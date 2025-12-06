@@ -191,7 +191,9 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
     # Get TPC-DS results using helper (Python-side filtering)
     results = get_results_for_run(cursor, 'benchmark_results', run_id)
 
-    benchmarks = []
+    # Aggregate results by query name (handle multiple iterations per query)
+    # The benchmark runner may execute each query multiple times for statistical reliability
+    query_data: Dict[str, List[tuple]] = {}
     for row in results:
         # Columns: RESULT_ID, RUN_ID, QUERY_NAME, STATUS, PARSE_TIME_MS, EXECUTOR_CREATION_TIME_MS,
         #          EXECUTION_TIME_MS, TOTAL_TIME_MS, ROW_COUNT, ERROR_MESSAGE
@@ -201,17 +203,35 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
         if query.startswith('sanity'):
             continue
 
+        if query not in query_data:
+            query_data[query] = []
+        query_data[query].append((exec_ms, total_ms, rows, status))
+
+    benchmarks = []
+    for query, iterations in sorted(query_data.items()):
+        # Calculate mean execution time from all iterations
+        exec_times = [it[0] for it in iterations if it[0] is not None]
+        total_times = [it[1] for it in iterations if it[1] is not None]
+
+        # Use the most common status (should all be the same)
+        statuses = [it[3] for it in iterations]
+        status = max(set(statuses), key=statuses.count)
+
+        # Use rows from first iteration (should all be the same)
+        rows = iterations[0][2] if iterations else 0
+
         # Convert to seconds
-        exec_s = (exec_ms / 1000) if exec_ms else 0
-        total_s = (total_ms / 1000) if total_ms else 0
+        mean_exec_s = (sum(exec_times) / len(exec_times) / 1000) if exec_times else 0
+        mean_total_s = (sum(total_times) / len(total_times) / 1000) if total_times else 0
 
         benchmarks.append({
             "name": f"tpcds_{query.lower()}_vibesql",
             "stats": {
-                "mean": exec_s,
-                "total": total_s,
+                "mean": mean_exec_s,
+                "total": mean_total_s,
                 "rows": rows or 0,
-                "status": status
+                "status": status,
+                "iterations": len(iterations)
             }
         })
 
@@ -219,7 +239,9 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
         print("  No TPC-DS results found")
         return None
 
-    print(f"  Exported {len(benchmarks)} TPC-DS results ({passed}/{total} passed, excluding sanity checks)")
+    unique_queries = len(benchmarks)
+    total_iterations = sum(len(v) for v in query_data.values())
+    print(f"  Exported {unique_queries} unique TPC-DS queries (from {total_iterations} total iterations)")
     return {
         "benchmarks": benchmarks,
         "metadata": {
@@ -227,8 +249,8 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
             "timestamp": timestamp,
             "git_commit": commit,
             "scale_factor": scale,
-            "total_queries": total,
-            "passed_queries": passed
+            "total_queries": unique_queries,
+            "passed_queries": sum(1 for b in benchmarks if b["stats"]["status"] == "passed")
         }
     }
 

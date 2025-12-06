@@ -3,388 +3,201 @@
     {
       "name": "tpcds_q1_vibesql",
       "stats": {
-        "mean": 0.007576799869537353,
-        "total": 0.007576799869537353,
+        "mean": 0.005677675008773804,
+        "total": 0.005677675008773804,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q3_vibesql",
-      "stats": {
-        "mean": 0.011484000205993652,
-        "total": 0.011484000205993652,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q4_vibesql",
-      "stats": {
-        "mean": 0.6129500122070313,
-        "total": 0.6129500122070313,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q5_vibesql",
-      "stats": {
-        "mean": 0.06034299850463867,
-        "total": 0.06034299850463867,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q7_vibesql",
-      "stats": {
-        "mean": 0.012656999588012694,
-        "total": 0.012656999588012694,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q8_vibesql",
-      "stats": {
-        "mean": 0.05766899871826172,
-        "total": 0.05766899871826172,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q9_vibesql",
-      "stats": {
-        "mean": 0.06044499969482422,
-        "total": 0.06044499969482422,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q10_vibesql",
       "stats": {
-        "mean": 0.01068400001525879,
-        "total": 0.01068400001525879,
+        "mean": 0.010183249950408936,
+        "total": 0.010183249950408936,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q11_vibesql",
       "stats": {
-        "mean": 0.34647000122070315,
-        "total": 0.34647000122070315,
+        "mean": 0.35582250213623046,
+        "total": 0.35582250213623046,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q12_vibesql",
       "stats": {
-        "mean": 0.00573960018157959,
-        "total": 0.00573960018157959,
+        "mean": 0.005637325048446655,
+        "total": 0.005637325048446655,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q14_vibesql",
-      "stats": {
-        "mean": 0.292510009765625,
-        "total": 0.292510009765625,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q15_vibesql",
-      "stats": {
-        "mean": 0.014980999946594239,
-        "total": 0.014980999946594239,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q17_vibesql",
-      "stats": {
-        "mean": 0.01620199966430664,
-        "total": 0.01620199966430664,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q18_vibesql",
-      "stats": {
-        "mean": 0.011942999839782715,
-        "total": 0.011942999839782715,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q19_vibesql",
-      "stats": {
-        "mean": 0.044271999359130856,
-        "total": 0.044271999359130856,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q42_vibesql",
-      "stats": {
-        "mean": 0.013005000114440918,
-        "total": 0.013005000114440918,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q52_vibesql",
-      "stats": {
-        "mean": 0.03669100189208984,
-        "total": 0.03669100189208984,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q55_vibesql",
-      "stats": {
-        "mean": 0.034481998443603515,
-        "total": 0.034481998443603515,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q68_vibesql",
-      "stats": {
-        "mean": 0.10995999908447265,
-        "total": 0.10995999908447265,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q73_vibesql",
-      "stats": {
-        "mean": 0.025173999786376952,
-        "total": 0.025173999786376952,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q89_vibesql",
-      "stats": {
-        "mean": 0.029667999267578123,
-        "total": 0.029667999267578123,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q96_vibesql",
-      "stats": {
-        "mean": 0.02161800003051758,
-        "total": 0.02161800003051758,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q25_vibesql",
-      "stats": {
-        "mean": 0.016642000198364256,
-        "total": 0.016642000198364256,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q26_vibesql",
-      "stats": {
-        "mean": 0.02558799934387207,
-        "total": 0.02558799934387207,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q27_vibesql",
-      "stats": {
-        "mean": 0.025330999374389648,
-        "total": 0.025330999374389648,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q35_vibesql",
-      "stats": {
-        "mean": 0.007395199775695801,
-        "total": 0.007395199775695801,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q50_vibesql",
-      "stats": {
-        "mean": 0.00920639991760254,
-        "total": 0.00920639991760254,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q81_vibesql",
-      "stats": {
-        "mean": 0.010425999641418457,
-        "total": 0.010425999641418457,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q83_vibesql",
-      "stats": {
-        "mean": 0.006533299922943115,
-        "total": 0.006533299922943115,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q13_vibesql",
       "stats": {
-        "mean": 0.008694999694824219,
-        "total": 0.008694999694824219,
+        "mean": 0.008534049987792969,
+        "total": 0.008534049987792969,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q14_vibesql",
+      "stats": {
+        "mean": 0.28880250549316405,
+        "total": 0.28880250549316405,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q15_vibesql",
+      "stats": {
+        "mean": 0.014677249908447265,
+        "total": 0.014677249908447265,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q16_vibesql",
       "stats": {
-        "mean": 0.007763899803161621,
-        "total": 0.007763899803161621,
+        "mean": 0.007548374891281128,
+        "total": 0.007548374891281128,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q17_vibesql",
+      "stats": {
+        "mean": 0.01566600012779236,
+        "total": 0.01566600012779236,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q18_vibesql",
+      "stats": {
+        "mean": 0.009596774816513061,
+        "total": 0.009596774816513061,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q19_vibesql",
+      "stats": {
+        "mean": 0.043848999977111815,
+        "total": 0.043848999977111815,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q2_vibesql",
+      "stats": {
+        "mean": 0.07786224937438965,
+        "total": 0.07786224937438965,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q20_vibesql",
       "stats": {
-        "mean": 0.009958499908447266,
-        "total": 0.009958499908447266,
+        "mean": 0.009465549945831299,
+        "total": 0.009465549945831299,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q32_vibesql",
-      "stats": {
-        "mean": 0.007806399822235108,
-        "total": 0.007806399822235108,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q37_vibesql",
-      "stats": {
-        "mean": 0.009067299842834473,
-        "total": 0.009067299842834473,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q60_vibesql",
-      "stats": {
-        "mean": 0.005817800045013428,
-        "total": 0.005817800045013428,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q62_vibesql",
-      "stats": {
-        "mean": 0.018781999588012695,
-        "total": 0.018781999588012695,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q76_vibesql",
-      "stats": {
-        "mean": 0.02430500030517578,
-        "total": 0.02430500030517578,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q84_vibesql",
-      "stats": {
-        "mean": 0.012812999725341797,
-        "total": 0.012812999725341797,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q92_vibesql",
-      "stats": {
-        "mean": 0.012282999992370605,
-        "total": 0.012282999992370605,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q21_vibesql",
       "stats": {
-        "mean": 0.02556500053405762,
-        "total": 0.02556500053405762,
+        "mean": 0.017899500131607057,
+        "total": 0.017899500131607057,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q22_vibesql",
       "stats": {
-        "mean": 0.012704000473022461,
-        "total": 0.012704000473022461,
+        "mean": 0.01205875015258789,
+        "total": 0.01205875015258789,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q23_vibesql",
       "stats": {
-        "mean": 0.11175,
-        "total": 0.11175,
+        "mean": 0.10595499992370605,
+        "total": 0.10595499992370605,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q24_vibesql",
       "stats": {
-        "mean": 0.04384000015258789,
-        "total": 0.04384000015258789,
+        "mean": 0.03887299919128418,
+        "total": 0.03887299919128418,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q25_vibesql",
+      "stats": {
+        "mean": 0.015665750026702882,
+        "total": 0.015665750026702882,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q26_vibesql",
+      "stats": {
+        "mean": 0.02451900005340576,
+        "total": 0.02451900005340576,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q27_vibesql",
+      "stats": {
+        "mean": 0.02458424997329712,
+        "total": 0.02458424997329712,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
@@ -393,439 +206,348 @@
         "mean": 0.006578999996185303,
         "total": 0.006578999996185303,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 1
       }
     },
     {
       "name": "tpcds_q29_vibesql",
       "stats": {
-        "mean": 0.015293000221252441,
-        "total": 0.015293000221252441,
+        "mean": 0.015204749822616577,
+        "total": 0.015204749822616577,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q3_vibesql",
+      "stats": {
+        "mean": 0.01084625005722046,
+        "total": 0.01084625005722046,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q30_vibesql",
       "stats": {
-        "mean": 0.006094399929046631,
-        "total": 0.006094399929046631,
+        "mean": 0.005146075010299683,
+        "total": 0.005146075010299683,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q31_vibesql",
       "stats": {
-        "mean": 0.10041999816894531,
-        "total": 0.10041999816894531,
+        "mean": 0.0875139980316162,
+        "total": 0.0875139980316162,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q32_vibesql",
+      "stats": {
+        "mean": 0.007541149854660034,
+        "total": 0.007541149854660034,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q33_vibesql",
       "stats": {
-        "mean": 0.03670899963378906,
-        "total": 0.03670899963378906,
+        "mean": 0.03460850048065185,
+        "total": 0.03460850048065185,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q34_vibesql",
       "stats": {
-        "mean": 0.023003000259399414,
-        "total": 0.023003000259399414,
+        "mean": 0.02179300022125244,
+        "total": 0.02179300022125244,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q35_vibesql",
+      "stats": {
+        "mean": 0.007243024945259094,
+        "total": 0.007243024945259094,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q36_vibesql",
       "stats": {
-        "mean": 0.021191999435424803,
-        "total": 0.021191999435424803,
+        "mean": 0.020817749977111815,
+        "total": 0.020817749977111815,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q37_vibesql",
+      "stats": {
+        "mean": 0.00840322494506836,
+        "total": 0.00840322494506836,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q38_vibesql",
       "stats": {
-        "mean": 0.01853700065612793,
-        "total": 0.01853700065612793,
+        "mean": 0.018243750095367432,
+        "total": 0.018243750095367432,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q39_vibesql",
       "stats": {
-        "mean": 0.030368999481201173,
-        "total": 0.030368999481201173,
+        "mean": 0.030243499755859375,
+        "total": 0.030243499755859375,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q4_vibesql",
+      "stats": {
+        "mean": 0.6105975189208984,
+        "total": 0.6105975189208984,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q40_vibesql",
       "stats": {
-        "mean": 0.021329000473022462,
-        "total": 0.021329000473022462,
+        "mean": 0.021009999752044678,
+        "total": 0.021009999752044678,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q41_vibesql",
       "stats": {
-        "mean": 0.0032764999866485597,
-        "total": 0.0032764999866485597,
+        "mean": 0.0031141499876976013,
+        "total": 0.0031141499876976013,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q42_vibesql",
+      "stats": {
+        "mean": 0.011310250043869019,
+        "total": 0.011310250043869019,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q43_vibesql",
       "stats": {
-        "mean": 0.045858001708984374,
-        "total": 0.045858001708984374,
+        "mean": 0.04763675022125244,
+        "total": 0.04763675022125244,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q44_vibesql",
       "stats": {
-        "mean": 0.08506099700927734,
-        "total": 0.08506099700927734,
+        "mean": 0.08754649925231933,
+        "total": 0.08754649925231933,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q45_vibesql",
       "stats": {
-        "mean": 0.012189000129699708,
-        "total": 0.012189000129699708,
+        "mean": 0.012209249973297118,
+        "total": 0.012209249973297118,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q46_vibesql",
       "stats": {
-        "mean": 0.03516899871826172,
-        "total": 0.03516899871826172,
+        "mean": 0.035042248725891116,
+        "total": 0.035042248725891116,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q47_vibesql",
       "stats": {
-        "mean": 0.08171399688720703,
-        "total": 0.08171399688720703,
+        "mean": 0.08017449760437012,
+        "total": 0.08017449760437012,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q48_vibesql",
       "stats": {
-        "mean": 0.058402999877929684,
-        "total": 0.058402999877929684,
+        "mean": 0.05829599952697754,
+        "total": 0.05829599952697754,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q49_vibesql",
       "stats": {
-        "mean": 0.017580999374389648,
-        "total": 0.017580999374389648,
+        "mean": 0.01733500003814697,
+        "total": 0.01733500003814697,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q5_vibesql",
+      "stats": {
+        "mean": 0.06058049964904785,
+        "total": 0.06058049964904785,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q50_vibesql",
+      "stats": {
+        "mean": 0.008608525037765503,
+        "total": 0.008608525037765503,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q51_vibesql",
       "stats": {
-        "mean": 0.005900700092315674,
-        "total": 0.005900700092315674,
+        "mean": 0.005907775044441223,
+        "total": 0.005907775044441223,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q52_vibesql",
+      "stats": {
+        "mean": 0.017197750568389892,
+        "total": 0.017197750568389892,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q53_vibesql",
       "stats": {
-        "mean": 0.02089699935913086,
-        "total": 0.02089699935913086,
+        "mean": 0.020693749904632568,
+        "total": 0.020693749904632568,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q54_vibesql",
       "stats": {
-        "mean": 0.01945400047302246,
-        "total": 0.01945400047302246,
+        "mean": 0.01948075008392334,
+        "total": 0.01948075008392334,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q55_vibesql",
+      "stats": {
+        "mean": 0.016868749618530274,
+        "total": 0.016868749618530274,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q56_vibesql",
       "stats": {
-        "mean": 0.007901299953460693,
-        "total": 0.007901299953460693,
+        "mean": 0.007818774938583375,
+        "total": 0.007818774938583375,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q57_vibesql",
+      "stats": {
+        "mean": 0.09491600036621094,
+        "total": 0.09491600036621094,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q58_vibesql",
       "stats": {
-        "mean": 0.023011999130249025,
-        "total": 0.023011999130249025,
+        "mean": 0.022970749855041505,
+        "total": 0.022970749855041505,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
-      "name": "tpcds_q61_vibesql",
+      "name": "tpcds_q59_vibesql",
       "stats": {
-        "mean": 0.021930000305175782,
-        "total": 0.021930000305175782,
+        "mean": 0.30469249725341796,
+        "total": 0.30469249725341796,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q63_vibesql",
-      "stats": {
-        "mean": 0.02051099967956543,
-        "total": 0.02051099967956543,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q64_vibesql",
-      "stats": {
-        "mean": 0.004675899982452393,
-        "total": 0.004675899982452393,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q65_vibesql",
-      "stats": {
-        "mean": 0.021006999969482423,
-        "total": 0.021006999969482423,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q66_vibesql",
-      "stats": {
-        "mean": 0.008813599586486816,
-        "total": 0.008813599586486816,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q67_vibesql",
-      "stats": {
-        "mean": 0.022190000534057615,
-        "total": 0.022190000534057615,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q70_vibesql",
-      "stats": {
-        "mean": 0.012265000343322754,
-        "total": 0.012265000343322754,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q71_vibesql",
-      "stats": {
-        "mean": 0.012171999931335449,
-        "total": 0.012171999931335449,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q72_vibesql",
-      "stats": {
-        "mean": 0.01851799964904785,
-        "total": 0.01851799964904785,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q74_vibesql",
-      "stats": {
-        "mean": 0.06876100158691406,
-        "total": 0.06876100158691406,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q75_vibesql",
-      "stats": {
-        "mean": 0.04459400177001953,
-        "total": 0.04459400177001953,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q77_vibesql",
-      "stats": {
-        "mean": 0.020145999908447267,
-        "total": 0.020145999908447267,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q78_vibesql",
-      "stats": {
-        "mean": 0.26195999145507814,
-        "total": 0.26195999145507814,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q79_vibesql",
-      "stats": {
-        "mean": 0.01994700050354004,
-        "total": 0.01994700050354004,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q80_vibesql",
-      "stats": {
-        "mean": 0.013829999923706055,
-        "total": 0.013829999923706055,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q85_vibesql",
-      "stats": {
-        "mean": 0.004069300174713135,
-        "total": 0.004069300174713135,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q86_vibesql",
-      "stats": {
-        "mean": 0.005049600124359131,
-        "total": 0.005049600124359131,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q87_vibesql",
-      "stats": {
-        "mean": 0.03890299987792969,
-        "total": 0.03890299987792969,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q88_vibesql",
-      "stats": {
-        "mean": 0.04914699935913086,
-        "total": 0.04914699935913086,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q90_vibesql",
-      "stats": {
-        "mean": 0.011546999931335448,
-        "total": 0.011546999931335448,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q94_vibesql",
-      "stats": {
-        "mean": 0.0037827000617980957,
-        "total": 0.0037827000617980957,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q95_vibesql",
-      "stats": {
-        "mean": 0.03452000045776367,
-        "total": 0.03452000045776367,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q97_vibesql",
-      "stats": {
-        "mean": 0.008001899719238282,
-        "total": 0.008001899719238282,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q98_vibesql",
-      "stats": {
-        "mean": 0.014079000473022461,
-        "total": 0.014079000473022461,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q99_vibesql",
-      "stats": {
-        "mean": 0.041631000518798825,
-        "total": 0.041631000518798825,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q2_vibesql",
-      "stats": {
-        "mean": 0.0790199966430664,
-        "total": 0.0790199966430664,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
@@ -834,2617 +556,428 @@
         "mean": 0.5173200073242188,
         "total": 0.5173200073242188,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q57_vibesql",
-      "stats": {
-        "mean": 0.09414399719238281,
-        "total": 0.09414399719238281,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q59_vibesql",
-      "stats": {
-        "mean": 0.3071000061035156,
-        "total": 0.3071000061035156,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q69_vibesql",
-      "stats": {
-        "mean": 0.01963100051879883,
-        "total": 0.01963100051879883,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q91_vibesql",
-      "stats": {
-        "mean": 0.003797600030899048,
-        "total": 0.003797600030899048,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q93_vibesql",
-      "stats": {
-        "mean": 0.004425000190734863,
-        "total": 0.004425000190734863,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q1_vibesql",
-      "stats": {
-        "mean": 0.004946499824523926,
-        "total": 0.004946499824523926,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q3_vibesql",
-      "stats": {
-        "mean": 0.010763999938964843,
-        "total": 0.010763999938964843,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q4_vibesql",
-      "stats": {
-        "mean": 0.6023300170898438,
-        "total": 0.6023300170898438,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q5_vibesql",
-      "stats": {
-        "mean": 0.05938299942016602,
-        "total": 0.05938299942016602,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q7_vibesql",
-      "stats": {
-        "mean": 0.012034999847412109,
-        "total": 0.012034999847412109,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q8_vibesql",
-      "stats": {
-        "mean": 0.05824100112915039,
-        "total": 0.05824100112915039,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q10_vibesql",
-      "stats": {
-        "mean": 0.01,
-        "total": 0.01,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q11_vibesql",
-      "stats": {
-        "mean": 0.3572900085449219,
-        "total": 0.3572900085449219,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q12_vibesql",
-      "stats": {
-        "mean": 0.0056016998291015625,
-        "total": 0.0056016998291015625,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q14_vibesql",
-      "stats": {
-        "mean": 0.2885700073242187,
-        "total": 0.2885700073242187,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q15_vibesql",
-      "stats": {
-        "mean": 0.014541999816894531,
-        "total": 0.014541999816894531,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q17_vibesql",
-      "stats": {
-        "mean": 0.015576000213623048,
-        "total": 0.015576000213623048,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q18_vibesql",
-      "stats": {
-        "mean": 0.008812999725341797,
-        "total": 0.008812999725341797,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q19_vibesql",
-      "stats": {
-        "mean": 0.04373400115966797,
-        "total": 0.04373400115966797,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q42_vibesql",
-      "stats": {
-        "mean": 0.010855999946594239,
-        "total": 0.010855999946594239,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q52_vibesql",
-      "stats": {
-        "mean": 0.010814999580383301,
-        "total": 0.010814999580383301,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q55_vibesql",
-      "stats": {
-        "mean": 0.011128999710083009,
-        "total": 0.011128999710083009,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q68_vibesql",
-      "stats": {
-        "mean": 0.03455699920654297,
-        "total": 0.03455699920654297,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q73_vibesql",
-      "stats": {
-        "mean": 0.02333099937438965,
-        "total": 0.02333099937438965,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q89_vibesql",
-      "stats": {
-        "mean": 0.02788100051879883,
-        "total": 0.02788100051879883,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q96_vibesql",
-      "stats": {
-        "mean": 0.018361000061035155,
-        "total": 0.018361000061035155,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q25_vibesql",
-      "stats": {
-        "mean": 0.015305999755859376,
-        "total": 0.015305999755859376,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q26_vibesql",
-      "stats": {
-        "mean": 0.024187000274658203,
-        "total": 0.024187000274658203,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q27_vibesql",
-      "stats": {
-        "mean": 0.024517999649047852,
-        "total": 0.024517999649047852,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q35_vibesql",
-      "stats": {
-        "mean": 0.0071298999786376955,
-        "total": 0.0071298999786376955,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q50_vibesql",
-      "stats": {
-        "mean": 0.008344099998474122,
-        "total": 0.008344099998474122,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q81_vibesql",
-      "stats": {
-        "mean": 0.00952649974822998,
-        "total": 0.00952649974822998,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q83_vibesql",
-      "stats": {
-        "mean": 0.006068399906158447,
-        "total": 0.006068399906158447,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q13_vibesql",
-      "stats": {
-        "mean": 0.008479700088500977,
-        "total": 0.008479700088500977,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q16_vibesql",
-      "stats": {
-        "mean": 0.007492499828338623,
-        "total": 0.007492499828338623,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q20_vibesql",
-      "stats": {
-        "mean": 0.00922249984741211,
-        "total": 0.00922249984741211,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q32_vibesql",
-      "stats": {
-        "mean": 0.007408599853515625,
-        "total": 0.007408599853515625,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q37_vibesql",
-      "stats": {
-        "mean": 0.008117300033569336,
-        "total": 0.008117300033569336,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 1
       }
     },
     {
       "name": "tpcds_q60_vibesql",
       "stats": {
-        "mean": 0.0056409001350402836,
-        "total": 0.0056409001350402836,
+        "mean": 0.005691825032234192,
+        "total": 0.005691825032234192,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q62_vibesql",
-      "stats": {
-        "mean": 0.016909999847412108,
-        "total": 0.016909999847412108,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q76_vibesql",
-      "stats": {
-        "mean": 0.006921299934387207,
-        "total": 0.006921299934387207,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q84_vibesql",
-      "stats": {
-        "mean": 0.0024458000659942627,
-        "total": 0.0024458000659942627,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q92_vibesql",
-      "stats": {
-        "mean": 0.005265200138092041,
-        "total": 0.005265200138092041,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q21_vibesql",
-      "stats": {
-        "mean": 0.015305999755859376,
-        "total": 0.015305999755859376,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q22_vibesql",
-      "stats": {
-        "mean": 0.011836000442504883,
-        "total": 0.011836000442504883,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q23_vibesql",
-      "stats": {
-        "mean": 0.10494999694824218,
-        "total": 0.10494999694824218,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q24_vibesql",
-      "stats": {
-        "mean": 0.03715399932861328,
-        "total": 0.03715399932861328,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q29_vibesql",
-      "stats": {
-        "mean": 0.015267999649047851,
-        "total": 0.015267999649047851,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q30_vibesql",
-      "stats": {
-        "mean": 0.00482480001449585,
-        "total": 0.00482480001449585,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q31_vibesql",
-      "stats": {
-        "mean": 0.08247899627685547,
-        "total": 0.08247899627685547,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q33_vibesql",
-      "stats": {
-        "mean": 0.033240001678466795,
-        "total": 0.033240001678466795,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q34_vibesql",
-      "stats": {
-        "mean": 0.02154199981689453,
-        "total": 0.02154199981689453,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q36_vibesql",
-      "stats": {
-        "mean": 0.02081100082397461,
-        "total": 0.02081100082397461,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q38_vibesql",
-      "stats": {
-        "mean": 0.018211999893188478,
-        "total": 0.018211999893188478,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q39_vibesql",
-      "stats": {
-        "mean": 0.030309999465942383,
-        "total": 0.030309999465942383,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q40_vibesql",
-      "stats": {
-        "mean": 0.0215939998626709,
-        "total": 0.0215939998626709,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q41_vibesql",
-      "stats": {
-        "mean": 0.002920599937438965,
-        "total": 0.002920599937438965,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q43_vibesql",
-      "stats": {
-        "mean": 0.047044998168945314,
-        "total": 0.047044998168945314,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q44_vibesql",
-      "stats": {
-        "mean": 0.08905599975585937,
-        "total": 0.08905599975585937,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q45_vibesql",
-      "stats": {
-        "mean": 0.012197999954223633,
-        "total": 0.012197999954223633,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q46_vibesql",
-      "stats": {
-        "mean": 0.03502899932861328,
-        "total": 0.03502899932861328,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q47_vibesql",
-      "stats": {
-        "mean": 0.0792699966430664,
-        "total": 0.0792699966430664,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q48_vibesql",
-      "stats": {
-        "mean": 0.058722999572753905,
-        "total": 0.058722999572753905,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q49_vibesql",
-      "stats": {
-        "mean": 0.017260000228881835,
-        "total": 0.017260000228881835,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q51_vibesql",
-      "stats": {
-        "mean": 0.006001399993896484,
-        "total": 0.006001399993896484,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q53_vibesql",
-      "stats": {
-        "mean": 0.020764999389648438,
-        "total": 0.020764999389648438,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q54_vibesql",
-      "stats": {
-        "mean": 0.019569000244140624,
-        "total": 0.019569000244140624,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q56_vibesql",
-      "stats": {
-        "mean": 0.0076409997940063475,
-        "total": 0.0076409997940063475,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q58_vibesql",
-      "stats": {
-        "mean": 0.022996000289916992,
-        "total": 0.022996000289916992,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q61_vibesql",
       "stats": {
-        "mean": 0.022018999099731446,
-        "total": 0.022018999099731446,
+        "mean": 0.021791500091552736,
+        "total": 0.021791500091552736,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q62_vibesql",
+      "stats": {
+        "mean": 0.017408249855041504,
+        "total": 0.017408249855041504,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q63_vibesql",
       "stats": {
-        "mean": 0.020343000411987305,
-        "total": 0.020343000411987305,
+        "mean": 0.020314249992370605,
+        "total": 0.020314249992370605,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q64_vibesql",
       "stats": {
-        "mean": 0.0043902997970581056,
-        "total": 0.0043902997970581056,
+        "mean": 0.00454324996471405,
+        "total": 0.00454324996471405,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q65_vibesql",
       "stats": {
-        "mean": 0.020823999404907225,
-        "total": 0.020823999404907225,
+        "mean": 0.020833499908447267,
+        "total": 0.020833499908447267,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q66_vibesql",
       "stats": {
-        "mean": 0.00888070011138916,
-        "total": 0.00888070011138916,
+        "mean": 0.008872399806976319,
+        "total": 0.008872399806976319,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q67_vibesql",
       "stats": {
-        "mean": 0.022072000503540037,
-        "total": 0.022072000503540037,
+        "mean": 0.021991000175476075,
+        "total": 0.021991000175476075,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q70_vibesql",
-      "stats": {
-        "mean": 0.012451000213623047,
-        "total": 0.012451000213623047,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q71_vibesql",
-      "stats": {
-        "mean": 0.012164999961853027,
-        "total": 0.012164999961853027,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q72_vibesql",
-      "stats": {
-        "mean": 0.01770800018310547,
-        "total": 0.01770800018310547,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q74_vibesql",
-      "stats": {
-        "mean": 0.07036199951171875,
-        "total": 0.07036199951171875,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q75_vibesql",
-      "stats": {
-        "mean": 0.04293500137329102,
-        "total": 0.04293500137329102,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q77_vibesql",
-      "stats": {
-        "mean": 0.020320999145507813,
-        "total": 0.020320999145507813,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q78_vibesql",
-      "stats": {
-        "mean": 0.25488999938964846,
-        "total": 0.25488999938964846,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q79_vibesql",
-      "stats": {
-        "mean": 0.020062000274658202,
-        "total": 0.020062000274658202,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q80_vibesql",
-      "stats": {
-        "mean": 0.013972000122070312,
-        "total": 0.013972000122070312,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q85_vibesql",
-      "stats": {
-        "mean": 0.003970799922943115,
-        "total": 0.003970799922943115,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q86_vibesql",
-      "stats": {
-        "mean": 0.00502239990234375,
-        "total": 0.00502239990234375,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q87_vibesql",
-      "stats": {
-        "mean": 0.03961899948120117,
-        "total": 0.03961899948120117,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q88_vibesql",
-      "stats": {
-        "mean": 0.0493380012512207,
-        "total": 0.0493380012512207,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q90_vibesql",
-      "stats": {
-        "mean": 0.011310999870300292,
-        "total": 0.011310999870300292,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q94_vibesql",
-      "stats": {
-        "mean": 0.0038243000507354736,
-        "total": 0.0038243000507354736,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q95_vibesql",
-      "stats": {
-        "mean": 0.040242000579833986,
-        "total": 0.040242000579833986,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q97_vibesql",
-      "stats": {
-        "mean": 0.008266500473022461,
-        "total": 0.008266500473022461,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q98_vibesql",
-      "stats": {
-        "mean": 0.014213000297546387,
-        "total": 0.014213000297546387,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q99_vibesql",
-      "stats": {
-        "mean": 0.04235200119018555,
-        "total": 0.04235200119018555,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q2_vibesql",
-      "stats": {
-        "mean": 0.07662400054931641,
-        "total": 0.07662400054931641,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q57_vibesql",
-      "stats": {
-        "mean": 0.09577899932861328,
-        "total": 0.09577899932861328,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q59_vibesql",
-      "stats": {
-        "mean": 0.30092999267578124,
-        "total": 0.30092999267578124,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q69_vibesql",
-      "stats": {
-        "mean": 0.019378999710083007,
-        "total": 0.019378999710083007,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q91_vibesql",
-      "stats": {
-        "mean": 0.003799999952316284,
-        "total": 0.003799999952316284,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q93_vibesql",
-      "stats": {
-        "mean": 0.004526800155639649,
-        "total": 0.004526800155639649,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q1_vibesql",
-      "stats": {
-        "mean": 0.0050788002014160154,
-        "total": 0.0050788002014160154,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q3_vibesql",
-      "stats": {
-        "mean": 0.010548999786376953,
-        "total": 0.010548999786376953,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q4_vibesql",
-      "stats": {
-        "mean": 0.6052100219726563,
-        "total": 0.6052100219726563,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q5_vibesql",
-      "stats": {
-        "mean": 0.060159000396728515,
-        "total": 0.060159000396728515,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q7_vibesql",
-      "stats": {
-        "mean": 0.011821999549865722,
-        "total": 0.011821999549865722,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q8_vibesql",
-      "stats": {
-        "mean": 0.057535999298095705,
-        "total": 0.057535999298095705,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q10_vibesql",
-      "stats": {
-        "mean": 0.009951000213623046,
-        "total": 0.009951000213623046,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q11_vibesql",
-      "stats": {
-        "mean": 0.36391000366210935,
-        "total": 0.36391000366210935,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q12_vibesql",
-      "stats": {
-        "mean": 0.005597400188446045,
-        "total": 0.005597400188446045,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q14_vibesql",
-      "stats": {
-        "mean": 0.2846400146484375,
-        "total": 0.2846400146484375,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q15_vibesql",
-      "stats": {
-        "mean": 0.014477999687194824,
-        "total": 0.014477999687194824,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q17_vibesql",
-      "stats": {
-        "mean": 0.015470000267028808,
-        "total": 0.015470000267028808,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q18_vibesql",
-      "stats": {
-        "mean": 0.008788999557495117,
-        "total": 0.008788999557495117,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q19_vibesql",
-      "stats": {
-        "mean": 0.04354700088500976,
-        "total": 0.04354700088500976,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q42_vibesql",
-      "stats": {
-        "mean": 0.010633000373840332,
-        "total": 0.010633000373840332,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q52_vibesql",
-      "stats": {
-        "mean": 0.010640000343322754,
-        "total": 0.010640000343322754,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q55_vibesql",
-      "stats": {
-        "mean": 0.010895000457763673,
-        "total": 0.010895000457763673,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q68_vibesql",
       "stats": {
-        "mean": 0.034224998474121096,
-        "total": 0.034224998474121096,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q73_vibesql",
-      "stats": {
-        "mean": 0.02293400001525879,
-        "total": 0.02293400001525879,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q89_vibesql",
-      "stats": {
-        "mean": 0.02762700080871582,
-        "total": 0.02762700080871582,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q96_vibesql",
-      "stats": {
-        "mean": 0.018187000274658204,
-        "total": 0.018187000274658204,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q25_vibesql",
-      "stats": {
-        "mean": 0.01529800033569336,
-        "total": 0.01529800033569336,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q26_vibesql",
-      "stats": {
-        "mean": 0.024038000106811522,
-        "total": 0.024038000106811522,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q27_vibesql",
-      "stats": {
-        "mean": 0.02418600082397461,
-        "total": 0.02418600082397461,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q35_vibesql",
-      "stats": {
-        "mean": 0.007232500076293945,
-        "total": 0.007232500076293945,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q50_vibesql",
-      "stats": {
-        "mean": 0.008502900123596191,
-        "total": 0.008502900123596191,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q81_vibesql",
-      "stats": {
-        "mean": 0.009675999641418458,
-        "total": 0.009675999641418458,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q83_vibesql",
-      "stats": {
-        "mean": 0.006078000068664551,
-        "total": 0.006078000068664551,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q13_vibesql",
-      "stats": {
-        "mean": 0.008324399948120117,
-        "total": 0.008324399948120117,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q16_vibesql",
-      "stats": {
-        "mean": 0.007412199974060059,
-        "total": 0.007412199974060059,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q20_vibesql",
-      "stats": {
-        "mean": 0.009284600257873536,
-        "total": 0.009284600257873536,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q32_vibesql",
-      "stats": {
-        "mean": 0.007415599822998047,
-        "total": 0.007415599822998047,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q37_vibesql",
-      "stats": {
-        "mean": 0.008226499557495118,
-        "total": 0.008226499557495118,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q60_vibesql",
-      "stats": {
-        "mean": 0.005622799873352051,
-        "total": 0.005622799873352051,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q62_vibesql",
-      "stats": {
-        "mean": 0.016909999847412108,
-        "total": 0.016909999847412108,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q76_vibesql",
-      "stats": {
-        "mean": 0.006639999866485596,
-        "total": 0.006639999866485596,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q84_vibesql",
-      "stats": {
-        "mean": 0.002426500082015991,
-        "total": 0.002426500082015991,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q92_vibesql",
-      "stats": {
-        "mean": 0.005217299938201904,
-        "total": 0.005217299938201904,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q21_vibesql",
-      "stats": {
-        "mean": 0.015430000305175781,
-        "total": 0.015430000305175781,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q22_vibesql",
-      "stats": {
-        "mean": 0.011779999732971192,
-        "total": 0.011779999732971192,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q23_vibesql",
-      "stats": {
-        "mean": 0.10251000213623047,
-        "total": 0.10251000213623047,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q24_vibesql",
-      "stats": {
-        "mean": 0.037168998718261716,
-        "total": 0.037168998718261716,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q29_vibesql",
-      "stats": {
-        "mean": 0.015060999870300292,
-        "total": 0.015060999870300292,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q30_vibesql",
-      "stats": {
-        "mean": 0.004825200080871582,
-        "total": 0.004825200080871582,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q31_vibesql",
-      "stats": {
-        "mean": 0.08418599700927734,
-        "total": 0.08418599700927734,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q33_vibesql",
-      "stats": {
-        "mean": 0.03413800048828125,
-        "total": 0.03413800048828125,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q34_vibesql",
-      "stats": {
-        "mean": 0.021374000549316406,
-        "total": 0.021374000549316406,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q36_vibesql",
-      "stats": {
-        "mean": 0.02063800048828125,
-        "total": 0.02063800048828125,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q38_vibesql",
-      "stats": {
-        "mean": 0.018091999053955077,
-        "total": 0.018091999053955077,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q39_vibesql",
-      "stats": {
-        "mean": 0.030356000900268555,
-        "total": 0.030356000900268555,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q40_vibesql",
-      "stats": {
-        "mean": 0.019882999420166015,
-        "total": 0.019882999420166015,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q41_vibesql",
-      "stats": {
-        "mean": 0.0032864999771118164,
-        "total": 0.0032864999771118164,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q43_vibesql",
-      "stats": {
-        "mean": 0.0475260009765625,
-        "total": 0.0475260009765625,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q44_vibesql",
-      "stats": {
-        "mean": 0.08917800140380859,
-        "total": 0.08917800140380859,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q45_vibesql",
-      "stats": {
-        "mean": 0.012177000045776367,
-        "total": 0.012177000045776367,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q46_vibesql",
-      "stats": {
-        "mean": 0.03491899871826172,
-        "total": 0.03491899871826172,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q47_vibesql",
-      "stats": {
-        "mean": 0.080875,
-        "total": 0.080875,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q48_vibesql",
-      "stats": {
-        "mean": 0.057910999298095706,
-        "total": 0.057910999298095706,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q49_vibesql",
-      "stats": {
-        "mean": 0.01711800003051758,
-        "total": 0.01711800003051758,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q51_vibesql",
-      "stats": {
-        "mean": 0.005821800231933594,
-        "total": 0.005821800231933594,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q53_vibesql",
-      "stats": {
-        "mean": 0.020524000167846678,
-        "total": 0.020524000167846678,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q54_vibesql",
-      "stats": {
-        "mean": 0.019565000534057617,
-        "total": 0.019565000534057617,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q56_vibesql",
-      "stats": {
-        "mean": 0.007882100105285644,
-        "total": 0.007882100105285644,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q58_vibesql",
-      "stats": {
-        "mean": 0.02279100036621094,
-        "total": 0.02279100036621094,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q61_vibesql",
-      "stats": {
-        "mean": 0.021558000564575196,
-        "total": 0.021558000564575196,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q63_vibesql",
-      "stats": {
-        "mean": 0.020065000534057617,
-        "total": 0.020065000534057617,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q64_vibesql",
-      "stats": {
-        "mean": 0.004464700222015381,
-        "total": 0.004464700222015381,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q65_vibesql",
-      "stats": {
-        "mean": 0.02070199966430664,
-        "total": 0.02070199966430664,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q66_vibesql",
-      "stats": {
-        "mean": 0.008845399856567383,
-        "total": 0.008845399856567383,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q67_vibesql",
-      "stats": {
-        "mean": 0.02174799919128418,
-        "total": 0.02174799919128418,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q70_vibesql",
-      "stats": {
-        "mean": 0.012164999961853027,
-        "total": 0.012164999961853027,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q71_vibesql",
-      "stats": {
-        "mean": 0.011951000213623046,
-        "total": 0.011951000213623046,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q72_vibesql",
-      "stats": {
-        "mean": 0.018101999282836914,
-        "total": 0.018101999282836914,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q74_vibesql",
-      "stats": {
-        "mean": 0.06964800262451172,
-        "total": 0.06964800262451172,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q75_vibesql",
-      "stats": {
-        "mean": 0.04279000091552734,
-        "total": 0.04279000091552734,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q77_vibesql",
-      "stats": {
-        "mean": 0.020097999572753905,
-        "total": 0.020097999572753905,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q78_vibesql",
-      "stats": {
-        "mean": 0.27160000610351565,
-        "total": 0.27160000610351565,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q79_vibesql",
-      "stats": {
-        "mean": 0.019920000076293944,
-        "total": 0.019920000076293944,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q80_vibesql",
-      "stats": {
-        "mean": 0.013694999694824218,
-        "total": 0.013694999694824218,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q85_vibesql",
-      "stats": {
-        "mean": 0.003938299894332886,
-        "total": 0.003938299894332886,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q86_vibesql",
-      "stats": {
-        "mean": 0.00499429988861084,
-        "total": 0.00499429988861084,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q87_vibesql",
-      "stats": {
-        "mean": 0.04123699951171875,
-        "total": 0.04123699951171875,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q88_vibesql",
-      "stats": {
-        "mean": 0.04776800155639648,
-        "total": 0.04776800155639648,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q90_vibesql",
-      "stats": {
-        "mean": 0.011531999588012695,
-        "total": 0.011531999588012695,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q94_vibesql",
-      "stats": {
-        "mean": 0.0037211999893188475,
-        "total": 0.0037211999893188475,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q95_vibesql",
-      "stats": {
-        "mean": 0.02932200050354004,
-        "total": 0.02932200050354004,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q97_vibesql",
-      "stats": {
-        "mean": 0.00806410026550293,
-        "total": 0.00806410026550293,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q98_vibesql",
-      "stats": {
-        "mean": 0.014100000381469727,
-        "total": 0.014100000381469727,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q99_vibesql",
-      "stats": {
-        "mean": 0.041762001037597654,
-        "total": 0.041762001037597654,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q2_vibesql",
-      "stats": {
-        "mean": 0.07822200012207031,
-        "total": 0.07822200012207031,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q57_vibesql",
-      "stats": {
-        "mean": 0.09428700256347657,
-        "total": 0.09428700256347657,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q59_vibesql",
-      "stats": {
-        "mean": 0.30589999389648437,
-        "total": 0.30589999389648437,
-        "rows": 0,
-        "status": "passed"
+        "mean": 0.053302498817443845,
+        "total": 0.053302498817443845,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q69_vibesql",
       "stats": {
-        "mean": 0.02003499984741211,
-        "total": 0.02003499984741211,
+        "mean": 0.019712250232696533,
+        "total": 0.019712250232696533,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q91_vibesql",
-      "stats": {
-        "mean": 0.0037811999320983888,
-        "total": 0.0037811999320983888,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q93_vibesql",
-      "stats": {
-        "mean": 0.004414100170135498,
-        "total": 0.004414100170135498,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q1_vibesql",
-      "stats": {
-        "mean": 0.00510860013961792,
-        "total": 0.00510860013961792,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q3_vibesql",
-      "stats": {
-        "mean": 0.010588000297546387,
-        "total": 0.010588000297546387,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q4_vibesql",
-      "stats": {
-        "mean": 0.6219000244140624,
-        "total": 0.6219000244140624,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q5_vibesql",
-      "stats": {
-        "mean": 0.062437000274658205,
-        "total": 0.062437000274658205,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q7_vibesql",
       "stats": {
-        "mean": 0.012038999557495118,
-        "total": 0.012038999557495118,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q8_vibesql",
-      "stats": {
-        "mean": 0.05694699859619141,
-        "total": 0.05694699859619141,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q10_vibesql",
-      "stats": {
-        "mean": 0.010097999572753907,
-        "total": 0.010097999572753907,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q11_vibesql",
-      "stats": {
-        "mean": 0.3556199951171875,
-        "total": 0.3556199951171875,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q12_vibesql",
-      "stats": {
-        "mean": 0.005610599994659424,
-        "total": 0.005610599994659424,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q14_vibesql",
-      "stats": {
-        "mean": 0.289489990234375,
-        "total": 0.289489990234375,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q15_vibesql",
-      "stats": {
-        "mean": 0.014708000183105469,
-        "total": 0.014708000183105469,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q17_vibesql",
-      "stats": {
-        "mean": 0.015416000366210937,
-        "total": 0.015416000366210937,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q18_vibesql",
-      "stats": {
-        "mean": 0.008842100143432617,
-        "total": 0.008842100143432617,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q19_vibesql",
-      "stats": {
-        "mean": 0.04384299850463867,
-        "total": 0.04384299850463867,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q42_vibesql",
-      "stats": {
-        "mean": 0.010746999740600586,
-        "total": 0.010746999740600586,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q52_vibesql",
-      "stats": {
-        "mean": 0.010645000457763672,
-        "total": 0.010645000457763672,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q55_vibesql",
-      "stats": {
-        "mean": 0.010968999862670898,
-        "total": 0.010968999862670898,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q68_vibesql",
-      "stats": {
-        "mean": 0.03446799850463867,
-        "total": 0.03446799850463867,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q73_vibesql",
-      "stats": {
-        "mean": 0.02304100036621094,
-        "total": 0.02304100036621094,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q89_vibesql",
-      "stats": {
-        "mean": 0.02788800048828125,
-        "total": 0.02788800048828125,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q96_vibesql",
-      "stats": {
-        "mean": 0.018104000091552733,
-        "total": 0.018104000091552733,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q25_vibesql",
-      "stats": {
-        "mean": 0.015416999816894532,
-        "total": 0.015416999816894532,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q26_vibesql",
-      "stats": {
-        "mean": 0.02426300048828125,
-        "total": 0.02426300048828125,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q27_vibesql",
-      "stats": {
-        "mean": 0.024302000045776366,
-        "total": 0.024302000045776366,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q35_vibesql",
-      "stats": {
-        "mean": 0.007214499950408936,
-        "total": 0.007214499950408936,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q50_vibesql",
-      "stats": {
-        "mean": 0.00838070011138916,
-        "total": 0.00838070011138916,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q81_vibesql",
-      "stats": {
-        "mean": 0.009668000221252441,
-        "total": 0.009668000221252441,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q83_vibesql",
-      "stats": {
-        "mean": 0.0061796998977661135,
-        "total": 0.0061796998977661135,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q13_vibesql",
-      "stats": {
-        "mean": 0.008637100219726563,
-        "total": 0.008637100219726563,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q16_vibesql",
-      "stats": {
-        "mean": 0.007524899959564209,
-        "total": 0.007524899959564209,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q20_vibesql",
-      "stats": {
-        "mean": 0.009396599769592286,
-        "total": 0.009396599769592286,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q32_vibesql",
-      "stats": {
-        "mean": 0.007533999919891357,
-        "total": 0.007533999919891357,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q37_vibesql",
-      "stats": {
-        "mean": 0.008201800346374511,
-        "total": 0.008201800346374511,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q60_vibesql",
-      "stats": {
-        "mean": 0.0056858000755310055,
-        "total": 0.0056858000755310055,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q62_vibesql",
-      "stats": {
-        "mean": 0.0170310001373291,
-        "total": 0.0170310001373291,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q76_vibesql",
-      "stats": {
-        "mean": 0.006633399963378906,
-        "total": 0.006633399963378906,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q84_vibesql",
-      "stats": {
-        "mean": 0.002436500072479248,
-        "total": 0.002436500072479248,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q92_vibesql",
-      "stats": {
-        "mean": 0.005279799938201904,
-        "total": 0.005279799938201904,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q21_vibesql",
-      "stats": {
-        "mean": 0.015296999931335448,
-        "total": 0.015296999931335448,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q22_vibesql",
-      "stats": {
-        "mean": 0.011914999961853027,
-        "total": 0.011914999961853027,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q23_vibesql",
-      "stats": {
-        "mean": 0.10461000061035156,
-        "total": 0.10461000061035156,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q24_vibesql",
-      "stats": {
-        "mean": 0.03732899856567383,
-        "total": 0.03732899856567383,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q29_vibesql",
-      "stats": {
-        "mean": 0.015196999549865723,
-        "total": 0.015196999549865723,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q30_vibesql",
-      "stats": {
-        "mean": 0.004839900016784668,
-        "total": 0.004839900016784668,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q31_vibesql",
-      "stats": {
-        "mean": 0.08297100067138671,
-        "total": 0.08297100067138671,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q33_vibesql",
-      "stats": {
-        "mean": 0.034347000122070315,
-        "total": 0.034347000122070315,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q34_vibesql",
-      "stats": {
-        "mean": 0.021253000259399413,
-        "total": 0.021253000259399413,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q36_vibesql",
-      "stats": {
-        "mean": 0.0206299991607666,
-        "total": 0.0206299991607666,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q38_vibesql",
-      "stats": {
-        "mean": 0.018134000778198243,
-        "total": 0.018134000778198243,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q39_vibesql",
-      "stats": {
-        "mean": 0.02993899917602539,
-        "total": 0.02993899917602539,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q40_vibesql",
-      "stats": {
-        "mean": 0.021233999252319335,
-        "total": 0.021233999252319335,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q41_vibesql",
-      "stats": {
-        "mean": 0.0029730000495910643,
-        "total": 0.0029730000495910643,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q43_vibesql",
-      "stats": {
-        "mean": 0.05011800003051758,
-        "total": 0.05011800003051758,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q44_vibesql",
-      "stats": {
-        "mean": 0.08689099884033204,
-        "total": 0.08689099884033204,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q45_vibesql",
-      "stats": {
-        "mean": 0.01227299976348877,
-        "total": 0.01227299976348877,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q46_vibesql",
-      "stats": {
-        "mean": 0.035051998138427735,
-        "total": 0.035051998138427735,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q47_vibesql",
-      "stats": {
-        "mean": 0.07883899688720702,
-        "total": 0.07883899688720702,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q48_vibesql",
-      "stats": {
-        "mean": 0.05814699935913086,
-        "total": 0.05814699935913086,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q49_vibesql",
-      "stats": {
-        "mean": 0.017381000518798827,
-        "total": 0.017381000518798827,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q51_vibesql",
-      "stats": {
-        "mean": 0.005907199859619141,
-        "total": 0.005907199859619141,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q53_vibesql",
-      "stats": {
-        "mean": 0.020589000701904298,
-        "total": 0.020589000701904298,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q54_vibesql",
-      "stats": {
-        "mean": 0.019334999084472657,
-        "total": 0.019334999084472657,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q56_vibesql",
-      "stats": {
-        "mean": 0.007850699901580811,
-        "total": 0.007850699901580811,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q58_vibesql",
-      "stats": {
-        "mean": 0.023083999633789064,
-        "total": 0.023083999633789064,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q61_vibesql",
-      "stats": {
-        "mean": 0.021659000396728516,
-        "total": 0.021659000396728516,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q63_vibesql",
-      "stats": {
-        "mean": 0.02033799934387207,
-        "total": 0.02033799934387207,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q64_vibesql",
-      "stats": {
-        "mean": 0.004642099857330322,
-        "total": 0.004642099857330322,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q65_vibesql",
-      "stats": {
-        "mean": 0.020801000595092774,
-        "total": 0.020801000595092774,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q66_vibesql",
-      "stats": {
-        "mean": 0.008949899673461914,
-        "total": 0.008949899673461914,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q67_vibesql",
-      "stats": {
-        "mean": 0.02195400047302246,
-        "total": 0.02195400047302246,
-        "rows": 0,
-        "status": "passed"
+        "mean": 0.01213824963569641,
+        "total": 0.01213824963569641,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q70_vibesql",
       "stats": {
-        "mean": 0.012218000411987305,
-        "total": 0.012218000411987305,
+        "mean": 0.012274750232696533,
+        "total": 0.012274750232696533,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q71_vibesql",
       "stats": {
-        "mean": 0.012092000007629394,
-        "total": 0.012092000007629394,
+        "mean": 0.01209500002861023,
+        "total": 0.01209500002861023,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q72_vibesql",
       "stats": {
-        "mean": 0.018367000579833984,
-        "total": 0.018367000579833984,
+        "mean": 0.018173749923706056,
+        "total": 0.018173749923706056,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q73_vibesql",
+      "stats": {
+        "mean": 0.023619999885559084,
+        "total": 0.023619999885559084,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q74_vibesql",
       "stats": {
-        "mean": 0.06943199920654297,
-        "total": 0.06943199920654297,
+        "mean": 0.06955075073242188,
+        "total": 0.06955075073242188,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q75_vibesql",
       "stats": {
-        "mean": 0.04468199920654297,
-        "total": 0.04468199920654297,
+        "mean": 0.04375025081634522,
+        "total": 0.04375025081634522,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q76_vibesql",
+      "stats": {
+        "mean": 0.011124925017356872,
+        "total": 0.011124925017356872,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q77_vibesql",
       "stats": {
-        "mean": 0.020100000381469727,
-        "total": 0.020100000381469727,
+        "mean": 0.020166249752044677,
+        "total": 0.020166249752044677,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q78_vibesql",
       "stats": {
-        "mean": 0.27894000244140627,
-        "total": 0.27894000244140627,
+        "mean": 0.26684749984741213,
+        "total": 0.26684749984741213,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q79_vibesql",
       "stats": {
-        "mean": 0.02002799987792969,
-        "total": 0.02002799987792969,
+        "mean": 0.01998925018310547,
+        "total": 0.01998925018310547,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q8_vibesql",
+      "stats": {
+        "mean": 0.057598249435424805,
+        "total": 0.057598249435424805,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q80_vibesql",
       "stats": {
-        "mean": 0.013708999633789062,
-        "total": 0.013708999633789062,
+        "mean": 0.013801499843597412,
+        "total": 0.013801499843597412,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q81_vibesql",
+      "stats": {
+        "mean": 0.009824124813079834,
+        "total": 0.009824124813079834,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q83_vibesql",
+      "stats": {
+        "mean": 0.006214849948883057,
+        "total": 0.006214849948883057,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q84_vibesql",
+      "stats": {
+        "mean": 0.0050304499864578245,
+        "total": 0.0050304499864578245,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q85_vibesql",
       "stats": {
-        "mean": 0.0039472999572753905,
-        "total": 0.0039472999572753905,
+        "mean": 0.0039814249873161315,
+        "total": 0.0039814249873161315,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q86_vibesql",
       "stats": {
-        "mean": 0.005070300102233887,
-        "total": 0.005070300102233887,
+        "mean": 0.005034150004386902,
+        "total": 0.005034150004386902,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q87_vibesql",
       "stats": {
-        "mean": 0.03948699951171875,
-        "total": 0.03948699951171875,
+        "mean": 0.03981149959564209,
+        "total": 0.03981149959564209,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q88_vibesql",
       "stats": {
-        "mean": 0.04855099868774414,
-        "total": 0.04855099868774414,
+        "mean": 0.048701000213623044,
+        "total": 0.048701000213623044,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q89_vibesql",
+      "stats": {
+        "mean": 0.028266000270843507,
+        "total": 0.028266000270843507,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q9_vibesql",
+      "stats": {
+        "mean": 0.06044499969482422,
+        "total": 0.06044499969482422,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 1
       }
     },
     {
       "name": "tpcds_q90_vibesql",
       "stats": {
-        "mean": 0.011362000465393067,
-        "total": 0.011362000465393067,
+        "mean": 0.011437999963760376,
+        "total": 0.011437999963760376,
         "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q94_vibesql",
-      "stats": {
-        "mean": 0.003730400085449219,
-        "total": 0.003730400085449219,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q95_vibesql",
-      "stats": {
-        "mean": 0.038778999328613284,
-        "total": 0.038778999328613284,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q97_vibesql",
-      "stats": {
-        "mean": 0.008237299919128417,
-        "total": 0.008237299919128417,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q98_vibesql",
-      "stats": {
-        "mean": 0.01414799976348877,
-        "total": 0.01414799976348877,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q99_vibesql",
-      "stats": {
-        "mean": 0.04018299865722656,
-        "total": 0.04018299865722656,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q2_vibesql",
-      "stats": {
-        "mean": 0.07758300018310547,
-        "total": 0.07758300018310547,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q57_vibesql",
-      "stats": {
-        "mean": 0.09545400238037109,
-        "total": 0.09545400238037109,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q59_vibesql",
-      "stats": {
-        "mean": 0.3048399963378906,
-        "total": 0.3048399963378906,
-        "rows": 0,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpcds_q69_vibesql",
-      "stats": {
-        "mean": 0.019804000854492188,
-        "total": 0.019804000854492188,
-        "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q91_vibesql",
       "stats": {
-        "mean": 0.003817399978637695,
-        "total": 0.003817399978637695,
+        "mean": 0.0037990499734878542,
+        "total": 0.0037990499734878542,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q92_vibesql",
+      "stats": {
+        "mean": 0.0070113250017166135,
+        "total": 0.0070113250017166135,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     },
     {
       "name": "tpcds_q93_vibesql",
       "stats": {
-        "mean": 0.004493400096893311,
-        "total": 0.004493400096893311,
+        "mean": 0.00446482515335083,
+        "total": 0.00446482515335083,
         "rows": 0,
-        "status": "passed"
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q94_vibesql",
+      "stats": {
+        "mean": 0.003764650046825409,
+        "total": 0.003764650046825409,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q95_vibesql",
+      "stats": {
+        "mean": 0.035715750217437746,
+        "total": 0.035715750217437746,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q96_vibesql",
+      "stats": {
+        "mean": 0.01906750011444092,
+        "total": 0.01906750011444092,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q97_vibesql",
+      "stats": {
+        "mean": 0.008142450094223022,
+        "total": 0.008142450094223022,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q98_vibesql",
+      "stats": {
+        "mean": 0.014135000228881835,
+        "total": 0.014135000228881835,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
+      }
+    },
+    {
+      "name": "tpcds_q99_vibesql",
+      "stats": {
+        "mean": 0.04148200035095215,
+        "total": 0.04148200035095215,
+        "rows": 0,
+        "status": "passed",
+        "iterations": 4
       }
     }
   ],
@@ -3453,7 +986,7 @@
     "timestamp": "2025-12-06T02:24:39.519662",
     "git_commit": "74deb565",
     "scale_factor": "0.01",
-    "total_queries": 389,
-    "passed_queries": 389
+    "total_queries": 98,
+    "passed_queries": 98
   }
 }
