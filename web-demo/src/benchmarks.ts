@@ -25,6 +25,106 @@ type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbenc
 
 const HARDWARE = 'Mac Studio M3 Ultra (28 cores, 96GB RAM)';
 
+// ============================================================================
+// Shared Constants
+// ============================================================================
+
+/** Display names for databases */
+const DB_DISPLAY_NAMES: Record<string, string> = {
+  'vibesql': 'VibeSQL',
+  'vibesql_server': 'VibeSQL Server',
+  'sqlite': 'SQLite',
+  'duckdb': 'DuckDB',
+  'mysql': 'MySQL',
+};
+
+/** Color configurations for databases (Chart.js format) */
+const DB_COLORS: Record<string, { bg: string; border: string }> = {
+  'vibesql': { bg: 'rgba(34, 197, 94, 0.5)', border: 'rgba(34, 197, 94, 1)' },
+  'vibesql_server': { bg: 'rgba(34, 197, 94, 0.5)', border: 'rgba(34, 197, 94, 1)' },
+  'sqlite': { bg: 'rgba(239, 68, 68, 0.5)', border: 'rgba(239, 68, 68, 1)' },
+  'duckdb': { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgba(59, 130, 246, 1)' },
+  'mysql': { bg: 'rgba(249, 115, 22, 0.5)', border: 'rgba(249, 115, 22, 1)' },
+};
+
+/** CSS classes for table cells */
+const CELL_CLASSES = {
+  base: 'px-4 py-3 text-right',
+  muted: 'px-4 py-3 text-right text-muted',
+  winner: 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400',
+  failed: 'text-red-500',
+};
+
+// ============================================================================
+// Chart Helpers
+// ============================================================================
+
+/** Create a Chart.js dataset for a database */
+function createDataset(dbKey: string, data: number[], labelOverride?: string): {
+  label: string;
+  data: number[];
+  backgroundColor: string;
+  borderColor: string;
+  borderWidth: number;
+} {
+  const colors = DB_COLORS[dbKey] || { bg: 'rgba(156, 163, 175, 0.5)', border: 'rgba(156, 163, 175, 1)' };
+  return {
+    label: labelOverride || DB_DISPLAY_NAMES[dbKey] || dbKey,
+    data,
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderWidth: 1,
+  };
+}
+
+/** Common chart options for time-based benchmarks (log scale) */
+function getLogScaleChartOptions(yAxisLabel: string): object {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        type: 'logarithmic',
+        beginAtZero: false,
+        title: { display: true, text: yAxisLabel },
+        ticks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          callback: function (value: any) {
+            const allowedTicks = [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000];
+            return allowedTicks.includes(value) ? value : null;
+          },
+        },
+      },
+    },
+    plugins: {
+      legend: { display: true, position: 'top' },
+      tooltip: {
+        callbacks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          label: (context: any) => `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ms`,
+        },
+      },
+    },
+  };
+}
+
+/** Common chart options for linear scale benchmarks */
+function getLinearChartOptions(yAxisLabel: string): object {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: yAxisLabel },
+      },
+    },
+    plugins: {
+      legend: { display: true, position: 'top' },
+    },
+  };
+}
+
 /** Generate a methodology detail list item */
 const li = (label: string, value: string): string =>
   `<li><strong>${label}:</strong> ${value}</li>`;
@@ -1000,8 +1100,7 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     // Find and highlight the winner (fastest time)
     if (times.length > 0) {
       const winner = times.reduce((min, t) => t.mean < min.mean ? t : min);
-      // Highlight winner in green with bold
-      winner.cell.className = 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400';
+      winner.cell.className = CELL_CLASSES.winner;
     }
 
     // Track speedup for summary cards (VibeSQL vs SQLite and DuckDB)
@@ -1084,85 +1183,20 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 
   // Build datasets array - MySQL only for sysbench-server
   const datasets = [
-    {
-      label: 'VibeSQL',
-      data: vibesqlData,
-      backgroundColor: 'rgba(34, 197, 94, 0.5)',
-      borderColor: 'rgba(34, 197, 94, 1)',
-      borderWidth: 1,
-    },
-    {
-      label: 'SQLite',
-      data: sqliteData,
-      backgroundColor: 'rgba(239, 68, 68, 0.5)',
-      borderColor: 'rgba(239, 68, 68, 1)',
-      borderWidth: 1,
-    },
-    {
-      label: 'DuckDB',
-      data: duckdbData,
-      backgroundColor: 'rgba(59, 130, 246, 0.5)',
-      borderColor: 'rgba(59, 130, 246, 1)',
-      borderWidth: 1,
-    },
+    createDataset('vibesql', vibesqlData),
+    createDataset('sqlite', sqliteData),
+    createDataset('duckdb', duckdbData),
   ];
 
   // Only add MySQL dataset for sysbench-server
   if (suite === 'sysbench-server') {
-    datasets.push({
-      label: 'MySQL',
-      data: mysqlData,
-      backgroundColor: 'rgba(249, 115, 22, 0.5)',
-      borderColor: 'rgba(249, 115, 22, 1)',
-      borderWidth: 1,
-    });
+    datasets.push(createDataset('mysql', mysqlData));
   }
 
   currentChart = new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets,
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          type: 'logarithmic',
-          beginAtZero: false,
-          title: {
-            display: true,
-            text: 'Time (ms) - Log Scale',
-          },
-          ticks: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            callback: function (value: any) {
-              // Only show specific tick marks: 0.01, 0.1, 1, 10, 100, 1000
-              const allowedTicks = [0.01, 0.1, 1, 10, 100, 1000];
-              if (allowedTicks.includes(value)) {
-                return value;
-              }
-              return null;
-            },
-          },
-        },
-      },
-      plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-        },
-        tooltip: {
-          callbacks: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            label: function (context: any) {
-              return `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ms`;
-            },
-          },
-        },
-      },
-    },
+    data: { labels, datasets },
+    options: getLogScaleChartOptions('Time (ms) - Log Scale'),
   });
 }
 
@@ -1198,12 +1232,6 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
   const minStartupTime = Math.min(...availableBenchmarks.map(b => b.startup_time_ms));
   const minMemory = Math.min(...availableBenchmarks.map(b => b.peak_memory_kb));
 
-  const dbDisplayNames: Record<string, string> = {
-    'vibesql': 'VibeSQL',
-    'sqlite': 'SQLite',
-    'duckdb': 'DuckDB',
-  };
-
   for (const benchmark of availableBenchmarks) {
     const row = document.createElement('tr');
     row.className = 'hover:bg-card/50 transition-colors';
@@ -1211,7 +1239,7 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
     // Database name
     const dbCell = document.createElement('td');
     dbCell.className = 'px-4 py-3 font-medium text-foreground';
-    dbCell.textContent = dbDisplayNames[benchmark.database] || benchmark.database;
+    dbCell.textContent = DB_DISPLAY_NAMES[benchmark.database] || benchmark.database;
     row.appendChild(dbCell);
 
     // Binary size
@@ -1323,48 +1351,24 @@ function renderFootprintEmbeddedChart(data: FootprintResults): void {
 
   const availableBenchmarks = data.benchmarks.filter(b => b.available);
 
-  const dbColors: Record<string, { bg: string; border: string }> = {
-    'vibesql': { bg: 'rgba(34, 197, 94, 0.5)', border: 'rgba(34, 197, 94, 1)' },
-    'sqlite': { bg: 'rgba(239, 68, 68, 0.5)', border: 'rgba(239, 68, 68, 1)' },
-    'duckdb': { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgba(59, 130, 246, 1)' },
-  };
-
-  const dbDisplayNames: Record<string, string> = {
-    'vibesql': 'VibeSQL',
-    'sqlite': 'SQLite',
-    'duckdb': 'DuckDB',
-  };
-
   const labels = ['Binary Size (MB)', 'Startup Time (ms)', 'Peak Memory (MB)'];
 
   const datasets = availableBenchmarks.map(bench => ({
-    label: dbDisplayNames[bench.database] || bench.database,
+    label: DB_DISPLAY_NAMES[bench.database] || bench.database,
     data: [
       bench.binary_size_bytes / (1024 * 1024),
       bench.startup_time_ms,
       bench.peak_memory_kb / 1024,
     ],
-    backgroundColor: dbColors[bench.database]?.bg || 'rgba(156, 163, 175, 0.5)',
-    borderColor: dbColors[bench.database]?.border || 'rgba(156, 163, 175, 1)',
+    backgroundColor: DB_COLORS[bench.database]?.bg || 'rgba(156, 163, 175, 0.5)',
+    borderColor: DB_COLORS[bench.database]?.border || 'rgba(156, 163, 175, 1)',
     borderWidth: 1,
   }));
 
   currentChart = new Chart(canvas, {
     type: 'bar',
     data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          beginAtZero: true,
-          title: { display: true, text: 'Value (lower is better)' },
-        },
-      },
-      plugins: {
-        legend: { display: true, position: 'top' },
-      },
-    },
+    options: getLinearChartOptions('Value (lower is better)'),
   });
 }
 
@@ -1628,7 +1632,7 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     // Find and highlight the winner (fastest time)
     if (times.length > 0) {
       const winner = times.reduce((min, t) => t.mean < min.mean ? t : min);
-      winner.cell.className = 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400';
+      winner.cell.className = CELL_CLASSES.winner;
     }
 
     // Track speedup for summary cards
@@ -1702,67 +1706,18 @@ function renderSysbenchChart(data: BenchmarkResults, suite: BenchmarkSuite): voi
   }
 
   const datasets = [
-    {
-      label: isServer ? 'VibeSQL Server' : 'VibeSQL',
-      data: primaryData,
-      backgroundColor: 'rgba(34, 197, 94, 0.5)',
-      borderColor: 'rgba(34, 197, 94, 1)',
-      borderWidth: 1,
-    },
-    {
-      label: isServer ? 'MySQL' : 'SQLite',
-      data: comparisonData,
-      backgroundColor: isServer ? 'rgba(249, 115, 22, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-      borderColor: isServer ? 'rgba(249, 115, 22, 1)' : 'rgba(239, 68, 68, 1)',
-      borderWidth: 1,
-    },
+    createDataset(isServer ? 'vibesql_server' : 'vibesql', primaryData),
+    createDataset(isServer ? 'mysql' : 'sqlite', comparisonData),
   ];
 
   if (!isServer) {
-    datasets.push({
-      label: 'DuckDB',
-      data: duckdbData,
-      backgroundColor: 'rgba(59, 130, 246, 0.5)',
-      borderColor: 'rgba(59, 130, 246, 1)',
-      borderWidth: 1,
-    });
+    datasets.push(createDataset('duckdb', duckdbData));
   }
 
   currentChart = new Chart(canvas, {
     type: 'bar',
     data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          type: 'logarithmic',
-          beginAtZero: false,
-          title: { display: true, text: 'Time (ms) - Log Scale' },
-          ticks: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            callback: function (value: any) {
-              const allowedTicks = [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000];
-              if (allowedTicks.includes(value)) {
-                return value;
-              }
-              return null;
-            },
-          },
-        },
-      },
-      plugins: {
-        legend: { display: true, position: 'top' },
-        tooltip: {
-          callbacks: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            label: function (context: any) {
-              return `${context.dataset.label}: ${context.parsed.y.toFixed(4)} ms`;
-            },
-          },
-        },
-      },
-    },
+    options: getLogScaleChartOptions('Time (ms) - Log Scale'),
   });
 }
 
@@ -1917,45 +1872,18 @@ function renderTPCCChart(data: TPCCResults): void {
     data: {
       labels,
       datasets: [
-        {
-          label: 'VibeSQL',
-          data: vibesqlData,
-          backgroundColor: 'rgba(34, 197, 94, 0.5)',
-          borderColor: 'rgba(34, 197, 94, 1)',
-          borderWidth: 1,
-        },
-        {
-          label: 'SQLite',
-          data: sqliteData,
-          backgroundColor: 'rgba(239, 68, 68, 0.5)',
-          borderColor: 'rgba(239, 68, 68, 1)',
-          borderWidth: 1,
-        },
+        createDataset('vibesql', vibesqlData),
+        createDataset('sqlite', sqliteData),
       ],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          beginAtZero: true,
-          title: {
-            display: true,
-            text: 'Transactions per Second (K TPS) - Higher is Better',
-          },
-        },
-      },
+      ...getLinearChartOptions('Transactions per Second (K TPS) - Higher is Better'),
       plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-        },
+        legend: { display: true, position: 'top' },
         tooltip: {
           callbacks: {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            label: function (context: any) {
-              return `${context.dataset.label}: ${(context.parsed.y * 1000).toLocaleString()} TPS`;
-            },
+            label: (context: any) => `${context.dataset.label}: ${(context.parsed.y * 1000).toLocaleString()} TPS`,
           },
         },
       },
@@ -2126,56 +2054,17 @@ function renderTPCDSChart(data: TPCDSResults): void {
     type: 'bar',
     data: {
       labels,
-      datasets: [
-        {
-          label: 'VibeSQL',
-          data: vibesqlData,
-          backgroundColor: 'rgba(34, 197, 94, 0.5)',
-          borderColor: 'rgba(34, 197, 94, 1)',
-          borderWidth: 1,
-        },
-      ],
+      datasets: [createDataset('vibesql', vibesqlData)],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      ...getLogScaleChartOptions('Execution Time (ms) - Log Scale'),
       scales: {
-        y: {
-          type: 'logarithmic',
-          beginAtZero: false,
-          title: {
-            display: true,
-            text: 'Execution Time (ms) - Log Scale',
-          },
-          ticks: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            callback: function (value: any) {
-              const allowedTicks = [0.1, 1, 10, 100, 1000];
-              if (allowedTicks.includes(value)) {
-                return value;
-              }
-              return null;
-            },
-          },
-        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...(getLogScaleChartOptions('') as any).scales,
         x: {
           ticks: {
             maxRotation: 90,
             minRotation: 45,
-          },
-        },
-      },
-      plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-        },
-        tooltip: {
-          callbacks: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            label: function (context: any) {
-              return `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ms`;
-            },
           },
         },
       },
