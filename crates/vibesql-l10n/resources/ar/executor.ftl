@@ -131,7 +131,7 @@ executor-function-not-found-with-suggestion = الدالة '{ $function_name }' 
     .available = الدوال المتاحة: { $available_functions }
     .suggestion = هل تقصد '{ $suggestion }'؟
 
-executor-parameter-count-mismatch = { $routine_type } '{ $routine_name }' يتوقع { $expected } معلمة/معلمات ({ $parameter_signature })، تم الحصول على { $actual } وسيطة/وسائط
+executor-parameter-count-mismatch = { $routine_type } '{ $routine_name }' يتوقع { $expected } معلمة{ $expected_plural } ({ $parameter_signature })، تم الحصول على { $actual } وسيطة{ $actual_plural }
 executor-parameter-type-mismatch = المعلمة '{ $parameter_name }' تتوقع { $expected_type }، تم الحصول على { $actual_type } '{ $actual_value }'
 executor-argument-count-mismatch = عدم تطابق عدد الوسائط: المتوقع { $expected }، تم الحصول على { $actual }
 
