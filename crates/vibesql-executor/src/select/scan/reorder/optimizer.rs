@@ -928,6 +928,23 @@ where
         );
     }
 
+    // Build column_to_table map for schema-based equijoin extraction
+    let table_names: Vec<String> = table_refs
+        .iter()
+        .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
+        .collect();
+    let column_to_table =
+        utils::build_column_to_table_map(database, &table_names, &table_refs, cte_results);
+
+    // Track accumulated tables (starts with target table)
+    let target_alias = table_refs[target_idx]
+        .alias
+        .as_ref()
+        .unwrap_or(&table_refs[target_idx].name)
+        .to_lowercase();
+    let mut accumulated_tables: HashSet<String> = HashSet::new();
+    accumulated_tables.insert(target_alias);
+
     // Start with the filtered result
     let mut accumulated = filtered_result;
 
@@ -947,34 +964,93 @@ where
         )?;
         let table_scan_time = table_start.elapsed();
 
+        let new_table_alias = table_ref
+            .alias
+            .as_ref()
+            .unwrap_or(&table_ref.name)
+            .to_lowercase();
+
         if profile {
-            let alias = table_ref.alias.as_ref().unwrap_or(&table_ref.name);
             eprintln!(
                 "[SEMI_JOIN_REORDER] Scanned '{}': {} rows in {:?}",
-                alias,
+                new_table_alias,
                 table_result.data.as_slice().len(),
                 table_scan_time
             );
         }
 
-        // Join with accumulated result using WHERE clause predicates
+        // Extract equijoin predicates from WHERE clause that connect accumulated tables to new table
+        let equijoins = if let Some(where_expr) = where_clause {
+            // Build table set including accumulated tables and the new table
+            let mut join_table_set = accumulated_tables.clone();
+            join_table_set.insert(new_table_alias.clone());
+
+            // Extract equijoins that reference both sides
+            let all_equijoins = predicates::extract_where_equijoins_with_schema(
+                where_expr,
+                &join_table_set,
+                &column_to_table,
+            );
+
+            // Filter to only include equijoins that connect accumulated tables to the new table
+            let applicable_equijoins: Vec<_> = all_equijoins
+                .into_iter()
+                .filter(|eq| {
+                    let mut referenced = HashSet::new();
+                    graph::extract_referenced_tables_with_schema(
+                        eq,
+                        &mut referenced,
+                        &join_table_set,
+                        &column_to_table,
+                    );
+                    // Keep if references the new table AND at least one accumulated table
+                    referenced.contains(&new_table_alias)
+                        && referenced.iter().any(|t| accumulated_tables.contains(t))
+                })
+                .collect();
+
+            if profile && !applicable_equijoins.is_empty() {
+                eprintln!(
+                    "[SEMI_JOIN_REORDER] Found {} equijoin predicates for joining '{}'",
+                    applicable_equijoins.len(),
+                    new_table_alias
+                );
+            }
+
+            applicable_equijoins
+        } else {
+            Vec::new()
+        };
+
+        // Use Inner join with equijoins if available, otherwise Cross join
+        let (join_type, join_condition) = if !equijoins.is_empty() {
+            (vibesql_ast::JoinType::Inner, None)
+        } else {
+            (vibesql_ast::JoinType::Cross, None)
+        };
+
+        // Join with accumulated result using extracted equijoin predicates
         let join_start = std::time::Instant::now();
         accumulated = crate::select::join::nested_loop_join(
             accumulated,
             table_result,
-            &vibesql_ast::JoinType::Cross,
-            &None, // No explicit condition - handled by WHERE clause
+            &join_type,
+            &join_condition,
             false,
             database,
-            &[], // WHERE equijoins will be evaluated during join
+            &equijoins,
             &timeout_ctx,
             cte_results,
         )?;
         let join_time = join_start.elapsed();
 
+        // Add new table to accumulated set
+        accumulated_tables.insert(new_table_alias.clone());
+
         if profile {
             eprintln!(
-                "[SEMI_JOIN_REORDER] After join: {} rows in {:?}",
+                "[SEMI_JOIN_REORDER] After join with '{}': {} rows in {:?}",
+                new_table_alias,
                 accumulated.data.as_slice().len(),
                 join_time
             );
