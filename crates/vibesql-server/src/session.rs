@@ -267,7 +267,7 @@ impl Session {
 
         match statement {
             vibesql_ast::Statement::Select(select_stmt) => {
-                let executor = vibesql_executor::SelectExecutor::new(&*db);
+                let executor = vibesql_executor::SelectExecutor::new(&db);
                 let rows = executor.execute(select_stmt)?;
 
                 // Convert to our result format
@@ -288,7 +288,7 @@ impl Session {
 
             vibesql_ast::Statement::Insert(insert_stmt) => {
                 let affected =
-                    vibesql_executor::InsertExecutor::execute(&mut *db, insert_stmt)?;
+                    vibesql_executor::InsertExecutor::execute(&mut db, insert_stmt)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&insert_stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: affected })
@@ -296,7 +296,7 @@ impl Session {
 
             vibesql_ast::Statement::Update(update_stmt) => {
                 let affected =
-                    vibesql_executor::UpdateExecutor::execute(update_stmt, &mut *db)?;
+                    vibesql_executor::UpdateExecutor::execute(update_stmt, &mut db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&update_stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: affected })
@@ -304,47 +304,47 @@ impl Session {
 
             vibesql_ast::Statement::Delete(delete_stmt) => {
                 let affected =
-                    vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut *db)?;
+                    vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&delete_stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: affected })
             }
 
             vibesql_ast::Statement::CreateTable(create_stmt) => {
-                vibesql_executor::CreateTableExecutor::execute(create_stmt, &mut *db)?;
+                vibesql_executor::CreateTableExecutor::execute(create_stmt, &mut db)?;
                 Ok(ExecutionResult::CreateTable)
             }
 
             vibesql_ast::Statement::CreateIndex(index_stmt) => {
-                vibesql_executor::CreateIndexExecutor::execute(index_stmt, &mut *db)?;
+                vibesql_executor::CreateIndexExecutor::execute(index_stmt, &mut db)?;
                 Ok(ExecutionResult::CreateIndex)
             }
 
             vibesql_ast::Statement::CreateView(view_stmt) => {
-                vibesql_executor::advanced_objects::execute_create_view(view_stmt, &mut *db)?;
+                vibesql_executor::advanced_objects::execute_create_view(view_stmt, &mut db)?;
                 Ok(ExecutionResult::CreateView)
             }
 
             vibesql_ast::Statement::DropTable(drop_stmt) => {
-                vibesql_executor::DropTableExecutor::execute(drop_stmt, &mut *db)?;
+                vibesql_executor::DropTableExecutor::execute(drop_stmt, &mut db)?;
                 // Invalidate cache for dropped table
                 self.stmt_cache.invalidate_table(&drop_stmt.table_name);
                 Ok(ExecutionResult::DropTable)
             }
 
             vibesql_ast::Statement::DropIndex(drop_stmt) => {
-                vibesql_executor::DropIndexExecutor::execute(drop_stmt, &mut *db)?;
+                vibesql_executor::DropIndexExecutor::execute(drop_stmt, &mut db)?;
                 Ok(ExecutionResult::DropIndex)
             }
 
             vibesql_ast::Statement::DropView(drop_stmt) => {
-                vibesql_executor::advanced_objects::execute_drop_view(drop_stmt, &mut *db)?;
+                vibesql_executor::advanced_objects::execute_drop_view(drop_stmt, &mut db)?;
                 Ok(ExecutionResult::DropView)
             }
 
             vibesql_ast::Statement::Analyze(analyze_stmt) => {
                 let message =
-                    vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut *db)?;
+                    vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut db)?;
                 // Extract table count from message - the executor returns a message like
                 // "ANALYZE completed - N table(s) analyzed"
                 let tables_analyzed =
@@ -379,7 +379,7 @@ impl Session {
 
             vibesql_ast::Statement::OpenCursor(open_stmt) => {
                 // Keep lock for open cursor (needs db)
-                CursorExecutor::open(&mut self.cursors, open_stmt, &*db)
+                CursorExecutor::open(&mut self.cursors, open_stmt, &db)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
                 Ok(ExecutionResult::OpenCursor { cursor_name: open_stmt.cursor_name.clone() })
             }

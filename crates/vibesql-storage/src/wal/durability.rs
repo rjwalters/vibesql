@@ -143,7 +143,7 @@ impl DurabilityMode {
     }
 
     /// Parse from string (case-insensitive)
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "volatile" => Some(DurabilityMode::Volatile),
             "lazy" => Some(DurabilityMode::Lazy),
@@ -399,11 +399,11 @@ mod tests {
 
     #[test]
     fn test_durability_mode_parsing() {
-        assert_eq!(DurabilityMode::from_str("volatile"), Some(DurabilityMode::Volatile));
-        assert_eq!(DurabilityMode::from_str("LAZY"), Some(DurabilityMode::Lazy));
-        assert_eq!(DurabilityMode::from_str("Durable"), Some(DurabilityMode::Durable));
-        assert_eq!(DurabilityMode::from_str("PARANOID"), Some(DurabilityMode::Paranoid));
-        assert_eq!(DurabilityMode::from_str("invalid"), None);
+        assert_eq!(DurabilityMode::parse("volatile"), Some(DurabilityMode::Volatile));
+        assert_eq!(DurabilityMode::parse("LAZY"), Some(DurabilityMode::Lazy));
+        assert_eq!(DurabilityMode::parse("Durable"), Some(DurabilityMode::Durable));
+        assert_eq!(DurabilityMode::parse("PARANOID"), Some(DurabilityMode::Paranoid));
+        assert_eq!(DurabilityMode::parse("invalid"), None);
     }
 
     #[test]

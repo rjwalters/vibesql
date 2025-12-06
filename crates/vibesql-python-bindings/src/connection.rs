@@ -26,6 +26,12 @@ pub struct Database {
     pub(crate) db: Arc<Mutex<vibesql_storage::Database>>,
 }
 
+impl Default for Database {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl Database {
     /// Create a new database connection

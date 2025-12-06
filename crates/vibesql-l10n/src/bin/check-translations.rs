@@ -145,13 +145,7 @@ fn find_resources_dir() -> Option<PathBuf> {
         PathBuf::from("../../../crates/vibesql-l10n/resources"),
     ];
 
-    for candidate in candidates {
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-
-    None
+    candidates.into_iter().find(|c| c.is_dir())
 }
 
 /// Get all locale directories in the resources directory

@@ -467,14 +467,14 @@ impl std::fmt::Display for ExecutorError {
                     let suggestion = find_closest_match(procedure_name, available_procedures);
                     if let Some(similar) = suggestion {
                         // Use multi-line format with suggestion
-                        write!(f, "{}\n{}\n{}",
+                        write!(f, "{}\nAvailable procedures: {}\nDid you mean '{}'?",
                             vibe_msg!("executor-procedure-not-found-simple", procedure_name = procedure_name.as_str(), schema_name = schema_name.as_str()),
-                            format!("Available procedures: {}", available_procedures.join(", ")),
-                            format!("Did you mean '{}'?", similar))
+                            available_procedures.join(", "),
+                            similar)
                     } else {
-                        write!(f, "{}\n{}",
+                        write!(f, "{}\nAvailable procedures: {}",
                             vibe_msg!("executor-procedure-not-found-simple", procedure_name = procedure_name.as_str(), schema_name = schema_name.as_str()),
-                            format!("Available procedures: {}", available_procedures.join(", ")))
+                            available_procedures.join(", "))
                     }
                 }
             }
@@ -484,14 +484,14 @@ impl std::fmt::Display for ExecutorError {
                 } else {
                     let suggestion = find_closest_match(function_name, available_functions);
                     if let Some(similar) = suggestion {
-                        write!(f, "{}\n{}\n{}",
+                        write!(f, "{}\nAvailable functions: {}\nDid you mean '{}'?",
                             vibe_msg!("executor-function-not-found-simple", function_name = function_name.as_str(), schema_name = schema_name.as_str()),
-                            format!("Available functions: {}", available_functions.join(", ")),
-                            format!("Did you mean '{}'?", similar))
+                            available_functions.join(", "),
+                            similar)
                     } else {
-                        write!(f, "{}\n{}",
+                        write!(f, "{}\nAvailable functions: {}",
                             vibe_msg!("executor-function-not-found-simple", function_name = function_name.as_str(), schema_name = schema_name.as_str()),
-                            format!("Available functions: {}", available_functions.join(", ")))
+                            available_functions.join(", "))
                     }
                 }
             }

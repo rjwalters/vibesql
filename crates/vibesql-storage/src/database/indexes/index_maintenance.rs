@@ -558,6 +558,7 @@ impl IndexManager {
 
         // Collect indexes that need updating for this table
         // Pre-compute column indices once per index (not per row)
+        #[allow(clippy::type_complexity)]
         let indexes_to_update: Vec<(String, Vec<(usize, Option<u64>)>)> = self
             .indexes
             .iter()

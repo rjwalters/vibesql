@@ -136,6 +136,7 @@ pub(in crate::select::join) fn hash_join_left_outer(
 /// 2. Probe phase: For each left row, create composite key and lookup (O(n))
 ///    - If matches found: emit left + right rows
 ///    - If no match (or NULL key): emit left + NULLs (preserves left rows)
+///
 /// Total: O(n + m) with correct LEFT JOIN semantics
 ///
 /// This fixes TPC-DS Q75 where compound LEFT JOIN conditions like:

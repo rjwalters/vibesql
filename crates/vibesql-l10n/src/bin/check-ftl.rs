@@ -45,13 +45,7 @@ fn find_resources_dir() -> Option<PathBuf> {
         PathBuf::from("../../../crates/vibesql-l10n/resources"),
     ];
 
-    for candidate in candidates {
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-
-    None
+    candidates.into_iter().find(|c| c.is_dir())
 }
 
 /// Get all locale directories in the resources directory
@@ -256,24 +250,22 @@ fn main() -> ExitCode {
                     file_name,
                     result.message_count
                 );
+            } else if !result.errors.is_empty() {
+                println!(
+                    "  {}[ERROR]{} {} ({} messages)",
+                    colors::RED,
+                    colors::RESET,
+                    file_name,
+                    result.message_count
+                );
             } else {
-                if !result.errors.is_empty() {
-                    println!(
-                        "  {}[ERROR]{} {} ({} messages)",
-                        colors::RED,
-                        colors::RESET,
-                        file_name,
-                        result.message_count
-                    );
-                } else {
-                    println!(
-                        "  {}[WARN]{} {} ({} messages)",
-                        colors::YELLOW,
-                        colors::RESET,
-                        file_name,
-                        result.message_count
-                    );
-                }
+                println!(
+                    "  {}[WARN]{} {} ({} messages)",
+                    colors::YELLOW,
+                    colors::RESET,
+                    file_name,
+                    result.message_count
+                );
             }
 
             if !result.errors.is_empty() || !result.warnings.is_empty() {

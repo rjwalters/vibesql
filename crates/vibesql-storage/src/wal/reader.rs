@@ -75,7 +75,7 @@ impl<R: Read + Seek> WalReader<R> {
 
         // Read entry data
         let mut data = vec![0u8; len as usize];
-        if let Err(_) = self.reader.read_exact(&mut data) {
+        if self.reader.read_exact(&mut data).is_err() {
             // Partial write - header was written but not full data
             return Ok(ReadResult::Corruption { position: self.position });
         }
