@@ -497,6 +497,35 @@ impl Table {
             .filter(|(idx, _)| !self.deleted[*idx])
     }
 
+    /// Scan only live (non-deleted) rows, returning an owned Vec.
+    ///
+    /// This method provides an efficient way to get all live rows as a Vec<Row>
+    /// for executor paths that need owned data. Unlike `scan()` which returns
+    /// all rows including deleted ones, this method filters out deleted rows.
+    ///
+    /// # Performance
+    /// O(n) time and space where n is the number of live rows.
+    /// Pre-allocates the exact capacity needed based on `row_count()`.
+    ///
+    /// # Returns
+    /// A Vec containing clones of all non-deleted rows.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // For SELECT queries that need a Vec<Row>
+    /// let rows = table.scan_live_vec();
+    /// ```
+    #[inline]
+    pub fn scan_live_vec(&self) -> Vec<Row> {
+        let mut result = Vec::with_capacity(self.row_count());
+        for (idx, row) in self.rows.iter().enumerate() {
+            if !self.deleted[idx] {
+                result.push(row.clone());
+            }
+        }
+        result
+    }
+
     /// Get a single row by index position (O(1) access)
     ///
     /// Returns None if the row is deleted or index is out of bounds.

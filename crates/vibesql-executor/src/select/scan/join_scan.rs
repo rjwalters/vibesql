@@ -700,8 +700,6 @@ fn try_index_nested_loop_semi_join(
         AHashSet::with_capacity(left_slice.len());
     let mut matching_keys: AHashSet<vibesql_types::SqlValue> = AHashSet::new();
 
-    let all_rows = right_table.scan();
-
     for left_row in left_slice {
         let join_key = &left_row.values[left_col_idx];
 
@@ -726,11 +724,12 @@ fn try_index_nested_loop_semi_join(
             .collect();
 
         // Do point lookup
+        // Issue #3790: Use get_row() which returns None for deleted rows
         if let Some(&row_idx) = pk_index.get(&lookup_key) {
-            if row_idx >= all_rows.len() {
-                continue;
-            }
-            let right_row = &all_rows[row_idx];
+            let right_row = match right_table.get_row(row_idx) {
+                Some(row) => row,
+                None => continue, // Row deleted or invalid
+            };
 
             // Apply residual filter if any
             let passes = if let (Some(filter), Some(eval)) = (&residual_filter, &evaluator) {

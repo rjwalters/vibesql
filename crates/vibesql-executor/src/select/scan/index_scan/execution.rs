@@ -361,17 +361,15 @@ pub(crate) fn execute_index_scan(
             false
         };
 
-    // Fetch rows from table (zero-copy - returns references)
-    let all_rows = table.scan();
-
     // Build schema early (needed for WHERE filtering)
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
     let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
 
     // Zero-copy optimization: Work with row references until the final step
     // This avoids cloning rows that will be filtered out by the WHERE clause
+    // Issue #3790: Use get_row() which returns None for deleted rows
     let row_refs: Vec<&Row> =
-        matching_row_indices.iter().filter_map(|idx| all_rows.get(*idx)).collect();
+        matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
 
     // Apply WHERE clause predicates if needed (zero-copy filtering)
     // Performance optimization: Skip WHERE clause evaluation if the index already

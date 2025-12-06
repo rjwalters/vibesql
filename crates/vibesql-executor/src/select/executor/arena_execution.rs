@@ -185,9 +185,10 @@ impl SelectExecutor<'_> {
         let evaluator =
             ArenaExpressionEvaluator::with_database(&schema, params, self.database, interner);
 
-        // Scan table and filter
+        // Scan table and filter (only live rows)
+        // Issue #3790: Use scan_live() to filter out deleted rows
         let mut results = Vec::new();
-        for row in table.scan() {
+        for (_, row) in table.scan_live() {
             // Apply WHERE clause filter
             if let Some(where_clause) = &stmt.where_clause {
                 let filter_result = evaluator.eval(where_clause, row)?;

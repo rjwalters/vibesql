@@ -427,3 +427,67 @@ fn test_delete_exists_with_select_multiple_columns() {
         panic!("Expected DELETE statement");
     }
 }
+
+/// Test that SELECT queries return only non-deleted rows after deletion bitmap marks rows as deleted.
+///
+/// This test verifies the fix for issue #3790:
+/// - DELETE marks rows as deleted in the bitmap (O(1) operation)
+/// - SELECT must filter out deleted rows using scan_live(), not scan()
+///
+/// Without the fix, SELECT returns all rows including deleted ones.
+#[test]
+fn test_select_excludes_deleted_rows_after_delete() {
+    use vibesql_executor::SelectExecutor;
+
+    let mut db = setup_customers_orders_db();
+
+    // Initial state: 4 customers (Alice, Bob, Charlie, Diana)
+    let select_stmt = Parser::parse_sql("SELECT * FROM customers").unwrap();
+    let rows = if let vibesql_ast::Statement::Select(ref select) = select_stmt {
+        SelectExecutor::new(&db).execute(select).unwrap()
+    } else {
+        panic!("Expected SELECT statement");
+    };
+    assert_eq!(rows.len(), 4, "Should have 4 customers initially");
+
+    // Delete Alice and Bob (customers with orders)
+    let delete_sql = "DELETE FROM customers WHERE EXISTS (SELECT 1 FROM orders WHERE customer_id = customers.id)";
+    let stmt = Parser::parse_sql(delete_sql).unwrap();
+    if let vibesql_ast::Statement::Delete(delete_stmt) = stmt {
+        let deleted = DeleteExecutor::execute(&delete_stmt, &mut db).unwrap();
+        assert_eq!(deleted, 2, "Should delete 2 customers");
+    }
+
+    // SELECT * FROM customers should only return Charlie and Diana (2 rows)
+    // Bug: Without fix, this returns all 4 rows (including deleted Alice and Bob)
+    let select_stmt = Parser::parse_sql("SELECT * FROM customers").unwrap();
+    let rows = if let vibesql_ast::Statement::Select(ref select) = select_stmt {
+        SelectExecutor::new(&db).execute(select).unwrap()
+    } else {
+        panic!("Expected SELECT statement");
+    };
+
+    assert_eq!(
+        rows.len(),
+        2,
+        "SELECT should return only 2 non-deleted customers (Charlie, Diana), got {}",
+        rows.len()
+    );
+
+    // Verify the remaining customers are Charlie (id=3) and Diana (id=4)
+    let ids: Vec<i64> = rows
+        .iter()
+        .filter_map(|row| {
+            if let SqlValue::Integer(id) = row.get(0).unwrap() {
+                Some(*id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(ids.contains(&3), "Charlie (id=3) should be in results");
+    assert!(ids.contains(&4), "Diana (id=4) should be in results");
+    assert!(!ids.contains(&1), "Alice (id=1) was deleted, should NOT be in results");
+    assert!(!ids.contains(&2), "Bob (id=2) was deleted, should NOT be in results");
+}

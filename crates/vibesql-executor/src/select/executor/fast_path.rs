@@ -637,10 +637,10 @@ impl SelectExecutor<'_> {
         };
 
         // Fetch the single row
-        let all_rows = table.scan();
-        let row = match all_rows.get(row_idx) {
+        // Issue #3790: Use get_row() which returns None for deleted rows
+        let row = match table.get_row(row_idx) {
             Some(r) => r.clone(),
-            None => return Ok(Some(vec![])), // Invalid row index
+            None => return Ok(Some(vec![])), // Row deleted or invalid index
         };
 
         // Build schema for projection
@@ -801,9 +801,9 @@ impl SelectExecutor<'_> {
             }
 
             // Fetch the rows
-            let all_rows = table.scan();
+            // Issue #3790: Use get_row() which returns None for deleted rows
             let rows: Vec<Row> =
-                row_indices.iter().filter_map(|&idx| all_rows.get(idx).cloned()).collect();
+                row_indices.iter().filter_map(|&idx| table.get_row(idx).cloned()).collect();
 
             // Build schema for projection and filtering
             let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());

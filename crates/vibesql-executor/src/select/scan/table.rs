@@ -248,8 +248,9 @@ pub(crate) fn execute_table_scan(
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
     let schema = CombinedSchema::from_table(effective_name.clone(), table.schema.clone());
 
-    // Get row slice from table (zero-copy reference)
-    let row_slice = table.scan();
+    // Get live rows from table (excludes deleted rows from deletion bitmap)
+    // Issue #3790: Must use scan_live_vec() instead of scan() to filter deleted rows
+    let live_rows = table.scan_live_vec();
 
     // Check if we need to apply table-local predicates (Phase 1 optimization)
     // NOTE: Skip predicate pushdown for correlated subqueries (when outer_row/outer_schema exist)
@@ -261,11 +262,10 @@ pub(crate) fn execute_table_scan(
         if is_correlated {
             // Return unfiltered rows for correlated subqueries
             // Filtering will happen later with full outer row context
-            let rows = row_slice.to_vec();
             use crate::select::from_iterator::FromIterator;
             return Ok(super::FromResult::from_iterator(
                 schema,
-                FromIterator::from_table_scan(rows),
+                FromIterator::from_table_scan(live_rows),
             ));
         }
 
@@ -302,12 +302,12 @@ pub(crate) fn execute_table_scan(
                         "[COLUMNAR_DEBUG] {} table: extracted {} predicates for {} rows",
                         table_name,
                         column_predicates.len(),
-                        row_slice.len()
+                        live_rows.len()
                     );
                 }
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
-                if table.is_native_columnar() && row_slice.len() >= SIMD_COLUMNAR_THRESHOLD {
+                if table.is_native_columnar() && live_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(filtered_rows) = filter_with_simd_columnar(table, &column_predicates)
                     {
                         return Ok(super::FromResult::from_rows(schema, filtered_rows));
@@ -317,9 +317,9 @@ pub(crate) fn execute_table_scan(
 
                 // For row-oriented tables, use bitmap-based filtering
                 let indices =
-                    crate::select::columnar::apply_columnar_filter(row_slice, &column_predicates)?;
+                    crate::select::columnar::apply_columnar_filter(&live_rows, &column_predicates)?;
                 let filtered_rows: Vec<_> =
-                    indices.into_iter().filter_map(|idx| row_slice.get(idx).cloned()).collect();
+                    indices.into_iter().filter_map(|idx| live_rows.get(idx).cloned()).collect();
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
             }
 
@@ -332,7 +332,7 @@ pub(crate) fn execute_table_scan(
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
             // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
             let filtered_rows = apply_table_local_predicates_ref(
-                row_slice,
+                &live_rows,
                 schema.clone(),
                 &predicate_plan,
                 &effective_name,
@@ -345,13 +345,13 @@ pub(crate) fn execute_table_scan(
         }
     }
 
-    // No table-local predicates or no WHERE clause: clone rows for iterator
-    // TODO: Future optimization - use zero-copy iterator over row slice
+    // No table-local predicates or no WHERE clause: return live rows
+    // Issue #3790: live_rows already filters deleted rows via scan_live_vec()
     #[cfg(feature = "parallel")]
-    let rows = parallel_scan_materialize(row_slice);
+    let rows = parallel_scan_materialize(&live_rows);
 
     #[cfg(not(feature = "parallel"))]
-    let rows = row_slice.to_vec();
+    let rows = live_rows;
 
     use crate::select::from_iterator::FromIterator;
     Ok(super::FromResult::from_iterator(schema, FromIterator::from_table_scan(rows)))
@@ -466,10 +466,8 @@ fn try_primary_key_lookup(
             // in case there are additional predicates beyond the PK columns.
             // Example: SELECT * FROM stock WHERE s_w_id = 1 AND s_i_id = 123 AND s_quantity < 10
             // The PK lookup finds the row, but we must also check s_quantity < 10.
-            let all_rows = table.scan();
-            if row_idx < all_rows.len() {
-                let row = &all_rows[row_idx];
-
+            // Issue #3790: Use get_row() which returns None for deleted rows
+            if let Some(row) = table.get_row(row_idx) {
                 // Evaluate the full WHERE clause on this row
                 // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
                 let evaluator = if cte_results.is_empty() {
@@ -487,7 +485,7 @@ fn try_primary_key_lookup(
                     Err(_) => vec![], // Evaluation error - treat as no match
                 }
             } else {
-                vec![] // Index points to invalid row (shouldn't happen)
+                vec![] // Row is deleted or index invalid
             }
         }
         None => vec![], // No matching row
