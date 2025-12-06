@@ -510,11 +510,6 @@ impl TPCDSData {
         (value * 100.0).round() / 100.0
     }
 
-    /// Debug: peek at next random f64 to check RNG state
-    pub fn debug_next_random(&mut self) -> f64 {
-        self.rng.random_range(0.0..=1.0)
-    }
-
     pub fn random_bool(&mut self) -> bool {
         self.rng.random_bool(0.5)
     }

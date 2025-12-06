@@ -71,108 +71,14 @@ fn get_expected_row_counts(
     queries: &[(&str, &str)],
 ) -> HashMap<String, usize> {
     let mut expected = HashMap::new();
-    let q64_debug = std::env::var("Q64_DEBUG").is_ok();
 
     for (name, sql) in queries {
         match duckdb.prepare(sql) {
             Ok(mut stmt) => match stmt.query([]) {
                 Ok(mut rows) => {
                     let mut count = 0;
-                    // Q64_DEBUG: Print actual row values from DuckDB
-                    if q64_debug && *name == "Q64" {
-                        eprintln!("\n=== Q64 DEBUG (DuckDB results) ===");
-                        while let Some(row) = rows.next().unwrap_or(None) {
-                            // Q64 columns: cs_item_sk, sale, refund
-                            let item_sk: i64 = row.get(0).unwrap_or_default();
-                            let sale: f64 = row.get(1).unwrap_or_default();
-                            let refund: f64 = row.get(2).unwrap_or_default();
-                            eprintln!("  Row {}: item_sk={}, sale={:.2}, refund={:.2}", count, item_sk, sale, refund);
-                            count += 1;
-                        }
-                        eprintln!("  Total: {} rows\n", count);
-
-                        // Also run intermediate query to debug the join
-                        let debug_cte = r#"
-                            SELECT
-                                cs_item_sk,
-                                SUM(cs_ext_list_price) AS sale,
-                                SUM(cr_refunded_cash + cr_reversed_charge + cr_store_credit) AS refund
-                            FROM catalog_sales, catalog_returns
-                            WHERE cs_item_sk = cr_item_sk
-                                AND cs_order_number = cr_order_number
-                            GROUP BY cs_item_sk
-                            ORDER BY cs_item_sk
-                            LIMIT 20
-                        "#;
-                        if let Ok(mut debug_stmt) = duckdb.prepare(debug_cte) {
-                            if let Ok(mut debug_rows) = debug_stmt.query([]) {
-                                eprintln!("=== Q64 DEBUG (DuckDB CTE without HAVING) ===");
-                                let mut debug_count = 0;
-                                while let Some(debug_row) = debug_rows.next().unwrap_or(None) {
-                                    let item_sk: i64 = debug_row.get(0).unwrap_or_default();
-                                    let sale: f64 = debug_row.get(1).unwrap_or_default();
-                                    let refund: f64 = debug_row.get(2).unwrap_or_default();
-                                    eprintln!("  Row {}: item_sk={}, sale={:.2}, refund={:.2}", debug_count, item_sk, sale, refund);
-                                    debug_count += 1;
-                                }
-                                eprintln!("  Total: {} rows\n", debug_count);
-                            }
-                        }
-
-                        // Check raw join rows for item_sk=2
-                        let debug_raw_join = r#"
-                            SELECT cs_item_sk, cs_order_number, cs_ext_list_price,
-                                   cr_refunded_cash, cr_reversed_charge, cr_store_credit
-                            FROM catalog_sales, catalog_returns
-                            WHERE cs_item_sk = cr_item_sk
-                                AND cs_order_number = cr_order_number
-                                AND cs_item_sk = 2
-                            ORDER BY cs_order_number
-                        "#;
-                        if let Ok(mut debug_stmt) = duckdb.prepare(debug_raw_join) {
-                            if let Ok(mut debug_rows) = debug_stmt.query([]) {
-                                eprintln!("=== Q64 DEBUG (DuckDB raw join for item_sk=2) ===");
-                                let mut debug_count = 0;
-                                while let Some(debug_row) = debug_rows.next().unwrap_or(None) {
-                                    let item_sk: i64 = debug_row.get(0).unwrap_or_default();
-                                    let order_num: i64 = debug_row.get(1).unwrap_or_default();
-                                    let list_price: f64 = debug_row.get(2).unwrap_or_default();
-                                    let refunded: f64 = debug_row.get(3).unwrap_or_default();
-                                    let reversed: f64 = debug_row.get(4).unwrap_or_default();
-                                    let credit: f64 = debug_row.get(5).unwrap_or_default();
-                                    eprintln!("  Row {}: item_sk={}, order={}, list_price={:.2}, refunded={:.2}, reversed={:.2}, credit={:.2}",
-                                             debug_count, item_sk, order_num, list_price, refunded, reversed, credit);
-                                    debug_count += 1;
-                                }
-                                eprintln!("  Total: {} rows\n", debug_count);
-                            }
-                        }
-
-                        // Verify base table data matches
-                        let base_query = "SELECT COUNT(*), SUM(cs_ext_list_price) FROM catalog_sales WHERE cs_item_sk = 2";
-                        if let Ok(mut stmt) = duckdb.prepare(base_query) {
-                            if let Ok(mut rows) = stmt.query([]) {
-                                if let Some(row) = rows.next().unwrap_or(None) {
-                                    let count: i64 = row.get(0).unwrap_or_default();
-                                    let sum: f64 = row.get(1).unwrap_or_default();
-                                    eprintln!("=== Q64 DEBUG: DuckDB catalog_sales for item_sk=2: count={}, sum={:.2}", count, sum);
-                                }
-                            }
-                        }
-                        let base_query = "SELECT COUNT(*), SUM(cr_refunded_cash+cr_reversed_charge+cr_store_credit) FROM catalog_returns WHERE cr_item_sk = 2";
-                        if let Ok(mut stmt) = duckdb.prepare(base_query) {
-                            if let Ok(mut rows) = stmt.query([]) {
-                                if let Some(row) = rows.next().unwrap_or(None) {
-                                    let count: i64 = row.get(0).unwrap_or_default();
-                                    let sum: f64 = row.get(1).unwrap_or_default();
-                                    eprintln!("=== Q64 DEBUG: DuckDB catalog_returns for item_sk=2: count={}, sum={:.2}\n", count, sum);
-                                }
-                            }
-                        }
-                    } else {
-                        while rows.next().map(|r| r.is_some()).unwrap_or(false) {
-                            count += 1;
-                        }
+                    while rows.next().map(|r| r.is_some()).unwrap_or(false) {
+                        count += 1;
                     }
                     expected.insert(name.to_string(), count);
                 }
@@ -346,88 +252,6 @@ fn main() {
                     success_count += 1;
                     total_time += elapsed;
                     let row_count = rows.len();
-
-                    // Q64_DEBUG: Print actual row values for Q64 debugging
-                    if std::env::var("Q64_DEBUG").is_ok() && *name == "Q64" {
-                        eprintln!("\n=== Q64 DEBUG (VibeSQL results) ===");
-                        for (i, row) in rows.iter().enumerate() {
-                            eprintln!("  Row {}: {:?}", i, row.values);
-                        }
-                        eprintln!("  Total: {} rows\n", row_count);
-
-                        // Also run intermediate query to debug the join
-                        let debug_cte = r#"
-                            SELECT
-                                cs_item_sk,
-                                SUM(cs_ext_list_price) AS sale,
-                                SUM(cr_refunded_cash + cr_reversed_charge + cr_store_credit) AS refund
-                            FROM catalog_sales, catalog_returns
-                            WHERE cs_item_sk = cr_item_sk
-                                AND cs_order_number = cr_order_number
-                            GROUP BY cs_item_sk
-                            ORDER BY cs_item_sk
-                            LIMIT 20
-                        "#;
-                        if let Ok(debug_stmt) = Parser::parse_sql(debug_cte) {
-                            if let vibesql_ast::Statement::Select(debug_select) = debug_stmt {
-                                let debug_executor = SelectExecutor::new(&db);
-                                if let Ok(debug_rows) = debug_executor.execute(&debug_select) {
-                                    eprintln!("=== Q64 DEBUG (VibeSQL CTE without HAVING) ===");
-                                    for (i, row) in debug_rows.iter().enumerate() {
-                                        eprintln!("  Row {}: {:?}", i, row.values);
-                                    }
-                                    eprintln!("  Total: {} rows\n", debug_rows.len());
-                                }
-                            }
-                        }
-
-                        // Check raw join rows for item_sk=2 in VibeSQL
-                        let debug_raw_join = r#"
-                            SELECT cs_item_sk, cs_order_number, cs_ext_list_price,
-                                   cr_refunded_cash, cr_reversed_charge, cr_store_credit
-                            FROM catalog_sales, catalog_returns
-                            WHERE cs_item_sk = cr_item_sk
-                                AND cs_order_number = cr_order_number
-                                AND cs_item_sk = 2
-                            ORDER BY cs_order_number
-                        "#;
-                        if let Ok(debug_stmt) = Parser::parse_sql(debug_raw_join) {
-                            if let vibesql_ast::Statement::Select(debug_select) = debug_stmt {
-                                let debug_executor = SelectExecutor::new(&db);
-                                if let Ok(debug_rows) = debug_executor.execute(&debug_select) {
-                                    eprintln!("=== Q64 DEBUG (VibeSQL raw join for item_sk=2) ===");
-                                    for (i, row) in debug_rows.iter().enumerate() {
-                                        eprintln!("  Row {}: {:?}", i, row.values);
-                                    }
-                                    eprintln!("  Total: {} rows\n", debug_rows.len());
-                                }
-                            }
-                        }
-
-                        // Verify base table data matches
-                        let base_query = "SELECT COUNT(*), SUM(cs_ext_list_price) FROM catalog_sales WHERE cs_item_sk = 2";
-                        if let Ok(debug_stmt) = Parser::parse_sql(base_query) {
-                            if let vibesql_ast::Statement::Select(debug_select) = debug_stmt {
-                                let debug_executor = SelectExecutor::new(&db);
-                                if let Ok(debug_rows) = debug_executor.execute(&debug_select) {
-                                    for row in debug_rows.iter() {
-                                        eprintln!("=== Q64 DEBUG: VibeSQL catalog_sales for item_sk=2: count={}, sum={}", row.values[0], row.values[1]);
-                                    }
-                                }
-                            }
-                        }
-                        let base_query = "SELECT COUNT(*), SUM(cr_refunded_cash+cr_reversed_charge+cr_store_credit) FROM catalog_returns WHERE cr_item_sk = 2";
-                        if let Ok(debug_stmt) = Parser::parse_sql(base_query) {
-                            if let vibesql_ast::Statement::Select(debug_select) = debug_stmt {
-                                let debug_executor = SelectExecutor::new(&db);
-                                if let Ok(debug_rows) = debug_executor.execute(&debug_select) {
-                                    for row in debug_rows.iter() {
-                                        eprintln!("=== Q64 DEBUG: VibeSQL catalog_returns for item_sk=2: count={}, sum={}\n", row.values[0], row.values[1]);
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     // Explicitly drop rows to allow memory reclamation
                     drop(rows);
