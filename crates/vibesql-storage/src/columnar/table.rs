@@ -121,6 +121,75 @@ impl ColumnarTable {
         Ok(ColumnarTable { columns, column_names: column_names.to_vec(), row_count })
     }
 
+    /// Create a ColumnarTable from a slice of row references
+    ///
+    /// This is useful when you have filtered rows (e.g., skipping deleted rows)
+    /// and want to avoid cloning the entire row just to pass to from_rows.
+    ///
+    /// # Arguments
+    /// * `rows` - Slice of row references to convert
+    /// * `column_names` - Column names for the table schema
+    ///
+    /// # Returns
+    /// * `Ok(ColumnarTable)` on success
+    /// * `Err(String)` if column count mismatch or incompatible types
+    pub fn from_row_refs(rows: &[&Row], column_names: &[String]) -> Result<Self, String> {
+        if rows.is_empty() {
+            return Ok(ColumnarTable {
+                columns: HashMap::new(),
+                column_names: column_names.to_vec(),
+                row_count: 0,
+            });
+        }
+
+        let row_count = rows.len();
+        let col_count = column_names.len();
+
+        // Validate first row column count
+        if rows[0].len() != col_count {
+            return Err(format!("Row 0 has {} columns, expected {}", rows[0].len(), col_count));
+        }
+
+        // Infer column types from first non-null value in each column
+        let col_types: Vec<_> = (0..col_count)
+            .map(|col_idx| {
+                rows.iter()
+                    .filter_map(|row| row.get(col_idx))
+                    .find(|v| !v.is_null())
+                    .map(ColumnTypeClass::from_sql_value)
+                    .unwrap_or(ColumnTypeClass::Null)
+            })
+            .collect();
+
+        // Pre-allocate column storage based on inferred types
+        let mut column_builders: Vec<ColumnBuilder> =
+            col_types.iter().map(|t| ColumnBuilder::new(*t, row_count)).collect();
+
+        // Single pass through rows - distribute values to columns
+        for (row_idx, row) in rows.iter().enumerate() {
+            if row.len() != col_count {
+                return Err(format!(
+                    "Row {} has {} columns, expected {}",
+                    row_idx,
+                    row.len(),
+                    col_count
+                ));
+            }
+
+            for (col_idx, value) in row.values.iter().enumerate() {
+                column_builders[col_idx].push(value)?;
+            }
+        }
+
+        // Build final columns HashMap - consume builders
+        let mut columns = HashMap::with_capacity(col_count);
+        for (col_name, builder) in column_names.iter().zip(column_builders.into_iter()) {
+            columns.insert(col_name.clone(), builder.build());
+        }
+
+        Ok(ColumnarTable { columns, column_names: column_names.to_vec(), row_count })
+    }
+
     /// Convert columnar data back to row-oriented format
     ///
     /// # Returns

@@ -252,11 +252,10 @@ impl DeleteExecutor {
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Use delete_by_indices for O(d * log n) instead of O(n) where d = deletes
+        // Note: With bitmap deletion, row indices don't change (rows are marked as deleted
+        // but remain in place). User-defined index entries have already been removed by
+        // batch_update_indexes_for_delete above, so we don't need to adjust remaining entries.
         let deleted_count = table_mut.delete_by_indices(&deleted_indices);
-
-        // Step 5c: Adjust remaining user-defined index entries
-        // (entries pointing to indices > deleted need to be decremented)
-        database.adjust_indexes_after_delete(&stmt.table_name, &deleted_indices);
 
         // Invalidate columnar cache since table data has changed
         if deleted_count > 0 {
@@ -337,7 +336,8 @@ impl DeleteExecutor {
         evaluator: &ExpressionEvaluator,
         rows_and_indices: &mut Vec<(usize, vibesql_storage::Row)>,
     ) -> Result<(), ExecutorError> {
-        for (index, row) in table.scan().iter().enumerate() {
+        // Use scan_live() to skip already-deleted rows
+        for (index, row) in table.scan_live() {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
             evaluator.clear_cse_cache();

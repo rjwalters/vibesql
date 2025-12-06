@@ -74,6 +74,7 @@ use crate::{Row, StorageError};
 /// operations to dedicated components:
 ///
 /// - **Row Storage**: Direct Vec storage for sequential access (table scans)
+/// - **Deletion Bitmap**: O(1) deletion via bitmap marking instead of Vec::remove()
 /// - **Columnar Storage**: Native columnar storage for OLAP-optimized tables
 /// - **Indexing**: `IndexManager` maintains hash indexes for constraint checks
 /// - **Normalization**: `RowNormalizer` handles value transformation and validation
@@ -106,8 +107,8 @@ use crate::{Row, StorageError};
 ///
 /// - **INSERT**: O(1) amortized for row append + O(1) for index updates
 /// - **UPDATE**: O(1) for row update + O(k) for k affected indexes (selective mode)
-/// - **DELETE**: O(n) for scan + O(m) for m deletes + O(n) for index rebuild
-/// - **SCAN**: O(n) direct vector iteration
+/// - **DELETE**: O(1) per row via bitmap marking (amortized O(n) for compaction)
+/// - **SCAN**: O(n) direct vector iteration (skipping deleted rows)
 /// - **COLUMNAR SCAN**: O(n) with SIMD acceleration (no conversion overhead for native columnar)
 /// - **PK/UNIQUE lookup**: O(1) via hash indexes
 ///
@@ -135,6 +136,14 @@ pub struct Table {
 
     /// Row storage - direct vector for sequential access (row-oriented tables only)
     rows: Vec<Row>,
+
+    /// Deletion bitmap - tracks which rows are logically deleted
+    /// Uses O(1) bit operations instead of O(n) Vec::remove()
+    /// Compaction occurs when deleted_count > rows.len() / 2
+    deleted: Vec<bool>,
+
+    /// Count of deleted rows (cached to avoid counting bits)
+    deleted_count: usize,
 
     /// Native columnar storage - primary storage for columnar tables
     /// For columnar tables, this is the authoritative data source
@@ -169,6 +178,8 @@ impl Clone for Table {
         Table {
             schema: self.schema.clone(),
             rows: self.rows.clone(),
+            deleted: self.deleted.clone(),
+            deleted_count: self.deleted_count,
             native_columnar: self.native_columnar.clone(),
             indexes: self.indexes.clone(),
             append_tracker: self.append_tracker.clone(),
@@ -204,6 +215,8 @@ impl Table {
         Table {
             schema,
             rows: Vec::new(),
+            deleted: Vec::new(),
+            deleted_count: 0,
             native_columnar,
             indexes,
             append_tracker: AppendModeTracker::new(),
@@ -238,6 +251,7 @@ impl Table {
         // Add row to table (always stored for indexing and potential row access)
         let row_index = self.rows.len();
         self.rows.push(normalized_row.clone());
+        self.deleted.push(false);
 
         // Update indexes (delegate to IndexManager)
         self.indexes.update_for_insert(&self.schema, &normalized_row, row_index);
@@ -263,12 +277,21 @@ impl Table {
         Ok(())
     }
 
-    /// Rebuild native columnar storage from rows
+    /// Rebuild native columnar storage from rows (excluding deleted rows)
     fn rebuild_native_columnar(&mut self) -> Result<(), StorageError> {
         let column_names: Vec<String> =
             self.schema.columns.iter().map(|c| c.name.clone()).collect();
 
-        let columnar = crate::ColumnarTable::from_rows(&self.rows, &column_names)
+        // Collect only live rows for columnar conversion
+        let live_rows: Vec<&Row> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !self.deleted[*idx])
+            .map(|(_, row)| row)
+            .collect();
+
+        let columnar = crate::ColumnarTable::from_row_refs(&live_rows, &column_names)
             .map_err(|e| StorageError::Other(format!("Columnar rebuild failed: {}", e)))?;
 
         self.native_columnar = Some(columnar);
@@ -327,8 +350,9 @@ impl Table {
             normalized_rows.push(normalized);
         }
 
-        // Phase 2: Pre-allocate capacity for rows vector
+        // Phase 2: Pre-allocate capacity for rows and deleted vectors
         self.rows.reserve(row_count);
+        self.deleted.reserve(row_count);
 
         // Record starting index for incremental index updates
         let start_index = self.rows.len();
@@ -336,6 +360,7 @@ impl Table {
         // Phase 3: Insert all rows into storage
         for row in normalized_rows {
             self.rows.push(row);
+            self.deleted.push(false);
         }
 
         // Phase 4: Incrementally update indexes for only the new rows
@@ -432,24 +457,61 @@ impl Table {
         Ok(total_inserted)
     }
 
-    /// Get all rows (for scanning)
+    /// Get all rows for scanning
+    ///
+    /// Returns a slice of all rows in the table. For tables with a deletion bitmap,
+    /// this returns the raw storage which may include deleted rows.
+    ///
+    /// **Important**: For operations that need to skip deleted rows, use `scan_live()`
+    /// which filters deleted rows automatically.
     pub fn scan(&self) -> &[Row] {
         &self.rows
     }
 
-    /// Get a single row by index position (O(1) access)
+    /// Check if a row at the given index is deleted
+    #[inline]
+    pub fn is_row_deleted(&self, idx: usize) -> bool {
+        idx < self.deleted.len() && self.deleted[idx]
+    }
+
+    /// Iterate over live (non-deleted) rows with their physical indices
     ///
-    /// This is more efficient than `scan().get(idx)` when you only need one row,
-    /// as it avoids returning a reference to the entire row slice.
-    ///
-    /// # Arguments
-    /// * `idx` - The row index position
+    /// This is the preferred way to scan table data, as it automatically
+    /// skips rows that have been deleted but not yet compacted.
     ///
     /// # Returns
-    /// * `Some(&Row)` - The row at the given index
-    /// * `None` - If the index is out of bounds
+    /// An iterator yielding `(physical_index, &Row)` pairs for all live rows.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// for (idx, row) in table.scan_live() {
+    ///     // idx is the physical index, can be used with get_row() or delete_by_indices()
+    ///     process_row(idx, row);
+    /// }
+    /// ```
+    #[inline]
+    pub fn scan_live(&self) -> impl Iterator<Item = (usize, &Row)> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !self.deleted[*idx])
+    }
+
+    /// Get a single row by index position (O(1) access)
+    ///
+    /// Returns None if the row is deleted or index is out of bounds.
+    ///
+    /// # Arguments
+    /// * `idx` - The row index position (physical index)
+    ///
+    /// # Returns
+    /// * `Some(&Row)` - The row at the given index if it exists and is not deleted
+    /// * `None` - If the index is out of bounds or row is deleted
     #[inline]
     pub fn get_row(&self, idx: usize) -> Option<&Row> {
+        if idx < self.deleted.len() && self.deleted[idx] {
+            return None;
+        }
         self.rows.get(idx)
     }
 
@@ -500,8 +562,17 @@ impl Table {
         let column_names: Vec<String> =
             self.schema.columns.iter().map(|c| c.name.clone()).collect();
 
+        // Collect only live rows for columnar conversion
+        let live_rows: Vec<&Row> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !self.deleted[*idx])
+            .map(|(_, row)| row)
+            .collect();
+
         // Convert rows to columnar format
-        let columnar = crate::ColumnarTable::from_rows(&self.rows, &column_names)
+        let columnar = crate::ColumnarTable::from_row_refs(&live_rows, &column_names)
             .map_err(|e| StorageError::Other(format!("Columnar conversion failed: {}", e)))?;
 
         // Cache the result for future queries (write lock)
@@ -510,8 +581,14 @@ impl Table {
         Ok(columnar)
     }
 
-    /// Get number of rows
+    /// Get number of live (non-deleted) rows
     pub fn row_count(&self) -> usize {
+        self.rows.len() - self.deleted_count
+    }
+
+    /// Get total number of rows including deleted ones (physical storage size)
+    #[inline]
+    pub fn physical_row_count(&self) -> usize {
         self.rows.len()
     }
 
@@ -553,6 +630,8 @@ impl Table {
     /// Clear all rows
     pub fn clear(&mut self) {
         self.rows.clear();
+        self.deleted.clear();
+        self.deleted_count = 0;
         // Clear indexes (delegate to IndexManager)
         self.indexes.clear();
         // Reset append mode tracking
@@ -574,6 +653,11 @@ impl Table {
     pub fn update_row(&mut self, index: usize, row: Row) -> Result<(), StorageError> {
         if index >= self.rows.len() {
             return Err(StorageError::ColumnIndexOutOfBounds { index });
+        }
+
+        // Cannot update a deleted row
+        if self.deleted[index] {
+            return Err(StorageError::RowNotFound);
         }
 
         // Normalize and validate row
@@ -623,6 +707,11 @@ impl Table {
             return Err(StorageError::ColumnIndexOutOfBounds { index });
         }
 
+        // Cannot update a deleted row
+        if self.deleted[index] {
+            return Err(StorageError::RowNotFound);
+        }
+
         // Normalize and validate row
         let normalizer = RowNormalizer::new(&self.schema);
         let normalized_row = normalizer.normalize_and_validate(row)?;
@@ -658,112 +747,89 @@ impl Table {
 
     /// Delete rows matching a predicate
     /// Returns number of rows deleted
+    ///
+    /// Uses O(1) bitmap marking for each deleted row instead of O(n) Vec::remove().
     pub fn delete_where<F>(&mut self, mut predicate: F) -> usize
     where
         F: FnMut(&Row) -> bool,
     {
-        // Collect indices and rows to delete (only call predicate once per row)
-        let mut indices_and_rows_to_delete: Vec<(usize, Row)> = Vec::new();
+        // Collect indices of rows to delete (skip already-deleted rows)
+        let mut indices_to_delete: Vec<usize> = Vec::new();
         for (index, row) in self.rows.iter().enumerate() {
-            if predicate(row) {
-                indices_and_rows_to_delete.push((index, row.clone()));
+            if !self.deleted[index] && predicate(row) {
+                indices_to_delete.push(index);
             }
         }
 
-        if indices_and_rows_to_delete.is_empty() {
+        if indices_to_delete.is_empty() {
             return 0;
         }
 
-        // Update indexes for deleted rows BEFORE removing (while indices are still valid)
-        for (_, deleted_row) in &indices_and_rows_to_delete {
-            self.indexes.update_for_delete(&self.schema, deleted_row);
-        }
-
-        // Extract just the indices for adjustment
-        let deleted_indices: Vec<usize> =
-            indices_and_rows_to_delete.iter().map(|(idx, _)| *idx).collect();
-
-        // Delete rows in reverse order to maintain correct indices during removal
-        for (index, _) in indices_and_rows_to_delete.iter().rev() {
-            self.rows.remove(*index);
-        }
-
-        // Adjust remaining index entries instead of full rebuild
-        // This is O(num_entries) instead of O(n) for rebuild
-        self.indexes.adjust_after_multi_delete(&deleted_indices);
-
-        // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
-        if self.native_columnar.is_some() {
-            // Note: Using expect here since delete_where returns usize, not Result
-            let _ = self.rebuild_native_columnar();
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
-        }
-
-        indices_and_rows_to_delete.len()
+        // Use the optimized delete_by_indices which uses bitmap marking
+        self.delete_by_indices(&indices_to_delete)
     }
 
     /// Remove a specific row (used for transaction undo)
     /// Returns error if row not found
+    ///
+    /// Uses O(1) bitmap marking instead of O(n) Vec::remove().
     pub fn remove_row(&mut self, target_row: &Row) -> Result<(), StorageError> {
-        // Find and remove the first matching row
-        if let Some(pos) = self.rows.iter().position(|row| row == target_row) {
-            // Update indexes before removing (delegate to IndexManager)
-            self.indexes.update_for_delete(&self.schema, target_row);
-            self.rows.remove(pos);
-            // Adjust remaining index entries instead of full rebuild
-            self.indexes.adjust_after_delete(pos);
-            // For native columnar tables, rebuild columnar data
-            // For row tables, invalidate the cache
-            if self.native_columnar.is_some() {
-                self.rebuild_native_columnar()?;
-            } else {
-                *self.columnar_cache.write().unwrap() = None;
+        // Find the first matching non-deleted row
+        for (idx, row) in self.rows.iter().enumerate() {
+            if !self.deleted[idx] && row == target_row {
+                // Use delete_by_indices for consistent behavior
+                self.delete_by_indices(&[idx]);
+                return Ok(());
             }
-            Ok(())
-        } else {
-            Err(StorageError::RowNotFound)
         }
+        Err(StorageError::RowNotFound)
     }
 
     /// Delete rows by known indices (fast path - no scanning required)
     ///
-    /// This is more efficient than `delete_where` when row indices are already known
-    /// (e.g., from a primary key lookup). Avoids O(n) table scan.
+    /// Uses O(1) bitmap marking instead of O(n) Vec::remove(). Rows are marked
+    /// as deleted but remain in the vector until compaction is triggered.
     ///
     /// # Arguments
     /// * `indices` - Indices of rows to delete, need not be sorted
     ///
     /// # Returns
     /// Number of rows deleted
+    ///
+    /// # Performance
+    /// O(d) where d = number of rows to delete, compared to O(d * n) for Vec::remove()
     pub fn delete_by_indices(&mut self, indices: &[usize]) -> usize {
         if indices.is_empty() {
             return 0;
         }
 
-        // Sort indices for consistent processing
-        let mut sorted_indices: Vec<usize> = indices.to_vec();
-        sorted_indices.sort_unstable();
+        // Count valid, non-already-deleted indices
+        let mut deleted = 0;
+        for &idx in indices {
+            // Skip invalid or already-deleted indices
+            if idx >= self.rows.len() || self.deleted[idx] {
+                continue;
+            }
 
-        // Validate all indices before modifying
-        if sorted_indices.last().is_some_and(|&max| max >= self.rows.len()) {
-            return 0; // Invalid index, return early
-        }
-
-        // Update indexes for deleted rows BEFORE removing (while indices are still valid)
-        for &idx in &sorted_indices {
+            // Update indexes for this row BEFORE marking as deleted
             let row = &self.rows[idx];
             self.indexes.update_for_delete(&self.schema, row);
+
+            // Mark row as deleted - O(1) operation
+            self.deleted[idx] = true;
+            self.deleted_count += 1;
+            deleted += 1;
         }
 
-        // Delete rows in reverse order to maintain correct indices during removal
-        for &idx in sorted_indices.iter().rev() {
-            self.rows.remove(idx);
+        if deleted == 0 {
+            return 0;
         }
 
-        // Adjust remaining index entries
-        self.indexes.adjust_after_multi_delete(&sorted_indices);
+        // Check if compaction is needed (> 50% deleted)
+        // Compaction rebuilds the vectors without deleted rows
+        if self.should_compact() {
+            self.compact();
+        }
 
         // For native columnar tables, rebuild columnar data
         // For row tables, invalidate the cache
@@ -773,7 +839,49 @@ impl Table {
             *self.columnar_cache.write().unwrap() = None;
         }
 
-        sorted_indices.len()
+        deleted
+    }
+
+    /// Check if the table should be compacted
+    ///
+    /// Compaction is triggered when more than 50% of rows are deleted.
+    /// This prevents unbounded growth of deleted row storage.
+    #[inline]
+    fn should_compact(&self) -> bool {
+        // Only compact if we have at least some rows and > 50% are deleted
+        !self.rows.is_empty() && self.deleted_count > self.rows.len() / 2
+    }
+
+    /// Compact the table by removing deleted rows
+    ///
+    /// This rebuilds the rows vector without deleted entries and rebuilds
+    /// all indexes to point to the new positions.
+    fn compact(&mut self) {
+        if self.deleted_count == 0 {
+            return;
+        }
+
+        // Build new vectors with only live rows
+        let mut new_rows = Vec::with_capacity(self.rows.len() - self.deleted_count);
+        for (idx, row) in self.rows.iter().enumerate() {
+            if !self.deleted[idx] {
+                new_rows.push(row.clone());
+            }
+        }
+
+        // Replace old vectors with compacted ones
+        self.rows = new_rows;
+        self.deleted = vec![false; self.rows.len()];
+        self.deleted_count = 0;
+
+        // Rebuild all indexes since row positions have changed
+        self.indexes.rebuild(&self.schema, &self.rows);
+    }
+
+    /// Check if a row at the given index is deleted
+    #[inline]
+    pub fn is_deleted(&self, idx: usize) -> bool {
+        idx < self.deleted.len() && self.deleted[idx]
     }
 
     /// Get mutable reference to rows

@@ -236,7 +236,8 @@ impl CreateIndexExecutor {
                     .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?;
 
                 let mut entries = Vec::new();
-                for (row_idx, row) in table.scan().iter().enumerate() {
+                // Use scan_live() to skip deleted rows and get correct physical indices
+                for (row_idx, row) in table.scan_live() {
                     let geom_value = &row.values[col_idx];
 
                     // Extract MBR from geometry value (skip NULLs and invalid geometries)
