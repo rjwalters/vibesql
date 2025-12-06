@@ -136,23 +136,48 @@ Or clear all site data for the demo origin through browser settings.
 ### Prerequisites
 
 - Node.js 20+
-- pnpm 10+
-- Rust toolchain
-- wasm-pack
+- pnpm 9+
+- Rust toolchain with `wasm32-unknown-unknown` target
+- wasm-pack 0.13+
+- LLVM with wasm32 support (for local builds on macOS)
 
 ### Setup
 
 ```bash
+# Install Rust wasm target
+rustup target add wasm32-unknown-unknown
+
+# Install wasm-pack
+cargo install wasm-pack
+
 # Install dependencies
+cd web-demo
 pnpm install
+```
 
-# Build WASM module with OPFS support (from repository root)
-./scripts/build-wasm.sh
+### Building WASM Module
 
-# Or manually:
-# wasm-pack build --target web --out-dir web-demo/public/pkg --release crates/vibesql-wasm-bindings
+**On Linux/CI** (uses system clang):
+```bash
+wasm-pack build --target web --out-dir web-demo/public/pkg crates/vibesql-wasm-bindings --release
+```
 
-# Start development server
+**On macOS with Homebrew LLVM** (required for wasm32 support):
+```bash
+# Install LLVM if not already installed
+brew install llvm
+
+# Build with LLVM's clang (has wasm32 target support)
+CC="/opt/homebrew/opt/llvm/bin/clang" \
+AR="/opt/homebrew/opt/llvm/bin/llvm-ar" \
+wasm-pack build --target web --out-dir web-demo/public/pkg crates/vibesql-wasm-bindings --release
+```
+
+> **Note:** The default macOS clang (Xcode) doesn't support `wasm32-unknown-unknown`. You must use Homebrew's LLVM.
+
+### Development Server
+
+```bash
 cd web-demo
 pnpm dev
 ```
@@ -229,32 +254,103 @@ Displays query results with:
 
 ## Deployment
 
-The web demo is automatically deployed to GitHub Pages via GitHub Actions:
+### Automatic Deployment (CI)
 
-1. On push to `main` branch:
-   - Build WASM module with Rust
-   - Run quality checks (lint, format, typecheck)
-   - Run tests
-   - Build Vite app
-   - Deploy to GitHub Pages
+The web demo is automatically deployed to GitHub Pages on push to `main`:
 
-2. Deployment URL: https://rjwalters.github.io/nistmemsql/
+1. Builds WASM module using Rust + wasm-pack
+2. Builds Vite app with `pnpm build`
+3. Deploys to GitHub Pages
+
+**Live URL:** https://rjwalters.github.io/vibesql/
+
+### Updating Benchmark Data
+
+Benchmark data is stored in `web-demo/public/benchmarks/` and committed to the repository. To update:
+
+```bash
+# Export latest benchmark data from dogfooded VibeSQL database
+./scripts/export_benchmark_json.py --all --verbose
+
+# Verify the exported files
+ls -la web-demo/public/benchmarks/
+
+# Commit the updated data
+git add web-demo/public/benchmarks/
+git commit -m "chore(bench): Update benchmark data"
+```
+
+The export script reads from `~/.vibesql/test_results/benchmark_results.vbsql` (our dogfooded database) and generates:
+
+| File | Description |
+|------|-------------|
+| `benchmark_results.json` | TPC-H comparison (vibesql vs sqlite) |
+| `tpcc_results.json` | TPC-C OLTP benchmark |
+| `sysbench_results.json` | Sysbench microbenchmarks |
+| `tpcds_results.json` | TPC-DS decision support queries |
+| `tpch_vibesql_only.json` | TPC-H vibesql-only timings |
+| `footprint_results.json` | Memory footprint measurements |
+
+### Local Build & Preview
+
+```bash
+# Build WASM (see "Building WASM Module" section above)
+
+# Build the website
+cd web-demo
+pnpm build
+
+# Preview locally
+pnpm preview
+```
+
+### Manual Deployment
+
+You can trigger a manual deployment from GitHub Actions:
+1. Go to Actions → "Deploy to GitHub Pages"
+2. Click "Run workflow"
+3. Optionally provide a reason for the deployment
 
 ---
 
 ## Troubleshooting
 
+### WASM build fails on macOS
+
+**Error:** `unable to create target: 'No available targets are compatible with triple "wasm32-unknown-unknown"'`
+
+**Cause:** The default macOS clang (from Xcode) doesn't support WebAssembly targets.
+
+**Solution:** Use Homebrew's LLVM which includes wasm32 support:
+```bash
+brew install llvm
+
+CC="/opt/homebrew/opt/llvm/bin/clang" \
+AR="/opt/homebrew/opt/llvm/bin/llvm-ar" \
+wasm-pack build --target web --out-dir web-demo/public/pkg crates/vibesql-wasm-bindings --release
+```
+
 ### WASM module not loading
 
 If you see "Use query() method for SELECT statements" error:
 
-1. Rebuild WASM module:
+1. Verify WASM files exist:
    ```bash
-   cd crates/wasm-bindings
-   wasm-pack build --target web --out-dir ../../web-demo/public/pkg
+   ls web-demo/public/pkg/
+   # Should contain: vibesql_wasm.js, vibesql_wasm_bg.wasm, *.d.ts files
    ```
 
-2. Clear browser cache and reload
+2. Rebuild WASM module (see "Building WASM Module" section)
+
+3. Clear browser cache and reload
+
+### TypeScript errors about missing WASM module
+
+**Error:** `Cannot find module '../../public/pkg/vibesql_wasm.js'`
+
+**Cause:** WASM module hasn't been built yet.
+
+**Solution:** Build the WASM module first (see "Building WASM Module" section).
 
 ### TypeScript errors
 
