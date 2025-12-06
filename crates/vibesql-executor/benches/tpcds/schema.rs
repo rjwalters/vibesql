@@ -92,36 +92,44 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     create_tpcds_schema_vibesql(&mut db);
     eprintln!("done");
 
+    let rng_debug = std::env::var("RNG_DEBUG").is_ok();
+
     // Load dimension tables first (fact tables reference them)
     eprint!("  Loading date_dim ({} rows)... ", data.date_dim_count);
     std::io::stderr().flush().ok();
     load_date_dim_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after date_dim: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading time_dim... ");
     std::io::stderr().flush().ok();
     load_time_dim_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after time_dim: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading item ({} rows)... ", data.item_count);
     std::io::stderr().flush().ok();
     load_item_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after item: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading customer_address ({} rows)... ", data.customer_address_count);
     std::io::stderr().flush().ok();
     load_customer_address_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after customer_address: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading customer ({} rows)... ", data.customer_count);
     std::io::stderr().flush().ok();
     load_customer_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after customer: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading store ({} rows)... ", data.store_count);
     std::io::stderr().flush().ok();
     load_store_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after store: {:.15}]", data.debug_next_random()); }
 
     // Load store_sales immediately after store to match DuckDB's loading order
     // (RNG state must match between loaders for deterministic data generation)
@@ -129,53 +137,63 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     std::io::stderr().flush().ok();
     load_store_sales_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after store_sales: {:.15}]", data.debug_next_random()); }
 
     // Phase 2 tables
     eprint!("  Loading promotion ({} rows)... ", data.promotion_count);
     std::io::stderr().flush().ok();
     load_promotion_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after promotion: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading warehouse... ");
     std::io::stderr().flush().ok();
     load_warehouse_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after warehouse: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading ship_mode... ");
     std::io::stderr().flush().ok();
     load_ship_mode_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after ship_mode: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading reason... ");
     std::io::stderr().flush().ok();
     load_reason_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after reason: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading store_returns ({} rows)... ", data.store_returns_count);
     std::io::stderr().flush().ok();
     load_store_returns_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after store_returns: {:.15}]", data.debug_next_random()); }
 
     // Phase 3 tables
     eprint!("  Loading catalog_page ({} rows)... ", data.catalog_page_count);
     std::io::stderr().flush().ok();
     load_catalog_page_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after catalog_page: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading web_page ({} rows)... ", data.web_page_count);
     std::io::stderr().flush().ok();
     load_web_page_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after web_page: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading web_site ({} rows)... ", data.web_site_count);
     std::io::stderr().flush().ok();
     load_web_site_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after web_site: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading catalog_sales ({} rows)... ", data.catalog_sales_count);
     std::io::stderr().flush().ok();
     load_catalog_sales_vibesql(&mut db, &mut data);
     eprintln!("done");
+    if rng_debug { eprintln!("    [VibeSQL RNG after catalog_sales: {:.15}]", data.debug_next_random()); }
 
     eprint!("  Loading catalog_returns ({} rows)... ", data.catalog_returns_count);
     std::io::stderr().flush().ok();
@@ -311,27 +329,45 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 
     create_tpcds_schema_duckdb(&conn);
 
+    let rng_debug = std::env::var("RNG_DEBUG").is_ok();
+
     // Phase 1 tables (core dimension and fact tables)
     load_date_dim_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after date_dim: {:.15}]", data.debug_next_random()); }
     load_time_dim_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after time_dim: {:.15}]", data.debug_next_random()); }
     load_item_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after item: {:.15}]", data.debug_next_random()); }
     load_customer_address_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after customer_address: {:.15}]", data.debug_next_random()); }
     load_customer_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after customer: {:.15}]", data.debug_next_random()); }
     load_store_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after store: {:.15}]", data.debug_next_random()); }
     load_store_sales_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after store_sales: {:.15}]", data.debug_next_random()); }
 
     // Phase 2 tables
     load_promotion_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after promotion: {:.15}]", data.debug_next_random()); }
     load_warehouse_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after warehouse: {:.15}]", data.debug_next_random()); }
     load_ship_mode_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after ship_mode: {:.15}]", data.debug_next_random()); }
     load_reason_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after reason: {:.15}]", data.debug_next_random()); }
     load_store_returns_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after store_returns: {:.15}]", data.debug_next_random()); }
 
     // Phase 3 tables
     load_catalog_page_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after catalog_page: {:.15}]", data.debug_next_random()); }
     load_web_page_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after web_page: {:.15}]", data.debug_next_random()); }
     load_web_site_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after web_site: {:.15}]", data.debug_next_random()); }
     load_catalog_sales_duckdb(&conn, &mut data);
+    if rng_debug { eprintln!("    [DuckDB RNG after catalog_sales: {:.15}]", data.debug_next_random()); }
     load_catalog_returns_duckdb(&conn, &mut data);
     load_web_sales_duckdb(&conn, &mut data);
     load_web_returns_duckdb(&conn, &mut data);
@@ -4243,13 +4279,14 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let w_warehouse_id = format!("AAAAAA{:010}", i);
         let state_idx = i % STATES.len();
 
+        // Match DuckDB's random parameters exactly for deterministic data generation
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(w_warehouse_id),
-            SqlValue::Varchar(format!("Warehouse#{}", i)),
+            SqlValue::Varchar(format!("Warehouse {}", i)),
             SqlValue::Integer(data.random_i32(50000, 500000) as i64), // sq_ft
-            SqlValue::Varchar(format!("{}", data.random_i32(1, 9999))),
-            SqlValue::Varchar(data.random_varchar(40)),
+            SqlValue::Varchar(format!("{}", data.random_i32(1, 9999))), // Match DuckDB: 1-9999
+            SqlValue::Varchar(data.random_varchar(40)),                 // Match DuckDB: max 40
             SqlValue::Varchar("Street".to_string()),
             SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
             SqlValue::Varchar(data.random_city()),
@@ -4257,7 +4294,7 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(STATES[state_idx].to_string()),
             SqlValue::Varchar(data.random_zip()),
             SqlValue::Varchar("United States".to_string()),
-            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),
+            SqlValue::Numeric(-5.0 - (state_idx % 4) as f64), // Match DuckDB's formula
         ]);
         rows.push(row);
     }
