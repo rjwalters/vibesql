@@ -7,7 +7,7 @@
 
 import './styles/main.css';
 import { initTheme } from './theme';
-import { initLocale, SUPPORTED_LOCALES } from './locale';
+import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
 import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
 import { initI18n, setI18nLocale, updateDOM } from './i18n';
