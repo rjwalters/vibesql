@@ -15,7 +15,8 @@
 //! All allocations are tied to the arena's lifetime via Rust's borrow checker.
 //! References returned cannot outlive the arena.
 
-use std::cell::{Cell, UnsafeCell};
+use std::alloc::{Layout, alloc, dealloc};
+use std::cell::Cell;
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
@@ -43,9 +44,14 @@ use std::ptr;
 ///     slice[i] = MaybeUninit::new(i as i32);
 /// }
 /// ```
+/// Maximum alignment we support (16 bytes covers most use cases including SIMD types)
+const MAX_ALIGN: usize = 16;
+
 pub struct QueryArena {
-    /// Pre-allocated buffer for all allocations
-    buffer: UnsafeCell<Vec<u8>>,
+    /// Pre-allocated buffer for all allocations (aligned to MAX_ALIGN)
+    buffer: *mut u8,
+    /// Capacity of the buffer in bytes
+    capacity: usize,
     /// Current offset into the buffer (bump pointer)
     offset: Cell<usize>,
     /// Phantom data to ensure proper variance
@@ -77,8 +83,16 @@ impl QueryArena {
     /// let arena = QueryArena::with_capacity(1024 * 1024);
     /// ```
     pub fn with_capacity(bytes: usize) -> Self {
+        // SAFETY: Allocate properly aligned memory
+        let layout = Layout::from_size_align(bytes, MAX_ALIGN)
+            .expect("invalid arena layout");
+        let buffer = unsafe { alloc(layout) };
+        if buffer.is_null() {
+            panic!("arena allocation failed");
+        }
         Self {
-            buffer: UnsafeCell::new(vec![0u8; bytes]),
+            buffer,
+            capacity: bytes,
             offset: Cell::new(0),
             _marker: PhantomData,
         }
@@ -127,19 +141,23 @@ impl QueryArena {
         let size = mem::size_of::<T>();
         let align = mem::align_of::<T>();
 
+        assert!(
+            align <= MAX_ALIGN,
+            "arena does not support alignment greater than {}",
+            MAX_ALIGN
+        );
+
         // Align pointer to T's alignment requirement
         let aligned_offset = (offset + align - 1) & !(align - 1);
 
         // Check capacity
         let end_offset = aligned_offset.checked_add(size).expect("arena offset overflow");
 
-        // SAFETY: We're accessing the buffer to check its length
-        let buffer = unsafe { &*self.buffer.get() };
         assert!(
-            end_offset <= buffer.len(),
+            end_offset <= self.capacity,
             "arena overflow: need {} bytes, have {} remaining",
             size,
-            buffer.len() - aligned_offset
+            self.capacity - aligned_offset
         );
 
         // Bump pointer
@@ -148,11 +166,10 @@ impl QueryArena {
         // Write value and return reference
         // SAFETY: We've verified:
         // - Buffer has enough space (checked above)
-        // - Pointer is properly aligned (aligned_offset)
+        // - Pointer is properly aligned (buffer is MAX_ALIGN aligned, aligned_offset ensures T's alignment)
         // - Lifetime is tied to arena via borrow checker
-        // - UnsafeCell allows interior mutability
         unsafe {
-            let ptr = buffer.as_ptr().add(aligned_offset) as *mut T;
+            let ptr = self.buffer.add(aligned_offset) as *mut T;
             ptr::write(ptr, value);
             &*ptr
         }
@@ -209,19 +226,23 @@ impl QueryArena {
         let size = mem::size_of::<T>().checked_mul(len).expect("slice size overflow");
         let align = mem::align_of::<T>();
 
+        assert!(
+            align <= MAX_ALIGN,
+            "arena does not support alignment greater than {}",
+            MAX_ALIGN
+        );
+
         // Align pointer to T's alignment requirement
         let aligned_offset = (offset + align - 1) & !(align - 1);
 
         // Check capacity
         let end_offset = aligned_offset.checked_add(size).expect("arena offset overflow");
 
-        // SAFETY: We're accessing the buffer to check its length
-        let buffer = unsafe { &*self.buffer.get() };
         assert!(
-            end_offset <= buffer.len(),
+            end_offset <= self.capacity,
             "arena overflow: need {} bytes, have {} remaining",
             size,
-            buffer.len() - aligned_offset
+            self.capacity - aligned_offset
         );
 
         // Bump pointer
@@ -230,13 +251,12 @@ impl QueryArena {
         // Return slice of MaybeUninit<T> (safe for uninitialized memory)
         // SAFETY: We've verified:
         // - Buffer has enough space (checked above)
-        // - Pointer is properly aligned (aligned_offset)
+        // - Pointer is properly aligned (buffer is MAX_ALIGN aligned, aligned_offset ensures T's alignment)
         // - Size doesn't overflow (checked above)
         // - Lifetime is tied to arena via borrow checker
         // - MaybeUninit<T> is safe to construct from uninitialized memory
-        // - UnsafeCell allows interior mutability
         unsafe {
-            let ptr = buffer.as_ptr().add(aligned_offset) as *mut MaybeUninit<T>;
+            let ptr = self.buffer.add(aligned_offset) as *mut MaybeUninit<T>;
             std::slice::from_raw_parts_mut(ptr, len)
         }
     }
@@ -267,22 +287,22 @@ impl QueryArena {
         let size = mem::size_of::<T>();
         let align = mem::align_of::<T>();
 
+        if align > MAX_ALIGN {
+            return None;
+        }
+
         let aligned_offset = (offset + align - 1) & !(align - 1);
         let end_offset = aligned_offset.checked_add(size)?;
 
-        // SAFETY: We're accessing the buffer to check its length
-        let buffer = unsafe { &*self.buffer.get() };
-
-        if end_offset > buffer.len() {
+        if end_offset > self.capacity {
             return None;
         }
 
         self.offset.set(end_offset);
 
         // SAFETY: Same guarantees as alloc(), but checked for space
-        // - UnsafeCell allows interior mutability
         unsafe {
-            let ptr = buffer.as_ptr().add(aligned_offset) as *mut T;
+            let ptr = self.buffer.add(aligned_offset) as *mut T;
             ptr::write(ptr, value);
             Some(&*ptr)
         }
@@ -347,8 +367,7 @@ impl QueryArena {
     /// ```
     #[inline]
     pub fn capacity_bytes(&self) -> usize {
-        // SAFETY: We're only reading the length, which is safe
-        unsafe { (*self.buffer.get()).len() }
+        self.capacity
     }
 
     /// Get the number of bytes remaining in this arena
@@ -365,10 +384,25 @@ impl QueryArena {
     /// ```
     #[inline]
     pub fn remaining_bytes(&self) -> usize {
-        // SAFETY: We're only reading the length, which is safe
-        unsafe { (*self.buffer.get()).len() - self.offset.get() }
+        self.capacity - self.offset.get()
     }
 }
+
+impl Drop for QueryArena {
+    fn drop(&mut self) {
+        // SAFETY: buffer was allocated with Layout::from_size_align(capacity, MAX_ALIGN)
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(self.capacity, MAX_ALIGN);
+            dealloc(self.buffer, layout);
+        }
+    }
+}
+
+// SAFETY: QueryArena can be sent between threads because:
+// - The buffer is only accessed through methods that take &self
+// - Cell provides interior mutability but is single-threaded
+// - The arena is not Sync (cannot be shared between threads) but is Send
+unsafe impl Send for QueryArena {}
 
 impl Default for QueryArena {
     fn default() -> Self {
