@@ -101,6 +101,16 @@
       }
     },
     {
+      "name": "sysbench_delete_vibesql_server",
+      "stats": {
+        "mean": 0,
+        "stddev": 0,
+        "min": 0,
+        "max": 0,
+        "rounds": 0
+      }
+    },
+    {
       "name": "sysbench_delete_sqlite",
       "stats": {
         "mean": 2.612528175396825e-05,
@@ -131,6 +141,16 @@
       }
     },
     {
+      "name": "sysbench_insert_vibesql_server",
+      "stats": {
+        "mean": 0.00028946,
+        "stddev": 0.00002,
+        "min": 0.00026,
+        "max": 0.00032,
+        "rounds": 102164
+      }
+    },
+    {
       "name": "sysbench_insert_sqlite",
       "stats": {
         "mean": 2.97329774036081e-06,
@@ -158,6 +178,16 @@
         "min": 3.306027647472465e-07,
         "max": 3.654030557732725e-07,
         "rounds": 100
+      }
+    },
+    {
+      "name": "sysbench_point_select_vibesql_server",
+      "stats": {
+        "mean": 0.00018575,
+        "stddev": 0.00001,
+        "min": 0.00017,
+        "max": 0.0002,
+        "rounds": 160856
       }
     },
     {
@@ -201,6 +231,16 @@
       }
     },
     {
+      "name": "sysbench_read_write_vibesql_server",
+      "stats": {
+        "mean": 0,
+        "stddev": 0,
+        "min": 0,
+        "max": 0,
+        "rounds": 0
+      }
+    },
+    {
       "name": "sysbench_read_write_sqlite",
       "stats": {
         "mean": 4.609790394426311e-06,
@@ -228,6 +268,16 @@
         "min": 6.56468949842186e-07,
         "max": 7.255709445624162e-07,
         "rounds": 100
+      }
+    },
+    {
+      "name": "sysbench_update_index_vibesql_server",
+      "stats": {
+        "mean": 0.00028909,
+        "stddev": 0.00002,
+        "min": 0.00026,
+        "max": 0.00032,
+        "rounds": 103517
       }
     },
     {
@@ -261,6 +311,16 @@
       }
     },
     {
+      "name": "sysbench_update_non_index_vibesql_server",
+      "stats": {
+        "mean": 0.00028175,
+        "stddev": 0.00002,
+        "min": 0.00025,
+        "max": 0.00031,
+        "rounds": 105350
+      }
+    },
+    {
       "name": "sysbench_update_non_index_sqlite",
       "stats": {
         "mean": 1.2917723628966896e-06,
@@ -288,6 +348,16 @@
         "min": 5.417311127483991e-05,
         "max": 5.9875544040612546e-05,
         "rounds": 100
+      }
+    },
+    {
+      "name": "sysbench_write_only_vibesql_server",
+      "stats": {
+        "mean": 0,
+        "stddev": 0,
+        "min": 0,
+        "max": 0,
+        "rounds": 0
       }
     },
     {
