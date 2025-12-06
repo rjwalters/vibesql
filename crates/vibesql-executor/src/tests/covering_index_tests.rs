@@ -182,7 +182,7 @@ fn test_covering_index_multiple_columns_select() {
 
             // Verify quantity matches the pattern: quantity = 5 + (s_i_id % 20)
             assert!(s_quantity < 10);
-            assert!(s_i_id >= 1 && s_i_id <= 4);
+            assert!((1..=4).contains(&s_i_id));
         }
     } else {
         panic!("Expected SELECT statement");

@@ -442,6 +442,7 @@ fn benchmark_mysql_query(conn: &mut MySqlConn, sql: &str) -> usize {
 // Sanity Check Benchmarks
 // =============================================================================
 
+#[cfg(not(feature = "sqlite-comparison"))]
 fn bench_sanity_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_sanity");
     group.measurement_time(Duration::from_secs(5));
@@ -891,6 +892,7 @@ fn bench_tpcds_slow_queries_comparison(c: &mut Criterion) {
     print_query_summary();
 }
 
+#[cfg(not(feature = "sqlite-comparison"))]
 fn bench_tpcds_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_queries");
     group.measurement_time(Duration::from_secs(10));
@@ -952,6 +954,7 @@ fn bench_tpcds_queries(c: &mut Criterion) {
 }
 
 /// Benchmark slow TPC-DS queries with reduced sample size
+#[cfg(not(feature = "sqlite-comparison"))]
 fn bench_tpcds_slow_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("tpcds_queries");
     group.measurement_time(Duration::from_secs(10));

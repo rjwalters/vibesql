@@ -1505,17 +1505,15 @@ impl<'a> MysqlTransactionExecutor<'a> {
                     error: Some(format!("Customer query failed: {}", e)),
                 };
             }
-        } else {
-            if let Err(e) = self.conn.exec_drop(
-                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
-                (input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()),
-            ) {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("Customer query failed: {}", e)),
-                };
-            }
+        } else if let Err(e) = self.conn.exec_drop(
+            "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
+            (input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()),
+        ) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
         }
 
         TransactionResult {

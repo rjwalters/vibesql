@@ -369,12 +369,12 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     // Phase 1 tables (core dimension and fact tables)
     eprint!("  Loading date_dim ({} rows)... ", data.date_dim_count);
     std::io::stderr().flush().ok();
-    load_date_dim_mysql(&mut conn, &mut data);
+    load_date_dim_mysql(&mut conn, &data);
     eprintln!("done");
 
     eprint!("  Loading time_dim... ");
     std::io::stderr().flush().ok();
-    load_time_dim_mysql(&mut conn, &mut data);
+    load_time_dim_mysql(&mut conn, &data);
     eprintln!("done");
 
     eprint!("  Loading item ({} rows)... ", data.item_count);

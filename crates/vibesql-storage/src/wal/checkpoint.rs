@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_header_invalid_magic() {
-        let mut buf = vec![0u8; CHECKPOINT_HEADER_SIZE];
+        let mut buf = [0u8; CHECKPOINT_HEADER_SIZE];
         buf[0..4].copy_from_slice(b"XXXX");
 
         let mut reader = &buf[..];
