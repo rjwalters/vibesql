@@ -27,6 +27,7 @@ pub(super) use inner::hash_join_inner;
 pub(super) use inner::hash_join_inner_arithmetic;
 pub(super) use inner::hash_join_inner_multi;
 pub(super) use outer::hash_join_left_outer;
+pub(super) use outer::hash_join_left_outer_multi;
 
 // Re-export existence hash table builders for semi-join and anti-join
 pub(super) use build::build_existence_hash_table_parallel;

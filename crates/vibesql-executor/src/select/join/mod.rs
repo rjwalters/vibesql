@@ -25,6 +25,7 @@ mod tests;
 use hash_anti_join::{hash_anti_join, hash_anti_join_with_filter};
 use hash_join::{
     hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi, hash_join_left_outer,
+    hash_join_left_outer_multi,
 };
 use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 // Re-export hash join iterator for public use
@@ -860,10 +861,13 @@ pub(super) fn nested_loop_join(
         let temp_schema =
             CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
 
-        // Try ON condition for hash join with compound AND support
+        // Try ON condition for hash join with multi-column support
+        // Use multi-column analysis to include ALL equi-join conditions in the hash join
+        // This is critical for LEFT JOIN correctness: post-filter conditions on NULL columns
+        // (from unmatched rows) incorrectly filter out valid LEFT JOIN results
         if let Some(cond) = condition {
-            if let Some(compound_result) =
-                join_analyzer::analyze_compound_equi_join(cond, &temp_schema, left_col_count)
+            if let Some(multi_result) =
+                join_analyzer::analyze_multi_column_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
                 let (left_schema_for_natural, right_schema_for_natural) = if natural {
@@ -872,17 +876,33 @@ pub(super) fn nested_loop_join(
                     (None, None)
                 };
 
-                let mut result = hash_join_left_outer(
-                    left,
-                    right,
-                    compound_result.equi_join.left_col_idx,
-                    compound_result.equi_join.right_col_idx,
-                )?;
+                // Use multi-column hash join when there are multiple equi-join columns
+                // This ensures all equi-join conditions are matched during hash lookup,
+                // not filtered afterward (which breaks LEFT JOIN semantics for NULL columns)
+                let mut result = if multi_result.equi_joins.left_col_indices.len() > 1 {
+                    hash_join_left_outer_multi(
+                        left,
+                        right,
+                        &multi_result.equi_joins.left_col_indices,
+                        &multi_result.equi_joins.right_col_indices,
+                    )?
+                } else {
+                    // Single column - use optimized single-column hash join
+                    hash_join_left_outer(
+                        left,
+                        right,
+                        multi_result.equi_joins.left_col_indices[0],
+                        multi_result.equi_joins.right_col_indices[0],
+                    )?
+                };
 
-                // Apply remaining conditions from compound AND as post-join filter
-                if !compound_result.remaining_conditions.is_empty() {
+                // Apply remaining NON-equi-join conditions as post-join filter
+                // Note: For LEFT JOIN, remaining conditions on right columns may evaluate
+                // to NULL for unmatched rows. These rows should be preserved.
+                // TODO: Consider a LEFT JOIN-aware post-filter that preserves NULL results
+                if !multi_result.remaining_conditions.is_empty() {
                     if let Some(filter_expr) =
-                        combine_with_and(compound_result.remaining_conditions)
+                        combine_with_and(multi_result.remaining_conditions)
                     {
                         result =
                             apply_post_join_filter(result, &filter_expr, database, cte_results)?;

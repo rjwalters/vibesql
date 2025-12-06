@@ -276,6 +276,226 @@ fn test_cte_in_exists_subquery() {
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
 }
 
+/// Test CTE with LEFT JOIN and GROUP BY (issue #3656)
+/// This tests that CTEs containing LEFT JOINs produce the correct number of rows
+/// when used with GROUP BY. Previously, CTEs with LEFT JOINs would incorrectly
+/// collapse GROUP BY results to 1 row.
+#[test]
+fn test_cte_left_join_group_by_issue_3656() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test tables
+    execute_sql(&mut db, "CREATE TABLE test_orders_3656(o_id INT, o_customer INT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE test_returns_3656(r_order_id INT, r_qty INT)").unwrap();
+
+    // Insert orders (3 orders, 2 customers)
+    execute_sql(&mut db, "INSERT INTO test_orders_3656 VALUES (1, 100)").unwrap();
+    execute_sql(&mut db, "INSERT INTO test_orders_3656 VALUES (2, 100)").unwrap();
+    execute_sql(&mut db, "INSERT INTO test_orders_3656 VALUES (3, 200)").unwrap();
+
+    // Insert returns (only for order 1)
+    execute_sql(&mut db, "INSERT INTO test_returns_3656 VALUES (1, 5)").unwrap();
+
+    // First verify: Derived table with LEFT JOIN + GROUP BY works correctly
+    let query_derived = "
+        SELECT o_customer, COUNT(*) as cnt
+        FROM (
+            SELECT o_customer
+            FROM test_orders_3656 o
+            LEFT JOIN test_returns_3656 r ON o.o_id = r.r_order_id
+        ) t
+        GROUP BY o_customer
+    ";
+    let result_derived = execute_sql(&mut db, query_derived).unwrap();
+    assert_eq!(
+        result_derived.len(),
+        2,
+        "Derived table should have 2 groups (customer 100 and 200)"
+    );
+
+    // Main test: CTE with LEFT JOIN + GROUP BY should also return 2 rows
+    let query_cte = "
+        WITH cte AS (
+            SELECT o_customer
+            FROM test_orders_3656 o
+            LEFT JOIN test_returns_3656 r ON o.o_id = r.r_order_id
+        )
+        SELECT o_customer, COUNT(*) as cnt
+        FROM cte
+        GROUP BY o_customer
+    ";
+    let result_cte = execute_sql(&mut db, query_cte).unwrap();
+    assert_eq!(
+        result_cte.len(),
+        2,
+        "CTE with LEFT JOIN + GROUP BY should also have 2 groups (issue #3656)"
+    );
+}
+
+/// Test CTE with UNION ALL + LEFT JOIN + GROUP BY pattern like TPC-DS Q75 (issue #3656)
+/// This tests the specific pattern that causes Q75 validation failure.
+#[test]
+fn test_cte_union_left_join_group_by_issue_3656() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test tables (simplified TPC-DS pattern)
+    execute_sql(&mut db, "CREATE TABLE sales_a(sale_id INT, item_id INT, qty INT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE sales_b(sale_id INT, item_id INT, qty INT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE returns_a(sale_id INT, ret_qty INT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE returns_b(sale_id INT, ret_qty INT)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE items(item_id INT, brand INT)").unwrap();
+
+    // Insert items (2 brands)
+    execute_sql(&mut db, "INSERT INTO items VALUES (1, 100)").unwrap();
+    execute_sql(&mut db, "INSERT INTO items VALUES (2, 100)").unwrap();
+    execute_sql(&mut db, "INSERT INTO items VALUES (3, 200)").unwrap();
+
+    // Insert sales for channel A
+    execute_sql(&mut db, "INSERT INTO sales_a VALUES (1, 1, 10)").unwrap();
+    execute_sql(&mut db, "INSERT INTO sales_a VALUES (2, 2, 20)").unwrap();
+    execute_sql(&mut db, "INSERT INTO sales_a VALUES (3, 3, 30)").unwrap();
+
+    // Insert sales for channel B
+    execute_sql(&mut db, "INSERT INTO sales_b VALUES (4, 1, 15)").unwrap();
+    execute_sql(&mut db, "INSERT INTO sales_b VALUES (5, 2, 25)").unwrap();
+
+    // Insert returns
+    execute_sql(&mut db, "INSERT INTO returns_a VALUES (1, 2)").unwrap();
+
+    // Test: CTE with UNION ALL of two channels, each with LEFT JOIN to returns
+    // Then GROUP BY brand and SUM(qty - COALESCE(ret_qty, 0))
+    let query = "
+        WITH all_sales AS (
+            SELECT brand, SUM(net_qty) AS total_qty
+            FROM (
+                SELECT i.brand, s.qty - COALESCE(r.ret_qty, 0) AS net_qty
+                FROM sales_a s
+                JOIN items i ON s.item_id = i.item_id
+                LEFT JOIN returns_a r ON s.sale_id = r.sale_id
+                UNION ALL
+                SELECT i.brand, s.qty - COALESCE(r.ret_qty, 0) AS net_qty
+                FROM sales_b s
+                JOIN items i ON s.item_id = i.item_id
+                LEFT JOIN returns_b r ON s.sale_id = r.sale_id
+            ) combined
+            GROUP BY brand
+        )
+        SELECT COUNT(*) FROM all_sales
+    ";
+    let result = execute_sql(&mut db, query).unwrap();
+    assert_eq!(result.len(), 1, "Should return one row with count");
+
+    // Extract the count value
+    let count = match &result[0].values[0] {
+        vibesql_types::SqlValue::Integer(n) => *n,
+        _ => panic!("Expected integer count"),
+    };
+
+    // Should have 2 groups (brand 100 and brand 200)
+    assert_eq!(
+        count, 2,
+        "CTE with UNION ALL + LEFT JOIN + GROUP BY should produce 2 groups (brands 100 and 200), got {}",
+        count
+    );
+}
+
+/// Test multi-column LEFT OUTER JOIN (compound ON condition) - issue #3656
+///
+/// This tests the fix for TPC-DS Q75 where LEFT JOIN has multiple equi-join columns:
+/// `LEFT JOIN returns ON sales.ticket = returns.ticket AND sales.item = returns.item`
+///
+/// Before the fix, only the first condition was used for hash join, and the second
+/// was applied as a post-join filter. This incorrectly filtered out unmatched left rows
+/// because the filter evaluated to NULL (right columns are NULL for unmatched rows).
+#[test]
+fn test_multi_column_left_outer_join_issue_3656() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test tables with composite key relationship
+    execute_sql(&mut db, "CREATE TABLE sales_3656(ticket_num INT, item_id INT, qty INT)").unwrap();
+    execute_sql(
+        &mut db,
+        "CREATE TABLE returns_3656(ret_ticket INT, ret_item INT, ret_qty INT)",
+    )
+    .unwrap();
+
+    // Insert sales - 4 rows
+    execute_sql(&mut db, "INSERT INTO sales_3656 VALUES (1, 100, 10)").unwrap(); // Will have return
+    execute_sql(&mut db, "INSERT INTO sales_3656 VALUES (1, 200, 20)").unwrap(); // No return (same ticket, diff item)
+    execute_sql(&mut db, "INSERT INTO sales_3656 VALUES (2, 100, 30)").unwrap(); // No return (diff ticket, same item)
+    execute_sql(&mut db, "INSERT INTO sales_3656 VALUES (3, 300, 40)").unwrap(); // No return
+
+    // Insert return - only for (ticket=1, item=100)
+    execute_sql(&mut db, "INSERT INTO returns_3656 VALUES (1, 100, 5)").unwrap();
+
+    // Multi-column LEFT JOIN: must match on BOTH ticket AND item
+    let query = "
+        SELECT s.ticket_num, s.item_id, s.qty, COALESCE(r.ret_qty, 0) as ret_qty
+        FROM sales_3656 s
+        LEFT JOIN returns_3656 r
+            ON s.ticket_num = r.ret_ticket
+            AND s.item_id = r.ret_item
+        ORDER BY s.ticket_num, s.item_id
+    ";
+
+    let result = execute_sql(&mut db, query).unwrap();
+
+    // Should return ALL 4 sales rows (LEFT JOIN preserves all left rows)
+    assert_eq!(
+        result.len(),
+        4,
+        "Multi-column LEFT JOIN should preserve all 4 sales rows, got {}. \
+         Bug was: second condition applied as post-filter, which filtered out \
+         unmatched rows because NULL = value evaluates to NULL (falsy)",
+        result.len()
+    );
+
+    // Verify the specific results
+    // Row 1: (1, 100) has a return
+    assert_eq!(
+        result[0].values,
+        vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(100),
+            vibesql_types::SqlValue::Integer(10),
+            vibesql_types::SqlValue::Integer(5), // has return
+        ]
+    );
+
+    // Row 2: (1, 200) - same ticket but different item, should NOT match return
+    assert_eq!(
+        result[1].values,
+        vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(200),
+            vibesql_types::SqlValue::Integer(20),
+            vibesql_types::SqlValue::Integer(0), // COALESCE(NULL, 0) = 0
+        ]
+    );
+
+    // Row 3: (2, 100) - different ticket but same item, should NOT match return
+    assert_eq!(
+        result[2].values,
+        vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(100),
+            vibesql_types::SqlValue::Integer(30),
+            vibesql_types::SqlValue::Integer(0),
+        ]
+    );
+
+    // Row 4: (3, 300) - completely unmatched
+    assert_eq!(
+        result[3].values,
+        vec![
+            vibesql_types::SqlValue::Integer(3),
+            vibesql_types::SqlValue::Integer(300),
+            vibesql_types::SqlValue::Integer(40),
+            vibesql_types::SqlValue::Integer(0),
+        ]
+    );
+}
+
 /// Test CTE referenced in NOT EXISTS subquery (issue #3044)
 #[test]
 fn test_cte_in_not_exists_subquery() {
