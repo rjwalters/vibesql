@@ -323,6 +323,16 @@ impl IndexManager {
     }
 
     /// Update user-defined indexes for update operation
+    ///
+    /// # Arguments
+    /// * `table_name` - Name of the table being updated
+    /// * `table_schema` - Schema of the table
+    /// * `old_row` - Row data before the update
+    /// * `new_row` - Row data after the update
+    /// * `row_index` - Index of the row in the table
+    /// * `changed_columns` - Optional set of column indices that were modified.
+    ///   If provided, indexes that don't involve any changed columns will be skipped.
+    ///   If None, all indexes are processed (backward compatible).
     pub fn update_indexes_for_update(
         &mut self,
         table_name: &str,
@@ -330,12 +340,27 @@ impl IndexManager {
         old_row: &Row,
         new_row: &Row,
         row_index: usize,
+        changed_columns: Option<&std::collections::HashSet<usize>>,
     ) {
         for (index_name, metadata) in &self.indexes {
             // Case-insensitive comparison for table name matching
             // SQL parser normalizes identifiers to uppercase, but table/index metadata
             // may store the original case from DDL statements
             if metadata.table_name.eq_ignore_ascii_case(table_name) {
+                // OPTIMIZATION: Skip indexes that don't involve any changed columns
+                // This avoids building key vectors and comparing them for unaffected indexes
+                if let Some(changed) = changed_columns {
+                    let index_affected = metadata.columns.iter().any(|col| {
+                        table_schema
+                            .get_column_index(&col.column_name)
+                            .map(|idx| changed.contains(&idx))
+                            .unwrap_or(false)
+                    });
+                    if !index_affected {
+                        continue; // Skip this index - none of its columns were changed
+                    }
+                }
+
                 if let Some(index_data) = self.index_data.get_mut(index_name) {
                     // Build keys from old and new rows
                     // Normalize numeric types to ensure consistent comparison

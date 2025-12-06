@@ -456,6 +456,15 @@ impl Operations {
     }
 
     /// Update user-defined indexes for update operation
+    ///
+    /// # Arguments
+    /// * `catalog` - Database catalog for schema lookup
+    /// * `table_name` - Name of the table being updated
+    /// * `old_row` - Row data before the update
+    /// * `new_row` - Row data after the update
+    /// * `row_index` - Index of the row in the table
+    /// * `changed_columns` - Optional set of column indices that were modified.
+    ///   If provided, indexes that don't involve any changed columns will be skipped.
     pub fn update_indexes_for_update(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -463,6 +472,7 @@ impl Operations {
         old_row: &Row,
         new_row: &Row,
         row_index: usize,
+        changed_columns: Option<&std::collections::HashSet<usize>>,
     ) {
         if let Some(table_schema) = catalog.get_table(table_name) {
             self.index_manager.update_indexes_for_update(
@@ -471,6 +481,7 @@ impl Operations {
                 old_row,
                 new_row,
                 row_index,
+                changed_columns,
             );
         }
 
