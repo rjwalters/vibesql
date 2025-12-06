@@ -14,13 +14,14 @@ use super::join_helpers::{
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
+    optimizer::optimize_expression,
     schema::CombinedSchema,
     select::{
         columnar, cte::CteResult, executor::builder::SelectExecutor,
         join::hash_join::columnar as columnar_join, projection::project_row_combined,
     },
 };
-use vibesql_ast::{FromClause, SelectItem};
+use vibesql_ast::{Expression, FromClause, SelectItem};
 
 impl SelectExecutor<'_> {
     /// Try to execute a multi-table JOIN query using columnar hash join (Phase 4)
@@ -64,9 +65,23 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Only handle queries without CTEs or set operations
+        // Only handle queries without CTEs, set operations, or DISTINCT
+        // DISTINCT requires deduplication which the columnar path doesn't support yet
         if !cte_results.is_empty() || stmt.set_operation.is_some() {
             log::debug!("Columnar join: skipping - has CTEs or set operations");
+            return Ok(None);
+        }
+
+        // DISTINCT queries need special handling - fall back to row-oriented
+        if stmt.distinct {
+            log::debug!("Columnar join: skipping - DISTINCT not supported");
+            return Ok(None);
+        }
+
+        // LIMIT/OFFSET queries need special handling - fall back to row-oriented
+        // TODO: Add LIMIT support to columnar join path
+        if stmt.limit.is_some() || stmt.offset.is_some() {
+            log::debug!("Columnar join: skipping - LIMIT/OFFSET not supported");
             return Ok(None);
         }
 
@@ -194,8 +209,24 @@ impl SelectExecutor<'_> {
             };
 
         // Apply remaining WHERE predicates (non-join conditions) using SIMD filtering
-        let predicates = stmt
-            .where_clause
+        // First, constant-fold the WHERE clause to handle expressions like `BETWEEN 1 AND 1+2`
+        // which need to become `BETWEEN 1 AND 3` for the predicate extractor to recognize them
+        let folded_where = if let Some(where_expr) = &stmt.where_clause {
+            // Create evaluator for constant folding
+            // SAFETY: combined_schema lives for the duration of this function call
+            let schema_ref: &'static CombinedSchema =
+                unsafe { std::mem::transmute(&combined_schema) };
+            let evaluator = CombinedExpressionEvaluator::with_database(schema_ref, self.database);
+
+            match optimize_expression(where_expr, &evaluator) {
+                Ok(folded) => Some(folded),
+                Err(_) => Some(where_expr.clone()), // Fall back to original if folding fails
+            }
+        } else {
+            None
+        };
+
+        let predicates = folded_where
             .as_ref()
             .and_then(|where_expr| extract_non_join_predicates(where_expr, &combined_schema))
             .unwrap_or_default();
