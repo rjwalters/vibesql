@@ -1072,4 +1072,94 @@ mod tests {
         assert!(result.contains("\\help"));
         assert!(result.contains("ความช่วยเหลือ"));
     }
+
+    #[test]
+    fn test_vietnamese_locale() {
+        init(Some("vi")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Tạm biệt!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("hàng"));
+    }
+
+    #[test]
+    fn test_vietnamese_parser_messages() {
+        init(Some("vi")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Chuỗi ký tự chưa kết thúc");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Ký tự không mong đợi"));
+    }
+
+    #[test]
+    fn test_vietnamese_resources_embedded() {
+        // Check that Vietnamese resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("vi/")), "Vietnamese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "vi/cli.ftl"), "vi/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "vi/parser.ftl"), "vi/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "vi/executor.ftl"), "vi/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "vi/storage.ftl"), "vi/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "vi/catalog.ftl"), "vi/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_vietnamese_executor_messages() {
+        init(Some("vi")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("Không tìm thấy bảng"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "Chia cho số không");
+    }
+
+    #[test]
+    fn test_vietnamese_storage_messages() {
+        init(Some("vi")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("Không tìm thấy bảng"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "Không tìm thấy hàng");
+    }
+
+    #[test]
+    fn test_vietnamese_catalog_messages() {
+        init(Some("vi")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("đã tồn tại"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("Không tìm thấy schema"));
+    }
+
+    #[test]
+    fn test_vietnamese_diacritics_handling() {
+        init(Some("vi")).unwrap();
+
+        // Test messages with Vietnamese diacritics are correctly handled
+        let result = vibe_msg!("executor-schema-not-empty", name = "công_khai");
+        assert!(result.contains("công_khai"));
+        assert!(result.contains("không trống"));
+
+        // Test the help hint with Vietnamese characters
+        let result = format("cli-help-hint", None);
+        assert!(result.contains("\\help"));
+        assert!(result.contains("trợ giúp"));
+    }
 }
