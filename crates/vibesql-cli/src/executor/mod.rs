@@ -62,20 +62,18 @@ impl SqlExecutor {
 
         match statement {
             vibesql_ast::Statement::Select(select_stmt) => {
-                // Execute SELECT and format results
+                // Execute SELECT and format results with column names
                 let executor = vibesql_executor::SelectExecutor::new(&self.db);
-                match executor.execute(&select_stmt) {
-                    Ok(rows) => {
-                        result.row_count = rows.len();
-                        // Convert rows to string representation
-                        if !rows.is_empty() {
-                            // Get column names from the select statement
-                            result.columns = vec!["Column".to_string(); rows[0].values.len()];
-                            for row in rows {
-                                let row_strs: Vec<String> =
-                                    row.values.iter().map(|v| format!("{:?}", v)).collect();
-                                result.rows.push(row_strs);
-                            }
+                match executor.execute_with_columns(&select_stmt) {
+                    Ok(select_result) => {
+                        result.row_count = select_result.rows.len();
+                        // Use column names from the executor result
+                        result.columns = select_result.columns;
+                        // Convert rows to string representation using Display trait
+                        for row in select_result.rows {
+                            let row_strs: Vec<String> =
+                                row.values.iter().map(|v| format!("{}", v)).collect();
+                            result.rows.push(row_strs);
                         }
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),

@@ -147,9 +147,62 @@ fn test_multi_column_select_order() {
     assert_eq!(result.rows[0].len(), 2, "Should return 2 columns");
 
     // Values should be in the same order as specified in SELECT: 74 first, then 50
-    // Note: Values are formatted as debug strings like "Integer(74)"
-    assert_eq!(result.rows[0][0], "Integer(74)", "First column should be 74");
-    assert_eq!(result.rows[0][1], "Integer(50)", "Second column should be 50");
+    // Values are displayed using Display trait, not Debug (fix for #3810)
+    assert_eq!(result.rows[0][0], "74", "First column should be 74");
+    assert_eq!(result.rows[0][1], "50", "Second column should be 50");
+}
+
+#[test]
+fn test_select_column_names_and_values_issue_3810() {
+    // Regression test for issue #3810
+    // SELECT should show actual column names/aliases, not generic "Column"
+    // SELECT should show actual values, not typed representation like "Integer(1)"
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("SELECT 1 as my_column, 'hello' as greeting").unwrap();
+
+    // Column names should be the aliases, not "Column"
+    // Note: SQL standard normalizes unquoted identifiers to uppercase
+    assert_eq!(result.columns, vec!["MY_COLUMN", "GREETING"]);
+
+    // Values should be display format, not debug format
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], "1", "Integer value should display as '1', not 'Integer(1)'");
+    assert_eq!(
+        result.rows[0][1], "hello",
+        "Varchar value should display as 'hello', not 'Varchar(\"hello\")'"
+    );
+}
+
+#[test]
+fn test_select_column_names_from_table() {
+    // Verify column names are derived correctly from table columns
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50))").unwrap();
+    executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+
+    let result = executor.execute("SELECT id, name FROM users").unwrap();
+
+    // Column names should match the table schema
+    assert_eq!(result.columns, vec!["ID", "NAME"]);
+
+    // Values should be display format
+    assert_eq!(result.rows[0][0], "1");
+    assert_eq!(result.rows[0][1], "Alice");
+}
+
+#[test]
+fn test_select_wildcard_column_names() {
+    // Verify SELECT * returns actual column names
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE products (sku VARCHAR(20) PRIMARY KEY, price INT)").unwrap();
+    executor.execute("INSERT INTO products VALUES ('ABC123', 99)").unwrap();
+
+    let result = executor.execute("SELECT * FROM products").unwrap();
+
+    // Column names should be actual column names from table
+    assert_eq!(result.columns, vec!["SKU", "PRICE"]);
+    assert_eq!(result.rows[0][0], "ABC123");
+    assert_eq!(result.rows[0][1], "99");
 }
 
 // ============================================================================
