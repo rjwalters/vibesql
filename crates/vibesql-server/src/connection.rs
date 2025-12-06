@@ -42,6 +42,7 @@ pub struct ConnectionHandler {
 
 impl ConnectionHandler {
     /// Create a new connection handler
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         stream: TcpStream,
         peer_addr: SocketAddr,

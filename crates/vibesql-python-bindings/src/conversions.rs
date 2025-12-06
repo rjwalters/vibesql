@@ -144,9 +144,8 @@ pub fn convert_params_to_sql_values(
 pub fn substitute_placeholders(sql: &str, sql_values: &[vibesql_types::SqlValue]) -> String {
     let mut result = String::new();
     let mut param_idx = 0;
-    let mut chars = sql.chars().peekable();
 
-    while let Some(ch) = chars.next() {
+    for ch in sql.chars() {
         if ch == '?' {
             // Replace ? with the corresponding parameter value as SQL literal
             if param_idx < sql_values.len() {

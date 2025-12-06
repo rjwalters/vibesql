@@ -30,15 +30,34 @@ fi
 PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
 echo "✓ Found Python $PYTHON_VERSION"
 
-# Check if maturin is available (either as command or via python -m)
-if ! python3 -m maturin --version &> /dev/null; then
+# Ensure pipx bin directory is in PATH (common issue after pipx install)
+if [[ -d "$HOME/.local/bin" ]] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# Check if maturin is available
+if ! command -v maturin &> /dev/null; then
     echo ""
-    echo "⚠️  maturin is not installed"
-    echo "Installing maturin..."
-    pip3 install maturin
+    echo "⚠️  maturin is not installed or not in PATH"
+    echo "Installing maturin via pipx..."
+    if ! command -v pipx &> /dev/null; then
+        echo "❌ Error: pipx is not installed"
+        echo "Please install pipx first: brew install pipx && pipx ensurepath"
+        exit 1
+    fi
+    pipx install maturin --force
+    # Ensure PATH includes pipx bin dir after install
+    export PATH="$HOME/.local/bin:$PATH"
+    if ! command -v maturin &> /dev/null; then
+        echo "❌ Error: maturin installed but not found in PATH"
+        echo "Try running: pipx ensurepath"
+        echo "Then restart your shell and try again"
+        exit 1
+    fi
     echo "✓ maturin installed"
 else
-    echo "✓ Found maturin $(python3 -m maturin --version 2>&1 | head -1)"
+    MATURIN_VERSION=$(maturin --version 2>&1 | head -1)
+    echo "✓ Found $MATURIN_VERSION"
 fi
 
 echo ""
@@ -48,8 +67,8 @@ echo "------------------------"
 # Navigate to Python bindings directory
 cd "$PYTHON_BINDINGS_DIR"
 
-# Build the wheel in release mode (use python3 -m to ensure we find maturin)
-python3 -m maturin build --release
+# Build the wheel in release mode
+maturin build --release
 
 # Strip quarantine on macOS
 strip_quarantine

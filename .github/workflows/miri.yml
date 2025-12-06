@@ -46,14 +46,21 @@ jobs:
         run: |
           # Run a limited set of executor tests due to MIRI's slowness
           # Note: This blocks PRs on UB detection - intentionally strict
+          # We run arena and join reorder tests which are pure algorithm tests without file I/O
+          # Exclude tests that require filesystem access (incompatible with MIRI isolation)
           cargo miri test --package vibesql-executor --lib \
-            --test-threads=1 \
             -- \
-            test_basic \
-            || (echo "::error::MIRI detected undefined behavior in executor tests" && exit 1)
+            arena::tests \
+            --test-threads=1 \
+            || (echo "::error::MIRI detected undefined behavior in arena tests" && exit 1)
+          cargo miri test --package vibesql-executor --lib \
+            -- \
+            select::join::reorder::tests \
+            --test-threads=1 \
+            || (echo "::error::MIRI detected undefined behavior in join reorder tests" && exit 1)
 
       - name: MIRI validation summary
         if: success()
         run: |
           echo "✅ MIRI validation passed - no undefined behavior detected"
-          echo "All unsafe code in Row and executor validated successfully"
+          echo "Validated: row::tests, arena::tests, select::join::reorder::tests"

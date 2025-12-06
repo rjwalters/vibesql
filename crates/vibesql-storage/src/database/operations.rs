@@ -623,7 +623,7 @@ impl Operations {
         }
 
         // Check spatial indexes
-        for (_, (metadata, _)) in &self.spatial_indexes {
+        for (metadata, _) in self.spatial_indexes.values() {
             if metadata.table_name.to_uppercase() == normalized_table
                 && metadata.column_name.to_uppercase() == normalized_column
             {

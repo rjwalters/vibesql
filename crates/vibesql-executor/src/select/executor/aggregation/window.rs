@@ -58,18 +58,19 @@ fn collect_aggregate_window_functions(select_list: &[SelectItem]) -> Vec<Aggrega
     let mut result = Vec::new();
 
     for (idx, item) in select_list.iter().enumerate() {
-        if let SelectItem::Expression { expr, .. } = item {
-            if let Expression::WindowFunction {
+        if let SelectItem::Expression {
+            expr: Expression::WindowFunction {
                 function: WindowFunctionSpec::Aggregate { name, .. },
                 over,
-            } = expr
-            {
-                result.push(AggregateWindowFunction {
-                    select_index: idx,
-                    outer_func_name: name.clone(),
-                    window_spec: over.clone(),
-                });
-            }
+            },
+            ..
+        } = item
+        {
+            result.push(AggregateWindowFunction {
+                select_index: idx,
+                outer_func_name: name.clone(),
+                window_spec: over.clone(),
+            });
         }
     }
 

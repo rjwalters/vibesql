@@ -21,7 +21,7 @@ use crate::{
         join::hash_join::columnar as columnar_join, projection::project_row_combined,
     },
 };
-use vibesql_ast::{Expression, FromClause, SelectItem};
+use vibesql_ast::{FromClause, SelectItem};
 
 impl SelectExecutor<'_> {
     /// Try to execute a multi-table JOIN query using columnar hash join (Phase 4)
