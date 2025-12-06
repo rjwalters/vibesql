@@ -3,12 +3,13 @@
 Unified benchmark CLI for VibeSQL.
 
 Provides a consistent interface for running all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)
-with support for engine selection, query filtering, and configuration options.
+with support for engine selection, query filtering, configuration options, and JSON export.
 
 Usage:
     ./scripts/bench --test=tpch                     # Run TPC-H (VibeSQL only)
     ./scripts/bench --test=tpcc --engine=mysql      # Run TPC-C with MySQL
     ./scripts/bench --test=all --engine=all         # Full matrix
+    ./scripts/bench --json                          # Export results as JSON
 
 Examples:
     ./scripts/bench --test=tpch --engine=vibesql,duckdb
@@ -17,16 +18,19 @@ Examples:
     ./scripts/bench --test=tpch --query=Q1,Q6
     ./scripts/bench --quick                         # Fast subset for CI
     ./scripts/bench --all                           # All benchmarks (eq: make benchmark)
+    ./scripts/bench --json --output=results.json    # Export to JSON file
 """
 
 import argparse
+import json
 import os
 import platform
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def strip_quarantine():
@@ -64,6 +68,41 @@ class BenchConfig:
     scale: Optional[float] = None      # Scale factor
     output: Optional[str] = None       # Output file path
     fast: bool = False                 # Fast mode for pipeline debugging
+    json_export: bool = False          # Export results to JSON
+    verbose: bool = False              # Verbose output
+
+
+@dataclass
+class BenchmarkResult:
+    """Result from a single benchmark run."""
+    test: str
+    status: str  # 'success', 'partial', 'failed'
+    duration_secs: float
+    queries_passed: int = 0
+    queries_total: int = 0
+    tps: Optional[float] = None  # Transactions per second (TPC-C)
+    error: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+
+
+def get_git_info() -> Dict[str, str]:
+    """Get current git commit hash and branch name."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True
+        ).strip()[:8]  # Short hash
+
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True
+        ).strip()
+
+        return {"commit": commit, "branch": branch}
+    except:
+        return {"commit": "unknown", "branch": "unknown"}
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -173,6 +212,18 @@ Transaction Filter (--txn):
         help="Equivalent to: --test=all (all benchmarks)"
     )
 
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Export results to JSON format (writes to --output if specified, else stdout)"
+    )
+
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Verbose output with detailed timing information"
+    )
+
     return parser
 
 
@@ -247,6 +298,8 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         scale=args.scale,
         output=args.output,
         fast=args.fast,
+        json_export=args.json,
+        verbose=args.verbose,
     )
 
     return config
@@ -584,13 +637,93 @@ def run_sysbench(config: BenchConfig) -> int:
     return 0
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in human-readable form."""
+    if seconds < 1:
+        return f"{seconds * 1000:.1f}ms"
+    elif seconds < 60:
+        return f"{seconds:.2f}s"
+    elif seconds < 3600:
+        mins = int(seconds // 60)
+        secs = seconds % 60
+        return f"{mins}m {secs:.1f}s"
+    else:
+        hours = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        return f"{hours}h {mins}m"
+
+
+def print_summary_table(results: Dict[str, BenchmarkResult]) -> None:
+    """Print a formatted summary table of benchmark results."""
+    print("\n" + "=" * 70)
+    print("BENCHMARK SUMMARY")
+    print("=" * 70)
+    print(f"{'Benchmark':<12} {'Status':<10} {'Duration':<12} {'Queries':<12} {'Notes'}")
+    print("-" * 70)
+
+    for test, result in results.items():
+        status_icon = "✓" if result.status == "success" else "⚠" if result.status == "partial" else "✗"
+        duration_str = format_duration(result.duration_secs)
+
+        if result.queries_total > 0:
+            queries_str = f"{result.queries_passed}/{result.queries_total}"
+        elif result.tps:
+            queries_str = f"{result.tps:.0f} TPS"
+        else:
+            queries_str = "-"
+
+        notes = result.error or ""
+        print(f"{test.upper():<12} {status_icon:<10} {duration_str:<12} {queries_str:<12} {notes}")
+
+    print("=" * 70)
+
+
+def export_json_results(results: Dict[str, BenchmarkResult], config: BenchConfig) -> Dict[str, Any]:
+    """Export benchmark results to JSON format."""
+    git_info = get_git_info()
+
+    # Build JSON structure
+    output = {
+        "metadata": {
+            "timestamp": datetime.now().isoformat(),
+            "git_commit": git_info.get("commit", "unknown"),
+            "git_branch": git_info.get("branch", "unknown"),
+            "config": {
+                "engines": config.engines,
+                "scale": config.scale,
+                "timeout": config.timeout,
+                "duration": config.duration,
+                "fast_mode": config.fast,
+            }
+        },
+        "benchmarks": {}
+    }
+
+    for test, result in results.items():
+        output["benchmarks"][test] = {
+            "status": result.status,
+            "duration_secs": round(result.duration_secs, 3),
+            "queries_passed": result.queries_passed,
+            "queries_total": result.queries_total,
+        }
+        if result.tps:
+            output["benchmarks"][test]["tps"] = round(result.tps, 2)
+        if result.error:
+            output["benchmarks"][test]["error"] = result.error
+        if result.details:
+            output["benchmarks"][test]["details"] = result.details
+
+    return output
+
+
 def run_all(config: BenchConfig) -> int:
     """Run all benchmarks."""
     print("\n" + "=" * 60)
     print("Running ALL BENCHMARKS")
     print("=" * 60)
 
-    results = {}
+    results: Dict[str, BenchmarkResult] = {}
+    start_time = datetime.now()
 
     # In fast mode, skip TPC-DS (it doesn't support query filtering and takes too long)
     benchmarks = ["tpch", "tpcc", "sysbench"] if config.fast else ["tpch", "tpcc", "tpcds", "sysbench"]
@@ -600,6 +733,7 @@ def run_all(config: BenchConfig) -> int:
     for test in benchmarks:
         config.test = test
         print(f"\n[{test.upper()}] Starting...")
+        test_start = datetime.now()
 
         if test == "tpch":
             ret = run_tpch(config)
@@ -612,25 +746,41 @@ def run_all(config: BenchConfig) -> int:
         else:
             ret = 1
 
-        results[test] = "✓" if ret == 0 else "✗"
+        test_duration = (datetime.now() - test_start).total_seconds()
+        results[test] = BenchmarkResult(
+            test=test,
+            status="success" if ret == 0 else "failed",
+            duration_secs=test_duration,
+        )
 
         if ret != 0:
             print(f"⚠ {test.upper()} had issues, continuing...")
-    
-    # Summary
-    print("\n" + "=" * 60)
-    print("BENCHMARK SUMMARY")
-    print("=" * 60)
-    for test, status in results.items():
-        print(f"  {test.upper()}: {status}")
-    
-    # Show analysis
-    print("\nRunning analysis...")
-    subprocess.run(
-        ["./scripts/query_benchmark_results.py", "--latest"],
-        cwd=Path(__file__).parent.parent
-    )
-    
+
+    # Print formatted summary
+    print_summary_table(results)
+
+    total_duration = (datetime.now() - start_time).total_seconds()
+    print(f"\nTotal time: {format_duration(total_duration)}")
+
+    # JSON export if requested
+    if config.json_export:
+        json_output = export_json_results(results, config)
+        if config.output:
+            with open(config.output, 'w') as f:
+                json.dump(json_output, f, indent=2)
+            print(f"\nJSON results written to: {config.output}")
+        else:
+            print("\n--- JSON Output ---")
+            print(json.dumps(json_output, indent=2))
+
+    # Show analysis (unless in JSON mode to stdout)
+    if not config.json_export or config.output:
+        print("\nRunning analysis...")
+        subprocess.run(
+            ["./scripts/query_benchmark_results.py", "--latest"],
+            cwd=Path(__file__).parent.parent
+        )
+
     return 0
 
 
@@ -705,20 +855,26 @@ def main():
         print(f"❌ Error: {e}")
         return 1
     
-    # Print configuration
-    print(f"Configuration:")
-    print(f"  Test:    {config.test}")
-    print(f"  Engines: {', '.join(config.engines)}")
-    if config.queries:
-        print(f"  Queries: {', '.join(config.queries)}")
-    if config.transactions:
-        print(f"  Txns:    {', '.join(config.transactions)}")
-    if config.timeout:
-        print(f"  Timeout: {config.timeout}s")
-    if config.duration:
-        print(f"  Duration: {config.duration}s")
-    if config.scale:
-        print(f"  Scale:   {config.scale}")
+    # Print configuration (unless JSON to stdout)
+    if not config.json_export or config.output:
+        print(f"Configuration:")
+        print(f"  Test:    {config.test}")
+        print(f"  Engines: {', '.join(config.engines)}")
+        if config.queries:
+            print(f"  Queries: {', '.join(config.queries)}")
+        if config.transactions:
+            print(f"  Txns:    {', '.join(config.transactions)}")
+        if config.timeout:
+            print(f"  Timeout: {config.timeout}s")
+        if config.duration:
+            print(f"  Duration: {config.duration}s")
+        if config.scale:
+            print(f"  Scale:   {config.scale}")
+        if config.json_export:
+            output_dest = config.output if config.output else "stdout"
+            print(f"  JSON:    {output_dest}")
+        if config.verbose:
+            print(f"  Verbose: enabled")
     
     # Run benchmark(s)
     if config.test == "all":
