@@ -24,6 +24,6 @@ pub use config::{DatabaseConfig, SpillPolicy, DEFAULT_COLUMNAR_CACHE_BUDGET};
 pub use core::{Database, ExportedSpatialIndexMetadata as SpatialIndexMetadata};
 pub use operations::SpatialIndexMetadata as OperationsSpatialIndexMetadata;
 
-pub use indexes::{IndexData, IndexManager, IndexMetadata};
+pub use indexes::{IndexData, IndexManager, IndexMetadata, OwnedStreamingRangeScan};
 pub use resource_tracker::{IndexBackend, IndexStats, ResourceTracker};
 pub use transactions::{Savepoint, TransactionChange, TransactionManager, TransactionState};
