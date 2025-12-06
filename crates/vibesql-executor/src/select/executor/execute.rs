@@ -424,7 +424,13 @@ impl SelectExecutor<'_> {
                 if has_joins {
                     if let Some(result) = self.try_columnar_join_execution(stmt, cte_results)? {
                         log::info!("Columnar join execution succeeded");
-                        result
+                        // Apply LIMIT/OFFSET to columnar join results (#3776)
+                        // Skip if set_operation exists - it will be applied later
+                        if stmt.set_operation.is_none() {
+                            apply_limit_offset(result, stmt.limit, stmt.offset)
+                        } else {
+                            result
+                        }
                     } else {
                         log::debug!(
                             "Columnar join execution not applicable, falling back to row-oriented"
