@@ -434,16 +434,36 @@ mod tests {
     }
 
     #[test]
-    fn test_column_case_insensitive_lookup() {
+    fn test_column_case_sensitive_with_fallback() {
+        // Column created with mixed case (simulating a delimited identifier like "UserName")
         let schema = CombinedSchema::from_table(
             "users".to_string(),
             table_schema_with_column("users", "UserName"),
         );
 
-        // Column name lookup should also be case-insensitive (via TableSchema)
+        // Exact case match works
         assert!(schema.get_column_index(Some("users"), "UserName").is_some());
+        // Case-insensitive fallback also works for backward compatibility
         assert!(schema.get_column_index(Some("users"), "username").is_some());
         assert!(schema.get_column_index(Some("users"), "USERNAME").is_some());
+    }
+
+    #[test]
+    fn test_column_distinct_cases_exact_match() {
+        // When there are multiple columns with different cases (via delimited identifiers),
+        // exact match takes precedence
+        let cols: Vec<vibesql_catalog::ColumnSchema> = vec![
+            vibesql_catalog::ColumnSchema::new("value".to_string(), DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new("VALUE".to_string(), DataType::Integer, true),
+            vibesql_catalog::ColumnSchema::new("Value".to_string(), DataType::Integer, true),
+        ];
+        let table_schema = vibesql_catalog::TableSchema::new("data".to_string(), cols);
+        let schema = CombinedSchema::from_table("data".to_string(), table_schema);
+
+        // Each case variation should find its specific column
+        assert_eq!(schema.get_column_index(Some("data"), "value"), Some(0));
+        assert_eq!(schema.get_column_index(Some("data"), "VALUE"), Some(1));
+        assert_eq!(schema.get_column_index(Some("data"), "Value"), Some(2));
     }
 
     // ==========================================================================

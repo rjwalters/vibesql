@@ -30,8 +30,12 @@ pub struct TableSchema {
 
 impl TableSchema {
     pub fn new(name: String, columns: Vec<ColumnSchema>) -> Self {
+        // Store columns by exact name for case-sensitive lookups.
+        // The parser normalizes unquoted identifiers to uppercase, so case-insensitive
+        // matching for regular identifiers works automatically. Delimited identifiers
+        // (quoted with "") preserve exact case per SQL:1999 Section 5.2.
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -52,7 +56,7 @@ impl TableSchema {
         primary_key: Vec<String>,
     ) -> Self {
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -73,7 +77,7 @@ impl TableSchema {
         unique_constraints: Vec<Vec<String>>,
     ) -> Self {
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -94,7 +98,7 @@ impl TableSchema {
         foreign_keys: Vec<ForeignKeyConstraint>,
     ) -> Self {
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -116,7 +120,7 @@ impl TableSchema {
         unique_constraints: Vec<Vec<String>>,
     ) -> Self {
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -140,7 +144,7 @@ impl TableSchema {
         foreign_keys: Vec<ForeignKeyConstraint>,
     ) -> Self {
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -161,7 +165,7 @@ impl TableSchema {
         storage_format: StorageFormat,
     ) -> Self {
         let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
 
         TableSchema {
             name,
@@ -186,15 +190,30 @@ impl TableSchema {
     }
 
     /// Get column by name.
-    /// Uses case-insensitive matching for column names via lowercase cache keys.
+    /// Uses exact case matching. The parser normalizes unquoted identifiers to uppercase,
+    /// so case-insensitive matching for regular identifiers works automatically.
+    /// Delimited identifiers preserve exact case per SQL:1999 Section 5.2.
     pub fn get_column(&self, name: &str) -> Option<&ColumnSchema> {
         self.get_column_index(name).map(|idx| &self.columns[idx])
     }
 
     /// Get column index by name.
-    /// Uses case-insensitive matching for column names via lowercase cache keys.
+    /// First tries exact case match to support delimited identifiers (SQL:1999 Section 5.2).
+    /// Falls back to case-insensitive search for backward compatibility with tests
+    /// that create schemas directly without parser normalization.
     pub fn get_column_index(&self, name: &str) -> Option<usize> {
-        self.column_index_cache.get(&name.to_lowercase()).copied()
+        // First, try exact case match (supports delimited identifiers correctly)
+        if let Some(&idx) = self.column_index_cache.get(name) {
+            return Some(idx);
+        }
+        // Fallback: case-insensitive search for backward compatibility
+        // This handles cases where tests create columns with lowercase names
+        // but SQL queries normalize to uppercase
+        let name_lower = name.to_lowercase();
+        self.column_index_cache
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == name_lower)
+            .map(|(_, &idx)| idx)
     }
 
     /// Get number of columns.
@@ -229,7 +248,7 @@ impl TableSchema {
             return Err(crate::CatalogError::ColumnAlreadyExists(column.name));
         }
         let index = self.columns.len();
-        self.column_index_cache.insert(column.name.to_lowercase(), index);
+        self.column_index_cache.insert(column.name.clone(), index);
         self.columns.push(column);
         Ok(())
     }
@@ -247,7 +266,7 @@ impl TableSchema {
         // Rebuild the column index cache since indices have shifted
         self.column_index_cache.clear();
         for (idx, col) in self.columns.iter().enumerate() {
-            self.column_index_cache.insert(col.name.to_lowercase(), idx);
+            self.column_index_cache.insert(col.name.clone(), idx);
         }
 
         // Remove from primary key if present
