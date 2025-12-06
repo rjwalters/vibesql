@@ -266,12 +266,31 @@ pub(crate) fn execute_index_scan(
             Some(IndexPredicate::Range(range)) => {
                 // Use storage layer's optimized range_scan for >, <, >=, <=, BETWEEN
                 // The storage layer handles empty/inverted range validation efficiently
-                index_data.range_scan(
-                    range.start.as_ref(),
-                    range.end.as_ref(),
-                    range.inclusive_start,
-                    range.inclusive_end,
-                )
+                //
+                // Optimization: Use range_scan_limit when LIMIT is provided and no post-filter needed
+                // This enables early termination at the index level for simple LIMIT queries (#3638)
+                // Example: SELECT c FROM t WHERE id BETWEEN 1 AND 100 LIMIT 10
+                //   - Without: Fetch all 100 rows, then take first 10
+                //   - With: Stop scanning after 10 rows
+                let use_limit_optimization =
+                    limit.is_some() && !need_where_filter && sorted_columns.is_none();
+
+                if use_limit_optimization {
+                    index_data.range_scan_limit(
+                        range.start.as_ref(),
+                        range.end.as_ref(),
+                        range.inclusive_start,
+                        range.inclusive_end,
+                        limit,
+                    )
+                } else {
+                    index_data.range_scan(
+                        range.start.as_ref(),
+                        range.end.as_ref(),
+                        range.inclusive_start,
+                        range.inclusive_end,
+                    )
+                }
             }
             Some(IndexPredicate::In(values)) => {
                 // For multi-column indexes, use prefix matching to find all rows
