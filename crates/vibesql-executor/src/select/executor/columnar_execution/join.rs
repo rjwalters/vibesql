@@ -16,7 +16,7 @@ use crate::{
     evaluator::CombinedExpressionEvaluator,
     schema::CombinedSchema,
     select::{
-        columnar, cte::CteResult, executor::builder::SelectExecutor,
+        columnar, cte::CteResult, executor::builder::SelectExecutor, helpers::apply_distinct,
         join::hash_join::columnar as columnar_join, projection::project_row_combined,
     },
 };
@@ -217,7 +217,6 @@ impl SelectExecutor<'_> {
             self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema)
         } else {
             // No GROUP BY - convert to rows and apply projection
-            let rows = filtered_batch.to_rows()?;
 
             // Check if we need projection (i.e., not just SELECT *)
             let is_select_star = stmt.select_list.iter().all(|item| {
@@ -225,7 +224,17 @@ impl SelectExecutor<'_> {
             });
 
             if is_select_star {
-                // SELECT * - return rows directly without projection
+                // SELECT * - apply columnar deduplication if DISTINCT, then convert to rows
+                let final_batch = if stmt.distinct {
+                    log::debug!(
+                        "Columnar join: applying DISTINCT deduplication to {} rows",
+                        filtered_batch.row_count()
+                    );
+                    filtered_batch.deduplicate()?
+                } else {
+                    filtered_batch
+                };
+                let rows = final_batch.to_rows()?;
                 Ok(Some(rows))
             } else {
                 // Check if SELECT list contains aggregate functions
@@ -241,7 +250,10 @@ impl SelectExecutor<'_> {
                 }
 
                 // Apply column projection to each row
-                log::debug!("Columnar join: applying projection to {} rows", rows.len());
+                log::debug!(
+                    "Columnar join: applying projection to {} rows",
+                    filtered_batch.row_count()
+                );
 
                 // Create evaluator for projection
                 // SAFETY: combined_schema lives for the duration of this function call
@@ -251,6 +263,7 @@ impl SelectExecutor<'_> {
                     CombinedExpressionEvaluator::with_database(schema_ref, self.database);
                 let buffer_pool = self.database.query_buffer_pool();
 
+                let rows = filtered_batch.to_rows()?;
                 let mut projected_rows = Vec::with_capacity(rows.len());
                 for row in &rows {
                     let projected = project_row_combined(
@@ -264,7 +277,11 @@ impl SelectExecutor<'_> {
                     projected_rows.push(projected);
                 }
 
-                Ok(Some(projected_rows))
+                // Apply DISTINCT after projection if requested
+                let final_rows =
+                    if stmt.distinct { apply_distinct(projected_rows) } else { projected_rows };
+
+                Ok(Some(final_rows))
             }
         }
     }
