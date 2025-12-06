@@ -4,7 +4,7 @@
 [![Demo](https://img.shields.io/badge/demo-live-success)](https://rjwalters.github.io/vibesql/)
 [![sqltest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json)](https://rjwalters.github.io/vibesql/conformance.html)
 [![SQLLogicTest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sqllogictest.json)](https://rjwalters.github.io/vibesql/conformance.html#SQLlogicTest)
-[![i18n](https://img.shields.io/badge/i18n-18%20languages-blue)](docs/CONTRIBUTING_TRANSLATIONS.md)
+[![i18n](https://img.shields.io/badge/i18n-19%20languages-blue)](docs/CONTRIBUTING_TRANSLATIONS.md)
 
 **SQL:1999 compliant database in Rust, 100% AI-generated**
 
@@ -14,7 +14,7 @@
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
 - **100% SQLLogicTest conformance** - 623 files (~5.9M tests)
-- **4,800+ unit tests** - comprehensive test coverage
+- **9,000+ unit tests** - comprehensive test coverage
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **HTTP REST & GraphQL API** - Full CRUD and query endpoints
 - **Vector search** - AI/ML embeddings with similarity search
@@ -23,7 +23,7 @@
 - **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **327,000+ lines** of Rust across 11 crates
+- **372,000+ lines** of Rust across 12 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
@@ -162,7 +162,7 @@ VibeSQL achieves **75,404 TPS** on TPC-C (38x faster than SQLite) and passes 100
 |-------|----------|-------|
 | SQL:1999 Core | 100% | 739/739 sqltest |
 | SQLLogicTest | 100% | 623 files (~5.9M tests) |
-| Unit Tests | - | 4,800+ tests |
+| Unit Tests | - | 9,000+ tests |
 | TPC-DS | 100% | 99/99 queries |
 | TPC-H | 100% | 22/22 queries |
 | TPC-C | 100% | All transactions |
