@@ -315,12 +315,12 @@ impl UpdateExecutor {
                 .update_row_selective(*index, new_row.clone(), changed_columns)
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
-            index_updates.push((*index, old_row.clone(), new_row.clone()));
+            index_updates.push((*index, old_row.clone(), new_row.clone(), changed_columns.clone()));
         }
 
         // Fire AFTER UPDATE triggers for all updated rows
         if has_triggers {
-            for (_index, old_row, new_row) in &index_updates {
+            for (_index, old_row, new_row, _changed_columns) in &index_updates {
                 crate::TriggerFirer::execute_after_triggers(
                     database,
                     &stmt.table_name,
@@ -332,8 +332,9 @@ impl UpdateExecutor {
         }
 
         // Now update user-defined indexes after releasing table borrow
-        for (index, old_row, new_row) in index_updates {
-            database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, index);
+        // Pass changed_columns to skip indexes that don't involve any modified columns
+        for (index, old_row, new_row, changed_columns) in index_updates {
+            database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, index, Some(&changed_columns));
         }
 
         // Invalidate columnar cache since table data has changed
@@ -549,7 +550,8 @@ impl UpdateExecutor {
         }
 
         // Update user-defined indexes FIRST (while we still have both row references)
-        database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, row_index);
+        // Pass changed_columns to skip indexes that don't involve any modified columns
+        database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, row_index, Some(&changed_columns));
 
         // Apply the update directly (transfers ownership of new_row, no clone needed)
         let table_mut = database
