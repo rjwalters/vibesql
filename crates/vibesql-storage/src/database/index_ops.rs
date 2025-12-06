@@ -67,6 +67,18 @@ impl Database {
         self.operations.update_indexes_for_delete(&self.catalog, table_name, row, row_index);
     }
 
+    /// Batch update user-defined indexes for delete operation
+    ///
+    /// This is significantly more efficient than calling `update_indexes_for_delete` in a loop
+    /// because it pre-computes column indices once per index rather than once per row.
+    pub fn batch_update_indexes_for_delete(
+        &mut self,
+        table_name: &str,
+        rows_to_delete: &[(usize, &Row)],
+    ) {
+        self.operations.batch_update_indexes_for_delete(&self.catalog, table_name, rows_to_delete);
+    }
+
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(&mut self, table_name: &str) {
         self.operations.rebuild_indexes(&self.catalog, &self.tables, table_name);

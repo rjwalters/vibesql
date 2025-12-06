@@ -506,6 +506,104 @@ impl IndexManager {
         }
     }
 
+    /// Batch update user-defined indexes for delete operation
+    ///
+    /// This is significantly more efficient than calling `update_indexes_for_delete` in a loop
+    /// because it:
+    /// 1. Pre-computes column indices once per index (not per row)
+    /// 2. Builds all keys in a single pass
+    /// 3. Batch-removes entries from each index
+    ///
+    /// # Arguments
+    /// * `table_name` - The table name
+    /// * `table_schema` - The table schema (for column lookups)
+    /// * `rows_to_delete` - Vec of (row_index, row) pairs to delete
+    pub fn batch_update_indexes_for_delete(
+        &mut self,
+        table_name: &str,
+        table_schema: &vibesql_catalog::TableSchema,
+        rows_to_delete: &[(usize, &Row)],
+    ) {
+        if rows_to_delete.is_empty() {
+            return;
+        }
+
+        // Collect indexes that need updating for this table
+        // Pre-compute column indices once per index (not per row)
+        let indexes_to_update: Vec<(String, Vec<(usize, Option<u64>)>)> = self
+            .indexes
+            .iter()
+            .filter(|(_, metadata)| metadata.table_name.eq_ignore_ascii_case(table_name))
+            .map(|(index_name, metadata)| {
+                // Pre-compute column indices and prefix lengths for this index
+                let column_info: Vec<(usize, Option<u64>)> = metadata
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        let col_idx = table_schema
+                            .get_column_index(&col.column_name)
+                            .expect("Index column should exist");
+                        (col_idx, col.prefix_length)
+                    })
+                    .collect();
+                (index_name.clone(), column_info)
+            })
+            .collect();
+
+        // Process each index
+        for (index_name, column_info) in indexes_to_update {
+            if let Some(index_data) = self.index_data.get_mut(&index_name) {
+                match index_data {
+                    IndexData::InMemory { data } => {
+                        // Build all keys and remove in batch
+                        for &(row_index, row) in rows_to_delete {
+                            let key_values: Vec<SqlValue> = column_info
+                                .iter()
+                                .map(|&(col_idx, prefix_length)| {
+                                    let value = &row.values[col_idx];
+                                    let truncated = apply_prefix_truncation(value, prefix_length);
+                                    crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                                })
+                                .collect();
+
+                            if let Some(row_indices) = data.get_mut(&key_values) {
+                                row_indices.retain(|&idx| idx != row_index);
+                                if row_indices.is_empty() {
+                                    data.remove(&key_values);
+                                }
+                            }
+                        }
+                    }
+                    IndexData::DiskBacked { btree, .. } => {
+                        // Acquire lock once and batch delete
+                        match acquire_btree_lock(btree) {
+                            Ok(mut guard) => {
+                                for &(row_index, row) in rows_to_delete {
+                                    let key_values: Vec<SqlValue> = column_info
+                                        .iter()
+                                        .map(|&(col_idx, prefix_length)| {
+                                            let value = &row.values[col_idx];
+                                            let truncated = apply_prefix_truncation(value, prefix_length);
+                                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                                        })
+                                        .collect();
+                                    let _ = guard.delete_specific(&key_values, row_index);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("BTreeIndex lock acquisition failed in batch_update_indexes_for_delete: {}", e);
+                            }
+                        }
+                    }
+                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                        // Vector indexes don't support incremental deletes
+                        // They need to be rebuilt after bulk operations
+                    }
+                }
+            }
+        }
+    }
+
     /// Rebuild user-defined indexes after bulk operations that change row indices
     pub fn rebuild_indexes(
         &mut self,
