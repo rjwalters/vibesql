@@ -54,6 +54,7 @@ members = [
     "crates/vibesql-wasm-bindings",
     "crates/vibesql-python-bindings",
     "crates/vibesql-sqllogictest",
+    "crates/vibesql-l10n",
 ]
 # Exclude Python bindings from default build (requires Python development environment)
 default-members = [
@@ -67,6 +68,7 @@ default-members = [
     "crates/vibesql-server",
     "crates/vibesql-wasm-bindings",
     "crates/vibesql-sqllogictest",
+    "crates/vibesql-l10n",
 ]
 resolver = "2"
 
