@@ -2501,40 +2501,52 @@ ORDER BY i_category, i_class, i_brand, sumsales DESC
 LIMIT 100
 "#;
 
-// TPC-DS Q69: Customer analysis - store buyers who don't buy web
-// Tests: EXISTS, NOT EXISTS, correlated subqueries (store vs web sales)
-// This is a simplified version of official Q69 that tests EXISTS/NOT EXISTS pattern
-// without the third catalog_sales clause that causes memory explosion.
-// Full TPC-DS spec also uses customer_demographics with GROUP BY.
+// TPC-DS Q69: Customer demographics analysis - store buyers who don't buy web/catalog
+// Tests: EXISTS, NOT EXISTS with multiple correlated subqueries, GROUP BY with aggregates
+// Official TPC-DS query per specification v3.2.0
+// Note: Using explicit JOINs for better optimizer handling (semantically equivalent to comma joins)
 pub const TPCDS_Q69: &str = r#"
 SELECT
-    c_customer_id,
-    c_first_name,
-    c_last_name,
-    c_preferred_cust_flag,
-    c_birth_country,
-    c_login,
-    c_email_address
-FROM customer c, customer_address ca
-WHERE c.c_current_addr_sk = ca.ca_address_sk
-    AND ca_state IN ('KY', 'GA', 'NM')
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    COUNT(*) cnt1,
+    cd.cd_purchase_estimate,
+    COUNT(*) cnt2,
+    cd.cd_credit_rating,
+    COUNT(*) cnt3
+FROM customer c
+JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd ON cd.cd_demo_sk = c.c_current_cdemo_sk
+WHERE ca.ca_state IN ('KS', 'AZ', 'NE')
     AND EXISTS (
         SELECT 1
-        FROM store_sales, date_dim d2
-        WHERE c.c_customer_sk = ss_customer_sk
-            AND ss_sold_date_sk = d2.d_date_sk
-            AND d2.d_year = 2000
-            AND d2.d_moy BETWEEN 1 AND 3
+        FROM store_sales ss
+        JOIN date_dim d1 ON ss.ss_sold_date_sk = d1.d_date_sk
+        WHERE c.c_customer_sk = ss.ss_customer_sk
+            AND d1.d_year = 2000
+            AND d1.d_moy BETWEEN 1 AND 1 + 2
     )
-    AND NOT EXISTS (
-        SELECT 1
-        FROM web_sales, date_dim d3
-        WHERE c.c_customer_sk = ws_bill_customer_sk
-            AND ws_sold_date_sk = d3.d_date_sk
-            AND d3.d_year = 2000
-            AND d3.d_moy BETWEEN 1 AND 3
-    )
-ORDER BY c_customer_id
+    AND (NOT EXISTS (
+            SELECT 1
+            FROM web_sales ws
+            JOIN date_dim d2 ON ws.ws_sold_date_sk = d2.d_date_sk
+            WHERE c.c_customer_sk = ws.ws_bill_customer_sk
+                AND d2.d_year = 2000
+                AND d2.d_moy BETWEEN 1 AND 1 + 2
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM catalog_sales cs
+            JOIN date_dim d3 ON cs.cs_sold_date_sk = d3.d_date_sk
+            WHERE c.c_customer_sk = cs.cs_ship_customer_sk
+                AND d3.d_year = 2000
+                AND d3.d_moy BETWEEN 1 AND 1 + 2
+        ))
+GROUP BY cd.cd_gender, cd.cd_marital_status, cd.cd_education_status,
+         cd.cd_purchase_estimate, cd.cd_credit_rating
+ORDER BY cd.cd_gender, cd.cd_marital_status, cd.cd_education_status,
+         cd.cd_purchase_estimate, cd.cd_credit_rating
 LIMIT 100
 "#;
 
