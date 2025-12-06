@@ -248,6 +248,24 @@ pub(in crate::select) fn try_covering_index_scan(
         None => return Ok(None),
     };
 
+    // Issue #1618: If there's a WHERE clause, we must be able to push it down to this index.
+    // Otherwise, we'd return wrong results (0 rows when predicate doesn't match index columns).
+    // A covering scan without predicate pushdown would require post-filtering which defeats
+    // the purpose and can silently return incorrect results.
+    if let Some(expr) = where_clause {
+        let prefix_with_range = extract_prefix_with_trailing_range(expr, &index_column_names);
+        let prefix_only = if prefix_with_range.is_none() {
+            extract_prefix_equality_predicates(expr, &index_column_names)
+        } else {
+            None
+        };
+
+        // If neither predicate extraction worked, this index can't be used for covering scan
+        if prefix_with_range.is_none() && prefix_only.is_none() {
+            return Ok(None);
+        }
+    }
+
     // Execute covering scan
     let result = execute_covering_index_scan(
         table_name,
