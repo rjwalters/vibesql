@@ -2,6 +2,7 @@ use std::{
     fs,
     io::{self, Read},
 };
+use vibesql_l10n::vibe_msg;
 
 use crate::{
     executor::SqlExecutor,
@@ -36,7 +37,7 @@ impl ScriptExecutor {
     /// Execute SQL from a file
     pub fn execute_file(&mut self, file_path: &str) -> anyhow::Result<()> {
         let contents = fs::read_to_string(file_path)
-            .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", file_path, e))?;
+            .map_err(|e| anyhow::anyhow!("{}", vibe_msg!("file-read-error", path = file_path, error = e.to_string())))?;
 
         self.execute_script(&contents)
     }
@@ -46,7 +47,7 @@ impl ScriptExecutor {
         let mut contents = String::new();
         io::stdin()
             .read_to_string(&mut contents)
-            .map_err(|e| anyhow::anyhow!("Failed to read from stdin: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", vibe_msg!("stdin-read-error", error = e.to_string())))?;
 
         self.execute_script(&contents)
     }
@@ -59,7 +60,7 @@ impl ScriptExecutor {
 
         if statements.is_empty() {
             if self.verbose {
-                println!("No SQL statements found in script");
+                println!("{}", vibe_msg!("script-no-statements"));
             }
             return Ok(());
         }
@@ -69,7 +70,7 @@ impl ScriptExecutor {
 
         for (idx, stmt) in statements.iter().enumerate() {
             if self.verbose {
-                println!("Executing statement {} of {}...", idx + 1, statements.len());
+                println!("{}", vibe_msg!("script-executing", current = (idx + 1) as i64, total = statements.len() as i64));
             }
 
             match self.executor.execute(stmt) {
@@ -81,13 +82,13 @@ impl ScriptExecutor {
                     if let Some(ref path) = self.database_path {
                         if is_modification_statement(stmt) {
                             if let Err(e) = self.executor.save_database(path) {
-                                eprintln!("Warning: Failed to auto-save database: {}", e);
+                                eprintln!("{}", vibe_msg!("warning-auto-save-failed", error = e.to_string()));
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error executing statement {}: {}", idx + 1, e);
+                    eprintln!("{}", vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string()));
                     error_count += 1;
                     // Continue executing remaining statements
                 }
@@ -96,14 +97,14 @@ impl ScriptExecutor {
 
         // Summary
         if self.verbose || error_count > 0 {
-            println!("\n=== Script Execution Summary ===");
-            println!("Total statements: {}", statements.len());
-            println!("Successful: {}", success_count);
-            println!("Failed: {}", error_count);
+            println!("\n{}", vibe_msg!("script-summary-title"));
+            println!("{}", vibe_msg!("script-total", count = statements.len() as i64));
+            println!("{}", vibe_msg!("script-successful", count = success_count as i64));
+            println!("{}", vibe_msg!("script-failed", count = error_count as i64));
         }
 
         if error_count > 0 {
-            Err(anyhow::anyhow!("{} statements failed", error_count))
+            Err(anyhow::anyhow!("{}", vibe_msg!("script-failed-error", count = error_count as i64)))
         } else {
             Ok(())
         }

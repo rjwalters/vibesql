@@ -13,6 +13,7 @@ use config::Config;
 use formatter::OutputFormat;
 use repl::Repl;
 use script::ScriptExecutor;
+use vibesql_l10n::vibe_msg;
 
 #[derive(Parser, Debug)]
 #[command(name = "vibesql")]
@@ -104,6 +105,10 @@ struct Args {
     #[arg(long, value_parser = ["table", "json", "csv", "markdown", "html"], value_name = "FORMAT")]
     format: Option<String>,
 
+    /// Set the display language (e.g., en-US, es, ja)
+    #[arg(long, value_name = "LOCALE", global = true)]
+    lang: Option<String>,
+
     #[command(subcommand)]
     subcommand: Option<Commands>,
 }
@@ -161,6 +166,11 @@ EXAMPLES:
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    // Initialize localization system
+    if let Err(e) = vibesql_l10n::init(args.lang.as_deref()) {
+        eprintln!("Warning: Failed to initialize localization: {}", e);
+    }
+
     // Handle subcommands first
     if let Some(cmd) = args.subcommand {
         return match cmd {
@@ -172,7 +182,7 @@ fn main() -> anyhow::Result<()> {
 
     // Load configuration from ~/.vibesqlrc
     let config = Config::load().unwrap_or_else(|e| {
-        eprintln!("Warning: Could not load config file: {}", e);
+        eprintln!("{}", vibe_msg!("warning-config-load", error = e.to_string()));
         Config::default()
     });
 
@@ -216,24 +226,21 @@ fn run_codegen(
 
     let typescript = if let Some(schema_path) = schema {
         // Generate from schema file
-        println!("Generating TypeScript types from schema file: {}", schema_path);
+        println!("{}", vibe_msg!("codegen-from-schema", path = schema_path.as_str()));
         codegen::generate_from_schema_file(&schema_path, &config)?
     } else if let Some(db_path) = database {
         // Generate from database file
-        println!("Generating TypeScript types from database: {}", db_path);
+        println!("{}", vibe_msg!("codegen-from-database", path = db_path.as_str()));
         let db = vibesql_executor::load_sql_dump(&db_path)
-            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", vibe_msg!("database-load-error", error = e.to_string())))?;
         codegen::generate_from_database(&db, &config)?
     } else {
-        return Err(anyhow::anyhow!(
-            "Either --database or --schema must be specified.\n\
-             Use 'vibesql codegen --help' for usage information."
-        ));
+        return Err(anyhow::anyhow!("{}", vibe_msg!("codegen-error-no-source")));
     };
 
     // Write to output file
     codegen::write_to_file(&typescript, &output)?;
-    println!("TypeScript types written to: {}", output);
+    println!("{}", vibe_msg!("codegen-written", path = output.as_str()));
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::time::SystemTime;
+use vibesql_l10n::vibe_msg;
 
 use crate::{
     commands::MetaCommand,
@@ -84,8 +85,8 @@ impl Repl {
                                         self.has_modifications = true;
                                         if let Err(e) = self.executor.save_database(path) {
                                             eprintln!(
-                                                "Warning: Failed to auto-save database: {}",
-                                                e
+                                                "{}",
+                                                vibe_msg!("warning-auto-save-failed", error = e.to_string())
                                             );
                                         }
                                     }
@@ -118,7 +119,7 @@ impl Repl {
         if self.has_modifications {
             if let Some(ref path) = self.database_path {
                 if let Err(e) = self.executor.save_database(path) {
-                    eprintln!("Warning: Failed to save database on exit: {}", e);
+                    eprintln!("{}", vibe_msg!("warning-save-on-exit-failed", error = e.to_string()));
                 }
             }
         }
@@ -159,7 +160,7 @@ impl Repl {
                     crate::formatter::OutputFormat::Markdown => "markdown",
                     crate::formatter::OutputFormat::Html => "html",
                 };
-                println!("Output format set to: {}", format_name);
+                println!("{}", vibe_msg!("format-changed", format = format_name));
             }
             MetaCommand::Timing => {
                 self.executor.toggle_timing();
@@ -172,10 +173,10 @@ impl Repl {
                 match save_path {
                     Some(ref p) => {
                         self.executor.save_database(p)?;
-                        println!("Database saved to: {}", p);
+                        println!("{}", vibe_msg!("database-saved", path = p.as_str()));
                     }
                     None => {
-                        eprintln!("Error: No database file specified. Use \\save <filename> or start with --database flag");
+                        eprintln!("{}", vibe_msg!("no-database-file"));
                     }
                 }
             }
@@ -187,12 +188,12 @@ impl Repl {
     }
 
     fn print_banner(&self) {
-        println!("VibeSQL v0.1.0 - SQL:1999 FULL Compliance Database");
-        println!("Type \\help for help, \\quit to exit\n");
+        println!("{}", vibe_msg!("cli-banner", version = "0.1.0"));
+        println!("{}\n", vibe_msg!("cli-help-hint"));
     }
 
     fn print_goodbye(&self) {
-        println!("Goodbye!");
+        println!("{}", vibe_msg!("cli-goodbye"));
     }
 
     fn track_error(&mut self, error_msg: String) {
@@ -208,11 +209,11 @@ impl Repl {
 
     fn print_error_history(&self) {
         if self.error_history.is_empty() {
-            println!("No errors in this session.");
+            println!("{}", vibe_msg!("no-errors"));
             return;
         }
 
-        println!("Recent errors:");
+        println!("{}", vibe_msg!("recent-errors"));
         for (idx, entry) in self.error_history.iter().enumerate() {
             let duration =
                 entry.timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();

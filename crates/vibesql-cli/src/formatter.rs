@@ -1,4 +1,5 @@
 use prettytable::{Cell, Row, Table};
+use vibesql_l10n::vibe_msg;
 
 use crate::executor::QueryResult;
 
@@ -35,9 +36,9 @@ impl ResultFormatter {
 
         // Print timing if available
         if let Some(time_ms) = result.execution_time_ms {
-            println!("{} rows in set ({:.3}s)", result.row_count, time_ms / 1000.0);
+            println!("{}", vibe_msg!("rows-with-time", count = result.row_count as i64, time = format!("{:.3}", time_ms / 1000.0)));
         } else {
-            println!("{} rows", result.row_count);
+            println!("{}", vibe_msg!("rows-count", count = result.row_count as i64));
         }
     }
 
