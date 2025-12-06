@@ -108,20 +108,27 @@
       </div>
 
       <!-- Summary Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-          <h3 class="text-sm font-medium text-muted mb-2">Average Performance</h3>
-          <p id="avg-speedup" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
+          <h3 class="text-sm font-medium text-muted mb-2">vs SQLite</h3>
+          <p id="avg-speedup-sqlite" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
             Loading...
           </p>
-          <p class="text-sm text-muted mt-1">vs SQLite</p>
+          <p id="avg-speedup-sqlite-label" class="text-sm text-muted mt-1">average speedup</p>
+        </div>
+        <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
+          <h3 class="text-sm font-medium text-muted mb-2">vs DuckDB</h3>
+          <p id="avg-speedup-duckdb" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
+            Loading...
+          </p>
+          <p id="avg-speedup-duckdb-label" class="text-sm text-muted mt-1">average speedup</p>
         </div>
         <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
           <h3 class="text-sm font-medium text-muted mb-2">Operations Tested</h3>
           <p id="ops-tested" class="text-3xl font-bold text-primary-light dark:text-primary-dark">
             -
           </p>
-          <p class="text-sm text-muted mt-1">TPC-H queries</p>
+          <p id="ops-tested-label" class="text-sm text-muted mt-1">TPC-H queries</p>
         </div>
         <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
           <h3 class="text-sm font-medium text-muted mb-2">Last Updated</h3>
@@ -129,6 +136,13 @@
             -
           </p>
           <p class="text-sm text-muted mt-1">from main branch</p>
+        </div>
+      </div>
+
+      <!-- Analysis & Roadmap (Discussion) -->
+      <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
+        <div id="discussion-content" class="prose prose-sm dark:prose-invert max-w-none text-foreground">
+          <!-- Content populated by JavaScript based on selected tab -->
         </div>
       </div>
 
@@ -174,16 +188,6 @@
           Methodology
         </h2>
         <div id="methodology-content" class="prose prose-sm dark:prose-invert max-w-none text-foreground">
-          <!-- Content populated by JavaScript based on selected tab -->
-        </div>
-      </div>
-
-      <!-- Discussion -->
-      <div class="bg-background rounded-lg shadow-lg p-6 border border-border">
-        <h2 class="text-2xl font-semibold text-foreground mb-4">
-          Discussion
-        </h2>
-        <div id="discussion-content" class="prose prose-sm dark:prose-invert max-w-none text-foreground">
           <!-- Content populated by JavaScript based on selected tab -->
         </div>
       </div>

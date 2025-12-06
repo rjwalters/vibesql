@@ -743,6 +743,62 @@ function updateLastUpdated(timestamp: string, gitCommit?: string): void {
 }
 
 /**
+ * Update a speedup display element with the calculated speedup value
+ */
+function updateSpeedupDisplay(elementId: string, avgSpeedup: number): void {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+
+  // Reset to default styling first
+  el.className = 'text-3xl font-bold';
+
+  if (avgSpeedup > 1) {
+    el.textContent = `${avgSpeedup.toFixed(2)}x faster`;
+    el.className += ' text-green-600 dark:text-green-400';
+  } else if (avgSpeedup < 1 && avgSpeedup > 0) {
+    const slowerBy = 1 / avgSpeedup;
+    el.textContent = `${slowerBy.toFixed(2)}x slower`;
+    el.className += ' text-red-600 dark:text-red-400';
+  } else if (avgSpeedup === 0) {
+    el.textContent = 'N/A';
+    el.className += ' text-muted';
+  } else {
+    el.textContent = `${avgSpeedup.toFixed(2)}x`;
+    el.className += ' text-primary-light dark:text-primary-dark';
+  }
+}
+
+/**
+ * Update both speedup summary cards (vs SQLite and vs DuckDB)
+ */
+function updateSpeedupSummary(
+  sqliteSpeedup: { total: number; count: number },
+  duckdbSpeedup: { total: number; count: number }
+): void {
+  // Update SQLite speedup
+  if (sqliteSpeedup.count > 0) {
+    updateSpeedupDisplay('avg-speedup-sqlite', sqliteSpeedup.total / sqliteSpeedup.count);
+  } else {
+    const sqliteEl = document.getElementById('avg-speedup-sqlite');
+    if (sqliteEl) {
+      sqliteEl.textContent = 'N/A';
+      sqliteEl.className = 'text-3xl font-bold text-muted';
+    }
+  }
+
+  // Update DuckDB speedup
+  if (duckdbSpeedup.count > 0) {
+    updateSpeedupDisplay('avg-speedup-duckdb', duckdbSpeedup.total / duckdbSpeedup.count);
+  } else {
+    const duckdbEl = document.getElementById('avg-speedup-duckdb');
+    if (duckdbEl) {
+      duckdbEl.textContent = 'N/A';
+      duckdbEl.className = 'text-3xl font-bold text-muted';
+    }
+  }
+}
+
+/**
  * Current benchmark suite state
  */
 let currentSuite: BenchmarkSuite = 'tpch';
@@ -839,8 +895,8 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
 
   tbody.innerHTML = '';
 
-  let totalSpeedup = 0;
-  let comparisonCount = 0;
+  const sqliteSpeedup = { total: 0, count: 0 };
+  const duckdbSpeedup = { total: 0, count: 0 };
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
@@ -931,40 +987,23 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
       winner.cell.className = 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400';
     }
 
-    // Track speedup for summary card (VibeSQL vs SQLite)
-    if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
-      const speedup = calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
-      totalSpeedup += speedup;
-      comparisonCount++;
+    // Track speedup for summary cards (VibeSQL vs SQLite and DuckDB)
+    if (vibesql && vibesql.stats.mean > 0) {
+      if (sqlite && sqlite.stats.mean > 0) {
+        sqliteSpeedup.total += calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
+        sqliteSpeedup.count++;
+      }
+      if (duckdb && duckdb.stats.mean > 0) {
+        duckdbSpeedup.total += calculateSpeedup(vibesql.stats.mean, duckdb.stats.mean);
+        duckdbSpeedup.count++;
+      }
     }
 
     tbody.appendChild(row);
   }
 
   // Update summary cards
-  if (comparisonCount > 0) {
-    const avgSpeedup = totalSpeedup / comparisonCount;
-    const avgSpeedupEl = document.getElementById('avg-speedup');
-    if (avgSpeedupEl) {
-      if (avgSpeedup > 1) {
-        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x faster`;
-        avgSpeedupEl.className = avgSpeedupEl.className.replace(
-          'text-primary-light dark:text-primary-dark',
-          'text-green-600 dark:text-green-400'
-        );
-      } else if (avgSpeedup < 1) {
-        // Invert the ratio: if speedup = 0.11, we're 1/0.11 = 9.09x slower
-        const slowerBy = 1 / avgSpeedup;
-        avgSpeedupEl.textContent = `${slowerBy.toFixed(2)}x slower`;
-        avgSpeedupEl.className = avgSpeedupEl.className.replace(
-          'text-primary-light dark:text-primary-dark',
-          'text-red-600 dark:text-red-400'
-        );
-      } else {
-        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x`;
-      }
-    }
-  }
+  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -1466,8 +1505,8 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
 
   tbody.innerHTML = '';
 
-  let totalSpeedup = 0;
-  let comparisonCount = 0;
+  const sqliteSpeedup = { total: 0, count: 0 };
+  const duckdbSpeedup = { total: 0, count: 0 };
 
   // Determine which databases to show based on mode
   const isServer = suite === 'sysbench-server';
@@ -1495,89 +1534,74 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     }
     row.appendChild(opCell);
 
+    // Collect valid times to find the winner (lower time = better)
+    const times: { mean: number; cell: HTMLTableCellElement }[] = [];
+
     // Primary database time
     const primaryCell = document.createElement('td');
     primaryCell.className = 'px-4 py-3 text-right text-muted';
-    primaryCell.textContent = primary ? formatTime(primary.stats.mean, primary.stats.stddev) || 'N/A' : 'N/A';
+    if (primary && primary.stats.mean > 0) {
+      primaryCell.textContent = formatTime(primary.stats.mean, primary.stats.stddev) || 'N/A';
+      times.push({ mean: primary.stats.mean, cell: primaryCell });
+    } else {
+      primaryCell.textContent = 'N/A';
+    }
     row.appendChild(primaryCell);
 
     // Comparison database time
     const compCell = document.createElement('td');
     compCell.className = 'px-4 py-3 text-right text-muted';
-    compCell.textContent = comparison ? formatTime(comparison.stats.mean, comparison.stats.stddev) || 'N/A' : 'N/A';
+    if (comparison && comparison.stats.mean > 0) {
+      compCell.textContent = formatTime(comparison.stats.mean, comparison.stats.stddev) || 'N/A';
+      times.push({ mean: comparison.stats.mean, cell: compCell });
+    } else {
+      compCell.textContent = 'N/A';
+    }
     row.appendChild(compCell);
 
     // DuckDB (only for embedded mode)
     if (!isServer) {
       const duckdbCell = document.createElement('td');
       duckdbCell.className = 'px-4 py-3 text-right text-muted';
-      duckdbCell.textContent = duckdb ? formatTime(duckdb.stats.mean, duckdb.stats.stddev) || 'N/A' : 'N/A';
+      if (duckdb && duckdb.stats.mean > 0) {
+        duckdbCell.textContent = formatTime(duckdb.stats.mean, duckdb.stats.stddev) || 'N/A';
+        times.push({ mean: duckdb.stats.mean, cell: duckdbCell });
+      } else {
+        duckdbCell.textContent = 'N/A';
+      }
       row.appendChild(duckdbCell);
     }
 
-    // Speedup
-    const speedupCell = document.createElement('td');
-    speedupCell.className = 'px-4 py-3 text-right font-semibold';
+    // Find and highlight the winner (fastest time)
+    if (times.length > 0) {
+      const winner = times.reduce((min, t) => t.mean < min.mean ? t : min);
+      winner.cell.className = 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400';
+    }
 
-    if (primary && comparison && primary.stats.mean > 0 && comparison.stats.mean > 0) {
-      const speedup = calculateSpeedup(primary.stats.mean, comparison.stats.mean);
-      speedupCell.textContent = `${speedup.toFixed(2)}x`;
-
-      if (speedup > 1) {
-        speedupCell.className += ' text-green-600 dark:text-green-400';
-      } else if (speedup < 1) {
-        speedupCell.className += ' text-red-600 dark:text-red-400';
-      } else {
-        speedupCell.className += ' text-muted';
+    // Track speedup for summary cards
+    if (primary && primary.stats.mean > 0) {
+      // For embedded: compare vs SQLite and DuckDB
+      // For server: compare vs MySQL (stored in sqliteSpeedup for consistency)
+      if (comparison && comparison.stats.mean > 0) {
+        sqliteSpeedup.total += calculateSpeedup(primary.stats.mean, comparison.stats.mean);
+        sqliteSpeedup.count++;
       }
-
-      totalSpeedup += speedup;
-      comparisonCount++;
-    } else {
-      speedupCell.textContent = 'N/A';
-      speedupCell.className += ' text-muted';
+      if (!isServer && duckdb && duckdb.stats.mean > 0) {
+        duckdbSpeedup.total += calculateSpeedup(primary.stats.mean, duckdb.stats.mean);
+        duckdbSpeedup.count++;
+      }
     }
-    row.appendChild(speedupCell);
-
-    // Winner
-    const winnerCell = document.createElement('td');
-    winnerCell.className = 'px-4 py-3 text-center text-2xl';
-
-    if (primary && comparison && primary.stats.mean > 0 && comparison.stats.mean > 0) {
-      const speedup = calculateSpeedup(primary.stats.mean, comparison.stats.mean);
-      winnerCell.textContent = speedup > 1 ? '🚀' : speedup < 1 ? '🐌' : '🤝';
-    } else {
-      winnerCell.textContent = '-';
-    }
-    row.appendChild(winnerCell);
 
     tbody.appendChild(row);
   }
 
   // Update summary cards
-  if (comparisonCount > 0) {
-    const avgSpeedup = totalSpeedup / comparisonCount;
-    const avgSpeedupEl = document.getElementById('avg-speedup');
-    if (avgSpeedupEl) {
-      const compLabel = isServer ? 'vs MySQL' : 'vs SQLite';
-      if (avgSpeedup > 1) {
-        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x faster`;
-        avgSpeedupEl.className = 'text-xl font-bold text-green-600 dark:text-green-400';
-      } else if (avgSpeedup < 1) {
-        const slowerBy = 1 / avgSpeedup;
-        avgSpeedupEl.textContent = `${slowerBy.toFixed(2)}x slower`;
-        avgSpeedupEl.className = 'text-xl font-bold text-red-600 dark:text-red-400';
-      } else {
-        avgSpeedupEl.textContent = `${avgSpeedup.toFixed(2)}x`;
-        avgSpeedupEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
-      }
+  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
 
-      // Update the comparison label
-      const compLabelEl = document.querySelector('#avg-speedup + p');
-      if (compLabelEl) {
-        compLabelEl.textContent = compLabel;
-      }
-    }
+  // Update header labels for server mode (SQLite card shows MySQL comparison)
+  if (isServer) {
+    const sqliteHeader = document.querySelector('#avg-speedup-sqlite')?.parentElement?.querySelector('h3');
+    if (sqliteHeader) sqliteHeader.textContent = 'vs MySQL';
   }
 
   const opsTestedEl = document.getElementById('ops-tested');
