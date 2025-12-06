@@ -73,14 +73,23 @@ impl ExpressionMapper {
             }
         }
 
-        // Try unqualified (just column name) - find first match
+        // Try unqualified (just column name) - find LEFTMOST match
+        // IMPORTANT: For LEFT JOINs, we must resolve to the LEFTMOST table
+        // that has the column. Since HashMap iteration order is non-deterministic,
+        // we find ALL matches and pick the one with the lowest index.
+        let mut best_match: Option<usize> = None;
         for ((_, col), &idx) in &self.column_positions {
             if col == &column_lower {
-                return Some(idx);
+                match best_match {
+                    None => best_match = Some(idx),
+                    Some(current_best) if idx < current_best => {
+                        best_match = Some(idx);
+                    }
+                    _ => {}
+                }
             }
         }
-
-        None
+        best_match
     }
 
     /// Get all tables currently in the mapper

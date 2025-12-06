@@ -83,12 +83,23 @@ impl CombinedSchema {
             None
         } else {
             // Unqualified column reference - search all tables
+            // IMPORTANT: For LEFT JOINs, we must resolve to the LEFTMOST table
+            // that has the column. Since HashMap iteration order is non-deterministic,
+            // we find ALL matches and pick the one with the lowest start_index.
+            let mut best_match: Option<usize> = None;
             for (start_index, schema) in self.table_schemas.values() {
                 if let Some(idx) = schema.get_column_index(column) {
-                    return Some(start_index + idx);
+                    let absolute_idx = start_index + idx;
+                    match best_match {
+                        None => best_match = Some(absolute_idx),
+                        Some(current_best) if absolute_idx < current_best => {
+                            best_match = Some(absolute_idx);
+                        }
+                        _ => {}
+                    }
                 }
             }
-            None
+            best_match
         }
     }
 }
