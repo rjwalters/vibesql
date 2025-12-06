@@ -50,7 +50,7 @@ const DB_COLORS: Record<string, { bg: string; border: string }> = {
 /** CSS classes for table cells */
 const CELL_CLASSES = {
   base: 'px-4 py-3 text-right',
-  muted: 'px-4 py-3 text-right text-muted',
+  muted: 'px-4 py-3 text-right text-gray-500 dark:text-gray-400',
   winner: 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400',
   failed: 'text-red-500',
 };
@@ -140,31 +140,31 @@ const methodology = (
   details: string[],
   notes?: string[]
 ): string => `
-  <h3 class="text-lg font-semibold text-foreground mb-2">${title}</h3>
-  <p class="text-muted mb-4">${description}</p>
-  <ul class="space-y-2 text-muted">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${title}</h3>
+  <p class="text-gray-500 dark:text-gray-400 mb-4">${description}</p>
+  <ul class="space-y-2 text-gray-500 dark:text-gray-400">
     ${li('Hardware', HARDWARE)}
     ${details.join('\n    ')}
   </ul>
   ${notes?.map(note => `
-  <p class="mt-4 text-muted text-sm">${note}</p>`).join('') ?? ''}
+  <p class="mt-4 text-gray-500 dark:text-gray-400 text-sm">${note}</p>`).join('') ?? ''}
 `;
 
 /** Generate discussion section with multiple subsections */
 const discussion = (sections: { title: string; content: string }[]): string => `
-  <h3 class="text-lg font-semibold text-foreground mb-2">Analysis &amp; Roadmap</h3>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Analysis &amp; Roadmap</h3>
   ${sections.map(({ title, content }) => `
-  <h4 class="text-md font-medium text-foreground mt-4 mb-2">${title}</h4>
+  <h4 class="text-md font-medium text-gray-900 dark:text-gray-100 mt-4 mb-2">${title}</h4>
   ${content}`).join('')}
 `;
 
 /** Generate a paragraph */
 const p = (text: string): string =>
-  `<p class="text-muted mb-2">${text}</p>`;
+  `<p class="text-gray-500 dark:text-gray-400 mb-2">${text}</p>`;
 
 /** Generate a bullet list for discussion items */
 const bullets = (items: string[]): string =>
-  `<ul class="list-disc list-inside space-y-1 text-muted text-sm ml-2">
+  `<ul class="list-disc list-inside space-y-1 text-gray-500 dark:text-gray-400 text-sm ml-2">
     ${items.join('\n    ')}
   </ul>`;
 
@@ -835,7 +835,7 @@ function updateLastUpdated(timestamp: string, gitCommit?: string): void {
 
   if (gitCommit) {
     // Show date, time, and commit hash on two lines
-    lastUpdatedEl.innerHTML = `${dateStr} ${timeStr}<br/><span class="text-sm font-mono text-muted">${gitCommit}</span>`;
+    lastUpdatedEl.innerHTML = `${dateStr} ${timeStr}<br/><span class="text-sm font-mono text-gray-500 dark:text-gray-400">${gitCommit}</span>`;
   } else {
     lastUpdatedEl.textContent = `${dateStr} ${timeStr}`;
   }
@@ -861,7 +861,7 @@ function updateSpeedupDisplay(elementId: string, avgSpeedup: number): void {
     el.className += ' text-red-600 dark:text-red-400';
   } else if (avgSpeedup === 0) {
     el.textContent = 'N/A';
-    el.className += ' text-muted';
+    el.className += ' text-gray-500 dark:text-gray-400';
   } else {
     el.textContent = `${avgSpeedup.toFixed(2)}x`;
     el.className += ' text-primary-light dark:text-primary-dark';
@@ -899,7 +899,7 @@ function updateSpeedupSummary(
     const sqliteEl = document.getElementById('avg-speedup-sqlite');
     if (sqliteEl) {
       sqliteEl.textContent = 'N/A';
-      sqliteEl.className = 'text-3xl font-bold text-muted';
+      sqliteEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
   }
 
@@ -910,7 +910,7 @@ function updateSpeedupSummary(
     const duckdbEl = document.getElementById('avg-speedup-duckdb');
     if (duckdbEl) {
       duckdbEl.textContent = 'N/A';
-      duckdbEl.className = 'text-3xl font-bold text-muted';
+      duckdbEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
   }
 }
@@ -1025,11 +1025,11 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     if (!vibesql && !vibesqlServer && !sqlite && !duckdb && !mysql) continue;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-card/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
 
     // Operation name (with tooltip)
     const opCell = document.createElement('td');
-    opCell.className = 'px-4 py-3 font-medium text-foreground';
+    opCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
 
     // Get the first benchmark to extract query info
     const firstBench = vibesql || sqlite || duckdb;
@@ -1067,7 +1067,7 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
       name: string
     ): HTMLTableCellElement => {
       const cell = document.createElement('td');
-      cell.className = 'px-4 py-3 text-right text-muted';
+      cell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
 
       if (bench && bench.stats.mean > 0) {
         cell.textContent = formatTime(bench.stats.mean, bench.stats.stddev);
@@ -1234,11 +1234,11 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
 
   for (const benchmark of availableBenchmarks) {
     const row = document.createElement('tr');
-    row.className = 'hover:bg-card/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
 
     // Database name
     const dbCell = document.createElement('td');
-    dbCell.className = 'px-4 py-3 font-medium text-foreground';
+    dbCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
     dbCell.textContent = DB_DISPLAY_NAMES[benchmark.database] || benchmark.database;
     row.appendChild(dbCell);
 
@@ -1248,7 +1248,7 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
     const isBestSize = benchmark.binary_size_bytes === minBinarySize;
     sizeCell.innerHTML = isBestSize
       ? `<span class="text-green-600 dark:text-green-400 font-semibold">${formatBytes(benchmark.binary_size_bytes)}</span>`
-      : `<span class="text-muted">${formatBytes(benchmark.binary_size_bytes)}</span>`;
+      : `<span class="text-gray-500 dark:text-gray-400">${formatBytes(benchmark.binary_size_bytes)}</span>`;
     row.appendChild(sizeCell);
 
     // Startup time
@@ -1258,7 +1258,7 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
     const startupText = `${benchmark.startup_time_ms.toFixed(2)} ms`;
     startupCell.innerHTML = isBestStartup
       ? `<span class="text-green-600 dark:text-green-400 font-semibold">${startupText}</span>`
-      : `<span class="text-muted">${startupText}</span>`;
+      : `<span class="text-gray-500 dark:text-gray-400">${startupText}</span>`;
     row.appendChild(startupCell);
 
     // Peak memory
@@ -1267,12 +1267,12 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
     const isBestMem = benchmark.peak_memory_kb === minMemory;
     memCell.innerHTML = isBestMem
       ? `<span class="text-green-600 dark:text-green-400 font-semibold">${formatMemory(benchmark.peak_memory_kb)}</span>`
-      : `<span class="text-muted">${formatMemory(benchmark.peak_memory_kb)}</span>`;
+      : `<span class="text-gray-500 dark:text-gray-400">${formatMemory(benchmark.peak_memory_kb)}</span>`;
     row.appendChild(memCell);
 
     // Version
     const versionCell = document.createElement('td');
-    versionCell.className = 'px-4 py-3 text-right text-muted text-xs';
+    versionCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400 text-xs';
     versionCell.textContent = benchmark.version;
     row.appendChild(versionCell);
 
@@ -1397,7 +1397,7 @@ function renderFootprintServerTable(data: FootprintResults): void {
 
   if (!vibesql || !vibesql.wasm_size_bytes) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="3" class="px-4 py-8 text-center text-muted">No WASM data available</td>`;
+    row.innerHTML = `<td colspan="3" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No WASM data available</td>`;
     tbody.appendChild(row);
     return;
   }
@@ -1426,10 +1426,10 @@ function renderFootprintServerTable(data: FootprintResults): void {
 
   for (const metric of metrics) {
     const row = document.createElement('tr');
-    row.className = 'hover:bg-card/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
 
     const nameCell = document.createElement('td');
-    nameCell.className = 'px-4 py-3 font-medium text-foreground';
+    nameCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
     nameCell.textContent = metric.name;
     row.appendChild(nameCell);
 
@@ -1439,7 +1439,7 @@ function renderFootprintServerTable(data: FootprintResults): void {
     row.appendChild(valueCell);
 
     const noteCell = document.createElement('td');
-    noteCell.className = 'px-4 py-3 text-right text-muted text-sm';
+    noteCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400 text-sm';
     noteCell.textContent = metric.note;
     row.appendChild(noteCell);
 
@@ -1578,11 +1578,11 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     if (!primary && !comparison) continue;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-card/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
 
     // Operation name
     const opCell = document.createElement('td');
-    opCell.className = 'px-4 py-3 font-medium text-foreground';
+    opCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
     const description = config.descriptions[operation];
     if (description) {
       opCell.innerHTML = `<span class="cursor-help" title="${description}">${operation.replace(/_/g, ' ').toUpperCase()}</span>`;
@@ -1596,7 +1596,7 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
 
     // Primary database time
     const primaryCell = document.createElement('td');
-    primaryCell.className = 'px-4 py-3 text-right text-muted';
+    primaryCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     if (primary && primary.stats.mean > 0) {
       primaryCell.textContent = formatTime(primary.stats.mean, primary.stats.stddev) || 'N/A';
       times.push({ mean: primary.stats.mean, cell: primaryCell });
@@ -1607,7 +1607,7 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
 
     // Comparison database time
     const compCell = document.createElement('td');
-    compCell.className = 'px-4 py-3 text-right text-muted';
+    compCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     if (comparison && comparison.stats.mean > 0) {
       compCell.textContent = formatTime(comparison.stats.mean, comparison.stats.stddev) || 'N/A';
       times.push({ mean: comparison.stats.mean, cell: compCell });
@@ -1619,7 +1619,7 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     // DuckDB (only for embedded mode)
     if (!isServer) {
       const duckdbCell = document.createElement('td');
-      duckdbCell.className = 'px-4 py-3 text-right text-muted';
+      duckdbCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
       if (duckdb && duckdb.stats.mean > 0) {
         duckdbCell.textContent = formatTime(duckdb.stats.mean, duckdb.stats.stddev) || 'N/A';
         times.push({ mean: duckdb.stats.mean, cell: duckdbCell });
@@ -1777,11 +1777,11 @@ function renderTPCCTable(data: TPCCResults): void {
     if (!vibesql && !sqlite) continue;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-card/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
 
     // Operation name
     const opCell = document.createElement('td');
-    opCell.className = 'px-4 py-3 font-medium text-foreground';
+    opCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
     const config = SUITE_CONFIGS['tpcc'];
     const description = config.descriptions[operation];
     if (description) {
@@ -1801,7 +1801,7 @@ function renderTPCCTable(data: TPCCResults): void {
     const vibesqlCell = document.createElement('td');
     vibesqlCell.className = vibesqlWins
       ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
-      : 'px-4 py-3 text-right text-muted';
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     vibesqlCell.textContent = vibesql ? formatTPS(vibesql.stats.tps) : 'N/A';
     row.appendChild(vibesqlCell);
 
@@ -1809,7 +1809,7 @@ function renderTPCCTable(data: TPCCResults): void {
     const sqliteCell = document.createElement('td');
     sqliteCell.className = sqliteWins
       ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
-      : 'px-4 py-3 text-right text-muted';
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : 'N/A';
     row.appendChild(sqliteCell);
 
@@ -1940,11 +1940,11 @@ function renderTPCDSTable(data: TPCDSResults): void {
     if (isPassed) passedCount++;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-card/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
 
     // Query name with description tooltip
     const queryCell = document.createElement('td');
-    queryCell.className = 'px-4 py-3 font-medium text-foreground';
+    queryCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
     const description = config.descriptions[queryNum];
     if (description) {
       queryCell.innerHTML = `<span class="cursor-help" title="${description}">TPC-DS ${queryNum.toUpperCase()}</span>`;
@@ -1955,7 +1955,7 @@ function renderTPCDSTable(data: TPCDSResults): void {
 
     // Execution time
     const timeCell = document.createElement('td');
-    timeCell.className = 'px-4 py-3 text-right text-muted';
+    timeCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     if (isPassed && bench.stats.mean > 0) {
       timeCell.textContent = formatTime(bench.stats.mean, bench.stats.stddev) || 'N/A';
     } else {
@@ -1965,7 +1965,7 @@ function renderTPCDSTable(data: TPCDSResults): void {
 
     // Rows returned
     const rowsCell = document.createElement('td');
-    rowsCell.className = 'px-4 py-3 text-right text-muted';
+    rowsCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     rowsCell.textContent = bench.stats.rows.toLocaleString();
     row.appendChild(rowsCell);
 
@@ -2287,7 +2287,7 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
     if (tbody) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="7" class="px-4 py-8 text-center text-muted">
+          <td colspan="7" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
             <p class="mb-2">No ${config.name} benchmark results available yet.</p>
             <p class="text-sm">Results will be generated when CI runs for this benchmark suite.</p>
           </td>
@@ -2298,12 +2298,12 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
     const sqliteEl = document.getElementById('avg-speedup-sqlite');
     if (sqliteEl) {
       sqliteEl.textContent = 'N/A';
-      sqliteEl.className = 'text-3xl font-bold text-muted';
+      sqliteEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
     const duckdbEl = document.getElementById('avg-speedup-duckdb');
     if (duckdbEl) {
       duckdbEl.textContent = 'N/A';
-      duckdbEl.className = 'text-3xl font-bold text-muted';
+      duckdbEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
 
     const opsTestedEl = document.getElementById('ops-tested');
