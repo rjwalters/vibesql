@@ -727,4 +727,94 @@ mod tests {
         let result = format("cli-help-hint", None);
         assert!(result.contains("Geben Sie"));
     }
+
+    #[test]
+    fn test_korean_locale() {
+        init(Some("ko")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "안녕히 가세요!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("행"));
+    }
+
+    #[test]
+    fn test_korean_parser_messages() {
+        init(Some("ko")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "종료되지 않은 문자열 리터럴");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("예기치 않은 문자"));
+    }
+
+    #[test]
+    fn test_korean_resources_embedded() {
+        // Check that Korean resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("ko/")), "Korean resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "ko/cli.ftl"), "ko/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "ko/parser.ftl"), "ko/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "ko/executor.ftl"), "ko/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "ko/storage.ftl"), "ko/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "ko/catalog.ftl"), "ko/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_korean_executor_messages() {
+        init(Some("ko")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("찾을 수 없습니다"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "0으로 나누기");
+    }
+
+    #[test]
+    fn test_korean_storage_messages() {
+        init(Some("ko")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("찾을 수 없습니다"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "행을 찾을 수 없습니다");
+    }
+
+    #[test]
+    fn test_korean_catalog_messages() {
+        init(Some("ko")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("이미 존재합니다"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("찾을 수 없습니다"));
+    }
+
+    #[test]
+    fn test_korean_hangul_handling() {
+        init(Some("ko")).unwrap();
+
+        // Test messages with Hangul are correctly handled
+        let result = vibe_msg!("executor-schema-not-empty", name = "공개");
+        assert!(result.contains("공개"));
+        assert!(result.contains("삭제할 수 없습니다"));
+
+        // Test the help hint with Korean characters
+        let result = format("cli-help-hint", None);
+        assert!(result.contains("\\help"));
+        assert!(result.contains("도움말"));
+    }
 }
