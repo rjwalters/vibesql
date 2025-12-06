@@ -272,19 +272,23 @@ jobs:
 
       - name: Build and install Python bindings
         run: |
-          uv pip install --system maturin
+          uv venv .venv
+          source .venv/bin/activate
+          uv pip install maturin
           cd crates/vibesql-python-bindings
           maturin build --release
-          uv pip install --system ../../target/wheels/vibesql-*.whl
+          uv pip install ../../target/wheels/vibesql-*.whl
 
       - name: Install benchmark dependencies
         run: |
+          source .venv/bin/activate
           grep -v "^vibesql" benchmarks/requirements.txt > /tmp/requirements-ci.txt
-          uv pip install --system -r /tmp/requirements-ci.txt
+          uv pip install -r /tmp/requirements-ci.txt
 
       - name: Run quick benchmarks (1k tests only)
         working-directory: benchmarks
         run: |
+          source ../.venv/bin/activate
           pytest test_insert.py test_update.py test_delete.py test_select.py test_aggregates.py \
             --benchmark-only \
             --benchmark-json=../benchmark_results.json \
@@ -297,7 +301,8 @@ jobs:
           echo "## Python Benchmark Results (1k tests)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f benchmark_results.json ]; then
-            uv run --python 3.11 benchmarks/format_results.py benchmark_results.json >> $GITHUB_STEP_SUMMARY
+            source .venv/bin/activate
+            python benchmarks/format_results.py benchmark_results.json >> $GITHUB_STEP_SUMMARY
           else
             echo "No benchmark results generated" >> $GITHUB_STEP_SUMMARY
           fi
