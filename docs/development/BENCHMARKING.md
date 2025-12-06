@@ -550,6 +550,98 @@ Current support matrix:
 
 ---
 
+## DuckDB Comparison Benchmarks
+
+### Overview
+
+VibeSQL supports comparison benchmarks against DuckDB for OLAP workloads. DuckDB comparison is kept in separate jobs/features because DuckDB adds ~73MB to the binary size.
+
+### Running Comparisons Locally
+
+```bash
+# TPC-H with SQLite comparison only (default, lighter weight)
+cargo bench --package vibesql-executor --bench tpch_profiling \
+  --features benchmark-comparison
+
+# TPC-H with DuckDB comparison (adds ~73MB to binary)
+cargo bench --package vibesql-executor --bench tpch_profiling \
+  --features benchmark-comparison,duckdb-comparison
+
+# TPC-DS with DuckDB validation mode
+VALIDATE=1 cargo bench --bench tpcds_runner \
+  --features benchmark-comparison,duckdb-comparison
+
+# Run with specific scale factor
+SCALE_FACTOR=0.1 cargo bench --package vibesql-executor --bench tpch_profiling \
+  --features benchmark-comparison,duckdb-comparison
+```
+
+### Feature Flags
+
+| Feature | Description | Binary Size Impact |
+|---------|-------------|-------------------|
+| `benchmark-comparison` | Enable SQLite comparison + in-memory indexes | ~2MB |
+| `sqlite-comparison` | SQLite only (included in benchmark-comparison) | ~2MB |
+| `duckdb-comparison` | Add DuckDB comparison | ~73MB |
+| `mysql-comparison` | Add MySQL comparison (requires MYSQL_URL) | ~1MB |
+
+### CI vs Local Differences
+
+| Aspect | Local | CI (Nightly) |
+|--------|-------|--------------|
+| DuckDB jobs | Optional feature flag | Separate jobs for isolation |
+| MySQL | Requires Docker/server | Uses service container |
+| Scale factor | Configurable | SF=0.1 (TPC-H), SF=0.01 (TPC-DS) |
+| Output format | Console | JSON + text artifacts |
+| Results storage | Local benchmarks.db | GitHub artifacts (30-day retention) |
+
+### Nightly Workflow Structure
+
+The nightly benchmark workflow (`.github/workflows/nightly-benchmarks.yml`) runs:
+
+1. **Standard benchmarks** (SQLite comparison):
+   - `tpch-full`: TPC-H with SQLite
+   - `tpcds-full`: TPC-DS with SQLite
+
+2. **DuckDB comparison jobs** (separate for binary size isolation):
+   - `tpch-duckdb-comparison`: TPC-H vs DuckDB
+   - `tpcds-duckdb-comparison`: TPC-DS vs DuckDB (with validation)
+
+3. **Other benchmarks**:
+   - `tpcc-extended`: TPC-C OLTP workload
+   - `sysbench-extended`: Sysbench OLTP
+   - `sqllogictest-complete`: Full conformance suite
+
+### Comparison Artifacts
+
+Nightly runs produce JSON artifacts suitable for web-demo consumption:
+
+```bash
+# Download artifacts from GitHub Actions
+gh run download <run-id> --name nightly-tpch-duckdb-comparison
+
+# Artifacts include:
+# - tpch_duckdb_output.txt (raw benchmark output)
+# - tpch_duckdb_comparison.json (parsed JSON for web-demo)
+```
+
+JSON format matches web-demo schema:
+```json
+{
+  "generated_at": "2024-12-05T02:00:00Z",
+  "scale_factor": 0.1,
+  "source": "nightly-benchmark",
+  "benchmarks": [
+    {
+      "name": "tpch_q1_vibesql",
+      "stats": { "mean": 0.245, "status": "passed" }
+    }
+  ]
+}
+```
+
+---
+
 ## CI Integration
 
 ### GitHub Actions Workflow
