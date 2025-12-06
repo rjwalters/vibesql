@@ -158,10 +158,10 @@ where
             .map_err(ExecutorError::InvalidWhereClause)?;
 
         // Extract equijoin conditions that apply to this join
-        let left_schema_tables: std::collections::HashSet<_> =
-            left_result.schema.table_schemas.keys().cloned().collect();
-        let right_schema_tables: std::collections::HashSet<_> =
-            right_result.schema.table_schemas.keys().cloned().collect();
+        let left_schema_tables: std::collections::HashSet<String> =
+            left_result.schema.table_names().into_iter().collect();
+        let right_schema_tables: std::collections::HashSet<String> =
+            right_result.schema.table_names().into_iter().collect();
 
         predicate_plan
             .get_equijoin_conditions()
@@ -224,7 +224,7 @@ fn generate_natural_join_condition(
             left_columns
                 .entry(lowercase_name)
                 .or_default()
-                .push((table_name.clone(), col.name.clone()));
+                .push((table_name.to_string(), col.name.clone()));
         }
     }
 
@@ -239,7 +239,7 @@ fn generate_natural_join_condition(
                     common_columns.push((
                         left_table.clone(),
                         left_col.clone(),
-                        table_name.clone(),
+                        table_name.to_string(),
                         col.name.clone(),
                     ));
                 }

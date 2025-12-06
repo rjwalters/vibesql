@@ -197,7 +197,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         table_name: table_str
                             .map(|t| t.to_string())
                             .unwrap_or_else(|| "unknown".to_string()),
-                        searched_tables: self.schema.table_schemas.keys().cloned().collect(),
+                        searched_tables: self.schema.table_names(),
                         available_columns: self.get_available_columns(),
                     })
                 }

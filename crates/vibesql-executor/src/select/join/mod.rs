@@ -1193,7 +1193,7 @@ fn remove_duplicate_columns_for_natural_join(
         for col in &table_schema.columns {
             let lowercase = col.name.to_lowercase();
             left_column_map.entry(lowercase).or_default().push((
-                table_name.clone(),
+                table_name.to_string(),
                 col.name.clone(),
                 col_idx,
             ));

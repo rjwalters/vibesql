@@ -324,10 +324,10 @@ pub(super) fn partition_filter_predicates(
     right_schema: &CombinedSchema,
 ) -> (Option<vibesql_ast::Expression>, Option<vibesql_ast::Expression>) {
     // Get the set of right-only table names
-    let right_table_names: HashSet<String> = right_schema.table_schemas.keys().cloned().collect();
+    let right_table_names: HashSet<String> = right_schema.table_names().into_iter().collect();
 
     // Get the set of left table names
-    let left_table_names: HashSet<String> = left_schema.table_schemas.keys().cloned().collect();
+    let left_table_names: HashSet<String> = left_schema.table_names().into_iter().collect();
 
     // Flatten the filter into individual conjuncts
     let conjuncts = flatten_conjuncts(filter);

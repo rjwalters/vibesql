@@ -1267,7 +1267,7 @@ impl SelectExecutor<'_> {
                     return Err(ExecutorError::ColumnNotFound {
                         column_name: column.clone(),
                         table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
-                        searched_tables: schema.table_schemas.keys().cloned().collect(),
+                        searched_tables: schema.table_names(),
                         available_columns,
                     });
                 }
@@ -1313,7 +1313,7 @@ impl SelectExecutor<'_> {
                     .ok_or_else(|| ExecutorError::ColumnNotFound {
                         column_name: column.clone(),
                         table_name: table.clone().unwrap_or_default(),
-                        searched_tables: schema.table_schemas.keys().cloned().collect(),
+                        searched_tables: schema.table_names(),
                         available_columns: vec![],
                     })?,
                 _ => {
