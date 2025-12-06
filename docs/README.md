@@ -44,9 +44,11 @@
 - [Publishing Checklist](PUBLISHING_CHECKLIST.md) - Release process
 
 ### Performance
+- [Optimization](performance/OPTIMIZATION.md) - Performance optimization strategies
 - [Optimization Roadmap](performance/OPTIMIZATION_ROADMAP.md) - Performance improvement plans
 - [Profiling Guide](performance/PROFILING_GUIDE.md) - How to profile queries
-- [SQLLogicTest Benchmarking](performance/SQLLOGICTEST_BENCHMARKING.md) - Conformance-focused benchmarking
+- [TPC-H Benchmarking](performance/TPC-H_BENCHMARKING.md) - TPC-H benchmark guide
+- [TPC-DS Results](performance/TPCDS_RESULTS.md) - TPC-DS benchmark results
 
 ### Testing
 - [Testing Strategy](testing/TESTING_STRATEGY.md) - Overall testing approach
@@ -61,19 +63,6 @@
 
 ## Internal
 
-### Analysis & Investigations
-- [analysis/](analysis/) - Technical optimization studies
-- [investigations/](investigations/) - Recent investigation reports
-- [profiling/](profiling/) - Performance profiling analysis
-- [research/](research/) - Research findings
-
-### Planning
-- [planning/](planning/) - Project planning documents
-- [roadmaps/](roadmaps/) - Specific feature roadmaps
-
-### Historical
 - [archive/](archive/) - Completed investigations and historical docs
 - [lessons/](lessons/) - Development insights and lessons learned
-
-### Templates
 - [templates/](templates/) - Document templates (ADR, architecture, implementation)
