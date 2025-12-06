@@ -9,6 +9,15 @@ description = "Network server with PostgreSQL wire protocol for VibeSQL"
 keywords = ["sql", "database", "server", "postgresql", "network"]
 categories = ["database", "network-programming"]
 
+[features]
+default = ["storage-all"]
+# Re-export storage features for conditional compilation in tests
+opendal = ["vibesql-storage/opendal"]
+storage-memory = ["vibesql-storage/storage-memory"]
+# storage-all enables all storage backends and also enables the local feature flags
+# so that #[cfg(feature = "...")] checks work correctly in tests
+storage-all = ["vibesql-storage/storage-all", "opendal", "storage-memory"]
+
 [lib]
 name = "vibesql_server"
 path = "src/lib.rs"
@@ -23,7 +32,7 @@ doc = false  # Binaries don't need documentation
 vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
 vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
 vibesql-catalog = { version = "0.1.2", path = "../vibesql-catalog" }
-vibesql-storage = { version = "0.1.2", path = "../vibesql-storage", features = ["storage-all"] }
+vibesql-storage = { version = "0.1.2", path = "../vibesql-storage" }
 vibesql-executor = { version = "0.1.2", path = "../vibesql-executor" }
 vibesql-parser = { version = "0.1.2", path = "../vibesql-parser" }
 
