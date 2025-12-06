@@ -4248,9 +4248,9 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(w_warehouse_id),
             SqlValue::Varchar(format!("Warehouse#{}", i)),
             SqlValue::Integer(data.random_i32(50000, 500000) as i64), // sq_ft
-            SqlValue::Varchar(format!("{}", data.random_i32(1, 999))),
-            SqlValue::Varchar(data.random_varchar(30)),
-            SqlValue::Varchar("Boulevard".to_string()),
+            SqlValue::Varchar(format!("{}", data.random_i32(1, 9999))),
+            SqlValue::Varchar(data.random_varchar(40)),
+            SqlValue::Varchar("Street".to_string()),
             SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
             SqlValue::Varchar(data.random_city()),
             SqlValue::Varchar(format!("{} County", STATES[state_idx])),
@@ -4390,28 +4390,34 @@ fn load_store_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 // =============================================================================
 
 fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
-    use super::data::CATALOG_PAGE_TYPES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    // Match DuckDB's data arrays for deterministic generation
+    let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
+    let page_types = ["Cover", "Regular", "Index", "Special"];
 
     let mut rows = Vec::with_capacity(BATCH_SIZE.min(data.catalog_page_count));
 
     for i in 1..=data.catalog_page_count {
         let cp_catalog_page_id = format!("AAAAAA{:010}", i);
-        let type_idx = i % CATALOG_PAGE_TYPES.len();
-        let catalog_number = (i / 100) + 1;
-        let page_number = (i % 100) + 1;
+        let dept_idx = i % departments.len();
+        let type_idx = i % page_types.len();
+
+        // Match DuckDB's RNG consumption pattern exactly
+        let start_date_sk = data.random_i32(1, 500);
+        let end_date_sk = data.random_i32(501, 1000);
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(cp_catalog_page_id),
-            SqlValue::Integer(((i - 1) / 1000 + 1) as i64), // cp_start_date_sk
-            SqlValue::Integer(((i - 1) / 1000 + 365) as i64), // cp_end_date_sk
-            SqlValue::Varchar(data.random_varchar(80).to_string()), // cp_department
-            SqlValue::Integer(catalog_number as i64),
-            SqlValue::Integer(page_number as i64),
-            SqlValue::Varchar(format!("Catalog page {}", i)), // cp_description
-            SqlValue::Varchar(CATALOG_PAGE_TYPES[type_idx].to_string()),
+            SqlValue::Integer(start_date_sk as i64),
+            SqlValue::Integer(end_date_sk as i64),
+            SqlValue::Varchar(departments[dept_idx].to_string()),
+            SqlValue::Integer(((i / 100) + 1) as i64),
+            SqlValue::Integer(((i % 100) + 1) as i64),
+            SqlValue::Varchar(format!("Catalog page {} description", i)),
+            SqlValue::Varchar(page_types[type_idx].to_string()),
         ]);
         rows.push(row);
 
@@ -4427,31 +4433,43 @@ fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 }
 
 fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
-    use super::data::WEB_PAGE_TYPES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    // Match DuckDB's page types for deterministic generation
+    let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
 
     let mut rows = Vec::with_capacity(data.web_page_count);
 
     for i in 1..=data.web_page_count {
         let wp_web_page_id = format!("AAAAAA{:010}", i);
-        let type_idx = i % WEB_PAGE_TYPES.len();
+        let type_idx = i % page_types.len();
+
+        // Match DuckDB's RNG consumption pattern exactly:
+        // random_i32(1, 500), random_i32(501, 1000), random_i32(100, 10000),
+        // random_i32(5, 50), random_i32(1, 20), random_i32(1, 10)
+        let creation_date_sk = data.random_i32(1, 500);
+        let access_date_sk = data.random_i32(501, 1000);
+        let char_count = data.random_i32(100, 10000);
+        let link_count = data.random_i32(5, 50);
+        let image_count = data.random_i32(1, 20);
+        let max_ad_count = data.random_i32(1, 10);
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(wp_web_page_id),
-            SqlValue::Integer(1), // wp_rec_start_date_sk - reference to date_dim
+            SqlValue::Null,       // wp_rec_start_date_sk
             SqlValue::Null,       // wp_rec_end_date_sk
-            SqlValue::Integer(((i - 1) / 20 + 1) as i64), // wp_creation_date_sk
-            SqlValue::Integer(((i - 1) / 10 + 1) as i64), // wp_access_date_sk
-            SqlValue::Varchar("N".to_string()), // wp_autogen_flag
-            SqlValue::Integer((i % data.customer_count + 1) as i64), // wp_customer_sk
-            SqlValue::Varchar(format!("/page/{}", i)), // wp_url
-            SqlValue::Varchar(WEB_PAGE_TYPES[type_idx].to_string()),
-            SqlValue::Integer(data.random_i32(1, 10) as i64), // wp_char_count
-            SqlValue::Integer(data.random_i32(1, 5) as i64),  // wp_link_count
-            SqlValue::Integer(data.random_i32(1, 20) as i64), // wp_image_count
-            SqlValue::Integer(data.random_i32(5, 100) as i64), // wp_max_ad_count
+            SqlValue::Integer(creation_date_sk as i64),
+            SqlValue::Integer(access_date_sk as i64),
+            SqlValue::Varchar(if i % 2 == 0 { "Y" } else { "N" }.to_string()), // wp_autogen_flag
+            SqlValue::Integer(((i % data.customer_count) + 1) as i64), // wp_customer_sk
+            SqlValue::Varchar(format!("http://www.example.com/page{}", i)), // wp_url
+            SqlValue::Varchar(page_types[type_idx].to_string()),
+            SqlValue::Integer(char_count as i64),
+            SqlValue::Integer(link_count as i64),
+            SqlValue::Integer(image_count as i64),
+            SqlValue::Integer(max_ad_count as i64),
         ]);
         rows.push(row);
     }
@@ -4462,7 +4480,6 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 }
 
 fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
-    use super::data::WEB_SITE_CLASSES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
@@ -4471,35 +4488,48 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
     for i in 1..=data.web_site_count {
         let web_site_id = format!("AAAAAA{:010}", i);
         let state_idx = i % STATES.len();
-        let class_idx = i % WEB_SITE_CLASSES.len();
+
+        // Match DuckDB's RNG consumption pattern exactly:
+        // random_i32(1, 500), random_varchar(30), random_varchar(30),
+        // random_i32(100, 9999), random_varchar(40), random_i32(100, 999),
+        // random_city(), random_zip(), random_f64(0.0, 0.11)
+        let open_date_sk = data.random_i32(1, 500);
+        let manager = data.random_varchar(30);
+        let market_manager = data.random_varchar(30);
+        let street_number = data.random_i32(100, 9999);
+        let street_name = data.random_varchar(40);
+        let suite_number = data.random_i32(100, 999);
+        let city = data.random_city();
+        let zip = data.random_zip();
+        let tax_percentage = data.random_f64(0.0, 0.11);
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(web_site_id),
-            SqlValue::Integer(1), // web_rec_start_date_sk - reference to date_dim
+            SqlValue::Null,       // web_rec_start_date_sk
             SqlValue::Null,       // web_rec_end_date_sk
-            SqlValue::Varchar(format!("site_{}", i)), // web_name
-            SqlValue::Integer(((i - 1) / 5 + 1) as i64), // web_open_date_sk
+            SqlValue::Varchar(format!("Site {}", i)), // web_name
+            SqlValue::Integer(open_date_sk as i64),
             SqlValue::Null,       // web_close_date_sk
-            SqlValue::Varchar(WEB_SITE_CLASSES[class_idx].to_string()),
-            SqlValue::Varchar(format!("Manager{}", i % 50)), // web_manager
-            SqlValue::Integer((i % 10 + 1) as i64),          // web_mkt_id
-            SqlValue::Varchar(format!("Market class {}", i % 5)), // web_mkt_class
-            SqlValue::Varchar(format!("Market description {}", i)), // web_mkt_desc
-            SqlValue::Varchar(format!("MarketManager{}", i % 20)), // web_market_manager
-            SqlValue::Integer((i % 5 + 1) as i64),           // web_company_id
-            SqlValue::Varchar(format!("Company{}", i % 5 + 1)),
-            SqlValue::Varchar(format!("{}", data.random_i32(1, 999))), // web_street_number
-            SqlValue::Varchar(data.random_varchar(30)),                // web_street_name
+            SqlValue::Varchar("medium".to_string()), // web_class
+            SqlValue::Varchar(manager),
+            SqlValue::Integer(((i % 6) + 1) as i64), // web_mkt_id
+            SqlValue::Varchar(format!("Market Class {}", i % 10)), // web_mkt_class
+            SqlValue::Varchar(format!("Market description for site {}", i)), // web_mkt_desc
+            SqlValue::Varchar(market_manager),
+            SqlValue::Integer(((i % 3) + 1) as i64), // web_company_id
+            SqlValue::Varchar(format!("Company {}", (i % 3) + 1)),
+            SqlValue::Varchar(format!("{}", street_number)), // web_street_number
+            SqlValue::Varchar(street_name),
             SqlValue::Varchar("Street".to_string()),
-            SqlValue::Varchar(format!("Suite {}", data.random_i32(100, 999))),
-            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(format!("Suite {}", suite_number)),
+            SqlValue::Varchar(city),
             SqlValue::Varchar(format!("{} County", STATES[state_idx])),
             SqlValue::Varchar(STATES[state_idx].to_string()),
-            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar(zip),
             SqlValue::Varchar("United States".to_string()),
-            SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)), // web_gmt_offset
-            SqlValue::Numeric(data.random_f64(0.0, 0.12)),      // web_tax_percentage
+            SqlValue::Numeric(-5.0 - (state_idx % 4) as f64), // web_gmt_offset
+            SqlValue::Numeric(tax_percentage),
         ]);
         rows.push(row);
     }
