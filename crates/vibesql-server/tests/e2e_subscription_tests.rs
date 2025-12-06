@@ -14,13 +14,9 @@ const MSG_SUBSCRIPTION_DATA: u8 = 0xF2;
 const MSG_READY_FOR_QUERY: u8 = b'Z';
 
 /// Helper to send a subscription request for a query
-async fn send_subscribe(client: &mut TestClient, query: &str) -> std::io::Result<[u8; 16]> {
-    // Generate a subscription ID (16 bytes based on query hash)
-    let mut sub_id = [0u8; 16];
-    for (i, b) in query.as_bytes().iter().enumerate() {
-        sub_id[i % 16] = sub_id[i % 16].wrapping_add(*b);
-    }
-
+/// Note: The returned ID is a placeholder. Use `extract_subscription_id` on the
+/// SubscriptionData response to get the real server-generated ID.
+async fn send_subscribe(client: &mut TestClient, query: &str) -> std::io::Result<()> {
     let mut buf = BytesMut::new();
 
     // Build message body: query string (null-terminated) + param count (i16)
@@ -38,7 +34,22 @@ async fn send_subscribe(client: &mut TestClient, query: &str) -> std::io::Result
 
     client.stream_write_all(&buf).await?;
     client.stream_flush().await?;
-    Ok(sub_id)
+    Ok(())
+}
+
+/// Extract subscription ID from SubscriptionData message bytes
+/// The ID is at bytes 0-16 of the payload (after msg_type byte and length i32 which are not in payload)
+fn extract_subscription_id(messages: &[common::ParsedMessage]) -> Option<[u8; 16]> {
+    for msg in messages {
+        if msg.msg_type == MSG_SUBSCRIPTION_DATA && msg.payload.len() >= 16 {
+            let mut id = [0u8; 16];
+            // Payload starts after msg_type (1 byte) + length (4 bytes)
+            // So subscription_id is at the start of payload
+            id.copy_from_slice(&msg.payload[0..16]);
+            return Some(id);
+        }
+    }
+    None
 }
 
 /// Helper to send an unsubscribe request
@@ -59,7 +70,6 @@ async fn send_unsubscribe(client: &mut TestClient, sub_id: [u8; 16]) -> std::io:
 
 /// test_subscribe_receives_initial_data - Subscribe returns current query results
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_subscribe_receives_initial_data() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -85,8 +95,7 @@ async fn test_subscribe_receives_initial_data() {
 
     // Subscribe to the table
     let select_query = format!("SELECT * FROM {}", table_name);
-    let _sub_id =
-        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
 
     // Read subscription response (should include initial data)
     let data = client
@@ -105,7 +114,6 @@ async fn test_subscribe_receives_initial_data() {
 
 /// test_insert_triggers_subscription_update - INSERT causes subscriber notification
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_insert_triggers_subscription_update() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -124,8 +132,7 @@ async fn test_insert_triggers_subscription_update() {
 
     // Subscribe to empty table
     let select_query = format!("SELECT * FROM {}", table_name);
-    let _sub_id =
-        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -154,7 +161,6 @@ async fn test_insert_triggers_subscription_update() {
 
 /// test_update_triggers_subscription_update - UPDATE causes subscriber notification
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_update_triggers_subscription_update() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -179,8 +185,7 @@ async fn test_update_triggers_subscription_update() {
 
     // Subscribe
     let select_query = format!("SELECT * FROM {} WHERE id = 1", table_name);
-    let _sub_id =
-        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -209,7 +214,6 @@ async fn test_update_triggers_subscription_update() {
 
 /// test_delete_triggers_subscription_update - DELETE causes subscriber notification
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_delete_triggers_subscription_update() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -234,8 +238,7 @@ async fn test_delete_triggers_subscription_update() {
 
     // Subscribe
     let select_query = format!("SELECT * FROM {}", table_name);
-    let _sub_id =
-        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
     let _ = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -264,7 +267,6 @@ async fn test_delete_triggers_subscription_update() {
 
 /// test_unsubscribe_stops_updates - After unsubscribe, no more notifications
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_unsubscribe_stops_updates() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -289,12 +291,13 @@ async fn test_unsubscribe_stops_updates() {
 
     // Subscribe
     let select_query = format!("SELECT * FROM {}", table_name);
-    let sub_id =
-        send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
-    let _ = client
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    let data = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
         .expect("Failed to read subscription response");
+    let messages = parse_backend_messages(&data);
+    let sub_id = extract_subscription_id(&messages).expect("Failed to extract subscription ID");
 
     // Unsubscribe - no response expected per protocol spec, just continue
     send_unsubscribe(&mut client, sub_id).await.expect("Failed to send unsubscribe");
@@ -326,7 +329,6 @@ async fn test_unsubscribe_stops_updates() {
 
 /// test_subscription_ignores_unrelated_tables - Changes to table B don't notify table A subscribers
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_subscription_ignores_unrelated_tables() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -359,7 +361,7 @@ async fn test_subscription_ignores_unrelated_tables() {
         client.read_until_message_type(b'Z').await.expect("Failed to read insert user response");
 
     // Subscribe to users table
-    let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_users_unrel")
+    send_subscribe(&mut client, "SELECT * FROM sub_users_unrel")
         .await
         .expect("Failed to send subscribe");
     let _ = client
@@ -396,8 +398,11 @@ async fn test_subscription_ignores_unrelated_tables() {
 // ============================================================================
 
 /// test_multiple_subscribers_same_query - Both clients receive updates
+/// NOTE: This test requires cross-connection subscription notifications, which
+/// requires integrating with the global SubscriptionManager and storage change events.
+/// Currently, subscriptions only receive updates for mutations on the same connection.
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
+#[ignore = "Cross-connection subscription notifications not yet implemented"]
 async fn test_multiple_subscribers_same_query() {
     let server = start_test_server().await;
 
@@ -427,15 +432,13 @@ async fn test_multiple_subscribers_same_query() {
 
     // Both clients subscribe to the same query
     let query = "SELECT * FROM sub_shared_users";
-    let _sub_id1 =
-        send_subscribe(&mut client1, query).await.expect("Failed to send subscribe from client1");
+    send_subscribe(&mut client1, query).await.expect("Failed to send subscribe from client1");
     let _ = client1
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
         .expect("Failed to read subscription response");
 
-    let _sub_id2 =
-        send_subscribe(&mut client2, query).await.expect("Failed to send subscribe from client2");
+    send_subscribe(&mut client2, query).await.expect("Failed to send subscribe from client2");
     let _ = client2
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -476,7 +479,6 @@ async fn test_multiple_subscribers_same_query() {
 
 /// test_subscription_survives_empty_result - Subscription works even if query returns no rows
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_subscription_survives_empty_result() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -493,7 +495,7 @@ async fn test_subscription_survives_empty_result() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe to empty result set
-    let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_empty_users")
+    send_subscribe(&mut client, "SELECT * FROM sub_empty_users")
         .await
         .expect("Failed to send subscribe");
 
@@ -531,7 +533,6 @@ async fn test_subscription_survives_empty_result() {
 
 /// test_rapid_mutations - Many quick changes don't cause issues
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_rapid_mutations() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -548,7 +549,7 @@ async fn test_rapid_mutations() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe
-    let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_counter_test")
+    send_subscribe(&mut client, "SELECT * FROM sub_counter_test")
         .await
         .expect("Failed to send subscribe");
     let _ = client
@@ -583,7 +584,6 @@ async fn test_rapid_mutations() {
 
 /// test_subscription_cleanup_on_disconnect - Subscriptions removed when client disconnects
 #[tokio::test]
-#[ignore = "Subscription protocol not fully implemented - see issue #XXXX"]
 async fn test_subscription_cleanup_on_disconnect() {
     let server = start_test_server().await;
     let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
@@ -600,7 +600,7 @@ async fn test_subscription_cleanup_on_disconnect() {
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
 
     // Subscribe
-    let _sub_id = send_subscribe(&mut client, "SELECT * FROM sub_disconnect_test")
+    send_subscribe(&mut client, "SELECT * FROM sub_disconnect_test")
         .await
         .expect("Failed to send subscribe");
     let _ = client
