@@ -398,11 +398,10 @@ async fn test_subscription_ignores_unrelated_tables() {
 // ============================================================================
 
 /// test_multiple_subscribers_same_query - Both clients receive updates
-/// NOTE: This test requires cross-connection subscription notifications, which
-/// requires integrating with the global SubscriptionManager and storage change events.
-/// Currently, subscriptions only receive updates for mutations on the same connection.
+///
+/// This test verifies that when multiple clients subscribe to the same query,
+/// mutations from one client notify all subscribers across all connections.
 #[tokio::test]
-#[ignore = "Cross-connection subscription notifications not yet implemented"]
 async fn test_multiple_subscribers_same_query() {
     let server = start_test_server().await;
 

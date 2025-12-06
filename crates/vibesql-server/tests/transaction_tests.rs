@@ -55,8 +55,9 @@ impl Drop for TestServer {
 
 /// Run a test server instance.
 async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
+    use tokio::sync::broadcast;
     use vibesql_server::config::Config;
-    use vibesql_server::connection::ConnectionHandler;
+    use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
     use vibesql_server::observability::ObservabilityProvider;
     use vibesql_server::registry::DatabaseRegistry;
     use vibesql_server::SubscriptionManager;
@@ -82,6 +83,10 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
     let subscription_manager = Arc::new(SubscriptionManager::new());
     let database_registry = DatabaseRegistry::new();
 
+    // Create broadcast channel for cross-connection subscription notifications
+    let (mutation_broadcast_tx, _mutation_broadcast_rx) =
+        broadcast::channel::<TableMutationNotification>(1024);
+
     loop {
         tokio::select! {
             _ = &mut shutdown_rx => {
@@ -95,6 +100,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                         let active_connections = Arc::clone(&active_connections);
                         let database_registry = database_registry.clone();
                         let subscription_manager = Arc::clone(&subscription_manager);
+                        let mutation_broadcast_tx = mutation_broadcast_tx.clone();
 
                         tokio::spawn(async move {
                             let mut handler = ConnectionHandler::new(
@@ -106,6 +112,7 @@ async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
                                 active_connections,
                                 database_registry,
                                 subscription_manager,
+                                mutation_broadcast_tx,
                             );
                             let _ = handler.handle().await;
                         });

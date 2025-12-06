@@ -6,11 +6,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
 use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::Config;
-use vibesql_server::connection::ConnectionHandler;
+use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
 use vibesql_server::http::create_http_router;
 use vibesql_server::observability::ObservabilityProvider;
 use vibesql_server::protocol::BackendMessage;
@@ -101,6 +102,13 @@ async fn main() -> Result<()> {
     // Create a shared database registry for wire protocol connections
     // Each database name maps to a shared Database instance
     let database_registry = DatabaseRegistry::new();
+
+    // Create a broadcast channel for cross-connection subscription notifications
+    // When one connection mutates data, other connections with subscriptions on
+    // the affected tables need to be notified. The channel capacity should be
+    // large enough to handle bursts of mutations without dropping messages.
+    let (mutation_broadcast_tx, _mutation_broadcast_rx) =
+        broadcast::channel::<TableMutationNotification>(1024);
 
     // Create a shared database for HTTP API and subscriptions
     // TODO: Consider integrating HTTP database into the registry
@@ -208,6 +216,9 @@ async fn main() -> Result<()> {
                             // Clone the database registry for this connection
                             let database_registry = database_registry.clone();
 
+                            // Clone the mutation broadcast sender for this connection
+                            let mutation_broadcast_tx = mutation_broadcast_tx.clone();
+
                             // Spawn a new task for each connection
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -219,6 +230,7 @@ async fn main() -> Result<()> {
                                     active_connections,
                                     database_registry,
                                     subscription_manager,
+                                    mutation_broadcast_tx,
                                 );
                                 if let Err(e) = handler.handle().await {
                                     error!("Connection error from {}: {}", peer_addr, e);

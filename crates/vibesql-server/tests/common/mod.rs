@@ -6,13 +6,13 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 
 use vibesql_server::auth::PasswordStore;
 use vibesql_server::config::{
     AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig,
 };
-use vibesql_server::connection::ConnectionHandler;
+use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
 use vibesql_server::registry::DatabaseRegistry;
 use vibesql_server::subscription::SubscriptionConfig;
@@ -87,6 +87,10 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
     // Create shared database registry for tests
     let database_registry = DatabaseRegistry::new();
 
+    // Create broadcast channel for cross-connection subscription notifications
+    let (mutation_broadcast_tx, _mutation_broadcast_rx) =
+        broadcast::channel::<TableMutationNotification>(1024);
+
     // Spawn server task
     tokio::spawn(async move {
         loop {
@@ -100,6 +104,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                             let active_connections = Arc::clone(&active_connections);
                             let database_registry = database_registry.clone();
                             let subscription_manager = Arc::clone(&subscription_manager);
+                            let mutation_broadcast_tx = mutation_broadcast_tx.clone();
 
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -111,6 +116,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                                     active_connections,
                                     database_registry,
                                     subscription_manager,
+                                    mutation_broadcast_tx,
                                 );
                                 let _ = handler.handle().await;
                             });
