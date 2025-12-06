@@ -194,7 +194,13 @@ impl SelectExecutor<'_> {
     ///
     /// For fast path queries, we derive column names directly from the SELECT list
     /// and table schema without going through the full FROM clause execution.
-    fn derive_fast_path_column_names(
+    ///
+    /// # Performance Note (#3780)
+    ///
+    /// This method is called by `Session::execute_prepared()` to cache column names
+    /// in `SimpleFastPathPlan`. After the first execution, cached column names are
+    /// reused to avoid repeated table lookups and column name derivation.
+    pub fn derive_fast_path_column_names(
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<Vec<String>, ExecutorError> {

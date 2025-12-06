@@ -251,14 +251,33 @@ impl<'a> Session<'a> {
                 }
                 // Fall through to standard execution if fast path fails
             }
-            CachedPlan::SimpleFastPath(_plan) => {
-                // SimpleFastPath caches the result of is_simple_point_query()
-                // Use execute_fast_path_with_columns to bypass the check
+            CachedPlan::SimpleFastPath(plan) => {
+                // SimpleFastPath caches both the result of is_simple_point_query()
+                // AND the column names derived from the SELECT list (#3780)
                 let bound_stmt = stmt.bind(params)?;
                 if let Statement::Select(select_stmt) = &bound_stmt {
                     let executor = SelectExecutor::new(self.db);
-                    let result = executor.execute_fast_path_with_columns(select_stmt)?;
-                    return Ok(PreparedExecutionResult::Select(result));
+
+                    // Use cached column names if available, otherwise derive and cache them
+                    let columns = plan.get_or_resolve_columns(|| {
+                        executor.derive_fast_path_column_names(select_stmt).ok()
+                    });
+
+                    match columns {
+                        Some(cached_columns) => {
+                            // Fast path: use cached column names
+                            let rows = executor.execute_fast_path(select_stmt)?;
+                            return Ok(PreparedExecutionResult::Select(SelectResult {
+                                columns: cached_columns.iter().cloned().collect(),
+                                rows,
+                            }));
+                        }
+                        None => {
+                            // First execution or resolution failed: derive columns
+                            let result = executor.execute_fast_path_with_columns(select_stmt)?;
+                            return Ok(PreparedExecutionResult::Select(result));
+                        }
+                    }
                 }
                 // Fall through for non-SELECT (shouldn't happen for SimpleFastPath)
             }

@@ -17,6 +17,7 @@ pub use prepared_statement::{
     arena_prepared::{ArenaBindError, ArenaParseError, ArenaPreparedStatement},
     CachedPlan, ColumnProjection, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
     PreparedStatementCacheStats, PreparedStatementError, ProjectionPlan, ResolvedProjection,
+    SimpleFastPathPlan,
 };
 pub use query_plan_cache::{CacheStats, QueryPlanCache};
 pub use query_result_cache::QueryResultCache;
