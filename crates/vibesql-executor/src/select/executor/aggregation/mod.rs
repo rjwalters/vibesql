@@ -408,7 +408,7 @@ impl SelectExecutor<'_> {
                             let column_expr = vibesql_ast::Expression::ColumnRef {
                                 table: if schema.table_schemas.len() > 1 {
                                     // Multiple tables: qualify the column
-                                    Some(table_name.clone())
+                                    Some(table_name.to_string())
                                 } else {
                                     // Single table: no need to qualify
                                     None
@@ -425,15 +425,8 @@ impl SelectExecutor<'_> {
                 }
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
                     // Expand SELECT table.* to all columns from that specific table
-                    // Try exact match first
-                    let table_result = schema.table_schemas.get(qualifier).cloned().or_else(|| {
-                        // Fall back to case-insensitive lookup without allocation
-                        schema
-                            .table_schemas
-                            .iter()
-                            .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
-                            .map(|(_key, value)| value.clone())
-                    });
+                    // TableKey lookup is case-insensitive
+                    let table_result = schema.get_table(qualifier).cloned();
 
                     if let Some((_start_idx, table_schema)) = table_result {
                         for column in &table_schema.columns {

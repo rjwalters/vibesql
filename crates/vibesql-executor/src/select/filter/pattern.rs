@@ -325,10 +325,7 @@ mod tests {
 
         let schema = TableSchema::new("lineitem".to_string(), columns);
 
-        let mut table_schemas = HashMap::new();
-        table_schemas.insert("lineitem".to_string(), (0, schema));
-
-        CombinedSchema { table_schemas, total_columns: 3 }
+        CombinedSchema::from_table("lineitem".to_string(), schema)
     }
 
     #[test]

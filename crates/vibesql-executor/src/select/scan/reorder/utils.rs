@@ -130,30 +130,16 @@ pub(super) fn build_reordered_schema(
 
     // Walk through original order and rebuild schema with correct positions
     for table_name in original_order {
-        let table_lower = table_name.to_lowercase();
-
         // Find this table's schema in the current (optimally ordered) schema
-        // Try exact match first, then case-insensitive
+        // get_table handles case-insensitive lookups via TableKey
         let table_schema = current_schema
-            .table_schemas
-            .get(table_name)
-            .or_else(|| {
-                current_schema.table_schemas.iter().find_map(
-                    |(k, v): (&String, &(usize, vibesql_catalog::TableSchema))| {
-                        if k.to_lowercase() == table_lower {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    },
-                )
-            })
-            .map(|(_, schema): &(usize, vibesql_catalog::TableSchema)| schema.clone());
+            .get_table(table_name)
+            .map(|(_, schema)| schema.clone());
 
         if let Some(schema) = table_schema {
             let col_count = schema.columns.len();
-            // Use lowercase for consistent case-insensitive lookups
-            new_table_schemas.insert(table_name.to_lowercase(), (current_position, schema));
+            // TableKey handles case normalization automatically
+            new_table_schemas.insert(crate::schema::TableKey::new(table_name), (current_position, schema));
             current_position += col_count;
         }
     }
