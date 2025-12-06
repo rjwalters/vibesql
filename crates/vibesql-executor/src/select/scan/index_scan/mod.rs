@@ -8,13 +8,16 @@
 //! - `selection`: Index selection logic - determines when and which index to use
 //! - `predicate`: Predicate extraction - extracts range/IN predicates from WHERE clauses
 //! - `execution`: Index scan execution - performs the actual index scan and fetches rows
+//! - `covering`: Covering index scan - returns data directly from index keys (index-only scan)
 //!
 //! # Public API
 //!
 //! The main entry points are:
 //! - `should_use_index_scan()`: Determines if an index scan is beneficial
 //! - `execute_index_scan()`: Executes an index scan to retrieve rows
+//! - `try_covering_index_scan()`: Attempts a covering index scan (index-only)
 
+pub(crate) mod covering;
 mod execution;
 pub(crate) mod predicate;
 pub(crate) mod selection;
