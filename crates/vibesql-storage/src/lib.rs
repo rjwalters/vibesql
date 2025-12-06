@@ -47,7 +47,8 @@ pub use row::Row;
 pub use statistics::{ColumnStatistics, TableStatistics};
 pub use table::Table;
 pub use wal::{
-    Lsn, PersistenceConfig, PersistenceEngine, PersistenceStats, WalEntry, WalOp, WalOpTag,
+    DurabilityConfig, DurabilityMode, Lsn, PersistenceConfig, PersistenceEngine, PersistenceStats,
+    TransactionDurability, WalEntry, WalOp, WalOpTag,
 };
 
 // Platform-specific exports
