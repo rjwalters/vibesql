@@ -167,13 +167,18 @@ pub fn init(locale: Option<&str>) -> Result<(), L10nError> {
         .parse()
         .map_err(|_| L10nError::InvalidLocale(locale_str.clone()))?;
 
+    // Create the bundle eagerly to avoid race conditions in parallel tests.
+    // This ensures we use the locale passed to init() rather than reading
+    // the global LOCALE later (which another thread may have changed).
+    let new_bundle = create_bundle(&locale_str)?;
+
     // Update global locale setting
     let mut global_locale = LOCALE.write().map_err(|_| L10nError::LockError)?;
     *global_locale = locale_str.clone();
 
-    // Clear the thread-local bundle so it gets recreated with new locale
+    // Set the thread-local bundle with the new bundle created above
     BUNDLE.with(|bundle| {
-        *bundle.borrow_mut() = None;
+        *bundle.borrow_mut() = Some(new_bundle);
     });
 
     Ok(())
@@ -561,5 +566,76 @@ mod tests {
         let result = vibe_msg!("storage-table-not-found", name = "users");
         assert!(result.contains("users"));
         assert!(result.contains("見つかりません"));
+    }
+
+    #[test]
+    fn test_french_locale() {
+        init(Some("fr")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Au revoir !");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("lignes"));
+    }
+
+    #[test]
+    fn test_french_parser_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Chaîne littérale non terminée");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Caractère inattendu"));
+    }
+
+    #[test]
+    fn test_french_resources_embedded() {
+        // Check that French resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("fr/")), "French resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "fr/cli.ftl"), "fr/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/parser.ftl"), "fr/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/executor.ftl"), "fr/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/storage.ftl"), "fr/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/catalog.ftl"), "fr/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_french_executor_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "Division par zéro");
+
+        let result = vibe_msg!("executor-table-not-found", name = "utilisateurs");
+        assert!(result.contains("utilisateurs"));
+        assert!(result.contains("introuvable"));
+    }
+
+    #[test]
+    fn test_french_storage_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = vibe_msg!("storage-row-not-found");
+        assert_eq!(result, "Ligne introuvable");
+
+        let result = vibe_msg!("storage-column-count-mismatch", expected = 3, actual = 5);
+        assert!(result.contains("3"));
+        assert!(result.contains("5"));
+    }
+
+    #[test]
+    fn test_french_catalog_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "produits");
+        assert!(result.contains("produits"));
+        assert!(result.contains("existe déjà"));
     }
 }
