@@ -86,3 +86,7 @@ harness = false
 [[bench]]
 name = "change_event_bench"
 harness = false
+
+[[bench]]
+name = "durability_modes"
+harness = false
