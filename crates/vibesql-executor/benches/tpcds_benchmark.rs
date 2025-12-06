@@ -363,6 +363,28 @@ fn benchmark_vibesql_query(db: &VibeDB, sql: &str) -> usize {
     }
 }
 
+/// Try to execute a query on SQLite, returning an error if it fails
+#[cfg(feature = "sqlite-comparison")]
+fn try_sqlite_query(conn: &SqliteConn, sql: &str) -> Result<usize, String> {
+    match conn.prepare(sql) {
+        Ok(mut stmt) => match stmt.query([]) {
+            Ok(mut rows) => {
+                let mut count = 0;
+                loop {
+                    match rows.next() {
+                        Ok(Some(_)) => count += 1,
+                        Ok(None) => break,
+                        Err(e) => return Err(format!("Row error: {}", e)),
+                    }
+                }
+                Ok(count)
+            }
+            Err(e) => Err(format!("Query error: {}", e)),
+        },
+        Err(e) => Err(format!("Prepare error: {}", e)),
+    }
+}
+
 /// Helper function to benchmark a query on SQLite
 #[cfg(feature = "sqlite-comparison")]
 fn benchmark_sqlite_query(conn: &SqliteConn, sql: &str) -> usize {
@@ -373,6 +395,28 @@ fn benchmark_sqlite_query(conn: &SqliteConn, sql: &str) -> usize {
         count += 1;
     }
     count
+}
+
+/// Try to execute a query on DuckDB, returning an error if it fails
+#[cfg(feature = "duckdb-comparison")]
+fn try_duckdb_query(conn: &DuckDBConn, sql: &str) -> Result<usize, String> {
+    match conn.prepare(sql) {
+        Ok(mut stmt) => match stmt.query([]) {
+            Ok(mut rows) => {
+                let mut count = 0;
+                loop {
+                    match rows.next() {
+                        Ok(Some(_)) => count += 1,
+                        Ok(None) => break,
+                        Err(e) => return Err(format!("Row error: {}", e)),
+                    }
+                }
+                Ok(count)
+            }
+            Err(e) => Err(format!("Query error: {}", e)),
+        },
+        Err(e) => Err(format!("Prepare error: {}", e)),
+    }
 }
 
 /// Helper function to benchmark a query on DuckDB
@@ -512,27 +556,45 @@ fn bench_sanity_queries_comparison(c: &mut Criterion) {
             });
         });
 
-        // SQLite benchmark (only if enabled)
+        // SQLite benchmark (only if enabled and query is supported)
         if let Some(sqlite) = sqlite_conn {
-            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
-                b.iter(|| {
-                    let conn = sqlite.lock().unwrap();
-                    let count = benchmark_sqlite_query(&conn, sql);
-                    black_box(count);
-                });
-            });
+            let conn = sqlite.lock().unwrap();
+            match try_sqlite_query(&conn, sql) {
+                Ok(_) => {
+                    drop(conn);
+                    group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                        b.iter(|| {
+                            let conn = sqlite.lock().unwrap();
+                            let count = benchmark_sqlite_query(&conn, sql);
+                            black_box(count);
+                        });
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[SQLite SKIP] sanity_{}: {}", name, e);
+                }
+            }
         }
 
-        // DuckDB benchmark (only if enabled)
+        // DuckDB benchmark (only if enabled and query is supported)
         #[cfg(feature = "duckdb-comparison")]
         if let Some(duckdb) = duckdb_conn {
-            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
-                b.iter(|| {
-                    let conn = duckdb.lock().unwrap();
-                    let count = benchmark_duckdb_query(&conn, sql);
-                    black_box(count);
-                });
-            });
+            let conn = duckdb.lock().unwrap();
+            match try_duckdb_query(&conn, sql) {
+                Ok(_) => {
+                    drop(conn);
+                    group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                        b.iter(|| {
+                            let conn = duckdb.lock().unwrap();
+                            let count = benchmark_duckdb_query(&conn, sql);
+                            black_box(count);
+                        });
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[DuckDB SKIP] sanity_{}: {}", name, e);
+                }
+            }
         }
 
         // MySQL benchmark (only if enabled)
@@ -633,27 +695,45 @@ fn bench_tpcds_queries_comparison(c: &mut Criterion) {
             });
         });
 
-        // SQLite benchmark (only if enabled)
+        // SQLite benchmark (only if enabled and query is supported)
         if let Some(sqlite) = sqlite_conn {
-            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
-                b.iter(|| {
-                    let conn = sqlite.lock().unwrap();
-                    let count = benchmark_sqlite_query(&conn, sql);
-                    black_box(count);
-                });
-            });
+            let conn = sqlite.lock().unwrap();
+            match try_sqlite_query(&conn, sql) {
+                Ok(_) => {
+                    drop(conn);
+                    group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                        b.iter(|| {
+                            let conn = sqlite.lock().unwrap();
+                            let count = benchmark_sqlite_query(&conn, sql);
+                            black_box(count);
+                        });
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[SQLite SKIP] {}: {}", name, e);
+                }
+            }
         }
 
-        // DuckDB benchmark (only if enabled)
+        // DuckDB benchmark (only if enabled and query is supported)
         #[cfg(feature = "duckdb-comparison")]
         if let Some(duckdb) = duckdb_conn {
-            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
-                b.iter(|| {
-                    let conn = duckdb.lock().unwrap();
-                    let count = benchmark_duckdb_query(&conn, sql);
-                    black_box(count);
-                });
-            });
+            let conn = duckdb.lock().unwrap();
+            match try_duckdb_query(&conn, sql) {
+                Ok(_) => {
+                    drop(conn);
+                    group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                        b.iter(|| {
+                            let conn = duckdb.lock().unwrap();
+                            let count = benchmark_duckdb_query(&conn, sql);
+                            black_box(count);
+                        });
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[DuckDB SKIP] {}: {}", name, e);
+                }
+            }
         }
 
         // MySQL benchmark (only if enabled)
@@ -747,27 +827,45 @@ fn bench_tpcds_slow_queries_comparison(c: &mut Criterion) {
             });
         });
 
-        // SQLite benchmark (only if enabled)
+        // SQLite benchmark (only if enabled and query is supported)
         if let Some(sqlite) = sqlite_conn {
-            group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
-                b.iter(|| {
-                    let conn = sqlite.lock().unwrap();
-                    let count = benchmark_sqlite_query(&conn, sql);
-                    black_box(count);
-                });
-            });
+            let conn = sqlite.lock().unwrap();
+            match try_sqlite_query(&conn, sql) {
+                Ok(_) => {
+                    drop(conn);
+                    group.bench_function(BenchmarkId::new("sqlite", *name), |b| {
+                        b.iter(|| {
+                            let conn = sqlite.lock().unwrap();
+                            let count = benchmark_sqlite_query(&conn, sql);
+                            black_box(count);
+                        });
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[SQLite SKIP] {}: {}", name, e);
+                }
+            }
         }
 
-        // DuckDB benchmark (only if enabled)
+        // DuckDB benchmark (only if enabled and query is supported)
         #[cfg(feature = "duckdb-comparison")]
         if let Some(duckdb) = duckdb_conn {
-            group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
-                b.iter(|| {
-                    let conn = duckdb.lock().unwrap();
-                    let count = benchmark_duckdb_query(&conn, sql);
-                    black_box(count);
-                });
-            });
+            let conn = duckdb.lock().unwrap();
+            match try_duckdb_query(&conn, sql) {
+                Ok(_) => {
+                    drop(conn);
+                    group.bench_function(BenchmarkId::new("duckdb", *name), |b| {
+                        b.iter(|| {
+                            let conn = duckdb.lock().unwrap();
+                            let count = benchmark_duckdb_query(&conn, sql);
+                            black_box(count);
+                        });
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[DuckDB SKIP] {}: {}", name, e);
+                }
+            }
         }
 
         // MySQL benchmark (only if enabled)

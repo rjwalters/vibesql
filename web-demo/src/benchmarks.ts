@@ -397,13 +397,18 @@ interface TPCCResults {
 }
 
 /**
- * TPC-DS benchmark interfaces (VibeSQL only, different stats format)
+ * TPC-DS benchmark interfaces (now with comparison data from SQLite and DuckDB)
  */
 interface TPCDSStats {
   mean: number;
   total: number;
   rows: number;
   status: 'passed' | 'failed' | 'timeout';
+  // Optional fields from Criterion data (present when comparison is enabled)
+  stddev?: number;
+  min?: number;
+  max?: number;
+  rounds?: number;
 }
 
 interface TPCDSBenchmark {
@@ -1696,11 +1701,46 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       return;
     }
 
-    // Handle TPC-DS suite differently (VibeSQL only, different stats format)
+    // Handle TPC-DS suite - now with comparison data (VibeSQL, SQLite, DuckDB)
     if (suite === 'tpcds') {
       const data: TPCDSResults = await response.json();
-      renderTPCDSTable(data);
-      renderTPCDSChart(data);
+
+      // Check if comparison data exists (look for sqlite or duckdb entries)
+      const hasComparison = data.benchmarks.some(b =>
+        b.name.endsWith('_sqlite') || b.name.endsWith('_duckdb') || b.name.endsWith('_mysql')
+      );
+
+      if (hasComparison) {
+        // Use standard comparison rendering (like TPC-H)
+        const benchmarkResults: BenchmarkResults = {
+          benchmarks: data.benchmarks.map(b => ({
+            name: b.name,
+            stats: {
+              mean: b.stats.mean,
+              stddev: b.stats.stddev ?? 0,
+              min: b.stats.min ?? b.stats.mean * 0.95,
+              max: b.stats.max ?? b.stats.mean * 1.05,
+              rounds: b.stats.rounds ?? 100,
+            }
+          })),
+          datetime: data.metadata.timestamp,
+        };
+
+        // Update last updated timestamp
+        const lastUpdatedEl = document.getElementById('last-updated');
+        if (lastUpdatedEl && data.metadata.timestamp) {
+          const date = new Date(data.metadata.timestamp);
+          lastUpdatedEl.textContent = date.toLocaleDateString();
+          lastUpdatedEl.className = 'text-xl font-bold text-primary-light dark:text-primary-dark';
+        }
+
+        renderResultsTable(benchmarkResults, suite);
+        renderChart(benchmarkResults, suite);
+      } else {
+        // Fall back to VibeSQL-only rendering
+        renderTPCDSTable(data);
+        renderTPCDSChart(data);
+      }
       return;
     }
 
