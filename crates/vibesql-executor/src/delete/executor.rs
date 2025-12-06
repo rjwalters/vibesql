@@ -131,6 +131,41 @@ impl DeleteExecutor {
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
             .clone();
 
+        // Fast path: Single-row PK delete without triggers/FKs
+        // This avoids ExpressionEvaluator creation and row cloning
+        if procedural_context.is_none() && trigger_context.is_none() {
+            if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
+                if let Some(pk_values) = Self::extract_primary_key_lookup(where_expr, &schema) {
+                    // Check if we can use the super-fast path (no triggers, no FKs)
+                    let has_triggers = database
+                        .catalog
+                        .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Delete))
+                        .next()
+                        .is_some();
+
+                    // Fast check: if this table has no PK, FKs can't reference it
+                    let has_pk = schema.get_primary_key_indices().is_some();
+                    let has_referencing_fks = has_pk && database.catalog.list_tables().iter().any(|t| {
+                        database
+                            .catalog
+                            .get_table(t)
+                            .map(|s| s.foreign_keys.iter().any(|fk| fk.parent_table.eq_ignore_ascii_case(&stmt.table_name)))
+                            .unwrap_or(false)
+                    });
+
+                    if !has_triggers && !has_referencing_fks {
+                        // Use the fast path - no triggers, no FKs, single row PK delete
+                        match database.delete_by_pk_fast(&stmt.table_name, &pk_values) {
+                            Ok(deleted) => return Ok(if deleted { 1 } else { 0 }),
+                            Err(_) => {
+                                // Fall through to standard path on error
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Step 2: Evaluate WHERE clause and collect rows to delete (two-phase execution)
         // Get table for scanning
         let table = database
