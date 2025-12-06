@@ -45,11 +45,12 @@ jobs:
       - name: Run MIRI on executor tests (sample)
         run: |
           # Run a limited set of executor tests due to MIRI's slowness
+          # Note: This blocks PRs on UB detection - intentionally strict
           cargo miri test --package vibesql-executor --lib \
             --test-threads=1 \
             -- \
             test_basic \
-            || (echo "::warning::Some executor tests failed under MIRI" && true)
+            || (echo "::error::MIRI detected undefined behavior in executor tests" && exit 1)
 
       - name: MIRI validation summary
         if: success()
