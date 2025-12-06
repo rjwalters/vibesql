@@ -13,8 +13,11 @@ pub use vibesql_ast::StorageFormat;
 pub struct TableSchema {
     pub name: String,
     pub columns: Vec<ColumnSchema>,
-    /// Cache for O(1) column name to index lookup
+    /// Cache for O(1) column name to index lookup (case-sensitive, exact match)
     column_index_cache: HashMap<String, usize>,
+    /// Secondary cache for case-insensitive lookups (lowercase key -> index)
+    /// Used when exact match fails, for unquoted identifier resolution
+    column_index_cache_lower: HashMap<String, usize>,
     /// Primary key column names (None if no primary key, Some(vec) for single or composite key)
     pub primary_key: Option<Vec<String>>,
     /// Unique constraints - each inner vec represents a unique constraint (can be single or
@@ -29,14 +32,27 @@ pub struct TableSchema {
 }
 
 impl TableSchema {
-    pub fn new(name: String, columns: Vec<ColumnSchema>) -> Self {
-        let column_index_cache: HashMap<String, usize> =
+    /// Build both case-sensitive and case-insensitive column index caches
+    fn build_column_caches(
+        columns: &[ColumnSchema],
+    ) -> (HashMap<String, usize>, HashMap<String, usize>) {
+        let exact_cache: HashMap<String, usize> =
+            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+
+        let lower_cache: HashMap<String, usize> =
             columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+
+        (exact_cache, lower_cache)
+    }
+
+    pub fn new(name: String, columns: Vec<ColumnSchema>) -> Self {
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key: None,
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
@@ -51,13 +67,13 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         primary_key: Vec<String>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key: Some(primary_key),
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
@@ -72,13 +88,13 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         unique_constraints: Vec<Vec<String>>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key: None,
             unique_constraints,
             check_constraints: Vec::new(),
@@ -93,13 +109,13 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         foreign_keys: Vec<ForeignKeyConstraint>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key: None,
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
@@ -115,13 +131,13 @@ impl TableSchema {
         primary_key: Option<Vec<String>>,
         unique_constraints: Vec<Vec<String>>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key,
             unique_constraints,
             check_constraints: Vec::new(),
@@ -139,13 +155,13 @@ impl TableSchema {
         check_constraints: Vec<(String, vibesql_ast::Expression)>,
         foreign_keys: Vec<ForeignKeyConstraint>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key,
             unique_constraints,
             check_constraints,
@@ -160,13 +176,13 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         storage_format: StorageFormat,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.to_lowercase(), idx)).collect();
+        let (column_index_cache, column_index_cache_lower) = Self::build_column_caches(&columns);
 
         TableSchema {
             name,
             columns,
             column_index_cache,
+            column_index_cache_lower,
             primary_key: None,
             unique_constraints: Vec::new(),
             check_constraints: Vec::new(),
@@ -192,9 +208,15 @@ impl TableSchema {
     }
 
     /// Get column index by name.
-    /// Uses case-insensitive matching for column names via lowercase cache keys.
+    /// Tries exact match first (for case-sensitive/quoted identifiers),
+    /// then falls back to case-insensitive matching (for unquoted identifiers).
     pub fn get_column_index(&self, name: &str) -> Option<usize> {
-        self.column_index_cache.get(&name.to_lowercase()).copied()
+        // First try exact case-sensitive match (for delimited/quoted identifiers)
+        if let Some(&idx) = self.column_index_cache.get(name) {
+            return Some(idx);
+        }
+        // Fall back to case-insensitive match (for regular/unquoted identifiers)
+        self.column_index_cache_lower.get(&name.to_lowercase()).copied()
     }
 
     /// Get number of columns.
@@ -229,7 +251,8 @@ impl TableSchema {
             return Err(crate::CatalogError::ColumnAlreadyExists(column.name));
         }
         let index = self.columns.len();
-        self.column_index_cache.insert(column.name.to_lowercase(), index);
+        self.column_index_cache.insert(column.name.clone(), index);
+        self.column_index_cache_lower.insert(column.name.to_lowercase(), index);
         self.columns.push(column);
         Ok(())
     }
@@ -244,11 +267,10 @@ impl TableSchema {
         }
         let removed_column = self.columns.remove(index);
 
-        // Rebuild the column index cache since indices have shifted
-        self.column_index_cache.clear();
-        for (idx, col) in self.columns.iter().enumerate() {
-            self.column_index_cache.insert(col.name.to_lowercase(), idx);
-        }
+        // Rebuild both column index caches since indices have shifted
+        let (new_cache, new_cache_lower) = Self::build_column_caches(&self.columns);
+        self.column_index_cache = new_cache;
+        self.column_index_cache_lower = new_cache_lower;
 
         // Remove from primary key if present
         if let Some(ref mut pk) = self.primary_key {
