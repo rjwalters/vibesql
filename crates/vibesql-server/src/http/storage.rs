@@ -240,7 +240,9 @@ async fn delete_blob(
     }
 }
 
-#[cfg(test)]
+/// Tests for blob storage HTTP handlers.
+/// These tests require the memory storage backend to be enabled.
+#[cfg(all(test, feature = "opendal", feature = "storage-memory"))]
 mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
