@@ -737,7 +737,8 @@ impl Database {
     /// Caller must ensure:
     /// - No triggers exist on this table for DELETE
     /// - No foreign key constraints reference this table
-    /// - No WAL logging is required (or caller handles it)
+    ///
+    /// Note: WAL logging is handled internally by this method.
     ///
     /// # Example
     /// ```rust,ignore
@@ -776,6 +777,9 @@ impl Database {
 
             (row_index, row)
         };
+
+        // Emit WAL entry before deleting (needed for crash recovery)
+        self.emit_wal_delete(table_name, row_index as u64, row_clone.values.clone());
 
         // Update user-defined indexes with the cloned row
         self.operations.update_indexes_for_delete(&self.catalog, table_name, &row_clone, row_index);
