@@ -892,4 +892,94 @@ mod tests {
         assert!(result.contains("myschema"));
         assert!(result.contains("tidak ditemukan"));
     }
+
+    #[test]
+    fn test_swedish_locale() {
+        init(Some("sv")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Hej då!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("rader"));
+    }
+
+    #[test]
+    fn test_swedish_parser_messages() {
+        init(Some("sv")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Oavslutad stränglitteral");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Oväntat tecken"));
+    }
+
+    #[test]
+    fn test_swedish_resources_embedded() {
+        // Check that Swedish resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("sv/")), "Swedish resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "sv/cli.ftl"), "sv/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "sv/parser.ftl"), "sv/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "sv/executor.ftl"), "sv/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "sv/storage.ftl"), "sv/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "sv/catalog.ftl"), "sv/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_swedish_executor_messages() {
+        init(Some("sv")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("hittades inte"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "Division med noll");
+    }
+
+    #[test]
+    fn test_swedish_storage_messages() {
+        init(Some("sv")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("hittades inte"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "Rad hittades inte");
+    }
+
+    #[test]
+    fn test_swedish_catalog_messages() {
+        init(Some("sv")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("finns redan"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("hittades inte"));
+    }
+
+    #[test]
+    fn test_swedish_special_characters() {
+        init(Some("sv")).unwrap();
+
+        // Test messages with Swedish characters (å, ä, ö) are correctly handled
+        let result = vibe_msg!("executor-schema-not-empty", name = "offentlig");
+        assert!(result.contains("offentlig"));
+        assert!(result.contains("är inte tomt"));
+
+        // Test the help hint with Swedish characters
+        let result = format("cli-help-hint", None);
+        assert!(result.contains("\\help"));
+        assert!(result.contains("hjälp"));
+    }
 }
