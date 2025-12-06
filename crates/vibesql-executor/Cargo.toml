@@ -234,3 +234,7 @@ harness = false
 [[bench]]
 name = "sysbench_server"
 harness = false
+
+[[bench]]
+name = "delete_profiling"
+harness = false
