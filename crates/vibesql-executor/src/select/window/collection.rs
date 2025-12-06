@@ -53,7 +53,10 @@ fn collect_from_expression(
                 collect_from_expression(arg, select_index, window_functions)?;
             }
         }
-        Expression::Case { when_clauses, else_result, .. } => {
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                collect_from_expression(op, select_index, window_functions)?;
+            }
             for when_clause in when_clauses {
                 for cond in &when_clause.conditions {
                     collect_from_expression(cond, select_index, window_functions)?;
@@ -63,6 +66,9 @@ fn collect_from_expression(
             if let Some(else_expr) = else_result {
                 collect_from_expression(else_expr, select_index, window_functions)?;
             }
+        }
+        Expression::IsNull { expr, .. } => {
+            collect_from_expression(expr, select_index, window_functions)?;
         }
         _ => {}
     }

@@ -131,6 +131,23 @@ pub(super) fn evaluate_expression_with_windows(
             let new_expr = Expression::UnaryOp { expr: Box::new(inner_substituted), op: *op };
             evaluator.eval(&new_expr, row)
         }
+        Expression::Case { .. } => {
+            // Substitute window functions in CASE expressions before evaluating
+            let substituted = substitute_window_functions(expr, row, window_mapping)?;
+            evaluator.eval(&substituted, row)
+        }
+        Expression::Function { .. } => {
+            // Substitute window functions in function arguments before evaluating
+            let substituted = substitute_window_functions(expr, row, window_mapping)?;
+            evaluator.eval(&substituted, row)
+        }
+        Expression::IsNull { expr: inner, negated } => {
+            // Substitute window functions in IS NULL expressions
+            let inner_substituted = substitute_window_functions(inner, row, window_mapping)?;
+            let new_expr =
+                Expression::IsNull { expr: Box::new(inner_substituted), negated: *negated };
+            evaluator.eval(&new_expr, row)
+        }
         _ => {
             // For non-window expressions, use the regular evaluator
             evaluator.eval(expr, row)
@@ -227,6 +244,10 @@ fn substitute_window_functions(
                 when_clauses: subst_when?,
                 else_result: subst_else,
             })
+        }
+        Expression::IsNull { expr: inner, negated } => {
+            let inner_sub = substitute_window_functions(inner, row, window_mapping)?;
+            Ok(Expression::IsNull { expr: Box::new(inner_sub), negated: *negated })
         }
         // For all other expressions (literals, column refs, etc.), no substitution needed
         _ => Ok(expr.clone()),

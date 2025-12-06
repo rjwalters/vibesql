@@ -65,4 +65,10 @@ export interface WasmModule {
     new (): Database
     newWithPersistence(): Promise<Database>
   }
+
+  /** Set the locale for localized error messages (optional, requires i18n feature) */
+  set_locale?: (locale: string) => void
+
+  /** Get the current locale (optional, requires i18n feature) */
+  get_locale?: () => string
 }

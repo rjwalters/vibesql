@@ -876,7 +876,7 @@ def ensure_python_bindings():
         wheel_path = max(wheels, key=lambda w: w.stat().st_mtime)
         print(f"  Installing wheel: {wheel_path.name}")
         result = subprocess.run(
-            ["pip3", "install", "--force-reinstall", "--quiet", str(wheel_path)],
+            ["pip3", "install", "--force-reinstall", "--quiet", "--break-system-packages", str(wheel_path)],
             cwd=Path(__file__).parent.parent
         )
         if result.returncode == 0:

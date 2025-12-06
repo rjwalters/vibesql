@@ -70,29 +70,37 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
+            // Try integer bounds first for optimal i64 SIMD path
             let low_i64 = match low {
-                SqlValue::Integer(v) => *v,
-                SqlValue::Bigint(v) => *v,
-                _ => {
-                    return Err(ExecutorError::ColumnarTypeMismatch {
-                        operation: "BETWEEN".to_string(),
-                        left_type: "Int64".to_string(),
-                        right_type: None,
-                    })
-                }
+                SqlValue::Integer(v) => Some(*v),
+                SqlValue::Bigint(v) => Some(*v),
+                _ => None,
             };
             let high_i64 = match high {
-                SqlValue::Integer(v) => *v,
-                SqlValue::Bigint(v) => *v,
-                _ => {
-                    return Err(ExecutorError::ColumnarTypeMismatch {
+                SqlValue::Integer(v) => Some(*v),
+                SqlValue::Bigint(v) => Some(*v),
+                _ => None,
+            };
+
+            if let (Some(lo), Some(hi)) = (low_i64, high_i64) {
+                simd_ops::between_i64(values, lo, hi)
+            } else {
+                // Fall back to f64 comparison for non-integer bounds (e.g., Numeric from division)
+                let low_f64 =
+                    value_to_f64(low).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "BETWEEN".to_string(),
                         left_type: "Int64".to_string(),
-                        right_type: None,
-                    })
-                }
-            };
-            simd_ops::between_i64(values, low_i64, high_i64)
+                        right_type: Some(format!("{:?}", low)),
+                    })?;
+                let high_f64 =
+                    value_to_f64(high).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "BETWEEN".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", high)),
+                    })?;
+                let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
+                simd_ops::between_f64(&f64_values, low_f64, high_f64)
+            }
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
@@ -493,29 +501,37 @@ pub fn evaluate_predicate_i64_packed(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
+            // Try integer bounds first for optimal i64 SIMD path
             let low_i64 = match low {
-                SqlValue::Integer(v) => *v,
-                SqlValue::Bigint(v) => *v,
-                _ => {
-                    return Err(ExecutorError::ColumnarTypeMismatch {
-                        operation: "BETWEEN".to_string(),
-                        left_type: "Int64".to_string(),
-                        right_type: None,
-                    })
-                }
+                SqlValue::Integer(v) => Some(*v),
+                SqlValue::Bigint(v) => Some(*v),
+                _ => None,
             };
             let high_i64 = match high {
-                SqlValue::Integer(v) => *v,
-                SqlValue::Bigint(v) => *v,
-                _ => {
-                    return Err(ExecutorError::ColumnarTypeMismatch {
+                SqlValue::Integer(v) => Some(*v),
+                SqlValue::Bigint(v) => Some(*v),
+                _ => None,
+            };
+
+            if let (Some(lo), Some(hi)) = (low_i64, high_i64) {
+                simd_ops::between_i64_packed(values, lo, hi)
+            } else {
+                // Fall back to f64 comparison for non-integer bounds (e.g., Numeric from division)
+                let low_f64 =
+                    value_to_f64(low).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                         operation: "BETWEEN".to_string(),
                         left_type: "Int64".to_string(),
-                        right_type: None,
-                    })
-                }
-            };
-            simd_ops::between_i64_packed(values, low_i64, high_i64)
+                        right_type: Some(format!("{:?}", low)),
+                    })?;
+                let high_f64 =
+                    value_to_f64(high).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
+                        operation: "BETWEEN".to_string(),
+                        left_type: "Int64".to_string(),
+                        right_type: Some(format!("{:?}", high)),
+                    })?;
+                let f64_values: Vec<f64> = values.iter().map(|&v| v as f64).collect();
+                simd_ops::between_f64_packed(&f64_values, low_f64, high_f64)
+            }
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {

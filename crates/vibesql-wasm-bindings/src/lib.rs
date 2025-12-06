@@ -36,6 +36,24 @@ fn detect_browser_locale() -> Option<String> {
         .and_then(|w| w.navigator().language())
 }
 
+/// Sets the locale for localized error messages at runtime.
+///
+/// This allows changing the language without reloading the page.
+/// Supported locales include: en-US, es, pt-BR, zh-CN, ja, de, fr, ko,
+/// id, sv, th, vi.
+#[cfg(feature = "i18n")]
+#[wasm_bindgen]
+pub fn set_locale(locale: &str) {
+    let _ = vibesql_l10n::init(Some(locale));
+}
+
+/// Gets the currently active locale code.
+#[cfg(feature = "i18n")]
+#[wasm_bindgen]
+pub fn get_locale() -> String {
+    vibesql_l10n::current_locale().to_string()
+}
+
 /// Result of a query execution
 #[derive(Serialize, Deserialize)]
 #[wasm_bindgen(getter_with_clone)]
