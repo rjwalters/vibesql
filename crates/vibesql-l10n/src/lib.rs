@@ -425,4 +425,73 @@ mod tests {
         assert!(files.iter().any(|f| f == "pt-BR/storage.ftl"), "pt-BR/storage.ftl not found");
         assert!(files.iter().any(|f| f == "pt-BR/catalog.ftl"), "pt-BR/catalog.ftl not found");
     }
+
+    #[test]
+    fn test_chinese_locale() {
+        init(Some("zh-CN")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "再见！");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("行"));
+    }
+
+    #[test]
+    fn test_chinese_parser_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "未终止的字符串字面量");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("意外的字符"));
+    }
+
+    #[test]
+    fn test_chinese_resources_embedded() {
+        // Check that Chinese resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("zh-CN/")), "Chinese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "zh-CN/cli.ftl"), "zh-CN/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/parser.ftl"), "zh-CN/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/executor.ftl"), "zh-CN/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/storage.ftl"), "zh-CN/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/catalog.ftl"), "zh-CN/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_chinese_executor_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("未找到表"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "除以零");
+    }
+
+    #[test]
+    fn test_chinese_storage_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = vibe_msg!("storage-column-count-mismatch", expected = 3, actual = 5);
+        assert!(result.contains("3"));
+        assert!(result.contains("5"));
+        assert!(result.contains("列数不匹配"));
+    }
+
+    #[test]
+    fn test_chinese_catalog_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("已存在"));
+    }
 }
