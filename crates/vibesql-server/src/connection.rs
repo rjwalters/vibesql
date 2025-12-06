@@ -6,7 +6,7 @@ use crate::protocol::{
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
-use crate::subscription::{SessionSubscriptionManager, SubscriptionManager};
+use crate::subscription::{extract_table_refs, SessionSubscriptionManager, SubscriptionManager};
 use anyhow::Result;
 use bytes::BytesMut;
 use std::collections::HashMap;
@@ -349,7 +349,20 @@ impl ConnectionHandler {
                     metrics.record_query(query_duration, stmt_type, true, rows_affected);
                 }
 
+                // Check if this was a mutation that might affect subscriptions
+                let is_mutation = matches!(
+                    &result,
+                    ExecutionResult::Insert { .. }
+                        | ExecutionResult::Update { .. }
+                        | ExecutionResult::Delete { .. }
+                );
+
                 self.send_query_result(result).await?;
+
+                // Notify affected subscriptions after mutations
+                if is_mutation {
+                    self.notify_affected_subscriptions(query).await;
+                }
 
                 // Return appropriate transaction status
                 let txn_status = self.get_transaction_status();
@@ -461,6 +474,100 @@ impl ConnectionHandler {
         }
 
         Ok(())
+    }
+
+    /// Notify affected subscriptions after a mutation (INSERT/UPDATE/DELETE)
+    ///
+    /// This method parses the mutation query to extract the affected table,
+    /// finds all subscriptions that depend on that table, re-executes their
+    /// queries, and sends updated results to the client.
+    async fn notify_affected_subscriptions(&mut self, mutation_query: &str) {
+        // Parse the mutation query to extract affected tables
+        let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {
+            Ok(stmt) => extract_table_refs(&stmt),
+            Err(e) => {
+                debug!("Failed to parse mutation query for subscription update: {}", e);
+                return;
+            }
+        };
+
+        if affected_tables.is_empty() {
+            return;
+        }
+
+        // Collect subscriptions that need updating
+        // We collect (subscription_id, query) pairs to avoid borrowing issues
+        let subscriptions_to_update: Vec<([u8; 16], String)> = affected_tables
+            .iter()
+            .flat_map(|table| {
+                self.subscription_manager
+                    .get_subscriptions_for_table_with_details(table)
+                    .map(|(id, sub)| (*id, sub.query.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        if subscriptions_to_update.is_empty() {
+            return;
+        }
+
+        // De-duplicate subscriptions (a subscription may depend on multiple affected tables)
+        let mut seen = std::collections::HashSet::new();
+        let unique_subscriptions: Vec<_> = subscriptions_to_update
+            .into_iter()
+            .filter(|(id, _)| seen.insert(*id))
+            .collect();
+
+        debug!(
+            "Notifying {} subscriptions after mutation affecting tables: {:?}",
+            unique_subscriptions.len(),
+            affected_tables
+        );
+
+        // Re-execute each subscription query and send updates
+        for (subscription_id, query) in unique_subscriptions {
+            if let Some(session) = &mut self.session {
+                match session.execute(&query).await {
+                    Ok(ExecutionResult::Select { rows, .. }) => {
+                        // Convert rows to wire format
+                        let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
+                            .iter()
+                            .map(|row| {
+                                row.values
+                                    .iter()
+                                    .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                                    .collect()
+                            })
+                            .collect();
+
+                        // Send full update (could optimize to send delta in the future)
+                        if let Err(e) = self
+                            .send_subscription_data(
+                                &subscription_id,
+                                SubscriptionUpdateType::Full,
+                                wire_rows,
+                            )
+                            .await
+                        {
+                            warn!("Failed to send subscription update: {}", e);
+                        }
+                    }
+                    Ok(_) => {
+                        // Non-SELECT result - shouldn't happen for a subscription query
+                        warn!("Subscription query returned non-SELECT result");
+                    }
+                    Err(e) => {
+                        // Query failed - send error to subscriber
+                        if let Err(send_err) = self
+                            .send_subscription_error(&subscription_id, &format!("Query error: {}", e))
+                            .await
+                        {
+                            warn!("Failed to send subscription error: {}", send_err);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Send query result to client

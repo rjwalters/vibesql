@@ -91,9 +91,9 @@ impl SessionSubscriptionManager {
             table_dependencies: table_dependencies.clone(),
         };
 
-        // Update table -> subscription index
+        // Update table -> subscription index (normalize to lowercase for case-insensitive matching)
         for table in &table_dependencies {
-            self.table_to_subscriptions.entry(table.clone()).or_default().insert(id);
+            self.table_to_subscriptions.entry(table.to_lowercase()).or_default().insert(id);
         }
 
         self.subscriptions.insert(id, subscription);
@@ -139,12 +139,13 @@ impl SessionSubscriptionManager {
         subscription_id: &SessionSubscriptionId,
     ) -> Option<SessionSubscription> {
         if let Some(subscription) = self.subscriptions.remove(subscription_id) {
-            // Clean up table -> subscription index
+            // Clean up table -> subscription index (use lowercase to match how we stored it)
             for table in &subscription.table_dependencies {
-                if let Some(sub_ids) = self.table_to_subscriptions.get_mut(table) {
+                let table_lower = table.to_lowercase();
+                if let Some(sub_ids) = self.table_to_subscriptions.get_mut(&table_lower) {
                     sub_ids.remove(subscription_id);
                     if sub_ids.is_empty() {
-                        self.table_to_subscriptions.remove(table);
+                        self.table_to_subscriptions.remove(&table_lower);
                     }
                 }
             }
@@ -154,13 +155,30 @@ impl SessionSubscriptionManager {
         }
     }
 
-    /// Get all subscription IDs that depend on a given table
-    #[allow(dead_code)]
+    /// Get all subscription IDs that depend on a given table (case-insensitive)
     pub fn get_subscriptions_for_table(&self, table: &str) -> Vec<SessionSubscriptionId> {
         self.table_to_subscriptions
-            .get(table)
+            .get(&table.to_lowercase())
             .map(|ids| ids.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// Get subscriptions that depend on a given table (case-insensitive)
+    ///
+    /// Returns an iterator over (subscription_id, subscription) pairs for all
+    /// subscriptions that depend on the given table. This is used to notify
+    /// subscribers when a table is mutated.
+    pub fn get_subscriptions_for_table_with_details(
+        &self,
+        table: &str,
+    ) -> impl Iterator<Item = (&SessionSubscriptionId, &SessionSubscription)> {
+        let table_lower = table.to_lowercase();
+        self.table_to_subscriptions
+            .get(&table_lower)
+            .into_iter()
+            .flat_map(|ids| {
+                ids.iter().filter_map(|id| self.subscriptions.get(id).map(|sub| (id, sub)))
+            })
     }
 
     /// Get a subscription by ID
