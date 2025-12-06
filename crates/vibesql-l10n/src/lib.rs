@@ -494,4 +494,72 @@ mod tests {
         assert!(result.contains("orders"));
         assert!(result.contains("已存在"));
     }
+
+    #[test]
+    fn test_japanese_locale() {
+        init(Some("ja")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "さようなら！");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("行"));
+    }
+
+    #[test]
+    fn test_japanese_parser_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "文字列リテラルが閉じられていません");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("予期しない文字"));
+    }
+
+    #[test]
+    fn test_japanese_resources_embedded() {
+        // Check that Japanese resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("ja/")), "Japanese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "ja/cli.ftl"), "ja/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/parser.ftl"), "ja/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/executor.ftl"), "ja/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/storage.ftl"), "ja/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/catalog.ftl"), "ja/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_japanese_executor_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("見つかりません"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "ゼロによる除算");
+    }
+
+    #[test]
+    fn test_japanese_catalog_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("すでに存在します"));
+    }
+
+    #[test]
+    fn test_japanese_storage_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("見つかりません"));
+    }
 }
