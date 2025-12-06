@@ -31,6 +31,7 @@
 // WASM builds don't have threads, so the engine uses a buffered
 // no-op implementation that stores entries in memory.
 
+use super::durability::{DurabilityConfig, DurabilityMode};
 use super::entry::{Lsn, WalEntry, WalOp};
 use super::writer::WalWriter;
 use crate::StorageError;
@@ -53,6 +54,8 @@ pub struct PersistenceConfig {
     pub flush_interval_ms: u64,
     /// Count-based flush threshold
     pub flush_count: usize,
+    /// Durability mode controlling WAL behavior
+    pub durability_mode: DurabilityMode,
 }
 
 impl Default for PersistenceConfig {
@@ -61,7 +64,75 @@ impl Default for PersistenceConfig {
             channel_capacity: DEFAULT_CHANNEL_CAPACITY,
             flush_interval_ms: DEFAULT_FLUSH_INTERVAL_MS,
             flush_count: DEFAULT_FLUSH_COUNT,
+            durability_mode: DurabilityMode::Lazy,
         }
+    }
+}
+
+impl PersistenceConfig {
+    /// Create configuration from a DurabilityConfig
+    pub fn from_durability_config(config: &DurabilityConfig) -> Self {
+        Self {
+            channel_capacity: DEFAULT_CHANNEL_CAPACITY,
+            flush_interval_ms: config.wal_flush_interval_ms,
+            flush_count: config.wal_flush_batch_size,
+            durability_mode: config.mode,
+        }
+    }
+
+    /// Create configuration for volatile mode (no persistence)
+    pub fn volatile() -> Self {
+        Self {
+            channel_capacity: DEFAULT_CHANNEL_CAPACITY,
+            flush_interval_ms: 0,
+            flush_count: usize::MAX,
+            durability_mode: DurabilityMode::Volatile,
+        }
+    }
+
+    /// Create configuration for lazy mode (batched writes)
+    pub fn lazy() -> Self {
+        Self {
+            channel_capacity: DEFAULT_CHANNEL_CAPACITY,
+            flush_interval_ms: DEFAULT_FLUSH_INTERVAL_MS,
+            flush_count: DEFAULT_FLUSH_COUNT,
+            durability_mode: DurabilityMode::Lazy,
+        }
+    }
+
+    /// Create configuration for durable mode (sync on commit)
+    pub fn durable() -> Self {
+        Self {
+            channel_capacity: DEFAULT_CHANNEL_CAPACITY,
+            flush_interval_ms: 0,
+            flush_count: 1,
+            durability_mode: DurabilityMode::Durable,
+        }
+    }
+
+    /// Create configuration for paranoid mode (sync on every op)
+    pub fn paranoid() -> Self {
+        Self {
+            channel_capacity: DEFAULT_CHANNEL_CAPACITY,
+            flush_interval_ms: 0,
+            flush_count: 1,
+            durability_mode: DurabilityMode::Paranoid,
+        }
+    }
+
+    /// Returns true if this configuration writes to WAL
+    pub fn writes_wal(&self) -> bool {
+        self.durability_mode.writes_wal()
+    }
+
+    /// Returns true if this configuration syncs on commit
+    pub fn sync_on_commit(&self) -> bool {
+        self.durability_mode.sync_on_commit()
+    }
+
+    /// Returns true if this configuration syncs on every operation
+    pub fn sync_on_every_op(&self) -> bool {
+        self.durability_mode.sync_on_every_op()
     }
 }
 
@@ -167,10 +238,18 @@ mod native {
         pub count_flushes: u64,
         /// Number of explicit flushes
         pub explicit_flushes: u64,
+        /// Number of entries discarded in volatile mode
+        pub volatile_discards: u64,
+        /// Number of sync-on-commit flushes (Durable/Paranoid mode)
+        pub commit_syncs: u64,
+        /// Number of sync-on-op flushes (Paranoid mode only)
+        pub op_syncs: u64,
         /// Average flush latency in microseconds
         pub avg_flush_latency_us: u64,
         /// Maximum flush latency in microseconds
         pub max_flush_latency_us: u64,
+        /// Number of pending entries in channel (snapshot)
+        pub pending_entries: u64,
         /// Total flush latency in microseconds (used for avg calculation)
         total_flush_latency_us: u64,
         /// Number of flush latency samples (used for avg calculation)
@@ -207,6 +286,8 @@ mod native {
         next_lsn: Arc<Mutex<Lsn>>,
         /// Whether the engine has been shut down
         shutdown: Arc<Mutex<bool>>,
+        /// Configuration (stored for durability mode checks)
+        config: PersistenceConfig,
     }
 
     impl std::fmt::Debug for PersistenceEngine {
@@ -253,7 +334,7 @@ mod native {
                 Self::writer_loop(writer, receiver, stats_clone, flush_interval, flush_count);
             });
 
-            Ok(Self { sender, handle: Some(handle), stats, next_lsn, shutdown })
+            Ok(Self { sender, handle: Some(handle), stats, next_lsn, shutdown, config })
         }
 
         /// The main writer loop running in the background thread
@@ -272,7 +353,9 @@ mod native {
                 }
             };
 
-            let mut batch: Vec<WalEntry> = Vec::with_capacity(flush_count);
+            // Cap batch capacity at a reasonable size to prevent allocation overflow
+            let batch_capacity = flush_count.min(DEFAULT_FLUSH_COUNT);
+            let mut batch: Vec<WalEntry> = Vec::with_capacity(batch_capacity);
             let mut last_flush = Instant::now();
             let mut pending_notifiers: Vec<FlushNotifier> = Vec::new();
 
@@ -422,6 +505,8 @@ mod native {
         ///
         /// This method is non-blocking unless the channel is full (backpressure).
         /// Returns the LSN assigned to the entry.
+        ///
+        /// In volatile mode, entries are not sent to the WAL - just an LSN is returned.
         pub fn send(&self, op: WalOp) -> Result<Lsn, StorageError> {
             let lsn = {
                 let mut next_lsn = self.next_lsn.lock();
@@ -429,6 +514,12 @@ mod native {
                 *next_lsn += 1;
                 lsn
             };
+
+            // In volatile mode, skip WAL entirely
+            if !self.config.writes_wal() {
+                self.stats.lock().volatile_discards += 1;
+                return Ok(lsn);
+            }
 
             let timestamp_ms = current_timestamp_ms();
             let entry = WalEntry::new(lsn, timestamp_ms, op);
@@ -443,6 +534,8 @@ mod native {
         }
 
         /// Send a pre-built WAL entry to be persisted
+        ///
+        /// In volatile mode, entries are not sent to the WAL.
         pub fn send_entry(&self, entry: WalEntry) -> Result<Lsn, StorageError> {
             let lsn = entry.lsn;
 
@@ -452,6 +545,12 @@ mod native {
                 if entry.lsn >= *next_lsn {
                     *next_lsn = entry.lsn + 1;
                 }
+            }
+
+            // In volatile mode, skip WAL entirely
+            if !self.config.writes_wal() {
+                self.stats.lock().volatile_discards += 1;
+                return Ok(lsn);
             }
 
             self.sender
@@ -504,6 +603,16 @@ mod native {
         /// Get current statistics
         pub fn stats(&self) -> PersistenceStats {
             self.stats.lock().clone()
+        }
+
+        /// Get the current durability mode
+        pub fn durability_mode(&self) -> DurabilityMode {
+            self.config.durability_mode
+        }
+
+        /// Get the current configuration
+        pub fn config(&self) -> &PersistenceConfig {
+            &self.config
         }
 
         /// Shutdown the persistence engine gracefully
@@ -582,17 +691,32 @@ mod wasm {
     /// Statistics about the persistence engine (WASM version)
     #[derive(Debug, Clone, Default)]
     pub struct PersistenceStats {
+        /// Total entries sent to the engine
         pub entries_sent: u64,
+        /// Total entries written to disk
         pub entries_written: u64,
+        /// Total batches written
         pub batches_written: u64,
+        /// Total bytes written
         pub bytes_written: u64,
+        /// Number of time-based flushes
         pub time_flushes: u64,
+        /// Number of count-based flushes
         pub count_flushes: u64,
+        /// Number of explicit flushes
         pub explicit_flushes: u64,
+        /// Number of entries discarded in volatile mode
+        pub volatile_discards: u64,
+        /// Number of sync-on-commit flushes (Durable/Paranoid mode)
+        pub commit_syncs: u64,
+        /// Number of sync-on-op flushes (Paranoid mode only)
+        pub op_syncs: u64,
         /// Average flush latency in microseconds (always 0 for WASM)
         pub avg_flush_latency_us: u64,
         /// Maximum flush latency in microseconds (always 0 for WASM)
         pub max_flush_latency_us: u64,
+        /// Number of pending entries in channel (snapshot)
+        pub pending_entries: u64,
     }
 
     /// Persistence engine for WASM (buffered, no background thread)
@@ -633,6 +757,8 @@ mod wasm {
         }
 
         /// Send a WAL operation to be persisted
+        ///
+        /// In volatile mode, entries are not buffered.
         pub fn send(&self, op: WalOp) -> Result<Lsn, StorageError> {
             let lsn = {
                 let mut next_lsn = self.next_lsn.lock().unwrap();
@@ -640,6 +766,12 @@ mod wasm {
                 *next_lsn += 1;
                 lsn
             };
+
+            // In volatile mode, skip buffering
+            if !self.config.writes_wal() {
+                self.stats.lock().unwrap().volatile_discards += 1;
+                return Ok(lsn);
+            }
 
             let timestamp_ms = current_timestamp_ms();
             let entry = WalEntry::new(lsn, timestamp_ms, op);
@@ -655,6 +787,8 @@ mod wasm {
         }
 
         /// Send a pre-built WAL entry to be persisted
+        ///
+        /// In volatile mode, entries are not buffered.
         pub fn send_entry(&self, entry: WalEntry) -> Result<Lsn, StorageError> {
             let lsn = entry.lsn;
 
@@ -663,6 +797,12 @@ mod wasm {
                 if entry.lsn >= *next_lsn {
                     *next_lsn = entry.lsn + 1;
                 }
+            }
+
+            // In volatile mode, skip buffering
+            if !self.config.writes_wal() {
+                self.stats.lock().unwrap().volatile_discards += 1;
+                return Ok(lsn);
             }
 
             {
@@ -696,6 +836,16 @@ mod wasm {
         /// Get current statistics
         pub fn stats(&self) -> PersistenceStats {
             self.stats.lock().unwrap().clone()
+        }
+
+        /// Get the current durability mode
+        pub fn durability_mode(&self) -> DurabilityMode {
+            self.config.durability_mode
+        }
+
+        /// Get the current configuration
+        pub fn config(&self) -> &PersistenceConfig {
+            &self.config
         }
 
         /// Get buffered entries (WASM-specific)
@@ -1030,5 +1180,129 @@ mod tests {
         );
 
         engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_volatile_mode_discards_entries() {
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+
+        // Create engine in volatile mode
+        let config = PersistenceConfig::volatile();
+        let mut engine = PersistenceEngine::with_writer(cursor, config).unwrap();
+
+        // Send some entries
+        for i in 1..=5 {
+            let lsn = engine
+                .send(WalOp::Insert {
+                    table_id: 1,
+                    row_id: i as u64,
+                    values: vec![SqlValue::Integer(i)],
+                })
+                .unwrap();
+            // LSNs should still be assigned
+            assert_eq!(lsn, i as u64);
+        }
+
+        // Check stats - entries should be discarded, not sent
+        let stats = engine.stats();
+        assert_eq!(stats.volatile_discards, 5);
+        assert_eq!(stats.entries_sent, 0);
+
+        // Verify mode
+        assert_eq!(engine.durability_mode(), DurabilityMode::Volatile);
+        assert!(!engine.config().writes_wal());
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_lazy_mode_sends_entries() {
+        let buf = Vec::new();
+        let cursor = Cursor::new(buf);
+
+        // Create engine in lazy mode (default)
+        let config = PersistenceConfig::lazy();
+        let mut engine = PersistenceEngine::with_writer(cursor, config).unwrap();
+
+        // Send some entries
+        for i in 1..=3 {
+            engine
+                .send(WalOp::Insert {
+                    table_id: 1,
+                    row_id: i as u64,
+                    values: vec![SqlValue::Integer(i)],
+                })
+                .unwrap();
+        }
+
+        // Check stats - entries should be sent
+        let stats = engine.stats();
+        assert_eq!(stats.entries_sent, 3);
+        assert_eq!(stats.volatile_discards, 0);
+
+        // Verify mode
+        assert_eq!(engine.durability_mode(), DurabilityMode::Lazy);
+        assert!(engine.config().writes_wal());
+        assert!(!engine.config().sync_on_commit());
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_config_presets() {
+        // Volatile mode
+        let volatile = PersistenceConfig::volatile();
+        assert_eq!(volatile.durability_mode, DurabilityMode::Volatile);
+        assert!(!volatile.writes_wal());
+
+        // Lazy mode
+        let lazy = PersistenceConfig::lazy();
+        assert_eq!(lazy.durability_mode, DurabilityMode::Lazy);
+        assert!(lazy.writes_wal());
+        assert!(!lazy.sync_on_commit());
+
+        // Durable mode
+        let durable = PersistenceConfig::durable();
+        assert_eq!(durable.durability_mode, DurabilityMode::Durable);
+        assert!(durable.writes_wal());
+        assert!(durable.sync_on_commit());
+        assert!(!durable.sync_on_every_op());
+
+        // Paranoid mode
+        let paranoid = PersistenceConfig::paranoid();
+        assert_eq!(paranoid.durability_mode, DurabilityMode::Paranoid);
+        assert!(paranoid.writes_wal());
+        assert!(paranoid.sync_on_commit());
+        assert!(paranoid.sync_on_every_op());
+    }
+
+    #[test]
+    fn test_config_from_durability_config() {
+        use crate::wal::durability::DurabilityConfig;
+
+        let dur_config = DurabilityConfig::durable();
+        let config = PersistenceConfig::from_durability_config(&dur_config);
+
+        assert_eq!(config.durability_mode, DurabilityMode::Durable);
+        assert_eq!(config.flush_interval_ms, dur_config.wal_flush_interval_ms);
+        assert_eq!(config.flush_count, dur_config.wal_flush_batch_size);
+    }
+
+    #[test]
+    fn test_durability_mode_getter() {
+        // Test each mode
+        for (mode, config) in [
+            (DurabilityMode::Volatile, PersistenceConfig::volatile()),
+            (DurabilityMode::Lazy, PersistenceConfig::lazy()),
+            (DurabilityMode::Durable, PersistenceConfig::durable()),
+            (DurabilityMode::Paranoid, PersistenceConfig::paranoid()),
+        ] {
+            let buf: Vec<u8> = Vec::new();
+            let cursor = Cursor::new(buf);
+            let mut engine = PersistenceEngine::with_writer(cursor, config).unwrap();
+            assert_eq!(engine.durability_mode(), mode);
+            engine.shutdown().unwrap();
+        }
     }
 }

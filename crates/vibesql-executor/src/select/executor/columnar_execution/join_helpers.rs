@@ -175,8 +175,8 @@ pub(super) fn build_combined_schema(
     let mut combined = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
 
     for (table_name, alias, _batch, schema) in batches {
-        let name = alias.as_ref().unwrap_or(table_name).to_lowercase();
-        combined.table_schemas.insert(name, (combined.total_columns, schema.clone()));
+        let name = alias.as_ref().unwrap_or(table_name);
+        combined.insert_table(name, combined.total_columns, schema.clone());
         combined.total_columns += schema.columns.len();
     }
 
@@ -190,8 +190,8 @@ pub(super) fn is_column_in_tables(column: &str, tables: &[&str], schema: &Combin
 
 /// Check if a column exists in a specific table
 pub(super) fn is_column_in_table(column: &str, table: &str, schema: &CombinedSchema) -> bool {
-    // Use lowercase for consistent table lookup
-    if let Some((_, table_schema)) = schema.table_schemas.get(&table.to_lowercase()) {
+    // TableKey lookup is case-insensitive
+    if let Some((_, table_schema)) = schema.get_table(table) {
         table_schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(column))
     } else {
         false

@@ -86,6 +86,10 @@ where
     })
 }
 
+/// List of FTL resource files to load for each locale.
+/// These files are loaded in order and merged into a single bundle.
+const RESOURCE_FILES: &[&str] = &["cli.ftl", "parser.ftl", "storage.ftl", "catalog.ftl", "executor.ftl"];
+
 /// Create a new FluentBundle for the given locale
 fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nError> {
     let locale: LanguageIdentifier = locale_str
@@ -97,22 +101,24 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
     // Not needed for database error messages and causes test failures
     bundle.set_use_isolating(false);
 
-    // List of all .ftl files to load
-    let ftl_files = ["cli.ftl", "storage.ftl", "catalog.ftl", "executor.ftl"];
+    // Load all resource files for this locale
+    for file_name in RESOURCE_FILES {
+        let resource_path = format!("{}/{}", locale_str, file_name);
+        let fallback_path = format!("en-US/{}", file_name);
 
-    for ftl_file in ftl_files {
-        // Load resources for the requested locale, falling back to en-US
-        let resource_path = format!("{}/{}", locale_str, ftl_file);
-        let fallback_path = format!("en-US/{}", ftl_file);
-
-        // Try to load from requested locale, fall back to en-US
-        let ftl_content = Resources::get(&resource_path)
-            .or_else(|| Resources::get(&fallback_path));
-
-        // Skip if file doesn't exist (graceful degradation)
-        let ftl_content = match ftl_content {
+        // Try the requested locale first, then fall back to en-US
+        let ftl_content = match Resources::get(&resource_path) {
             Some(content) => content,
-            None => continue,
+            None => {
+                // Try fallback locale
+                match Resources::get(&fallback_path) {
+                    Some(content) => content,
+                    None => {
+                        // Skip if neither locale has this file (it's optional)
+                        continue;
+                    }
+                }
+            }
         };
 
         let ftl_string = std::str::from_utf8(ftl_content.data.as_ref())
@@ -122,7 +128,8 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
         let resource = FluentResource::try_new(ftl_string)
             .map_err(|(_, errors)| L10nError::ParseError(format!("{:?}", errors)))?;
 
-        bundle.add_resource(resource).map_err(|errors| L10nError::ParseError(format!("{:?}", errors)))?;
+        // Ignore errors from duplicate message IDs (later files override earlier ones)
+        let _ = bundle.add_resource(resource);
     }
 
     Ok(bundle)
@@ -160,13 +167,18 @@ pub fn init(locale: Option<&str>) -> Result<(), L10nError> {
         .parse()
         .map_err(|_| L10nError::InvalidLocale(locale_str.clone()))?;
 
+    // Create the bundle eagerly to avoid race conditions in parallel tests.
+    // This ensures we use the locale passed to init() rather than reading
+    // the global LOCALE later (which another thread may have changed).
+    let new_bundle = create_bundle(&locale_str)?;
+
     // Update global locale setting
     let mut global_locale = LOCALE.write().map_err(|_| L10nError::LockError)?;
     *global_locale = locale_str.clone();
 
-    // Clear the thread-local bundle so it gets recreated with new locale
+    // Set the thread-local bundle with the new bundle created above
     BUNDLE.with(|bundle| {
-        *bundle.borrow_mut() = None;
+        *bundle.borrow_mut() = Some(new_bundle);
     });
 
     Ok(())
@@ -323,5 +335,396 @@ mod tests {
 
         let result = vibe_msg!("rows-count", count = 5);
         assert!(result.contains("5"));
+    }
+
+    #[test]
+    fn test_parser_resources_loaded() {
+        init(Some("en-US")).unwrap();
+
+        // Test parser.ftl messages are accessible
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Unterminated string literal");
+
+        let result = format("lexer-empty-delimited-identifier", None);
+        assert_eq!(result, "Empty delimited identifier is not allowed");
+    }
+
+    #[test]
+    fn test_parser_message_with_args() {
+        init(Some("en-US")).unwrap();
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Unexpected character"));
+    }
+
+    #[test]
+    fn test_spanish_locale() {
+        init(Some("es")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "¡Hasta luego!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("filas"));
+    }
+
+    #[test]
+    fn test_spanish_parser_messages() {
+        init(Some("es")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Literal de cadena sin terminar");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Carácter inesperado"));
+    }
+
+    #[test]
+    fn test_spanish_resources_embedded() {
+        // Check that Spanish resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("es/")), "Spanish resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "es/cli.ftl"), "es/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "es/parser.ftl"), "es/parser.ftl not found");
+    }
+
+    #[test]
+    fn test_portuguese_locale() {
+        init(Some("pt-BR")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Até logo!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("linhas"));
+    }
+
+    #[test]
+    fn test_portuguese_parser_messages() {
+        init(Some("pt-BR")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Literal de string não terminado");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Caractere inesperado"));
+    }
+
+    #[test]
+    fn test_portuguese_resources_embedded() {
+        // Check that Portuguese (Brazilian) resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("pt-BR/")), "Portuguese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "pt-BR/cli.ftl"), "pt-BR/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/parser.ftl"), "pt-BR/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/executor.ftl"), "pt-BR/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/storage.ftl"), "pt-BR/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "pt-BR/catalog.ftl"), "pt-BR/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_chinese_locale() {
+        init(Some("zh-CN")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "再见！");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("行"));
+    }
+
+    #[test]
+    fn test_chinese_parser_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "未终止的字符串字面量");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("意外的字符"));
+    }
+
+    #[test]
+    fn test_chinese_resources_embedded() {
+        // Check that Chinese resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("zh-CN/")), "Chinese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "zh-CN/cli.ftl"), "zh-CN/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/parser.ftl"), "zh-CN/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/executor.ftl"), "zh-CN/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/storage.ftl"), "zh-CN/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "zh-CN/catalog.ftl"), "zh-CN/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_chinese_executor_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("未找到表"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "除以零");
+    }
+
+    #[test]
+    fn test_chinese_storage_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = vibe_msg!("storage-column-count-mismatch", expected = 3, actual = 5);
+        assert!(result.contains("3"));
+        assert!(result.contains("5"));
+        assert!(result.contains("列数不匹配"));
+    }
+
+    #[test]
+    fn test_chinese_catalog_messages() {
+        init(Some("zh-CN")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("已存在"));
+    }
+
+    #[test]
+    fn test_japanese_locale() {
+        init(Some("ja")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "さようなら！");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("行"));
+    }
+
+    #[test]
+    fn test_japanese_parser_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "文字列リテラルが閉じられていません");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("予期しない文字"));
+    }
+
+    #[test]
+    fn test_japanese_resources_embedded() {
+        // Check that Japanese resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("ja/")), "Japanese resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "ja/cli.ftl"), "ja/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/parser.ftl"), "ja/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/executor.ftl"), "ja/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/storage.ftl"), "ja/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "ja/catalog.ftl"), "ja/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_japanese_executor_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("見つかりません"));
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "ゼロによる除算");
+    }
+
+    #[test]
+    fn test_japanese_catalog_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("すでに存在します"));
+    }
+
+    #[test]
+    fn test_japanese_storage_messages() {
+        init(Some("ja")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("見つかりません"));
+    }
+
+    #[test]
+    fn test_french_locale() {
+        init(Some("fr")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Au revoir !");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("lignes"));
+    }
+
+    #[test]
+    fn test_french_parser_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Chaîne littérale non terminée");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Caractère inattendu"));
+    }
+
+    #[test]
+    fn test_french_resources_embedded() {
+        // Check that French resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("fr/")), "French resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "fr/cli.ftl"), "fr/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/parser.ftl"), "fr/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/executor.ftl"), "fr/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/storage.ftl"), "fr/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "fr/catalog.ftl"), "fr/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_french_executor_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = vibe_msg!("executor-division-by-zero");
+        assert_eq!(result, "Division par zéro");
+
+        let result = vibe_msg!("executor-table-not-found", name = "utilisateurs");
+        assert!(result.contains("utilisateurs"));
+        assert!(result.contains("introuvable"));
+    }
+
+    #[test]
+    fn test_french_storage_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = vibe_msg!("storage-row-not-found");
+        assert_eq!(result, "Ligne introuvable");
+
+        let result = vibe_msg!("storage-column-count-mismatch", expected = 3, actual = 5);
+        assert!(result.contains("3"));
+        assert!(result.contains("5"));
+    }
+
+    #[test]
+    fn test_french_catalog_messages() {
+        init(Some("fr")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "produits");
+        assert!(result.contains("produits"));
+        assert!(result.contains("existe déjà"));
+    }
+
+    #[test]
+    fn test_german_locale() {
+        init(Some("de")).unwrap();
+
+        let goodbye = format("cli-goodbye", None);
+        assert_eq!(goodbye, "Auf Wiedersehen!");
+
+        let mut args = FluentArgs::new();
+        args.set("count", 5);
+        let result = format("rows-count", Some(&args));
+        assert!(result.contains("5"));
+        assert!(result.contains("Zeilen"));
+    }
+
+    #[test]
+    fn test_german_parser_messages() {
+        init(Some("de")).unwrap();
+
+        let result = format("lexer-unterminated-string", None);
+        assert_eq!(result, "Nicht abgeschlossenes Zeichenkettenliteral");
+
+        let result = vibe_msg!("lexer-unexpected-character", character = "~");
+        assert!(result.contains("~"));
+        assert!(result.contains("Unerwartetes Zeichen"));
+    }
+
+    #[test]
+    fn test_german_executor_messages() {
+        init(Some("de")).unwrap();
+
+        let result = vibe_msg!("executor-table-not-found", name = "users");
+        assert!(result.contains("users"));
+        assert!(result.contains("nicht gefunden"));
+
+        let result = format("executor-division-by-zero", None);
+        assert_eq!(result, "Division durch Null");
+    }
+
+    #[test]
+    fn test_german_storage_messages() {
+        init(Some("de")).unwrap();
+
+        let result = vibe_msg!("storage-table-not-found", name = "products");
+        assert!(result.contains("products"));
+        assert!(result.contains("nicht gefunden"));
+
+        let result = format("storage-row-not-found", None);
+        assert_eq!(result, "Zeile nicht gefunden");
+    }
+
+    #[test]
+    fn test_german_catalog_messages() {
+        init(Some("de")).unwrap();
+
+        let result = vibe_msg!("catalog-table-already-exists", name = "orders");
+        assert!(result.contains("orders"));
+        assert!(result.contains("existiert bereits"));
+
+        let result = vibe_msg!("catalog-schema-not-found", name = "myschema");
+        assert!(result.contains("myschema"));
+        assert!(result.contains("nicht gefunden"));
+    }
+
+    #[test]
+    fn test_german_resources_embedded() {
+        // Check that German resources are embedded
+        let files: Vec<_> = Resources::iter().collect();
+        assert!(files.iter().any(|f| f.starts_with("de/")), "German resources not found in: {:?}", files);
+        assert!(files.iter().any(|f| f == "de/cli.ftl"), "de/cli.ftl not found");
+        assert!(files.iter().any(|f| f == "de/parser.ftl"), "de/parser.ftl not found");
+        assert!(files.iter().any(|f| f == "de/executor.ftl"), "de/executor.ftl not found");
+        assert!(files.iter().any(|f| f == "de/storage.ftl"), "de/storage.ftl not found");
+        assert!(files.iter().any(|f| f == "de/catalog.ftl"), "de/catalog.ftl not found");
+    }
+
+    #[test]
+    fn test_german_umlaut_handling() {
+        init(Some("de")).unwrap();
+
+        // Test messages with umlauts are correctly handled
+        let result = vibe_msg!("executor-schema-not-empty", name = "öffentlich");
+        assert!(result.contains("öffentlich"));
+        assert!(result.contains("kann nicht gelöscht werden"));
+
+        // Test the help hint with German characters
+        let result = format("cli-help-hint", None);
+        assert!(result.contains("Geben Sie"));
     }
 }

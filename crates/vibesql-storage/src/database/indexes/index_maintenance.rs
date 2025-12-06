@@ -216,7 +216,10 @@ impl IndexManager {
             let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate
             let memory_bytes = self.estimate_index_memory(table_rows.len(), key_size);
 
-            let data = IndexData::InMemory { data: index_data_map };
+            let data = IndexData::InMemory {
+                data: index_data_map,
+                pending_deletions: Vec::new(),
+            };
 
             (data, memory_bytes, 0, crate::database::IndexBackend::InMemory)
         };
@@ -272,7 +275,7 @@ impl IndexManager {
 
                     // Insert into the index data
                     match index_data {
-                        IndexData::InMemory { data } => {
+                        IndexData::InMemory { data, .. } => {
                             data.entry(key_values).or_insert_with(Vec::new).push(row_index);
                         }
                         IndexData::DiskBacked { btree, .. } => {
@@ -369,7 +372,7 @@ impl IndexManager {
                     // If keys are different, remove old and add new
                     if old_key_values != new_key_values {
                         match index_data {
-                            IndexData::InMemory { data } => {
+                            IndexData::InMemory { data, .. } => {
                                 // Remove old key
                                 if let Some(row_indices) = data.get_mut(&old_key_values) {
                                     row_indices.retain(|&idx| idx != row_index);
@@ -460,7 +463,7 @@ impl IndexManager {
 
                     // Remove the row index from this key
                     match index_data {
-                        IndexData::InMemory { data } => {
+                        IndexData::InMemory { data, .. } => {
                             if let Some(row_indices) = data.get_mut(&key_values) {
                                 row_indices.retain(|&idx| idx != row_index);
                                 // Remove empty entries
@@ -554,7 +557,7 @@ impl IndexManager {
         for (index_name, column_info) in indexes_to_update {
             if let Some(index_data) = self.index_data.get_mut(&index_name) {
                 match index_data {
-                    IndexData::InMemory { data } => {
+                    IndexData::InMemory { data, .. } => {
                         // Build all keys and remove in batch
                         for &(row_index, row) in rows_to_delete {
                             let key_values: Vec<SqlValue> = column_info
@@ -625,9 +628,10 @@ impl IndexManager {
             if let Some(index_data) = self.index_data.get_mut(&index_name) {
                 if let Some(metadata) = self.indexes.get(&index_name) {
                     match index_data {
-                        IndexData::InMemory { data } => {
-                            // Clear existing data
+                        IndexData::InMemory { data, pending_deletions } => {
+                            // Clear existing data and pending deletions
                             data.clear();
+                            pending_deletions.clear();
 
                             // Rebuild from current table rows
                             for (row_index, row) in table_rows.iter().enumerate() {
@@ -727,11 +731,13 @@ impl IndexManager {
 
     /// Adjust row indices after row deletions for user-defined indexes
     ///
-    /// When rows are deleted, all row indices in indexes that are greater than the deleted
-    /// indices need to be decremented. This is much faster than rebuilding all indexes.
+    /// For in-memory indexes, this uses lazy adjustment: instead of immediately adjusting
+    /// all row indices (O(n) for table size), we store the deleted indices in a pending
+    /// list and apply the adjustment lazily during lookups. This makes single-row deletes
+    /// O(1) instead of O(n).
     ///
-    /// Uses binary search for O(n log d) complexity where n = entries, d = deletes,
-    /// instead of O(n * d) with linear search.
+    /// For disk-backed indexes, we still use the immediate adjustment approach since
+    /// the B+tree has its own row ID adjustment mechanism.
     ///
     /// # Arguments
     /// * `table_name` - The table whose indexes need adjustment
@@ -742,26 +748,64 @@ impl IndexManager {
         }
 
         // Find all indexes for this table
-        for (index_name, metadata) in &self.indexes {
-            if !metadata.table_name.eq_ignore_ascii_case(table_name) {
-                continue;
-            }
+        let index_names: Vec<String> = self
+            .indexes
+            .iter()
+            .filter(|(_, metadata)| metadata.table_name.eq_ignore_ascii_case(table_name))
+            .map(|(name, _)| name.clone())
+            .collect();
 
-            if let Some(index_data) = self.index_data.get_mut(index_name) {
+        for index_name in index_names {
+            if let Some(index_data) = self.index_data.get_mut(&index_name) {
                 match index_data {
-                    IndexData::InMemory { data } => {
-                        // For each key, adjust all row indices using binary search
-                        for row_indices in data.values_mut() {
-                            for row_idx in row_indices.iter_mut() {
-                                // Binary search gives count of deleted indices < row_idx
-                                let decrement = deleted_indices.partition_point(|&d| d < *row_idx);
-                                *row_idx -= decrement;
+                    IndexData::InMemory { pending_deletions, .. } => {
+                        // Lazy adjustment: merge deleted_indices into pending_deletions
+                        // This is O(d) where d = number of deletes, instead of O(n) for table size
+                        //
+                        // Note: deleted_indices are raw indices that haven't been adjusted yet.
+                        // We need to adjust them based on existing pending_deletions before merging.
+                        let adjusted_deletions: Vec<usize> = deleted_indices
+                            .iter()
+                            .map(|&idx| {
+                                // The deleted index needs to be adjusted for previously pending deletions
+                                // that are less than it, since those deletions affect the raw row indices
+                                let adjustment = pending_deletions.partition_point(|&d| d < idx);
+                                idx - adjustment
+                            })
+                            .collect();
+
+                        // Merge adjusted deletions into pending_deletions (maintaining sorted order)
+                        if pending_deletions.is_empty() {
+                            *pending_deletions = adjusted_deletions;
+                        } else {
+                            // Merge two sorted lists
+                            let mut merged = Vec::with_capacity(
+                                pending_deletions.len() + adjusted_deletions.len(),
+                            );
+                            let mut i = 0;
+                            let mut j = 0;
+                            while i < pending_deletions.len() && j < adjusted_deletions.len() {
+                                if pending_deletions[i] <= adjusted_deletions[j] {
+                                    merged.push(pending_deletions[i]);
+                                    i += 1;
+                                } else {
+                                    merged.push(adjusted_deletions[j]);
+                                    j += 1;
+                                }
                             }
+                            merged.extend_from_slice(&pending_deletions[i..]);
+                            merged.extend_from_slice(&adjusted_deletions[j..]);
+                            *pending_deletions = merged;
+                        }
+
+                        // Compact if needed (apply pending deletions when list gets too large)
+                        if index_data.needs_compaction() {
+                            index_data.compact_pending_deletions();
                         }
                     }
                     IndexData::DiskBacked { btree, .. } => {
-                        // For disk-backed indexes, we need to adjust all row IDs
-                        // This requires iterating through all entries
+                        // For disk-backed indexes, we still use immediate adjustment
+                        // since the B+tree has its own efficient row ID adjustment
                         match acquire_btree_lock(btree) {
                             Ok(mut guard) => {
                                 guard.adjust_row_ids_after_delete(deleted_indices);

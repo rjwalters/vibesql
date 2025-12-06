@@ -13,7 +13,7 @@
 use std::env;
 
 /// List of available locales (embedded in the binary)
-const AVAILABLE_LOCALES: &[&str] = &["en-US"];
+const AVAILABLE_LOCALES: &[&str] = &["en-US", "es", "pt-BR", "zh-CN", "ja", "de"];
 
 /// Detect the user's preferred locale from environment variables.
 ///

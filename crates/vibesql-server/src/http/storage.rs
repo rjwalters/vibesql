@@ -19,40 +19,45 @@ use tracing::{debug, error};
 use vibesql_storage::{BlobId, BlobStorageConfig, BlobStorageService, Database};
 
 use super::types::*;
+use crate::registry::DatabaseRegistry;
 
 /// State for storage endpoints
 #[derive(Clone)]
 pub struct StorageState {
+    /// Database registry for shared database access
+    pub registry: DatabaseRegistry,
+    /// Legacy database reference for backwards compatibility (blob storage)
     pub db: Arc<RwLock<Database>>,
+    /// Blob storage service
     pub blob_service: Arc<BlobStorageService>,
 }
 
 impl StorageState {
-    /// Create storage state from database
-    pub fn new(db: Arc<Database>) -> Self {
+    /// Create storage state from database and registry
+    pub fn new(db: Arc<Database>, registry: DatabaseRegistry) -> Self {
         // Create blob service with the database reference
         let blob_service = Arc::new(BlobStorageService::new_default(db.clone()));
         // Wrap Database in RwLock for safe concurrent access
         let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
         let db = Arc::new(RwLock::new(db_inner));
-        Self { db, blob_service }
+        Self { registry, db, blob_service }
     }
 
     /// Create storage state with custom config
     #[allow(dead_code)]
-    pub fn with_config(config: BlobStorageConfig, db: Arc<Database>) -> Self {
+    pub fn with_config(config: BlobStorageConfig, db: Arc<Database>, registry: DatabaseRegistry) -> Self {
         // Create blob service with the database reference
         let blob_service = Arc::new(BlobStorageService::new(config, db.clone()));
         // Wrap Database in RwLock for safe concurrent access
         let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
         let db = Arc::new(RwLock::new(db_inner));
-        Self { db, blob_service }
+        Self { registry, db, blob_service }
     }
 }
 
 /// Create the storage API router
-pub fn create_storage_router(db: Arc<Database>) -> Router {
-    let state = StorageState::new(db);
+pub fn create_storage_router(db: Arc<Database>, registry: DatabaseRegistry) -> Router {
+    let state = StorageState::new(db, registry);
 
     Router::new()
         .route("/upload", post(upload_blob))
@@ -250,11 +255,12 @@ mod tests {
 
     fn create_test_router() -> Router {
         let db = Arc::new(Database::new());
+        let registry = DatabaseRegistry::new();
         let config = BlobStorageConfig {
             backend: "memory".to_string(),
             config: serde_json::json!({}),
         };
-        let state = StorageState::with_config(config, db);
+        let state = StorageState::with_config(config, db, registry);
 
         Router::new()
             .route("/upload", post(upload_blob))

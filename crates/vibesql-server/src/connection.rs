@@ -328,7 +328,8 @@ impl ConnectionHandler {
         // Handle empty query
         if query.trim().is_empty() {
             self.send_empty_query_response().await?;
-            self.send_ready_for_query(TransactionStatus::Idle).await?;
+            let txn_status = self.get_transaction_status();
+            self.send_ready_for_query(txn_status).await?;
             return Ok(());
         }
 
@@ -348,7 +349,10 @@ impl ConnectionHandler {
                 }
 
                 self.send_query_result(result).await?;
-                self.send_ready_for_query(TransactionStatus::Idle).await?;
+
+                // Return appropriate transaction status
+                let txn_status = self.get_transaction_status();
+                self.send_ready_for_query(txn_status).await?;
                 Ok(())
             }
 
@@ -361,9 +365,25 @@ impl ConnectionHandler {
                 }
 
                 self.send_error_response(&format!("{}", e)).await?;
-                self.send_ready_for_query(TransactionStatus::Idle).await?;
+
+                // If in transaction and error occurred, report failed transaction state
+                let txn_status = if self.session.as_ref().is_some_and(|s| s.in_transaction()) {
+                    TransactionStatus::FailedTransaction
+                } else {
+                    TransactionStatus::Idle
+                };
+                self.send_ready_for_query(txn_status).await?;
                 Ok(())
             }
+        }
+    }
+
+    /// Get the current transaction status for the session
+    fn get_transaction_status(&self) -> TransactionStatus {
+        if self.session.as_ref().is_some_and(|s| s.in_transaction()) {
+            TransactionStatus::InTransaction
+        } else {
+            TransactionStatus::Idle
         }
     }
 
@@ -565,6 +585,18 @@ impl ConnectionHandler {
 
             ExecutionResult::CloseCursor { cursor_name } => {
                 self.send_command_complete(&format!("CLOSE {}", cursor_name)).await?;
+            }
+
+            ExecutionResult::Begin => {
+                self.send_command_complete("BEGIN").await?;
+            }
+
+            ExecutionResult::Commit => {
+                self.send_command_complete("COMMIT").await?;
+            }
+
+            ExecutionResult::Rollback => {
+                self.send_command_complete("ROLLBACK").await?;
             }
         }
 

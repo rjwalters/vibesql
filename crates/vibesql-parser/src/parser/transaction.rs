@@ -1,8 +1,12 @@
 //! Transaction control statement parsing (BEGIN, COMMIT, ROLLBACK)
 
-use crate::{keywords::Keyword, parser::ParseError};
+use crate::{keywords::Keyword, parser::ParseError, token::Token};
 
-/// Parse BEGIN [TRANSACTION] or START TRANSACTION statement
+/// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY = <mode>] statement
+///
+/// Syntax:
+/// - BEGIN [TRANSACTION] [WITH DURABILITY = DEFAULT | DURABLE | LAZY | VOLATILE]
+/// - START TRANSACTION [WITH DURABILITY = DEFAULT | DURABLE | LAZY | VOLATILE]
 pub(super) fn parse_begin_statement(
     parser: &mut super::Parser,
 ) -> Result<vibesql_ast::BeginStmt, ParseError> {
@@ -20,7 +24,40 @@ pub(super) fn parse_begin_statement(
         parser.consume_keyword(Keyword::Transaction)?;
     }
 
-    Ok(vibesql_ast::BeginStmt)
+    // Parse optional WITH DURABILITY = <mode> clause
+    let durability = if parser.peek_keyword(Keyword::With) {
+        parser.consume_keyword(Keyword::With)?;
+        parser.consume_keyword(Keyword::Durability)?;
+
+        // Optional = sign
+        parser.try_consume(&Token::Symbol('='));
+
+        // Parse durability mode
+        parse_durability_hint(parser)?
+    } else {
+        vibesql_ast::DurabilityHint::Default
+    };
+
+    Ok(vibesql_ast::BeginStmt { durability })
+}
+
+/// Parse a durability hint keyword
+fn parse_durability_hint(
+    parser: &mut super::Parser,
+) -> Result<vibesql_ast::DurabilityHint, ParseError> {
+    if parser.try_consume_keyword(Keyword::Default) {
+        Ok(vibesql_ast::DurabilityHint::Default)
+    } else if parser.try_consume_keyword(Keyword::Durable) {
+        Ok(vibesql_ast::DurabilityHint::Durable)
+    } else if parser.try_consume_keyword(Keyword::Lazy) {
+        Ok(vibesql_ast::DurabilityHint::Lazy)
+    } else if parser.try_consume_keyword(Keyword::Volatile) {
+        Ok(vibesql_ast::DurabilityHint::Volatile)
+    } else {
+        Err(ParseError {
+            message: "Expected durability mode: DEFAULT, DURABLE, LAZY, or VOLATILE".to_string(),
+        })
+    }
 }
 
 /// Parse COMMIT statement

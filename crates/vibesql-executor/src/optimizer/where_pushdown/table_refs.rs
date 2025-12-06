@@ -47,7 +47,7 @@ fn extract_tables_recursive_branch(
     match expr {
         vibesql_ast::Expression::ColumnRef { table: Some(table_name), .. } => {
             let normalized = table_name.to_lowercase();
-            if schema.table_schemas.contains_key(&normalized) {
+            if schema.contains_table(&normalized) {
                 tables.insert(normalized);
                 true
             } else {
@@ -62,7 +62,7 @@ fn extract_tables_recursive_branch(
             let mut found = false;
             for (table_name, (_start_idx, table_schema)) in &schema.table_schemas {
                 if table_schema.columns.iter().any(|col| col.name.to_lowercase() == column_lower) {
-                    tables.insert(table_name.clone());
+                    tables.insert(table_name.to_string());
                     found = true;
                 }
             }
@@ -186,7 +186,7 @@ fn extract_column_reference_branch(
         vibesql_ast::Expression::ColumnRef { table, column } => {
             if let Some(table_name) = table {
                 let normalized_table = table_name.to_lowercase();
-                if schema.table_schemas.contains_key(&normalized_table) {
+                if schema.contains_table(&normalized_table) {
                     return Some((normalized_table, column.to_lowercase()));
                 }
             }

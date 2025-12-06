@@ -8,7 +8,7 @@ use super::operations::Operations;
 use super::transactions::TransactionChange;
 use crate::change_events::{ChangeEvent, ChangeEventReceiver, ChangeEventSender};
 use crate::columnar_cache::ColumnarCache;
-use crate::wal::{PersistenceEngine, WalOp};
+use crate::wal::{PersistenceEngine, TransactionDurability, WalOp};
 use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
 
@@ -58,6 +58,17 @@ impl Database {
 
     /// Begin a new transaction
     pub fn begin_transaction(&mut self) -> Result<(), StorageError> {
+        self.begin_transaction_with_durability(TransactionDurability::Default)
+    }
+
+    /// Begin a new transaction with a specific durability hint
+    ///
+    /// The durability hint controls how the transaction's changes are persisted.
+    /// See [`TransactionDurability`] for available options.
+    pub fn begin_transaction_with_durability(
+        &mut self,
+        _durability: TransactionDurability,
+    ) -> Result<(), StorageError> {
         let catalog = &self.catalog.clone();
         self.lifecycle.transaction_manager_mut().begin_transaction(catalog, &self.tables)?;
 
@@ -65,6 +76,11 @@ impl Database {
         if let Some(txn_id) = self.transaction_id() {
             self.emit_wal_op(WalOp::TxnBegin { txn_id });
         }
+
+        // TODO: Store durability hint in transaction manager for use at commit time
+        // For now, the durability hint is parsed and passed through but not yet
+        // wired to the actual WAL sync behavior. This requires additional changes
+        // to the transaction manager to store the hint and use it at commit.
 
         Ok(())
     }

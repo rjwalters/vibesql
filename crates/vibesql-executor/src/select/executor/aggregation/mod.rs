@@ -4,6 +4,7 @@
 mod detection;
 
 mod evaluation;
+mod window;
 
 use std::collections::HashMap;
 
@@ -320,6 +321,18 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Apply window functions that wrap aggregates (e.g., AVG(SUM(x)) OVER (...))
+        // This must happen after GROUP BY but before ORDER BY
+        let result_rows = if window::has_aggregate_window_functions(&expanded_select_list) {
+            window::apply_window_functions_to_aggregates(
+                result_rows,
+                &expanded_select_list,
+                self.database,
+            )?
+        } else {
+            result_rows
+        };
+
         // Apply ORDER BY if present
         let result_rows = if let Some(order_by) = &stmt.order_by {
             self.apply_order_by_to_aggregates(result_rows, stmt, order_by, &expanded_select_list)?
@@ -395,7 +408,7 @@ impl SelectExecutor<'_> {
                             let column_expr = vibesql_ast::Expression::ColumnRef {
                                 table: if schema.table_schemas.len() > 1 {
                                     // Multiple tables: qualify the column
-                                    Some(table_name.clone())
+                                    Some(table_name.to_string())
                                 } else {
                                     // Single table: no need to qualify
                                     None
@@ -412,15 +425,8 @@ impl SelectExecutor<'_> {
                 }
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
                     // Expand SELECT table.* to all columns from that specific table
-                    // Try exact match first
-                    let table_result = schema.table_schemas.get(qualifier).cloned().or_else(|| {
-                        // Fall back to case-insensitive lookup without allocation
-                        schema
-                            .table_schemas
-                            .iter()
-                            .find(|(key, _)| key.eq_ignore_ascii_case(qualifier))
-                            .map(|(_key, value)| value.clone())
-                    });
+                    // TableKey lookup is case-insensitive
+                    let table_result = schema.get_table(qualifier).cloned();
 
                     if let Some((_start_idx, table_schema)) = table_result {
                         for column in &table_schema.columns {

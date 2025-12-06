@@ -22,7 +22,9 @@ fn test_basic_savepoint() {
     db.create_table(schema).unwrap();
 
     // Begin transaction
-    let begin_stmt = vibesql_ast::BeginStmt;
+    let begin_stmt = vibesql_ast::BeginStmt {
+        durability: vibesql_ast::DurabilityHint::Default,
+    };
     BeginTransactionExecutor::execute(&begin_stmt, &mut db).unwrap();
 
     // Insert initial row
@@ -87,7 +89,9 @@ fn test_nested_savepoints() {
     db.create_table(schema).unwrap();
 
     // Begin transaction
-    let begin_stmt = vibesql_ast::BeginStmt;
+    let begin_stmt = vibesql_ast::BeginStmt {
+        durability: vibesql_ast::DurabilityHint::Default,
+    };
     BeginTransactionExecutor::execute(&begin_stmt, &mut db).unwrap();
 
     // Insert initial row

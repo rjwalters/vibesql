@@ -97,7 +97,7 @@ impl CombinedExpressionEvaluator<'_> {
 
                 // Column not found in either schema - collect diagnostic info
                 let searched_tables: Vec<String> =
-                    self.schema.table_schemas.keys().cloned().collect();
+                    self.schema.table_names();
                 let mut available_columns = Vec::new();
                 for (_start, schema) in self.schema.table_schemas.values() {
                     available_columns.extend(schema.columns.iter().map(|c| c.name.clone()));

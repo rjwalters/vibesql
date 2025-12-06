@@ -1,11 +1,109 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
+
+/// A normalized table/alias key for case-insensitive lookups.
+/// Always stored as lowercase, making case-insensitive handling impossible to get wrong.
+#[derive(Debug, Clone, Eq)]
+pub struct TableKey(String);
+
+impl TableKey {
+    /// Create a new TableKey, normalizing to lowercase.
+    #[inline]
+    pub fn new(name: impl AsRef<str>) -> Self {
+        TableKey(name.as_ref().to_lowercase())
+    }
+
+    /// Get the normalized key as a string slice.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume the TableKey and return the inner String.
+    #[inline]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl PartialEq for TableKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Hash for TableKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl Deref for TableKey {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<str> for TableKey {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for TableKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TableKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for TableKey {
+    fn from(s: String) -> Self {
+        TableKey::new(s)
+    }
+}
+
+impl From<&str> for TableKey {
+    fn from(s: &str) -> Self {
+        TableKey::new(s)
+    }
+}
+
+impl From<TableKey> for String {
+    fn from(key: TableKey) -> Self {
+        key.0
+    }
+}
+
+impl From<&TableKey> for TableKey {
+    fn from(key: &TableKey) -> Self {
+        key.clone()
+    }
+}
+
+impl From<&String> for TableKey {
+    fn from(s: &String) -> Self {
+        TableKey::new(s)
+    }
+}
 
 /// Represents the combined schema from multiple tables (for JOINs)
 #[derive(Debug, Clone)]
 pub struct CombinedSchema {
-    /// Map from table name to (start_index, TableSchema)
+    /// Map from table name (normalized via TableKey) to (start_index, TableSchema)
     /// start_index is where this table's columns begin in the combined row
-    pub table_schemas: HashMap<String, (usize, vibesql_catalog::TableSchema)>,
+    /// Keys are always lowercase for case-insensitive lookups
+    pub table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
     /// Total number of columns across all tables
     pub total_columns: usize,
 }
@@ -13,16 +111,18 @@ pub struct CombinedSchema {
 impl CombinedSchema {
     /// Create a new combined schema from a single table
     ///
-    /// Note: Table name is normalized to lowercase for case-insensitive lookups
+    /// Note: Table name is automatically normalized via TableKey for case-insensitive lookups
     pub fn from_table(table_name: String, schema: vibesql_catalog::TableSchema) -> Self {
         let total_columns = schema.columns.len();
         let mut table_schemas = HashMap::new();
-        // Use lowercase table name for consistent case-insensitive lookups
-        table_schemas.insert(table_name.to_lowercase(), (0, schema));
+        // TableKey automatically normalizes to lowercase
+        table_schemas.insert(TableKey::new(table_name), (0, schema));
         CombinedSchema { table_schemas, total_columns }
     }
 
     /// Create a new combined schema from a derived table (subquery result)
+    ///
+    /// Note: Alias is automatically normalized via TableKey for case-insensitive lookups
     pub fn from_derived_table(
         alias: String,
         column_names: Vec<String>,
@@ -44,22 +144,24 @@ impl CombinedSchema {
 
         let schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
         let mut table_schemas = HashMap::new();
-        // Use lowercase alias for consistent lookups
-        table_schemas.insert(alias.to_lowercase(), (0, schema));
+        // TableKey automatically normalizes to lowercase
+        table_schemas.insert(TableKey::new(alias), (0, schema));
         CombinedSchema { table_schemas, total_columns }
     }
 
     /// Combine two schemas (for JOIN operations)
+    ///
+    /// Note: Right table name is automatically normalized via TableKey for case-insensitive lookups
     pub fn combine(
         left: CombinedSchema,
-        right_table: String,
+        right_table: impl Into<TableKey>,
         right_schema: vibesql_catalog::TableSchema,
     ) -> Self {
         let mut table_schemas = left.table_schemas;
         let left_total = left.total_columns;
         let right_columns = right_schema.columns.len();
-        // Use lowercase table name for consistent lookups
-        table_schemas.insert(right_table.to_lowercase(), (left_total, right_schema));
+        // TableKey automatically normalizes to lowercase
+        table_schemas.insert(right_table.into(), (left_total, right_schema));
         CombinedSchema { table_schemas, total_columns: left_total + right_columns }
     }
 
@@ -68,17 +170,10 @@ impl CombinedSchema {
     pub fn get_column_index(&self, table: Option<&str>, column: &str) -> Option<usize> {
         if let Some(table_name) = table {
             // Qualified column reference (table.column)
-            // Try exact match first for performance
-            if let Some((start_index, schema)) = self.table_schemas.get(table_name) {
+            // TableKey normalizes to lowercase, so lookup is case-insensitive
+            let key = TableKey::new(table_name);
+            if let Some((start_index, schema)) = self.table_schemas.get(&key) {
                 return schema.get_column_index(column).map(|idx| start_index + idx);
-            }
-
-            // Fall back to case-insensitive table/alias name lookup
-            let table_name_lower = table_name.to_lowercase();
-            for (key, (start_index, schema)) in self.table_schemas.iter() {
-                if key.to_lowercase() == table_name_lower {
-                    return schema.get_column_index(column).map(|idx| start_index + idx);
-                }
             }
             None
         } else {
@@ -91,6 +186,31 @@ impl CombinedSchema {
             None
         }
     }
+
+    /// Get a table schema by name (case-insensitive lookup)
+    pub fn get_table(&self, table_name: &str) -> Option<&(usize, vibesql_catalog::TableSchema)> {
+        self.table_schemas.get(&TableKey::new(table_name))
+    }
+
+    /// Check if a table exists (case-insensitive lookup)
+    pub fn contains_table(&self, table_name: &str) -> bool {
+        self.table_schemas.contains_key(&TableKey::new(table_name))
+    }
+
+    /// Get all table names as strings
+    pub fn table_names(&self) -> Vec<String> {
+        self.table_schemas.keys().map(|k| k.to_string()).collect()
+    }
+
+    /// Insert or update a table in the schema
+    pub fn insert_table(
+        &mut self,
+        name: impl Into<TableKey>,
+        start_index: usize,
+        schema: vibesql_catalog::TableSchema,
+    ) {
+        self.table_schemas.insert(name.into(), (start_index, schema));
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema
@@ -99,7 +219,7 @@ impl CombinedSchema {
 /// the column offset as tables are added.
 #[derive(Debug)]
 pub struct SchemaBuilder {
-    table_schemas: HashMap<String, (usize, vibesql_catalog::TableSchema)>,
+    table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
     column_offset: usize,
 }
 
@@ -111,26 +231,21 @@ impl SchemaBuilder {
 
     /// Create a schema builder initialized with an existing CombinedSchema
     ///
-    /// Note: Table names are normalized to lowercase for case-insensitive lookups
+    /// Note: Table names are already normalized via TableKey
     pub fn from_schema(schema: CombinedSchema) -> Self {
         let column_offset = schema.total_columns;
-        // Normalize all table names to lowercase for case-insensitive lookups
-        let table_schemas = schema
-            .table_schemas
-            .into_iter()
-            .map(|(name, value)| (name.to_lowercase(), value))
-            .collect();
-        SchemaBuilder { table_schemas, column_offset }
+        // TableKeys are already normalized, just pass them through
+        SchemaBuilder { table_schemas: schema.table_schemas, column_offset }
     }
 
     /// Add a table to the schema
     ///
     /// This is an O(1) operation - columns are not copied, just indexed
-    /// Note: Table names are normalized to lowercase for case-insensitive lookups
-    pub fn add_table(&mut self, name: String, schema: vibesql_catalog::TableSchema) -> &mut Self {
+    /// Note: Table names are automatically normalized via TableKey for case-insensitive lookups
+    pub fn add_table(&mut self, name: impl Into<TableKey>, schema: vibesql_catalog::TableSchema) -> &mut Self {
         let num_columns = schema.columns.len();
-        // Use lowercase for consistent case-insensitive lookups
-        self.table_schemas.insert(name.to_lowercase(), (self.column_offset, schema));
+        // TableKey automatically normalizes to lowercase
+        self.table_schemas.insert(name.into(), (self.column_offset, schema));
         self.column_offset += num_columns;
         self
     }

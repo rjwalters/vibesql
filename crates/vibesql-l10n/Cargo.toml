@@ -9,6 +9,10 @@ description = "Localization support for VibeSQL using Project Fluent"
 keywords = ["sql", "database", "localization", "i18n", "l10n"]
 categories = ["database", "internationalization"]
 
+[[bin]]
+name = "check-ftl"
+path = "src/bin/check-ftl.rs"
+
 [dependencies]
 fluent = "0.16"
 fluent-bundle = "0.15"

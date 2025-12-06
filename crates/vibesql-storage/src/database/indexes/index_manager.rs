@@ -216,7 +216,7 @@ impl IndexManager {
                     // Check if key already exists (skip NULLs)
                     if !key_values.contains(&SqlValue::Null) {
                         match index_data {
-                            IndexData::InMemory { data } => {
+                            IndexData::InMemory { data, .. } => {
                                 if data.contains_key(&key_values) {
                                     let column_names: Vec<String> = metadata
                                         .columns
@@ -370,7 +370,7 @@ impl IndexManager {
 
         // Extract InMemory data, or return if already DiskBacked or IVFFlat
         let data = match index_data {
-            IndexData::InMemory { data } => data,
+            IndexData::InMemory { data, .. } => data,
             IndexData::DiskBacked { .. } => {
                 // Already disk-backed, just put it back
                 self.index_data.insert(index_name.to_string(), index_data);

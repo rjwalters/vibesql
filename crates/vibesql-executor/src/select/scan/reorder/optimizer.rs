@@ -270,8 +270,7 @@ where
         }
 
         // Record the column count for this table (using table_schemas to get column info)
-        let col_count = if let Some((_, schema)) = table_result.schema.table_schemas.get(table_name)
-        {
+        let col_count = if let Some((_, schema)) = table_result.schema.get_table(table_name) {
             schema.columns.len()
         } else {
             table_result.schema.total_columns

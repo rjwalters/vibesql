@@ -9,6 +9,7 @@ use vibesql_executor::{
 use vibesql_types::SqlValue;
 
 use crate::registry::SharedDatabase;
+use crate::transaction::SessionTransactionManager;
 
 /// Session state for a database connection
 pub struct Session {
@@ -20,15 +21,15 @@ pub struct Session {
     pub user: String,
     /// Shared database instance (shared across all connections to the same database)
     db: SharedDatabase,
-    /// Transaction state
-    #[allow(dead_code)]
-    pub in_transaction: bool,
     /// Prepared statement cache for reduced parsing overhead
     stmt_cache: Arc<PreparedStatementCache>,
     /// Named prepared statements (from PREPARE SQL syntax)
     named_statements: HashMap<String, Arc<PreparedStatement>>,
     /// Cursor storage for DECLARE/OPEN/FETCH/CLOSE operations
     cursors: CursorStore,
+    /// Session-level transaction manager for READ COMMITTED isolation
+    /// Tracks uncommitted changes that should only be visible to this session
+    txn_manager: SessionTransactionManager,
 }
 
 /// Simplified execution result for wire protocol
@@ -81,6 +82,12 @@ pub enum ExecutionResult {
     CloseCursor {
         cursor_name: String,
     },
+    /// Transaction started
+    Begin,
+    /// Transaction committed
+    Commit,
+    /// Transaction rolled back
+    Rollback,
     Other {
         message: String,
     },
@@ -107,6 +114,9 @@ impl ExecutionResult {
             ExecutionResult::OpenCursor { .. } => "OPEN_CURSOR",
             ExecutionResult::Fetch { .. } => "FETCH",
             ExecutionResult::CloseCursor { .. } => "CLOSE_CURSOR",
+            ExecutionResult::Begin => "BEGIN",
+            ExecutionResult::Commit => "COMMIT",
+            ExecutionResult::Rollback => "ROLLBACK",
             ExecutionResult::Other { .. } => "OTHER",
         }
     }
@@ -144,10 +154,10 @@ impl Session {
             database,
             user,
             db,
-            in_transaction: false,
             stmt_cache: Arc::new(PreparedStatementCache::default_cache()),
             named_statements: HashMap::new(),
             cursors: CursorStore::new(),
+            txn_manager: SessionTransactionManager::new(),
         }
     }
 
@@ -158,6 +168,11 @@ impl Session {
     pub fn new_standalone(database: String, user: String) -> Self {
         let db = Arc::new(tokio::sync::RwLock::new(vibesql_storage::Database::new()));
         Self::new(database, user, db)
+    }
+
+    /// Check if this session is currently in a transaction
+    pub fn in_transaction(&self) -> bool {
+        self.txn_manager.in_transaction()
     }
 
     /// Get the shared database handle
@@ -177,10 +192,10 @@ impl Session {
             database,
             user,
             db,
-            in_transaction: false,
             stmt_cache: cache,
             named_statements: HashMap::new(),
             cursors: CursorStore::new(),
+            txn_manager: SessionTransactionManager::new(),
         }
     }
 
@@ -381,6 +396,39 @@ impl Session {
                 self.execute_close_cursor(close_stmt)
             }
 
+            vibesql_ast::Statement::BeginTransaction(_) => {
+                // Release lock - transaction management doesn't need db lock
+                drop(db);
+                self.begin_transaction().await
+            }
+
+            vibesql_ast::Statement::Commit(_) => {
+                // Release lock first, commit() will reacquire if needed
+                drop(db);
+                self.commit().await
+            }
+
+            vibesql_ast::Statement::Rollback(_) => {
+                // Release lock - rollback discards buffered changes, no db write needed
+                drop(db);
+                self.rollback().await
+            }
+
+            vibesql_ast::Statement::RollbackToSavepoint(_savepoint_stmt) => {
+                // TODO: Implement savepoints in SessionTransactionManager
+                Ok(ExecutionResult::Other { message: "ROLLBACK TO SAVEPOINT".to_string() })
+            }
+
+            vibesql_ast::Statement::Savepoint(_savepoint_stmt) => {
+                // TODO: Implement savepoints in SessionTransactionManager
+                Ok(ExecutionResult::Other { message: "SAVEPOINT".to_string() })
+            }
+
+            vibesql_ast::Statement::ReleaseSavepoint(_release_stmt) => {
+                // TODO: Implement savepoints in SessionTransactionManager
+                Ok(ExecutionResult::Other { message: "RELEASE SAVEPOINT".to_string() })
+            }
+
             _ => {
                 // For now, return a generic success for other statements
                 Ok(ExecutionResult::Other { message: "Command completed successfully".to_string() })
@@ -486,33 +534,52 @@ impl Session {
     }
 
     /// Begin a transaction
-    #[allow(dead_code)]
-    pub fn begin_transaction(&mut self) -> Result<()> {
-        if self.in_transaction {
-            return Err(anyhow::anyhow!("Already in transaction"));
-        }
-        self.in_transaction = true;
-        Ok(())
+    ///
+    /// Starts a new transaction for this session. While in a transaction:
+    /// - Changes are tracked for potential rollback
+    /// - The storage layer manages transaction state
+    pub async fn begin_transaction(&mut self) -> Result<ExecutionResult> {
+        // Track session-level transaction state
+        self.txn_manager.begin().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Also start transaction in the shared database storage layer
+        let mut db = self.db.write().await;
+        db.begin_transaction()
+            .map_err(|e| anyhow::anyhow!("Failed to begin transaction: {}", e))?;
+
+        Ok(ExecutionResult::Begin)
     }
 
     /// Commit the current transaction
-    #[allow(dead_code)]
-    pub fn commit(&mut self) -> Result<()> {
-        if !self.in_transaction {
-            return Err(anyhow::anyhow!("No transaction in progress"));
-        }
-        self.in_transaction = false;
-        Ok(())
+    ///
+    /// Commits all changes made during this transaction.
+    /// After commit, changes are permanent and visible to all sessions.
+    pub async fn commit(&mut self) -> Result<ExecutionResult> {
+        // Commit session-level transaction state (clears buffered change tracking)
+        let _changes = self.txn_manager.commit().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Commit in the shared database storage layer
+        let mut db = self.db.write().await;
+        db.commit_transaction()
+            .map_err(|e| anyhow::anyhow!("Failed to commit transaction: {}", e))?;
+
+        Ok(ExecutionResult::Commit)
     }
 
     /// Rollback the current transaction
-    #[allow(dead_code)]
-    pub fn rollback(&mut self) -> Result<()> {
-        if !self.in_transaction {
-            return Err(anyhow::anyhow!("No transaction in progress"));
-        }
-        self.in_transaction = false;
-        Ok(())
+    ///
+    /// Discards all changes made during this transaction.
+    /// The database state is restored to what it was before BEGIN.
+    pub async fn rollback(&mut self) -> Result<ExecutionResult> {
+        // Rollback session-level transaction state
+        self.txn_manager.rollback().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Rollback in the shared database storage layer
+        let mut db = self.db.write().await;
+        db.rollback_transaction()
+            .map_err(|e| anyhow::anyhow!("Failed to rollback transaction: {}", e))?;
+
+        Ok(ExecutionResult::Rollback)
     }
 
     /// Execute DECLARE CURSOR statement
@@ -593,30 +660,30 @@ mod tests {
         let session = Session::new("testdb".to_string(), "testuser".to_string(), db);
         assert_eq!(session.database, "testdb");
         assert_eq!(session.user, "testuser");
-        assert!(!session.in_transaction);
+        assert!(!session.in_transaction());
     }
 
-    #[test]
-    fn test_transaction_state() {
+    #[tokio::test]
+    async fn test_transaction_state() {
         let db = create_shared_db();
         let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
 
         // Not in transaction initially
-        assert!(!session.in_transaction);
+        assert!(!session.in_transaction());
 
         // Begin transaction
-        assert!(session.begin_transaction().is_ok());
-        assert!(session.in_transaction);
+        assert!(session.begin_transaction().await.is_ok());
+        assert!(session.in_transaction());
 
         // Can't begin twice
-        assert!(session.begin_transaction().is_err());
+        assert!(session.begin_transaction().await.is_err());
 
         // Commit
-        assert!(session.commit().is_ok());
-        assert!(!session.in_transaction);
+        assert!(session.commit().await.is_ok());
+        assert!(!session.in_transaction());
 
         // Can't commit when not in transaction
-        assert!(session.commit().is_err());
+        assert!(session.commit().await.is_err());
     }
 
     #[tokio::test]
