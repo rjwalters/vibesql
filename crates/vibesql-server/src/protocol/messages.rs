@@ -83,6 +83,14 @@ pub enum BackendMessage {
 
     /// Subscription error (0xF3) - subscription error notification
     SubscriptionError { subscription_id: [u8; 16], message: String },
+
+    /// Subscription acknowledgment (0xF4) - confirms subscription registration
+    /// Sent immediately after a subscription is registered, before initial data
+    SubscriptionAck {
+        subscription_id: [u8; 16],
+        /// Number of table dependencies the subscription monitors
+        table_count: u16,
+    },
 }
 
 /// Transaction status
@@ -143,6 +151,12 @@ pub enum FrontendMessage {
 
     /// Unsubscribe message (0xF1) - cancel subscription
     Unsubscribe { subscription_id: [u8; 16] },
+
+    /// Pause subscription message (0xF5) - temporarily pause updates
+    SubscriptionPause { subscription_id: [u8; 16] },
+
+    /// Resume subscription message (0xF6) - resume paused subscription
+    SubscriptionResume { subscription_id: [u8; 16] },
 }
 
 impl BackendMessage {
@@ -308,6 +322,16 @@ impl BackendMessage {
                 buf.put_slice(subscription_id);
                 put_cstring(buf, message);
             }
+
+            BackendMessage::SubscriptionAck { subscription_id, table_count } => {
+                buf.put_u8(0xF4); // SubscriptionAck
+
+                let len = 4 + 16 + 2; // length + subscription_id + table_count
+
+                buf.put_i32(len as i32);
+                buf.put_slice(subscription_id);
+                buf.put_u16(*table_count);
+            }
         }
     }
 }
@@ -392,6 +416,22 @@ impl FrontendMessage {
                 let mut subscription_id = [0u8; 16];
                 buf.copy_to_slice(&mut subscription_id);
                 Ok(Some(FrontendMessage::Unsubscribe { subscription_id }))
+            }
+
+            0xF5 => {
+                // SubscriptionPause message
+                buf.advance(4); // length
+                let mut subscription_id = [0u8; 16];
+                buf.copy_to_slice(&mut subscription_id);
+                Ok(Some(FrontendMessage::SubscriptionPause { subscription_id }))
+            }
+
+            0xF6 => {
+                // SubscriptionResume message
+                buf.advance(4); // length
+                let mut subscription_id = [0u8; 16];
+                buf.copy_to_slice(&mut subscription_id);
+                Ok(Some(FrontendMessage::SubscriptionResume { subscription_id }))
             }
 
             _ => Err(ProtocolError::InvalidMessageType(msg_type)),
@@ -608,6 +648,53 @@ mod tests {
         assert_eq!(buf[0], 0xF3);
         // Verify subscription_id is at bytes 5-20
         assert_eq!(&buf[5..21], subscription_id.as_ref());
+    }
+
+    #[test]
+    fn test_subscription_ack_encoding() {
+        let mut buf = BytesMut::new();
+        let subscription_id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+        let msg = BackendMessage::SubscriptionAck { subscription_id, table_count: 3 };
+        msg.encode(&mut buf);
+
+        assert_eq!(buf[0], 0xF4);
+        // Verify length field (4 + 16 + 2 = 22)
+        assert_eq!(&buf[1..5], &[0, 0, 0, 22]);
+        // Verify subscription_id is at bytes 5-20
+        assert_eq!(&buf[5..21], subscription_id.as_ref());
+        // Verify table_count (big-endian u16)
+        assert_eq!(&buf[21..23], &[0, 3]);
+    }
+
+    #[test]
+    fn test_subscription_pause_parsing() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF5); // SubscriptionPause
+        buf.put_i32(20); // Length: 4 (length) + 16 (UUID)
+        buf.put_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        assert!(matches!(
+            msg,
+            Some(FrontendMessage::SubscriptionPause { subscription_id })
+            if subscription_id == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        ));
+    }
+
+    #[test]
+    fn test_subscription_resume_parsing() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF6); // SubscriptionResume
+        buf.put_i32(20); // Length: 4 (length) + 16 (UUID)
+        buf.put_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        assert!(matches!(
+            msg,
+            Some(FrontendMessage::SubscriptionResume { subscription_id })
+            if subscription_id == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        ));
     }
 
     // =====================================================================
