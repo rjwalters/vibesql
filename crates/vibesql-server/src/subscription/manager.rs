@@ -616,6 +616,24 @@ impl SubscriptionManager {
         false
     }
 
+    /// Update selective updates configuration for a subscription
+    ///
+    /// Allows per-subscription overrides of the server-level selective updates config.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The subscription ID
+    /// * `config` - The new selective updates configuration
+    pub fn update_selective_updates(
+        &self,
+        id: SubscriptionId,
+        config: super::SelectiveColumnConfig,
+    ) {
+        if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+            sub.selective_updates = config;
+        }
+    }
+
     /// Get the primary key columns for a subscription by wire ID
     ///
     /// Returns the PK column indices, or default [0] if not found.

@@ -471,12 +471,20 @@ def run_tpcc(config: BenchConfig) -> int:
     print("\n" + "=" * 60)
     print("TPC-C Benchmark (OLTP)")
     print("=" * 60)
-    
+
+    # Build features based on selected engines
+    features = ["benchmark-comparison"]
+    if "duckdb" in config.engines:
+        features.append("duckdb-comparison")
+    if "mysql" in config.engines:
+        features.append("mysql-comparison")
+    features_str = ",".join(features)
+
     # Build benchmark
-    print("Building TPC-C benchmark...")
+    print(f"Building TPC-C benchmark (features: {features_str})...")
     result = subprocess.run(
         ["cargo", "bench", "--package", "vibesql-executor", "--bench", "tpcc_benchmark",
-         "--features", "benchmark-comparison", "--no-run"],
+         "--features", features_str, "--no-run"],
         cwd=Path(__file__).parent.parent
     )
     
@@ -516,17 +524,18 @@ def run_tpcc(config: BenchConfig) -> int:
     
     # Run benchmark
     print(f"\nRunning TPC-C (duration={duration}s)...")
-    
-    # Find benchmark binary
+
+    # Find benchmark binary - use the most recently modified one
     import glob
     benchmarks = glob.glob("./target/release/deps/tpcc_benchmark-*")
     benchmarks = [b for b in benchmarks if not b.endswith((".d", ".o"))]
-    
+
     if not benchmarks:
         print("❌ Benchmark binary not found")
         return 1
-    
-    bench_bin = benchmarks[0]
+
+    # Select most recently modified binary (the one we just built)
+    bench_bin = max(benchmarks, key=lambda b: Path(b).stat().st_mtime)
 
     # Build command with transaction filter if specified
     cmd = [bench_bin]
