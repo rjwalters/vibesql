@@ -13,21 +13,29 @@ use vibesql_server::config::{
     AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig,
 };
 use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
+use vibesql_server::http::create_http_router;
 use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
 use vibesql_server::registry::DatabaseRegistry;
 use vibesql_server::subscription::SubscriptionConfig;
 use vibesql_server::SubscriptionManager;
+use vibesql_storage::Database;
 
 /// Test server handle - holds the shutdown channel and address
 pub struct TestServer {
     pub addr: SocketAddr,
+    pub http_addr: Option<SocketAddr>,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
 impl TestServer {
-    /// Get the server address
+    /// Get the server address (TCP wire protocol)
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// Get the HTTP server address (if HTTP is enabled)
+    pub fn http_addr(&self) -> Option<SocketAddr> {
+        self.http_addr
     }
 
     /// Shutdown the server
@@ -54,13 +62,25 @@ pub async fn start_test_server() -> TestServer {
 
 /// Start a test server with the given configuration
 pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
-    // Bind to a random available port
+    // Bind to a random available port for TCP wire protocol
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("Failed to bind");
     let addr = listener.local_addr().expect("Failed to get local address");
 
     // Update config with actual port
     config.server.port = addr.port();
     config.server.host = "127.0.0.1".to_string();
+
+    // Bind HTTP server to a separate random port if enabled
+    let http_addr = if config.http.enabled {
+        let http_listener =
+            TcpListener::bind("127.0.0.1:0").await.expect("Failed to bind HTTP server");
+        let http_addr = http_listener.local_addr().expect("Failed to get HTTP local address");
+        config.http.port = http_addr.port();
+        config.http.host = "127.0.0.1".to_string();
+        Some((http_addr, http_listener))
+    } else {
+        None
+    };
 
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
@@ -91,7 +111,37 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
     let (mutation_broadcast_tx, _mutation_broadcast_rx) =
         broadcast::channel::<TableMutationNotification>(1024);
 
-    // Spawn server task
+    // Start HTTP server if enabled
+    let http_server_addr = if let Some((http_socket_addr, http_listener)) = http_addr {
+        // Create a shared database for HTTP API (like main.rs does)
+        let mut db = Database::new();
+        let change_rx = db.enable_change_events(1024);
+        let db = Arc::new(db);
+
+        // Clone subscription manager for HTTP
+        let subscription_manager_for_http = Arc::clone(&subscription_manager);
+        let registry_for_http = database_registry.clone();
+
+        // Spawn the subscription manager event loop
+        let db_for_subscription_task = Arc::clone(&db);
+        let subscription_manager_for_loop = Arc::clone(&subscription_manager);
+        tokio::spawn(async move {
+            subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
+        });
+
+        // Spawn HTTP server
+        let db_for_http = Arc::clone(&db);
+        tokio::spawn(async move {
+            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http);
+            axum::serve(http_listener, app).await.expect("HTTP server error");
+        });
+
+        Some(http_socket_addr)
+    } else {
+        None
+    };
+
+    // Spawn TCP wire protocol server task
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -131,7 +181,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
         }
     });
 
-    TestServer { addr, shutdown_tx: Some(shutdown_tx) }
+    TestServer { addr, http_addr: http_server_addr, shutdown_tx: Some(shutdown_tx) }
 }
 
 /// Create a test configuration with trust authentication
