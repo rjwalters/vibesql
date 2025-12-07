@@ -10,16 +10,6 @@
 //!
 //! Run with:
 //!   cargo bench --package vibesql-types --bench types_bench
-//!
-//! Compare Arc<str> vs arcstr:
-//!   # Baseline (Arc<str>)
-//!   cargo bench --package vibesql-types --bench types_bench > baseline.txt
-//!
-//!   # With arcstr SSO
-//!   cargo bench --package vibesql-types --bench types_bench --features arcstr > arcstr.txt
-//!
-//! Or via Makefile:
-//!   make bench-types
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::collections::HashMap;
@@ -27,7 +17,6 @@ use std::hint::black_box;
 use vibesql_types::{Date, SqlValue, StringValue, Time, Timestamp};
 
 /// Helper to create StringValue from &str
-/// Works with both Arc<str> and ArcStr depending on feature flag
 fn string_value(s: &str) -> StringValue {
     StringValue::from(s)
 }

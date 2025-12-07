@@ -9,22 +9,16 @@ use crate::{
     DataType,
 };
 
-// Conditional string type based on feature flag:
-// - With `arcstr` feature: Uses ArcStr with small string optimization (SSO)
-//   Strings ≤22 bytes are stored inline without heap allocation
-// - Without `arcstr` feature: Uses standard Arc<str> for O(1) cloning
-#[cfg(feature = "arcstr")]
+/// String type for SQL values using ArcStr with small string optimization (SSO).
+/// Strings ≤22 bytes are stored inline without heap allocation.
 pub type StringValue = arcstr::ArcStr;
-#[cfg(not(feature = "arcstr"))]
-pub type StringValue = std::sync::Arc<str>;
 
 /// SQL Values - runtime representation of data
 ///
 /// Represents actual values in SQL, including NULL.
 ///
-/// String types use `StringValue` which provides O(1) cloning.
-/// When compiled with the `arcstr` feature, strings ≤22 bytes
-/// are stored inline (small string optimization) avoiding heap allocation.
+/// String types use `StringValue` (ArcStr) which provides O(1) cloning.
+/// Strings ≤22 bytes are stored inline (small string optimization) avoiding heap allocation.
 #[derive(Debug, Clone)]
 pub enum SqlValue {
     Integer(i64),
@@ -127,7 +121,7 @@ impl SqlValue {
         match self {
             SqlValue::Character(s) | SqlValue::Varchar(s) => {
 // StringValue: base + string length
-                // Note: With arcstr feature, strings ≤22 bytes use SSO (no heap)
+                // Note: ArcStr strings ≤22 bytes use SSO (no heap)
                 // but we still count the string length for accounting purposes
                 base_size + s.len()
             }

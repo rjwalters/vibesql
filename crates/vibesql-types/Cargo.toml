@@ -9,14 +9,8 @@ description = "Type system for vibesql SQL database engine"
 keywords = ["sql", "database", "types"]
 categories = ["database"]
 
-[features]
-default = []
-# Use arcstr crate for small string optimization (SSO)
-# Strings ≤22 bytes are stored inline without heap allocation
-arcstr = ["dep:arcstr"]
-
 [dependencies]
-arcstr = { version = "1.2", optional = true }
+arcstr = "1.2"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
