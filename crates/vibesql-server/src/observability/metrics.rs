@@ -1,5 +1,7 @@
-use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 use opentelemetry::KeyValue;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Server metrics collection
@@ -31,6 +33,8 @@ pub struct ServerMetrics {
     subscription_updates_total: Counter<u64>,
     selective_update_columns_sent: Histogram<u64>,
     selective_update_changed_ratio: Histogram<f64>,
+    subscriptions_selective_eligible: Gauge<u64>,
+    subscriptions_selective_eligible_count: Arc<AtomicU64>,
 }
 
 impl ServerMetrics {
@@ -124,6 +128,13 @@ impl ServerMetrics {
             .with_unit("1")
             .build();
 
+        let subscriptions_selective_eligible = meter
+            .u64_gauge("vibesql_subscriptions_selective_eligible")
+            .with_description("Active subscriptions eligible for selective column updates")
+            .with_unit("{subscription}")
+            .build();
+        let subscriptions_selective_eligible_count = Arc::new(AtomicU64::new(0));
+
         Self {
             connections_total,
             connection_errors_total,
@@ -139,6 +150,8 @@ impl ServerMetrics {
             subscription_updates_total,
             selective_update_columns_sent,
             selective_update_changed_ratio,
+            subscriptions_selective_eligible,
+            subscriptions_selective_eligible_count,
         }
     }
 
@@ -250,5 +263,79 @@ impl ServerMetrics {
             let ratio = columns_sent as f64 / total_columns as f64;
             self.selective_update_changed_ratio.record(ratio, &[]);
         }
+    }
+
+    /// Increment the count of selective-eligible subscriptions
+    ///
+    /// Called when a subscription is registered with successfully detected PK columns.
+    pub fn increment_selective_eligible(&self) {
+        let new_value = self.subscriptions_selective_eligible_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.subscriptions_selective_eligible.record(new_value, &[]);
+    }
+
+    /// Decrement the count of selective-eligible subscriptions
+    ///
+    /// Called when a selective-eligible subscription is unregistered.
+    pub fn decrement_selective_eligible(&self) {
+        let new_value = self.subscriptions_selective_eligible_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        self.subscriptions_selective_eligible.record(new_value, &[]);
+    }
+
+    /// Get the current count of selective-eligible subscriptions
+    pub fn selective_eligible_count(&self) -> u64 {
+        self.subscriptions_selective_eligible_count.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::global;
+
+    fn create_test_metrics() -> ServerMetrics {
+        let meter = global::meter("test_meter");
+        ServerMetrics::new(&meter)
+    }
+
+    #[test]
+    fn test_selective_eligible_increment_decrement() {
+        let metrics = create_test_metrics();
+
+        // Initially zero
+        assert_eq!(metrics.selective_eligible_count(), 0);
+
+        // Increment
+        metrics.increment_selective_eligible();
+        assert_eq!(metrics.selective_eligible_count(), 1);
+
+        // Increment again
+        metrics.increment_selective_eligible();
+        assert_eq!(metrics.selective_eligible_count(), 2);
+
+        // Decrement
+        metrics.decrement_selective_eligible();
+        assert_eq!(metrics.selective_eligible_count(), 1);
+
+        // Decrement again
+        metrics.decrement_selective_eligible();
+        assert_eq!(metrics.selective_eligible_count(), 0);
+    }
+
+    #[test]
+    fn test_selective_eligible_clone() {
+        let metrics1 = create_test_metrics();
+
+        // Increment on first instance
+        metrics1.increment_selective_eligible();
+        assert_eq!(metrics1.selective_eligible_count(), 1);
+
+        // Clone and check shared state
+        let metrics2 = metrics1.clone();
+        assert_eq!(metrics2.selective_eligible_count(), 1);
+
+        // Increment on clone, check both see it
+        metrics2.increment_selective_eligible();
+        assert_eq!(metrics1.selective_eligible_count(), 2);
+        assert_eq!(metrics2.selective_eligible_count(), 2);
     }
 }
