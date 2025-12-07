@@ -735,11 +735,17 @@ impl ConnectionHandler {
         // Check if selective updates are enabled in config
         let config = &self.config.subscriptions.selective_updates;
         if !config.enabled {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_partial_update_fallback("disabled");
+            }
             return false;
         }
 
         // Row counts must match for selective updates (no inserts/deletes)
         if old_rows.len() != new_rows.len() {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_partial_update_fallback("row_count_mismatch");
+            }
             return false;
         }
 
@@ -769,6 +775,7 @@ impl ConnectionHandler {
 
         // Try to create partial row updates for each new row
         let mut partial_updates = Vec::new();
+        let mut threshold_exceeded_count = 0u64;
         for new_row in &new_wire {
             // Extract PK from new row
             let pk_values: Vec<Option<Vec<u8>>> =
@@ -784,19 +791,83 @@ impl ConnectionHandler {
                 {
                     partial_updates.push(partial);
                 } else {
-                    // No changes for this row, skip it
+                    // Check if this was due to threshold exceeded (too many columns changed)
+                    let changed_count = old_row
+                        .iter()
+                        .zip(new_row.iter())
+                        .filter(|(o, n)| o != n)
+                        .count();
+                    if changed_count > 0 {
+                        let ratio = changed_count as f64 / new_row.len() as f64;
+                        if ratio > selective_config.max_changed_columns_ratio {
+                            threshold_exceeded_count += 1;
+                        }
+                    }
                     continue;
                 }
             } else {
                 // Can't find matching old row - this is an insert, not an update
                 // Fall back to regular updates
+                if let Some(metrics) = self.observability.metrics() {
+                    metrics.record_partial_update_fallback("pk_mismatch");
+                }
                 return false;
+            }
+        }
+
+        // Record threshold exceeded fallbacks if any
+        if threshold_exceeded_count > 0 {
+            if let Some(metrics) = self.observability.metrics() {
+                for _ in 0..threshold_exceeded_count {
+                    metrics.record_partial_update_fallback("threshold_exceeded");
+                }
             }
         }
 
         // If no partial updates were generated, nothing changed
         if partial_updates.is_empty() {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_partial_update_fallback("no_changes");
+            }
             return false;
+        }
+
+        // Calculate and record metrics before sending
+        if let Some(metrics) = self.observability.metrics() {
+            let total_columns = if !new_wire.is_empty() { new_wire[0].len() as u64 } else { 0 };
+            let mut total_columns_sent: u64 = 0;
+            let mut total_bytes_full: u64 = 0;
+            let mut total_bytes_partial: u64 = 0;
+
+            for (partial, new_row) in partial_updates.iter().zip(new_wire.iter()) {
+                // Count columns sent in this partial update
+                total_columns_sent += partial.present_column_count() as u64;
+
+                // Estimate bytes for full row vs partial update
+                let full_row_bytes: u64 = new_row
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| b.len() as u64).unwrap_or(0) + 4) // value + length prefix
+                    .sum();
+                let partial_bytes: u64 = partial
+                    .values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| b.len() as u64).unwrap_or(0) + 4)
+                    .sum::<u64>()
+                    + partial.column_mask.len() as u64
+                    + 2; // mask + total_columns header
+
+                total_bytes_full += full_row_bytes;
+                total_bytes_partial += partial_bytes;
+            }
+
+            // Record column efficiency metrics
+            let total_possible = total_columns * partial_updates.len() as u64;
+            metrics.record_selective_update_columns(total_columns_sent, total_possible);
+
+            // Record bytes saved
+            if total_bytes_full > total_bytes_partial {
+                metrics.record_partial_update_bytes_saved(total_bytes_full - total_bytes_partial);
+            }
         }
 
         // Send the partial updates
@@ -1540,20 +1611,6 @@ impl ConnectionHandler {
             message: message.to_string(),
         }
         .encode(&mut self.write_buf);
-        self.flush_write_buffer().await
-    }
-
-    /// Send subscription partial data (0xF7) for selective column updates
-    ///
-    /// This is more bandwidth-efficient than sending full rows when only
-    /// a few columns have changed.
-    async fn send_subscription_partial_data(
-        &mut self,
-        subscription_id: &[u8; 16],
-        rows: Vec<crate::protocol::messages::PartialRowUpdate>,
-    ) -> Result<()> {
-        BackendMessage::SubscriptionPartialData { subscription_id: *subscription_id, rows }
-            .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
 
