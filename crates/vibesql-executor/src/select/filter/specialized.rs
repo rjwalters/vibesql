@@ -273,7 +273,7 @@ mod tests {
     use super::*;
 
     fn create_test_row(values: Vec<SqlValue>) -> Row {
-        Row { values }
+        Row::from_vec(values)
     }
 
     #[test]

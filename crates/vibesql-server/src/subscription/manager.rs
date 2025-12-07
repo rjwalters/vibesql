@@ -750,7 +750,7 @@ impl SubscriptionManager {
 
                     // Convert to Row format
                     let result_rows: Vec<crate::Row> =
-                        rows.iter().map(|r| crate::Row { values: r.values.clone() }).collect();
+                        rows.iter().map(|r| crate::Row { values: r.values.to_vec() }).collect();
 
                     // Hash results for comparison
                     let new_hash = hash_rows(&result_rows);
@@ -1098,7 +1098,7 @@ impl SubscriptionManager {
 
         // Convert to Row format
         let result_rows: Vec<crate::Row> =
-            rows.iter().map(|r| crate::Row { values: r.values.clone() }).collect();
+            rows.iter().map(|r| crate::Row { values: r.values.to_vec() }).collect();
 
         // Update hash and store result for delta computation
         subscription.last_result_hash = hash_rows(&result_rows);

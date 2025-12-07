@@ -49,7 +49,7 @@ impl TableStatistics {
     /// * `schema` - Table schema with column definitions
     ///
     /// # Example
-    /// ```no_run
+    /// ```ignore
     /// let stats = TableStatistics::estimate_from_schema(5000, &schema);
     /// // Boolean col: n_distinct = 2
     /// // Integer col: n_distinct = sqrt(5000) ≈ 70

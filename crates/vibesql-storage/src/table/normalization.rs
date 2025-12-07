@@ -142,7 +142,7 @@ impl<'a> RowNormalizer<'a> {
             // Character types
             DataType::Character { length } => {
                 if let SqlValue::Character(s) = value {
-                    *s = std::sync::Arc::from(Self::normalize_char_value(s, *length));
+                    *s = Self::normalize_char_value(s, *length).into();
                 } else {
                     return Err(StorageError::TypeMismatch {
                         column: column_name.to_string(),
@@ -156,7 +156,7 @@ impl<'a> RowNormalizer<'a> {
                     // Truncate if exceeds max_length
                     if let Some(max_len) = max_length {
                         if s.len() > *max_len {
-                            *s = std::sync::Arc::from(&s[..*max_len]);
+                            *s = s[..*max_len].into();
                         }
                     }
                 } else {
@@ -175,7 +175,7 @@ impl<'a> RowNormalizer<'a> {
                 if let SqlValue::Varchar(s) = value {
                     // Truncate to 128 if exceeds
                     if s.len() > 128 {
-                        *s = std::sync::Arc::from(&s[..128]);
+                        *s = s[..128].into();
                     }
                 } else {
                     return Err(StorageError::TypeMismatch {
@@ -440,13 +440,11 @@ mod tests {
         let schema = create_test_schema();
         let normalizer = RowNormalizer::new(&schema);
 
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Character(std::sync::Arc::from("ABC")), // Should be padded to 5
-            ],
-        };
+            ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
         assert_eq!(normalized.values[2], SqlValue::Character(std::sync::Arc::from("ABC  ")));
@@ -457,13 +455,11 @@ mod tests {
         let schema = create_test_schema();
         let normalizer = RowNormalizer::new(&schema);
 
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Character(std::sync::Arc::from("ABCDEFGH")), // Should be truncated to 5
-            ],
-        };
+            ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
         assert_eq!(normalized.values[2], SqlValue::Character(std::sync::Arc::from("ABCDE")));
@@ -474,13 +470,11 @@ mod tests {
         let schema = create_test_schema();
         let normalizer = RowNormalizer::new(&schema);
 
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Null, // id is NOT NULL
                 SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Character(std::sync::Arc::from("ABC")),
-            ],
-        };
+            ]);
 
         let result = normalizer.normalize_and_validate(row);
         assert!(result.is_err());
@@ -492,13 +486,11 @@ mod tests {
         let schema = create_test_schema();
         let normalizer = RowNormalizer::new(&schema);
 
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Varchar(std::sync::Arc::from("not_an_int")), // Wrong type for id
                 SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Character(std::sync::Arc::from("ABC")),
-            ],
-        };
+            ]);
 
         let result = normalizer.normalize_and_validate(row);
         assert!(result.is_err());
@@ -511,13 +503,11 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let long_name = "A".repeat(100); // Exceeds max_length of 50
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Varchar(std::sync::Arc::from(long_name.clone())),
                 SqlValue::Character(std::sync::Arc::from("ABC")),
-            ],
-        };
+            ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
         if let SqlValue::Varchar(name) = &normalized.values[1] {
@@ -532,13 +522,11 @@ mod tests {
         let schema = create_test_schema();
         let normalizer = RowNormalizer::new(&schema);
 
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Null, // code is nullable
-            ],
-        };
+            ]);
 
         let result = normalizer.normalize_and_validate(row);
         assert!(result.is_ok());

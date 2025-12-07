@@ -44,7 +44,7 @@ pub use persistence::load::{parse_sql_statements, read_sql_dump};
 pub use query_buffer_pool::{
     QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard,
 };
-pub use row::Row;
+pub use row::{Row, RowValues, ROW_INLINE_CAPACITY};
 pub use statistics::{ColumnStatistics, TableIndexInfo, TableStatistics};
 pub use table::{DeleteResult, Table};
 pub use wal::{

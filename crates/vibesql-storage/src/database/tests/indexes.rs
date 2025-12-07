@@ -137,7 +137,7 @@ fn test_disk_backed_index_creation_with_bulk_load() {
     // Create 100,500 rows - this would exceed DISK_BACKED_THRESHOLD in production
     let num_rows = 100_500;
     let table_rows: Vec<Row> =
-        (0..num_rows).map(|i| Row { values: vec![SqlValue::Integer(i as i64)] }).collect();
+        (0..num_rows).map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
     let mut index_manager = IndexManager::new();
     index_manager.set_database_path(temp_dir.path().to_path_buf());
@@ -179,7 +179,7 @@ fn test_in_memory_index_for_small_tables() {
 
     // Create small number of rows (well below threshold)
     let table_rows: Vec<Row> =
-        (0..100).map(|i| Row { values: vec![SqlValue::Integer(i as i64)] }).collect();
+        (0..100).map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
     let mut index_manager = IndexManager::new();
 
@@ -234,7 +234,7 @@ fn test_budget_enforcement_with_spill_policy() {
 
     // Create small rows for in-memory indexes
     let table_rows: Vec<Row> =
-        (0..100).map(|i| Row { values: vec![SqlValue::Integer(i as i64)] }).collect();
+        (0..100).map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
     let mut index_manager = IndexManager::new();
     index_manager.set_database_path(temp_dir.path().to_path_buf());
@@ -301,7 +301,7 @@ fn test_lru_eviction_order() {
     let table_schema = TableSchema::new("test_table".to_string(), columns);
 
     let table_rows: Vec<Row> =
-        (0..50).map(|i| Row { values: vec![SqlValue::Integer(i as i64)] }).collect();
+        (0..50).map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
     let mut index_manager = IndexManager::new();
     index_manager.set_database_path(temp_dir.path().to_path_buf());
@@ -400,7 +400,7 @@ fn test_access_tracking() {
     let table_schema = TableSchema::new("test_table".to_string(), columns);
 
     let table_rows: Vec<Row> =
-        (0..10).map(|i| Row { values: vec![SqlValue::Integer(i as i64)] }).collect();
+        (0..10).map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
     let mut index_manager = IndexManager::new();
 
@@ -454,7 +454,7 @@ fn test_resource_cleanup_on_drop() {
     let table_schema = TableSchema::new("test_table".to_string(), columns);
 
     let table_rows: Vec<Row> =
-        (0..100).map(|i| Row { values: vec![SqlValue::Integer(i as i64)] }).collect();
+        (0..100).map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)])).collect();
 
     let mut index_manager = IndexManager::new();
 
@@ -533,11 +533,11 @@ fn test_index_scan_after_database_reset() {
 
         // Insert rows into table (simulates: INSERT INTO tab1 VALUES...)
         let rows = vec![
-            Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(100)] },
-            Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(200)] },
-            Row { values: vec![SqlValue::Integer(3), SqlValue::Integer(300)] },
-            Row { values: vec![SqlValue::Integer(4), SqlValue::Integer(400)] },
-            Row { values: vec![SqlValue::Integer(5), SqlValue::Integer(500)] },
+            Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(100)]),
+            Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(200)]),
+            Row::from_vec(vec![SqlValue::Integer(3), SqlValue::Integer(300)]),
+            Row::from_vec(vec![SqlValue::Integer(4), SqlValue::Integer(400)]),
+            Row::from_vec(vec![SqlValue::Integer(5), SqlValue::Integer(500)]),
         ];
 
         // Get the table and insert rows
@@ -721,7 +721,7 @@ fn test_thread_local_pool_pattern() {
         let table = db.get_table_mut("tab1").unwrap();
         for i in 1..=5 {
             table
-                .insert(Row { values: vec![SqlValue::Integer(i), SqlValue::Integer(i * 100)] })
+                .insert(Row::from_vec(vec![SqlValue::Integer(i), SqlValue::Integer(i * 100)]))
                 .unwrap();
         }
         eprintln!("  Inserted 5 rows");
@@ -798,13 +798,13 @@ fn test_lookup_by_index_single_column() {
     // Insert rows
     let table = db.get_table_mut("users").unwrap();
     table
-        .insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))] })
+        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".into())]))
         .unwrap();
     table
-        .insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] })
+        .insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".into())]))
         .unwrap();
     table
-        .insert(Row { values: vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))] })
+        .insert(Row::from_vec(vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".into())]))
         .unwrap();
 
     // Create index on id column
@@ -825,7 +825,7 @@ fn test_lookup_by_index_single_column() {
     assert!(result.is_some());
     let rows = result.unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+    assert_eq!(rows[0].values[1], SqlValue::Varchar("Bob".into()));
 
     // Test lookup_by_index - non-existing key
     let result = db.lookup_by_index("idx_users_id", &[SqlValue::Integer(999)]).unwrap();
@@ -854,8 +854,8 @@ fn test_lookup_one_by_index() {
 
     // Insert rows
     let table = db.get_table_mut("items").unwrap();
-    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(100)] }).unwrap();
-    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(200)] }).unwrap();
+    table.insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
+    table.insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(200)])).unwrap();
 
     // Create index
     db.create_index(
@@ -904,44 +904,36 @@ fn test_lookup_by_index_composite_key() {
     // Insert rows
     let table = db.get_table_mut("orders").unwrap();
     table
-        .insert(Row {
-            values: vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(1),
-                SqlValue::Integer(1),
-                SqlValue::Double(100.0),
-            ],
-        })
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Double(100.0),
+        ]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Double(200.0),
-            ],
-        })
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Double(200.0),
+        ]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Integer(1),
-                SqlValue::Double(300.0),
-            ],
-        })
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Integer(1),
+            SqlValue::Double(300.0),
+        ]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![
-                SqlValue::Integer(2),
-                SqlValue::Integer(1),
-                SqlValue::Integer(1),
-                SqlValue::Double(400.0),
-            ],
-        })
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(2),
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Double(400.0),
+        ]))
         .unwrap();
 
     // Create composite index
@@ -1014,9 +1006,10 @@ fn test_lookup_by_index_batch() {
     let table = db.get_table_mut("products").unwrap();
     for i in 1..=10 {
         table
-            .insert(Row {
-                values: vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("Product{}", i)))],
-            })
+            .insert(Row::from_vec(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(std::sync::Arc::from(format!("Product{}", i))),
+            ]))
             .unwrap();
     }
 
@@ -1049,9 +1042,9 @@ fn test_lookup_by_index_batch() {
     assert!(results[3].is_some()); // id=8
 
     // Verify values
-    assert_eq!(results[0].as_ref().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Product2")));
-    assert_eq!(results[1].as_ref().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Product5")));
-    assert_eq!(results[3].as_ref().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Product8")));
+    assert_eq!(results[0].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product2".into()));
+    assert_eq!(results[1].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product5".into()));
+    assert_eq!(results[3].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product8".into()));
 }
 
 #[test]
@@ -1077,7 +1070,7 @@ fn test_lookup_one_by_index_batch() {
     let table = db.get_table_mut("items").unwrap();
     for i in 1..=5 {
         table
-            .insert(Row { values: vec![SqlValue::Integer(i), SqlValue::Double(i as f64 * 10.0)] })
+            .insert(Row::from_vec(vec![SqlValue::Integer(i), SqlValue::Double(i as f64 * 10.0)]))
             .unwrap();
     }
 
@@ -1158,66 +1151,54 @@ fn test_lookup_by_index_prefix_basic() {
     let table = db.get_table_mut("new_order").unwrap();
     // District 1: orders 101, 102
     table
-        .insert(Row {
-            values: vec![
+        .insert(Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(1),
                 SqlValue::Integer(101),
                 SqlValue::Null,
-            ],
-        })
+            ]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![
+        .insert(Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(1),
                 SqlValue::Integer(102),
                 SqlValue::Null,
-            ],
-        })
+            ]))
         .unwrap();
     // District 2: orders 201, 202, 203
     table
-        .insert(Row {
-            values: vec![
+        .insert(Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(2),
                 SqlValue::Integer(201),
                 SqlValue::Null,
-            ],
-        })
+            ]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![
+        .insert(Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(2),
                 SqlValue::Integer(202),
                 SqlValue::Null,
-            ],
-        })
+            ]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![
+        .insert(Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(2),
                 SqlValue::Integer(203),
                 SqlValue::Null,
-            ],
-        })
+            ]))
         .unwrap();
     // District 3: order 301
     table
-        .insert(Row {
-            values: vec![
+        .insert(Row::from_vec(vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(3),
                 SqlValue::Integer(301),
                 SqlValue::Null,
-            ],
-        })
+            ]))
         .unwrap();
 
     // Create composite index on (w_id, d_id, o_id)
@@ -1290,30 +1271,20 @@ fn test_lookup_by_index_prefix_single_column() {
     let table = db.get_table_mut("test_data").unwrap();
     // Warehouse 1: 3 rows
     table
-        .insert(Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)],
-        })
+        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(200)],
-        })
+        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(200)]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Integer(3), SqlValue::Integer(300)],
-        })
+        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(3), SqlValue::Integer(300)]))
         .unwrap();
     // Warehouse 2: 2 rows
     table
-        .insert(Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Integer(400)],
-        })
+        .insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Integer(400)]))
         .unwrap();
     table
-        .insert(Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Integer(2), SqlValue::Integer(500)],
-        })
+        .insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(2), SqlValue::Integer(500)]))
         .unwrap();
 
     // Create index on (warehouse, district)
@@ -1366,8 +1337,8 @@ fn test_lookup_by_index_prefix_no_match() {
 
     // Insert rows
     let table = db.get_table_mut("test_table").unwrap();
-    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(10)] }).unwrap();
-    table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Integer(20)] }).unwrap();
+    table.insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(10)])).unwrap();
+    table.insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(20)])).unwrap();
 
     // Create index
     db.create_index(
@@ -1420,13 +1391,11 @@ fn test_lookup_by_index_prefix_batch_basic() {
         // Each district has d_id orders (district 1 has 1 order, district 2 has 2, etc.)
         for o_id in 1..=d_id {
             table
-                .insert(Row {
-                    values: vec![
+                .insert(Row::from_vec(vec![
                         SqlValue::Integer(1),
                         SqlValue::Integer(d_id as i64),
                         SqlValue::Integer(o_id as i64 * 100),
-                    ],
-                })
+                    ]))
                 .unwrap();
         }
     }
@@ -1499,13 +1468,11 @@ fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
     for d_id in 1..=10 {
         for o_id in 2100..(2100 + d_id) {
             table
-                .insert(Row {
-                    values: vec![
+                .insert(Row::from_vec(vec![
                         SqlValue::Integer(w_id),
                         SqlValue::Integer(d_id as i64),
                         SqlValue::Integer(o_id as i64),
-                    ],
-                })
+                    ]))
                 .unwrap();
         }
     }
@@ -1597,7 +1564,7 @@ fn test_lookup_by_index_prefix_empty_prefix() {
 
     // Insert rows
     let table = db.get_table_mut("test_table").unwrap();
-    table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(10)] }).unwrap();
+    table.insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(10)])).unwrap();
 
     // Create index
     db.create_index(

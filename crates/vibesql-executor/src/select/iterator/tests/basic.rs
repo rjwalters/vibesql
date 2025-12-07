@@ -28,9 +28,9 @@ fn test_table_scan_iterator_with_rows() {
     let _ = iter.schema().table_schemas.len();
     assert_eq!(iter.size_hint(), (3, Some(3)));
 
-    assert_eq!(iter.next().unwrap().unwrap().values, vec![SqlValue::Integer(1)]);
-    assert_eq!(iter.next().unwrap().unwrap().values, vec![SqlValue::Integer(2)]);
-    assert_eq!(iter.next().unwrap().unwrap().values, vec![SqlValue::Integer(3)]);
+    assert_eq!(iter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(1)]);
+    assert_eq!(iter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
+    assert_eq!(iter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(3)]);
     assert_eq!(iter.next(), None);
 }
 
@@ -51,9 +51,9 @@ fn test_filter_iterator_all_pass() {
 
     // Verify schema is accessible (len() is always >= 0, so just access it)
     let _ = filter.schema().table_schemas.len();
-    assert_eq!(filter.next().unwrap().unwrap().values, vec![SqlValue::Integer(1)]);
-    assert_eq!(filter.next().unwrap().unwrap().values, vec![SqlValue::Integer(2)]);
-    assert_eq!(filter.next().unwrap().unwrap().values, vec![SqlValue::Integer(3)]);
+    assert_eq!(filter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(1)]);
+    assert_eq!(filter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
+    assert_eq!(filter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(3)]);
     assert_eq!(filter.next(), None);
 }
 
@@ -102,8 +102,8 @@ fn test_filter_iterator_integer_truthy() {
     let evaluator = CombinedExpressionEvaluator::new(&schema);
     let mut filter = FilterIterator::new(scan, predicate, evaluator);
 
-    assert_eq!(filter.next().unwrap().unwrap().values, vec![SqlValue::Integer(1)]);
-    assert_eq!(filter.next().unwrap().unwrap().values, vec![SqlValue::Integer(2)]);
+    assert_eq!(filter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(1)]);
+    assert_eq!(filter.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
     assert_eq!(filter.next(), None);
 }
 
@@ -231,8 +231,8 @@ fn test_filter_with_column_ref() {
         results
     );
 
-    assert_eq!(results[0].values, vec![SqlValue::Integer(1), SqlValue::Integer(25)]);
-    assert_eq!(results[1].values, vec![SqlValue::Integer(3), SqlValue::Integer(30)]);
+    assert_eq!(results[0].values.to_vec(), vec![SqlValue::Integer(1), SqlValue::Integer(25)]);
+    assert_eq!(results[1].values.to_vec(), vec![SqlValue::Integer(3), SqlValue::Integer(30)]);
 }
 
 #[test]
@@ -247,8 +247,8 @@ fn test_projection_iterator_identity() {
 
     // Verify schema is accessible (len() is always >= 0, so just access it)
     let _ = project.schema().table_schemas.len();
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(1)]);
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(2)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(1)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
     assert_eq!(project.next(), None);
 }
 
@@ -267,8 +267,8 @@ fn test_projection_iterator_transform() {
     };
     let mut project = ProjectionIterator::new(scan, schema.clone(), project_fn);
 
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(2)]);
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(4)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(4)]);
     assert_eq!(project.next(), None);
 }
 
@@ -298,10 +298,10 @@ fn test_chained_iterators() {
     let mut project = ProjectionIterator::new(filter, schema.clone(), project_fn);
 
     // Should get all rows (filter passes all), doubled
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(2)]);
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(4)]);
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(6)]);
-    assert_eq!(project.next().unwrap().unwrap().values, vec![SqlValue::Integer(8)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(4)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(6)]);
+    assert_eq!(project.next().unwrap().unwrap().values.to_vec(), vec![SqlValue::Integer(8)]);
     assert_eq!(project.next(), None);
 }
 
@@ -321,6 +321,6 @@ fn test_iterator_take_limit() {
     let results: Vec<_> = scan.take(2).collect();
 
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].as_ref().unwrap().values, vec![SqlValue::Integer(1)]);
-    assert_eq!(results[1].as_ref().unwrap().values, vec![SqlValue::Integer(2)]);
+    assert_eq!(results[0].as_ref().unwrap().values.to_vec(), vec![SqlValue::Integer(1)]);
+    assert_eq!(results[1].as_ref().unwrap().values.to_vec(), vec![SqlValue::Integer(2)]);
 }

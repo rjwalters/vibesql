@@ -32,7 +32,7 @@ fn test_lazy_nested_loop_join_cross() {
 
     // Check first row: (1, 10, 1, 100)
     assert_eq!(
-        results[0].values,
+        results[0].values.to_vec(),
         vec![
             SqlValue::Integer(1),
             SqlValue::Integer(10),
@@ -43,7 +43,7 @@ fn test_lazy_nested_loop_join_cross() {
 
     // Check last row: (2, 20, 2, 200)
     assert_eq!(
-        results[3].values,
+        results[3].values.to_vec(),
         vec![
             SqlValue::Integer(2),
             SqlValue::Integer(20),
@@ -97,7 +97,7 @@ fn test_lazy_nested_loop_join_inner_with_condition() {
 
     // (1, 10, 1, 100)
     assert_eq!(
-        results[0].values,
+        results[0].values.to_vec(),
         vec![
             SqlValue::Integer(1),
             SqlValue::Integer(10),
@@ -108,7 +108,7 @@ fn test_lazy_nested_loop_join_inner_with_condition() {
 
     // (2, 20, 2, 200)
     assert_eq!(
-        results[1].values,
+        results[1].values.to_vec(),
         vec![
             SqlValue::Integer(2),
             SqlValue::Integer(20),
@@ -157,7 +157,7 @@ fn test_lazy_nested_loop_join_left_outer() {
 
     // First row: (1, 10, 1, 100) - match
     assert_eq!(
-        results[0].values,
+        results[0].values.to_vec(),
         vec![
             SqlValue::Integer(1),
             SqlValue::Integer(10),
@@ -168,7 +168,7 @@ fn test_lazy_nested_loop_join_left_outer() {
 
     // Second row: (3, 30, NULL, NULL) - no match, left with NULLs
     assert_eq!(
-        results[1].values,
+        results[1].values.to_vec(),
         vec![SqlValue::Integer(3), SqlValue::Integer(30), SqlValue::Null, SqlValue::Null]
     );
 }
