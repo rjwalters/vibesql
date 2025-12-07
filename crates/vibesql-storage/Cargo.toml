@@ -92,3 +92,7 @@ harness = false
 [[bench]]
 name = "durability_modes"
 harness = false
+
+[[bench]]
+name = "row_capacity_benchmark"
+harness = false

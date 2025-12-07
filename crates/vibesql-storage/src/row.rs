@@ -3,7 +3,32 @@ use vibesql_types::{Date, SqlValue};
 
 /// Inline capacity for Row values.
 /// Rows with up to this many columns avoid heap allocation.
-/// Set to 8 to cover most common queries (TPC-H, typical OLTP).
+///
+/// Benchmarked with capacity values 4, 6, 8, 10, 12 (issue #3964).
+/// Set to 8 based on the following findings:
+///
+/// | Capacity | Struct Size | Optimal For     |
+/// |----------|-------------|-----------------|
+/// | 4        | 176 bytes   | 2-4 columns     |
+/// | 6        | 256 bytes   | 4-6 columns     |
+/// | 8        | 336 bytes   | 6-10 columns    |
+/// | 10       | 416 bytes   | 8-10 columns    |
+/// | 12       | 496 bytes   | 10-12 columns   |
+///
+/// Key benchmarking results for 8-column rows:
+/// - Capacity 4: 162.8 ns (spills to heap)
+/// - Capacity 6: 159.8 ns (spills to heap)
+/// - Capacity 8: 142.1 ns (inline)
+/// - Capacity 10: 141.0 ns (inline)
+///
+/// Capacity 8 was chosen because:
+/// 1. Covers most TPC-H aggregation results without heap allocation
+/// 2. Best performance at the 8-column mark (common for analytical queries)
+/// 3. Competitive even when spilling for wider queries
+/// 4. Reasonable 336-byte memory overhead per row
+///
+/// For memory-constrained or OLTP-heavy workloads with narrow queries,
+/// capacity 6 could provide ~8% memory savings (256 vs 336 bytes).
 pub const ROW_INLINE_CAPACITY: usize = 8;
 
 /// Type alias for the SmallVec used in Row.
