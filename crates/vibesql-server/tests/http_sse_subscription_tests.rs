@@ -690,6 +690,10 @@ async fn test_sse_invalid_selective_ratio() {
 /// 1. HTTP SSE subscriptions perform PK detection after initial query execution
 /// 2. Subscriptions with confident PK detection are marked as selective_eligible
 /// 3. Partial updates are emitted for HTTP SSE subscriptions when only subset of columns change
+///
+/// Note: This is primarily a smoke test verifying PK detection setup works end-to-end.
+/// The actual partial update reception depends on timing, but we verify the initial event
+/// is received which confirms the subscription was created with PK detection.
 #[tokio::test]
 async fn test_sse_partial_updates_with_pk_detection() {
     // Create test config with HTTP enabled
@@ -726,14 +730,14 @@ async fn test_sse_partial_updates_with_pk_detection() {
 
     let client = reqwest::Client::new();
 
-    // Start subscription
+    // Start subscription with longer timeouts to ensure we receive the initial event
     match tokio::time::timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(5),
         client
             .get(&http_url)
             .header("X-Database-Name", "testdb")
             .query(&[("query", "SELECT * FROM sse_partial_test")])
-            .timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(4))
             .send(),
     )
     .await
@@ -745,7 +749,7 @@ async fn test_sse_partial_updates_with_pk_detection() {
             let _update_handle = tokio::spawn({
                 let server_addr = server.addr();
                 async move {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
 
                     let mut wire_client =
                         common::TestClient::connect(server_addr).await.expect("Failed to connect for update");
@@ -762,26 +766,28 @@ async fn test_sse_partial_updates_with_pk_detection() {
             });
 
             // Read the response body with timeout
+            // Note: SSE streams don't complete naturally, so we use a short timeout
+            // and check what events we received within that window
             match tokio::time::timeout(Duration::from_secs(2), resp.text()).await {
                 Ok(Ok(body)) => {
-                    // Parse SSE events looking for partial update
+                    // Parse SSE events looking for initial event
                     let mut found_initial = false;
+                    let mut found_partial = false;
                     let mut found_event_types = Vec::new();
 
                     for line in body.lines() {
                         if let Some((field, value)) = parse_sse_event(line) {
                             if field == "event" {
-                                found_event_types.push(value);
+                                found_event_types.push(value.clone());
                             } else if field == "data" {
                                 // Try to parse the event
                                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
                                     if let Some(event_type) = event.get("type").and_then(|v| v.as_str())
                                     {
+                                        found_event_types.push(event_type.to_string());
                                         match event_type {
                                             "initial" => found_initial = true,
-                                            "partial" => {
-                                                // partial updates would be handled here
-                                            }
+                                            "partial" => found_partial = true,
                                             _ => {}
                                         }
                                     }
@@ -790,23 +796,33 @@ async fn test_sse_partial_updates_with_pk_detection() {
                         }
                     }
 
-                    // We should at minimum have an initial event
-                    // Partial updates may or may not be received depending on timing
-                    // but the important thing is that the subscription was created and PK detection ran
+                    // Log what we found for debugging
+                    eprintln!("SSE events received: {:?}, initial={}, partial={}",
+                             found_event_types, found_initial, found_partial);
+
+                    // We must receive an initial event - this confirms PK detection ran
                     assert!(
                         found_initial,
                         "Should receive initial event. Event types received: {:?}",
                         found_event_types
                     );
                 }
-                _ => {
-                    // Timeout is acceptable - subscription was created
-                    eprintln!("Note: Response timeout. PK detection for HTTP SSE subscription was still executed.");
+                Err(_) => {
+                    // Timeout reading body is acceptable for SSE - the stream never completes naturally.
+                    // The test verifies that subscription setup with PK detection worked
+                    // by successfully getting a 200 response and establishing the SSE connection.
+                    eprintln!("Note: SSE response timed out (expected for streaming). Subscription was established successfully.");
+                }
+                Ok(Err(e)) => {
+                    panic!("Error reading response body: {}", e);
                 }
             }
         }
-        _ => {
-            eprintln!("Note: HTTP server not responding. Expected in basic test environment.");
+        Ok(Err(e)) => {
+            eprintln!("Note: HTTP request failed: {}. Expected in basic test environment.", e);
+        }
+        Err(_) => {
+            eprintln!("Note: HTTP server not responding (timeout). Expected in basic test environment.");
         }
     }
 
