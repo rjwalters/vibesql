@@ -534,7 +534,7 @@ impl Operations {
             self.index_manager.batch_update_indexes_for_delete(table_name, table_schema, rows_to_delete);
         }
 
-        // Batch update spatial indexes
+        // Batch update spatial indexes (pre-computes column indices once per index)
         self.batch_update_spatial_indexes_for_delete(catalog, table_name, rows_to_delete);
     }
 
@@ -1181,8 +1181,8 @@ impl Operations {
 
     /// Batch update spatial indexes for delete operation
     ///
-    /// This is significantly more efficient than calling `update_spatial_indexes_for_delete` in a loop
-    /// because it pre-computes column indices once per index rather than once per row.
+    /// This is significantly more efficient than calling `update_spatial_indexes_for_delete_with_values`
+    /// in a loop because it pre-computes column indices once per index rather than once per row.
     fn batch_update_spatial_indexes_for_delete(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -1210,13 +1210,15 @@ impl Operations {
             })
             .collect();
 
-        // Process each spatial index
+        if indexes_to_update.is_empty() {
+            return;
+        }
+
+        // Process each spatial index - batch remove entries for all rows
         for (index_name, col_idx) in indexes_to_update {
             if let Some((_, index)) = self.spatial_indexes.get_mut(&index_name) {
-                // Batch remove entries for all rows
                 for &(row_index, row) in rows_to_delete {
                     let geom_value = &row.values[col_idx];
-
                     if let Some(mbr) = extract_mbr_from_sql_value(geom_value) {
                         index.remove(row_index, &mbr);
                     }
