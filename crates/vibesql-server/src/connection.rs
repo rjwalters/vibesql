@@ -735,6 +735,10 @@ impl ConnectionHandler {
 
         // Check if selective updates are enabled in effective config
         if !selective_config.enabled {
+            debug!(
+                "Selective update skipped for subscription {:?}: disabled in config",
+                subscription_id
+            );
             if let Some(metrics) = self.observability.metrics() {
                 metrics.record_partial_update_fallback("disabled");
             }
@@ -743,6 +747,12 @@ impl ConnectionHandler {
 
         // Row counts must match for selective updates (no inserts/deletes)
         if old_rows.len() != new_rows.len() {
+            debug!(
+                "Selective update skipped for subscription {:?}: row count mismatch (old={}, new={})",
+                subscription_id,
+                old_rows.len(),
+                new_rows.len()
+            );
             if let Some(metrics) = self.observability.metrics() {
                 metrics.record_partial_update_fallback("row_count_mismatch");
             }
@@ -802,6 +812,11 @@ impl ConnectionHandler {
             } else {
                 // Can't find matching old row - this is an insert, not an update
                 // Fall back to regular updates
+                debug!(
+                    "Selective update skipped for subscription {:?}: cannot match row by PK (pk_columns={:?})",
+                    subscription_id,
+                    pk_columns
+                );
                 if let Some(metrics) = self.observability.metrics() {
                     metrics.record_partial_update_fallback("pk_mismatch");
                 }
@@ -811,6 +826,11 @@ impl ConnectionHandler {
 
         // Record threshold exceeded fallbacks if any
         if threshold_exceeded_count > 0 {
+            debug!(
+                "Selective update: {} rows exceeded change threshold for subscription {:?}",
+                threshold_exceeded_count,
+                subscription_id
+            );
             if let Some(metrics) = self.observability.metrics() {
                 for _ in 0..threshold_exceeded_count {
                     metrics.record_partial_update_fallback("threshold_exceeded");
@@ -820,6 +840,10 @@ impl ConnectionHandler {
 
         // If no partial updates were generated, nothing changed
         if partial_updates.is_empty() {
+            debug!(
+                "Selective update skipped for subscription {:?}: no column changes detected",
+                subscription_id
+            );
             if let Some(metrics) = self.observability.metrics() {
                 metrics.record_partial_update_fallback("no_changes");
             }
@@ -1010,10 +1034,21 @@ impl ConnectionHandler {
             let db = session.shared_database().read().await;
             detect_pk_columns_from_stmt(&parsed, &db)
         };
-        debug!(
-            "PK detection for subscription query: {:?} (confident: {})",
-            pk_detection.pk_column_indices, pk_detection.confident
-        );
+        if pk_detection.confident {
+            debug!(
+                "PK detection confident for subscription: pk_columns={:?}, tables={:?}",
+                pk_detection.pk_column_indices,
+                pk_detection.tables
+            );
+        } else {
+            debug!(
+                "PK detection not confident for subscription: reason={}, pk_columns={:?}, tables={:?}, query={}",
+                pk_detection.reason.map(|r| r.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                pk_detection.pk_column_indices,
+                pk_detection.tables,
+                query
+            );
+        }
 
         // Generate a wire subscription ID (UUID) for the wire protocol
         let wire_subscription_id = *uuid::Uuid::new_v4().as_bytes();

@@ -60,7 +60,9 @@ use tokio::sync::mpsc;
 
 pub use error::{classify_error, classify_error_str, SubscriptionErrorKind};
 pub use manager::SubscriptionManager;
-pub use pk_detector::{detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionResult};
+pub use pk_detector::{
+    detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionFailureReason, PkDetectionResult,
+};
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
