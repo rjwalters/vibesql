@@ -64,6 +64,15 @@ pub fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usi
     // This ensures auto-created indexes for PK/UNIQUE constraints are also cleared
     database.rebuild_indexes(table_name);
 
+    // Invalidate the database-level columnar cache since table data changed.
+    // Note: table.clear() invalidates the table-level cache.
+    // Both invalidations are necessary because they manage separate caches:
+    // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+    // - Database-level cache: used by Database::get_columnar() for cached access
+    if row_count > 0 {
+        database.invalidate_columnar_cache(table_name);
+    }
+
     // Reset AUTO_INCREMENT sequences
     reset_auto_increment_sequences(database, table_name)?;
 

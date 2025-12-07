@@ -253,6 +253,15 @@ fn execute_bulk_transfer(
         inserted_count += 1;
     }
 
+    // Invalidate the database-level columnar cache since table data changed.
+    // Note: The table-level cache is already invalidated by insert_row().
+    // Both invalidations are necessary because they manage separate caches:
+    // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+    // - Database-level cache: used by Database::get_columnar() for cached access
+    if inserted_count > 0 {
+        db.invalidate_columnar_cache(dest_table);
+    }
+
     Ok(Some(inserted_count))
 }
 
