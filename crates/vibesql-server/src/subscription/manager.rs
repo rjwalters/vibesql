@@ -1623,6 +1623,7 @@ mod tests {
             rate_limit_per_second: 100,
             channel_buffer_size: 128,
             slow_consumer_threshold_percent: 90,
+            selective_updates: Default::default(),
         };
 
         let sub = Subscription::with_config("SELECT * FROM users".to_string(), tables, tx, &config);

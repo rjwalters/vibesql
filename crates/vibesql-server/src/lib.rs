@@ -31,9 +31,9 @@ pub use scheduler::{
 pub use registry::{DatabaseRegistry, SharedDatabase};
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
-    extract_table_dependencies, extract_table_refs, SessionSubscription, SessionSubscriptionId,
-    SessionSubscriptionManager, Subscription, SubscriptionError, SubscriptionId,
-    SubscriptionManager, SubscriptionUpdate,
+    extract_table_dependencies, extract_table_refs, SelectiveColumnConfig, SessionSubscription,
+    SessionSubscriptionId, SessionSubscriptionManager, Subscription, SubscriptionConfig,
+    SubscriptionError, SubscriptionId, SubscriptionManager, SubscriptionUpdate,
 };
 pub use transaction::{
     SessionTransactionManager, TransactionChange, TransactionError, TransactionState,

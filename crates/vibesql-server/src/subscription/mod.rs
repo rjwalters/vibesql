@@ -119,6 +119,13 @@ pub struct SubscriptionConfig {
     /// When channel depth exceeds this percentage, warn about slow consumer
     #[serde(default = "default_slow_consumer_threshold_percent")]
     pub slow_consumer_threshold_percent: u8,
+
+    /// Configuration for selective column updates
+    ///
+    /// Controls when the server sends partial row updates (only changed columns)
+    /// instead of full rows, reducing bandwidth for wide tables with few changes.
+    #[serde(default)]
+    pub selective_updates: SelectiveColumnConfig,
 }
 
 fn default_max_per_connection() -> usize {
@@ -154,6 +161,7 @@ impl Default for SubscriptionConfig {
             rate_limit_per_second: default_rate_limit_per_second(),
             channel_buffer_size: default_channel_buffer_size(),
             slow_consumer_threshold_percent: default_slow_consumer_threshold_percent(),
+            selective_updates: SelectiveColumnConfig::default(),
         }
     }
 }
@@ -713,27 +721,48 @@ pub fn compute_delta(
 // ============================================================================
 
 /// Configuration for selective column updates
-#[derive(Debug, Clone)]
+///
+/// This config controls when selective column updates (0xF7 messages) are used
+/// instead of full row updates. Selective updates only send changed columns
+/// plus primary key columns, reducing bandwidth for wide tables with few changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectiveColumnConfig {
     /// Enable selective column updates
+    #[serde(default = "default_selective_enabled")]
     pub enabled: bool,
     /// Column indices that are primary key columns (always included)
+    /// This is per-subscription and not configurable via config file
+    #[serde(skip)]
     pub pk_columns: Vec<usize>,
     /// Minimum columns that must change to use selective update
     /// If fewer columns change, send full row instead
+    #[serde(default = "default_min_changed_columns")]
     pub min_changed_columns: usize,
-    /// Maximum columns that can change before falling back to full row
-    /// If more columns change, send full row instead (more efficient)
+    /// Maximum ratio of changed columns before falling back to full row
+    /// E.g., 0.5 means if >50% of columns changed, send full row instead
+    #[serde(default = "default_max_changed_columns_ratio")]
     pub max_changed_columns_ratio: f64,
+}
+
+fn default_selective_enabled() -> bool {
+    true
+}
+
+fn default_min_changed_columns() -> usize {
+    1
+}
+
+fn default_max_changed_columns_ratio() -> f64 {
+    0.5
 }
 
 impl Default for SelectiveColumnConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: default_selective_enabled(),
             pk_columns: vec![0], // Assume first column is PK by default
-            min_changed_columns: 1,
-            max_changed_columns_ratio: 0.5, // If >50% of columns changed, send full row
+            min_changed_columns: default_min_changed_columns(),
+            max_changed_columns_ratio: default_max_changed_columns_ratio(),
         }
     }
 }

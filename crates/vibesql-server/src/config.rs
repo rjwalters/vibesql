@@ -231,4 +231,84 @@ mod tests {
         let deserialized: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(config.server.port, deserialized.server.port);
     }
+
+    #[test]
+    fn test_selective_updates_config_defaults() {
+        let config = Config::default();
+        assert!(config.subscriptions.selective_updates.enabled);
+        assert_eq!(config.subscriptions.selective_updates.min_changed_columns, 1);
+        assert!((config.subscriptions.selective_updates.max_changed_columns_ratio - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_selective_updates_config_from_toml() {
+        let toml_str = r#"
+[server]
+host = "0.0.0.0"
+port = 5432
+max_connections = 100
+ssl_enabled = false
+
+[auth]
+method = "trust"
+
+[logging]
+level = "info"
+
+[subscriptions.selective_updates]
+enabled = false
+min_changed_columns = 2
+max_changed_columns_ratio = 0.75
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.subscriptions.selective_updates.enabled);
+        assert_eq!(config.subscriptions.selective_updates.min_changed_columns, 2);
+        assert!((config.subscriptions.selective_updates.max_changed_columns_ratio - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_selective_updates_config_partial_override() {
+        // Test that partial config falls back to defaults for unspecified fields
+        let toml_str = r#"
+[server]
+host = "0.0.0.0"
+port = 5432
+max_connections = 100
+ssl_enabled = false
+
+[auth]
+method = "trust"
+
+[logging]
+level = "info"
+
+[subscriptions.selective_updates]
+enabled = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.subscriptions.selective_updates.enabled);
+        // Other fields should use defaults
+        assert_eq!(config.subscriptions.selective_updates.min_changed_columns, 1);
+        assert!((config.subscriptions.selective_updates.max_changed_columns_ratio - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_selective_updates_config_serialization() {
+        let config = Config::default();
+        let toml_str = toml::to_string(&config).unwrap();
+        let deserialized: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(
+            config.subscriptions.selective_updates.enabled,
+            deserialized.subscriptions.selective_updates.enabled
+        );
+        assert_eq!(
+            config.subscriptions.selective_updates.min_changed_columns,
+            deserialized.subscriptions.selective_updates.min_changed_columns
+        );
+        assert!(
+            (config.subscriptions.selective_updates.max_changed_columns_ratio
+                - deserialized.subscriptions.selective_updates.max_changed_columns_ratio).abs() < 0.001
+        );
+    }
 }
