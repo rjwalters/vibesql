@@ -1028,11 +1028,9 @@ impl Table {
         };
 
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // (Row tables use Database::columnar_cache which is invalidated by executors)
         if self.native_columnar.is_some() {
             let _ = self.rebuild_native_columnar();
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         DeleteResult::new(deleted, compacted)
