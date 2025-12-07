@@ -325,7 +325,7 @@ fn compare_string(
     })?;
 
     let val = match literal {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => &**s,
         _ => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "String comparison".to_string(),
@@ -566,7 +566,7 @@ fn evaluate_like_simd(
     // Extract pattern string from literal
     let pattern_str = match pattern {
         Expression::Literal(SqlValue::Varchar(s)) | Expression::Literal(SqlValue::Character(s)) => {
-            s.as_str()
+            &**s
         }
         Expression::Literal(SqlValue::Null) => {
             // NULL pattern matches nothing - return all false
@@ -735,7 +735,7 @@ mod tests {
         // name LIKE 'Al%'
         let predicate = Expression::Like {
             expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
-            pattern: Box::new(Expression::Literal(SqlValue::Varchar("Al%".to_string()))),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Al%")))),
             negated: false,
         };
 
@@ -759,7 +759,7 @@ mod tests {
         // name LIKE '%lie'
         let predicate = Expression::Like {
             expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
-            pattern: Box::new(Expression::Literal(SqlValue::Varchar("%lie".to_string()))),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("%lie")))),
             negated: false,
         };
 
@@ -778,7 +778,7 @@ mod tests {
         // name NOT LIKE 'Al%'
         let predicate = Expression::Like {
             expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
-            pattern: Box::new(Expression::Literal(SqlValue::Varchar("Al%".to_string()))),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Al%")))),
             negated: true,
         };
 
@@ -801,7 +801,7 @@ mod tests {
         // name LIKE '%li%'
         let predicate = Expression::Like {
             expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
-            pattern: Box::new(Expression::Literal(SqlValue::Varchar("%li%".to_string()))),
+            pattern: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("%li%")))),
             negated: false,
         };
 

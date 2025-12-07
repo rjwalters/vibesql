@@ -311,9 +311,9 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-                vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
+                vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))],
             ],
         );
 
@@ -341,7 +341,7 @@ mod tests {
 
         // Check that we only have user 3 (Charlie)
         assert_eq!(result.rows()[0].values[0], SqlValue::Integer(3));
-        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar("Charlie".to_string()));
+        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
     }
 
     #[test]
@@ -351,8 +351,8 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Null, SqlValue::Varchar("Unknown".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("Unknown"))],
             ],
         );
 
@@ -368,7 +368,7 @@ mod tests {
         // Only "Unknown" should be returned (NULL has no match, since NULLs don't match anything)
         assert_eq!(result.rows().len(), 1);
         assert_eq!(result.rows()[0].values[0], SqlValue::Null);
-        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar("Unknown".to_string()));
+        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Unknown")));
     }
 
     #[test]
@@ -422,8 +422,8 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
             ],
         );
 
@@ -443,9 +443,9 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-                vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
+                vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))],
             ],
         );
 

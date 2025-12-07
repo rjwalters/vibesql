@@ -54,7 +54,7 @@ fn test_tpcds_schema_loads_without_type_mismatch() {
     // Insert row with correct DATE type (not INTEGER)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar("AAAAAA0000000001".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("AAAAAA0000000001")),
         SqlValue::Date(Date::from_str("1998-01-01").unwrap()),
         SqlValue::Null,
     ]);
@@ -112,7 +112,7 @@ fn test_web_site_date_columns() {
     // Insert row with correct DATE type
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar("AAAAAA0000000001".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("AAAAAA0000000001")),
         SqlValue::Date(Date::from_str("1998-01-01").unwrap()),
         SqlValue::Null,
     ]);

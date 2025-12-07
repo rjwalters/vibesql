@@ -407,9 +407,9 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-                vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
+                vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))],
             ],
         );
 
@@ -457,8 +457,8 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Null, SqlValue::Varchar("Unknown".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("Unknown"))],
             ],
         );
 
@@ -478,7 +478,7 @@ mod tests {
         // NULL values should not match each other in equi-joins
         assert_eq!(result.rows().len(), 1);
         assert_eq!(result.rows()[0].values[0], SqlValue::Integer(1));
-        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar("Alice".to_string()));
+        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
     }
 
     #[test]
@@ -510,8 +510,8 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-                vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+                vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
             ],
         );
 
@@ -532,6 +532,6 @@ mod tests {
         // Should return only 1 row for Alice, despite 4 matching orders
         assert_eq!(result.rows().len(), 1);
         assert_eq!(result.rows()[0].values[0], SqlValue::Integer(1));
-        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar("Alice".to_string()));
+        assert_eq!(result.rows()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
     }
 }

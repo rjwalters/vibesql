@@ -39,7 +39,7 @@ fn test_select_into_single_row() {
         vibesql_storage::Row {
             values: vec![
                 vibesql_types::SqlValue::Integer(1),
-                vibesql_types::SqlValue::Varchar("Alice".to_string()),
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
             ],
         },
     )
@@ -108,7 +108,7 @@ fn test_select_into_single_row() {
     let rows = executor.execute(&query).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar("Alice".to_string()));
+    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
 }
 
 #[test]

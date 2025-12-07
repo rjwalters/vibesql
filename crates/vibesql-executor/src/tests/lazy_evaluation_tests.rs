@@ -148,15 +148,15 @@ fn test_coalesce_with_strings() {
         name: "COALESCE".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Null),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar("hello".to_string())),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar("world".to_string())),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("world"))),
         ],
         character_unit: None,
     };
 
     let result = evaluator.eval(&expr, &row);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result.unwrap(), SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]

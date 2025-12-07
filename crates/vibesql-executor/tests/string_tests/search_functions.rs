@@ -22,7 +22,7 @@ fn test_position_null() {
         name: "POSITION".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -36,8 +36,8 @@ fn test_position_not_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("xyz".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("xyz"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -51,8 +51,8 @@ fn test_position_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("lo".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("lo"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -66,8 +66,8 @@ fn test_position_empty_needle() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(""))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -82,8 +82,8 @@ fn test_position_multiple_occurrences() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -97,9 +97,7 @@ fn test_position_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "hello".to_string(),
-        ))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -113,7 +111,7 @@ fn test_position_wrong_type() {
         name: "POSITION".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -127,10 +125,8 @@ fn test_position_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("lo".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-                "hello".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("lo"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -149,7 +145,7 @@ fn test_instr_null() {
         name: "INSTR".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("lo".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("lo"))),
         ],
         character_unit: None,
     };
@@ -163,8 +159,8 @@ fn test_instr_not_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("xyz".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("xyz"))),
         ],
         character_unit: None,
     };
@@ -178,8 +174,8 @@ fn test_instr_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("ll".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("ll"))),
         ],
         character_unit: None,
     };
@@ -192,9 +188,7 @@ fn test_instr_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "hello".to_string(),
-        ))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -208,7 +202,7 @@ fn test_instr_wrong_type() {
         name: "INSTR".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l"))),
         ],
         character_unit: None,
     };
@@ -222,10 +216,8 @@ fn test_instr_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-                "hello".to_string(),
-            )),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("ll".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("ll"))),
         ],
         character_unit: None,
     };
@@ -244,7 +236,7 @@ fn test_locate_null() {
         name: "LOCATE".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -258,8 +250,8 @@ fn test_locate_not_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("xyz".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("xyz"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -274,8 +266,8 @@ fn test_locate_with_start_position() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(4)), // Start after first 'l'
         ],
         character_unit: None,
@@ -290,8 +282,8 @@ fn test_locate_start_beyond_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100)),
         ],
         character_unit: None,
@@ -305,9 +297,7 @@ fn test_locate_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "l".to_string(),
-        ))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -321,7 +311,7 @@ fn test_locate_wrong_type_needle() {
         name: "LOCATE".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };
@@ -335,9 +325,9 @@ fn test_locate_wrong_type_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("one".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("one"))),
         ],
         character_unit: None,
     };
@@ -351,8 +341,8 @@ fn test_locate_null_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("l".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("l"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
         ],
         character_unit: None,
@@ -367,10 +357,8 @@ fn test_locate_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character("ll".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-                "hello".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("ll"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("hello"))),
         ],
         character_unit: None,
     };

@@ -23,7 +23,7 @@ fn test_parse_extract_year_from_literal() {
                         assert_eq!(
                             **expr,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "2024-01-15".to_string()
+                                std::sync::Arc::from("2024-01-15")
                             ))
                         );
                     }

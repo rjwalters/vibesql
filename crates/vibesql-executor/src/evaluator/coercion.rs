@@ -22,7 +22,7 @@ use crate::errors::ExecutorError;
 /// use vibesql_executor::evaluator::coercion::coerce_to_date;
 ///
 /// // String to date
-/// let result = coerce_to_date(&SqlValue::Varchar("2024-01-01".to_string()));
+/// let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("2024-01-01")));
 /// assert!(matches!(result, Ok(SqlValue::Date(_))));
 ///
 /// // NULL handling
@@ -85,14 +85,14 @@ mod tests {
 
     #[test]
     fn test_coerce_varchar_to_date() {
-        let result = coerce_to_date(&SqlValue::Varchar("2024-01-15".to_string())).unwrap();
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("2024-01-15"))).unwrap();
         let expected = vibesql_types::Date::new(2024, 1, 15).unwrap();
         assert_eq!(result, SqlValue::Date(expected));
     }
 
     #[test]
     fn test_coerce_character_to_date() {
-        let result = coerce_to_date(&SqlValue::Character("2024-12-31".to_string())).unwrap();
+        let result = coerce_to_date(&SqlValue::Character(std::sync::Arc::from("2024-12-31"))).unwrap();
         let expected = vibesql_types::Date::new(2024, 12, 31).unwrap();
         assert_eq!(result, SqlValue::Date(expected));
     }
@@ -105,24 +105,24 @@ mod tests {
 
     #[test]
     fn test_coerce_invalid_date_string() {
-        let result = coerce_to_date(&SqlValue::Varchar("not-a-date".to_string()));
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("not-a-date")));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_coerce_invalid_date_format() {
-        let result = coerce_to_date(&SqlValue::Varchar("01/15/2024".to_string()));
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("01/15/2024")));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_coerce_invalid_date_values() {
         // Month out of range
-        let result = coerce_to_date(&SqlValue::Varchar("2024-13-01".to_string()));
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("2024-13-01")));
         assert!(result.is_err());
 
         // Day out of range
-        let result = coerce_to_date(&SqlValue::Varchar("2024-02-30".to_string()));
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("2024-02-30")));
         assert!(result.is_err());
     }
 
@@ -134,14 +134,14 @@ mod tests {
 
     #[test]
     fn test_coerce_leap_year_date() {
-        let result = coerce_to_date(&SqlValue::Varchar("2024-02-29".to_string())).unwrap();
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("2024-02-29"))).unwrap();
         let expected = vibesql_types::Date::new(2024, 2, 29).unwrap();
         assert_eq!(result, SqlValue::Date(expected));
     }
 
     #[test]
     fn test_coerce_non_leap_year_feb_29() {
-        let result = coerce_to_date(&SqlValue::Varchar("2023-02-29".to_string()));
+        let result = coerce_to_date(&SqlValue::Varchar(std::sync::Arc::from("2023-02-29")));
         assert!(result.is_err());
     }
 }

@@ -41,27 +41,27 @@ fn test_phase_c_proof_of_concept_full_pipeline() {
     let from_rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(25),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(17),
         ]),
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             SqlValue::Integer(30),
         ]),
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Diana".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Diana")),
             SqlValue::Integer(16),
         ]),
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Eve".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Eve")),
             SqlValue::Integer(22),
         ]),
     ];
@@ -167,9 +167,9 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
 
     // 3 customers
     let customers_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]),
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
     ];
 
     // Stage 1: FROM orders (scan)

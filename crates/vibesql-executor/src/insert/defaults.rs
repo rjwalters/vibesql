@@ -153,11 +153,11 @@ pub fn evaluate_default_expression(
                 }
                 "CURRENT_USER" | "USER" | "SESSION_USER" => {
                     // Return current user (placeholder - would come from session context)
-                    Ok(vibesql_types::SqlValue::Varchar("public".to_string()))
+                    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("public")))
                 }
                 "CURRENT_ROLE" => {
                     // Return current role (placeholder - would come from session context)
-                    Ok(vibesql_types::SqlValue::Varchar("public".to_string()))
+                    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("public")))
                 }
                 _ => Err(ExecutorError::UnsupportedExpression(format!(
                     "Function '{}' not supported in DEFAULT expressions",

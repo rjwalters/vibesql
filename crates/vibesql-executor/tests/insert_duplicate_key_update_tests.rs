@@ -38,9 +38,7 @@ fn test_on_duplicate_key_update_basic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Widget".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -56,9 +54,7 @@ fn test_on_duplicate_key_update_basic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Widget".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20)),
         ]]),
         conflict_clause: None,
@@ -78,7 +74,7 @@ fn test_on_duplicate_key_update_basic() {
 
     let row = &result_rows[0];
     assert_eq!(row.values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(row.values[1], vibesql_types::SqlValue::Varchar("Widget".to_string()));
+    assert_eq!(row.values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget")));
     assert_eq!(row.values[2], vibesql_types::SqlValue::Integer(20)); // Updated to 20
 }
 
@@ -93,9 +89,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Widget".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -110,9 +104,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Widget".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(30)),
         ]]),
         conflict_clause: None,
@@ -153,9 +145,7 @@ fn test_on_duplicate_key_update_no_conflict() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Widget".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -175,6 +165,6 @@ fn test_on_duplicate_key_update_no_conflict() {
 
     let row = &result_rows[0];
     assert_eq!(row.values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(row.values[1], vibesql_types::SqlValue::Varchar("Widget".to_string()));
+    assert_eq!(row.values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget")));
     assert_eq!(row.values[2], vibesql_types::SqlValue::Integer(10));
 }

@@ -305,16 +305,16 @@ mod row_ref_tests {
 
     #[test]
     fn test_multi_table_resolver() {
-        let table0 = [Row::new(vec![SqlValue::Varchar("A".into())])];
-        let table1 = [Row::new(vec![SqlValue::Varchar("B".into())])];
+        let table0 = [Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A"))])];
+        let table1 = [Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B"))])];
 
         let resolver = MultiTableResolver::from_tables(vec![(0, &table0[..]), (1, &table1[..])]);
 
         let ref0 = RowReference::new(0, 0);
         let ref1 = RowReference::new(1, 0);
 
-        assert_eq!(resolver.resolve_column(&ref0, 0), Some(&SqlValue::Varchar("A".into())));
-        assert_eq!(resolver.resolve_column(&ref1, 0), Some(&SqlValue::Varchar("B".into())));
+        assert_eq!(resolver.resolve_column(&ref0, 0), Some(&SqlValue::Varchar(std::sync::Arc::from("A"))));
+        assert_eq!(resolver.resolve_column(&ref1, 0), Some(&SqlValue::Varchar(std::sync::Arc::from("B"))));
     }
 
     #[test]

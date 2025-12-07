@@ -35,7 +35,7 @@ fn int_lit(value: i64) -> vibesql_ast::Expression {
 
 /// Helper to create a varchar literal expression
 fn varchar_lit(value: &str) -> vibesql_ast::Expression {
-    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(value.to_string()))
+    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(value)))
 }
 
 /// Helper to create a null literal expression

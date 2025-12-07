@@ -57,7 +57,7 @@ impl Parser {
                     }
 
                     // Convert bytes to string (UTF-8 lossy conversion for compatibility)
-                    let result = String::from_utf8_lossy(&bytes).to_string();
+                    let result = std::sync::Arc::<str>::from(String::from_utf8_lossy(&bytes).as_ref());
                     return Ok(Some(vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Varchar(result),
                     )));
@@ -95,7 +95,7 @@ impl Parser {
                     }
 
                     // Convert bytes to string
-                    let result = String::from_utf8_lossy(&bytes).to_string();
+                    let result = std::sync::Arc::<str>::from(String::from_utf8_lossy(&bytes).as_ref());
                     return Ok(Some(vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Varchar(result),
                     )));

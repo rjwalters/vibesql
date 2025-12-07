@@ -403,7 +403,7 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
 
     fn update_non_index(&mut self, id: i64, c: &str) {
         // Use SQL path with pre-parsed template
-        let params = [SqlValue::Varchar(c.to_string()), SqlValue::Integer(id)];
+        let params = [SqlValue::Varchar(std::sync::Arc::from(c)), SqlValue::Integer(id)];
         let bound = bind_update(&self.queries.update_non_index, &params);
         let _ = UpdateExecutor::execute(&bound, self.db);
     }

@@ -103,7 +103,7 @@ mod integration_tests {
             "small_table",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(1),
-                vibesql_types::SqlValue::Varchar("Alice".to_string()),
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
             ]),
         )
         .unwrap();
@@ -111,7 +111,7 @@ mod integration_tests {
             "small_table",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(2),
-                vibesql_types::SqlValue::Varchar("Bob".to_string()),
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
             ]),
         )
         .unwrap();

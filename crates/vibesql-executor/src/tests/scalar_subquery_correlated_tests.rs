@@ -48,8 +48,8 @@ fn test_correlated_subquery_basic() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Alice".to_string()),
-            vibesql_types::SqlValue::Varchar("Engineering".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             vibesql_types::SqlValue::Integer(50000),
         ]),
     )
@@ -58,8 +58,8 @@ fn test_correlated_subquery_basic() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("Bob".to_string()),
-            vibesql_types::SqlValue::Varchar("Engineering".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             vibesql_types::SqlValue::Integer(80000),
         ]),
     )
@@ -68,8 +68,8 @@ fn test_correlated_subquery_basic() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("Charlie".to_string()),
-            vibesql_types::SqlValue::Varchar("Sales".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Sales")),
             vibesql_types::SqlValue::Integer(40000),
         ]),
     )
@@ -78,8 +78,8 @@ fn test_correlated_subquery_basic() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar("Diana".to_string()),
-            vibesql_types::SqlValue::Varchar("Sales".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Diana")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Sales")),
             vibesql_types::SqlValue::Integer(60000),
         ]),
     )
@@ -177,11 +177,11 @@ fn test_correlated_subquery_basic() {
 
     // Check Bob
     let bob = &result[0];
-    assert_eq!(bob.get(0).unwrap(), &vibesql_types::SqlValue::Varchar("Bob".to_string()));
+    assert_eq!(bob.get(0).unwrap(), &vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")));
     assert_eq!(bob.get(1).unwrap(), &vibesql_types::SqlValue::Integer(80000));
 
     // Check Diana
     let diana = &result[1];
-    assert_eq!(diana.get(0).unwrap(), &vibesql_types::SqlValue::Varchar("Diana".to_string()));
+    assert_eq!(diana.get(0).unwrap(), &vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Diana")));
     assert_eq!(diana.get(1).unwrap(), &vibesql_types::SqlValue::Integer(60000));
 }

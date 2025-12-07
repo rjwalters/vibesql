@@ -33,8 +33,8 @@ fn test_eq_ord_consistency() {
         SqlValue::Numeric(2.718),
         SqlValue::Numeric(f64::NAN),
         // Strings
-        SqlValue::Character("hello".to_string()),
-        SqlValue::Varchar("world".to_string()),
+        SqlValue::Character(std::sync::Arc::from("hello")),
+        SqlValue::Varchar(std::sync::Arc::from("world")),
         // Boolean
         SqlValue::Boolean(true),
         SqlValue::Boolean(false),
@@ -136,7 +136,7 @@ fn test_eq_reflexivity() {
         SqlValue::Integer(42),
         SqlValue::Float(f32::NAN),
         SqlValue::Double(f64::NAN),
-        SqlValue::Varchar("test".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("test")),
     ];
 
     for val in test_values {
@@ -158,7 +158,7 @@ fn test_btreemap_usage() {
     map.insert(SqlValue::Float(f32::NAN), "nan_float".to_string());
     map.insert(SqlValue::Double(f64::NAN), "nan_double".to_string());
     map.insert(SqlValue::Null, "null".to_string());
-    map.insert(SqlValue::Varchar("hello".to_string()), "greeting".to_string());
+    map.insert(SqlValue::Varchar(std::sync::Arc::from("hello")), "greeting".to_string());
 
     // Verify retrieval works
     assert_eq!(map.get(&SqlValue::Integer(1)), Some(&"one".to_string()));
@@ -181,7 +181,7 @@ fn test_btreemap_vec_keys() {
         vec![SqlValue::Integer(3), SqlValue::Integer(4)],
         vec![SqlValue::Integer(1), SqlValue::Integer(2)], // Duplicate
         vec![SqlValue::Float(1.5), SqlValue::Float(2.5)],
-        vec![SqlValue::Varchar("a".to_string()), SqlValue::Varchar("b".to_string())],
+        vec![SqlValue::Varchar(std::sync::Arc::from("a")), SqlValue::Varchar(std::sync::Arc::from("b"))],
     ];
 
     let mut btree: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();

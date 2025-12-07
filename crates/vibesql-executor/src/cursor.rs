@@ -294,7 +294,7 @@ mod tests {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".into()),
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Integer(50000),
             ]),
         )
@@ -303,7 +303,7 @@ mod tests {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(2),
-                SqlValue::Varchar("Bob".into()),
+                SqlValue::Varchar(std::sync::Arc::from("Bob")),
                 SqlValue::Integer(60000),
             ]),
         )
@@ -312,7 +312,7 @@ mod tests {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(3),
-                SqlValue::Varchar("Carol".into()),
+                SqlValue::Varchar(std::sync::Arc::from("Carol")),
                 SqlValue::Integer(55000),
             ]),
         )

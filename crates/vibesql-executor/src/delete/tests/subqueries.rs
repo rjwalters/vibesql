@@ -28,7 +28,7 @@ mod common {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(name.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
                 SqlValue::Integer(dept_id),
             ]),
         )
@@ -68,7 +68,7 @@ mod common {
             "items",
             Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(name.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
                 SqlValue::Integer(price),
             ]),
         )
@@ -117,7 +117,7 @@ mod common {
     pub fn insert_customer(db: &mut Database, table_name: &str, customer_id: i64, status: &str) {
         db.insert_row(
             table_name,
-            Row::new(vec![SqlValue::Integer(customer_id), SqlValue::Varchar(status.to_string())]),
+            Row::new(vec![SqlValue::Integer(customer_id), SqlValue::Varchar(std::sync::Arc::from(status))]),
         )
         .unwrap();
     }
@@ -143,7 +143,7 @@ mod common {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(name.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
                 SqlValue::Integer(salary),
             ]),
         )
@@ -225,7 +225,7 @@ mod in_subquery {
         let table = db.get_table("employees").unwrap();
         assert_eq!(table.row_count(), 1);
         let remaining = &table.scan()[0];
-        assert_eq!(remaining.get(1).unwrap(), &SqlValue::Varchar("Bob".to_string()));
+        assert_eq!(remaining.get(1).unwrap(), &SqlValue::Varchar(std::sync::Arc::from("Bob")));
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod in_subquery {
         let table = db.get_table("employees").unwrap();
         assert_eq!(table.row_count(), 1);
         let remaining = &table.scan()[0];
-        assert_eq!(remaining.get(1).unwrap(), &SqlValue::Varchar("Alice".to_string()));
+        assert_eq!(remaining.get(1).unwrap(), &SqlValue::Varchar(std::sync::Arc::from("Alice")));
     }
 }
 
@@ -352,19 +352,17 @@ mod scalar_subquery {
         // Verify Bob and Charlie remain
         let table = db.get_table("employees").unwrap();
         assert_eq!(table.row_count(), 2);
-        let names: Vec<String> = table
+        let names: Vec<std::sync::Arc<str>> = table
             .scan()
             .iter()
             .map(|row| {
                 if let SqlValue::Varchar(name) = row.get(1).unwrap() {
                     name.clone()
-                } else {
-                    String::new()
-                }
+                } else { std::sync::Arc::from("") }
             })
             .collect();
-        assert!(names.contains(&"Bob".to_string()));
-        assert!(names.contains(&"Charlie".to_string()));
+        assert!(names.iter().any(|n| n.as_ref() == "Bob"));
+        assert!(names.iter().any(|n| n.as_ref() == "Charlie"));
     }
 
     #[test]
@@ -588,7 +586,7 @@ mod complex_subquery {
             where_clause: Some(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar("inactive".to_string()))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("inactive")))),
             }),
             group_by: None,
             having: None,

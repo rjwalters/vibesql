@@ -420,7 +420,7 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                         } else if let Some(prefix) = pattern_str.strip_suffix('%') {
                             s.starts_with(prefix)
                         } else {
-                            s == pattern_str
+                            &**s == pattern_str
                         }
                     } else {
                         false

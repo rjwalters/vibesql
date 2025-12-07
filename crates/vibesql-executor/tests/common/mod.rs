@@ -61,9 +61,9 @@ pub fn setup_test_table(db: &mut vibesql_storage::Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
             vibesql_types::SqlValue::Integer(45000),
-            vibesql_types::SqlValue::Varchar("Engineering".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Engineering")),
         ]),
     )
     .unwrap();
@@ -72,9 +72,9 @@ pub fn setup_test_table(db: &mut vibesql_storage::Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
             vibesql_types::SqlValue::Integer(48000),
-            vibesql_types::SqlValue::Varchar("Engineering".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Engineering")),
         ]),
     )
     .unwrap();
@@ -83,9 +83,9 @@ pub fn setup_test_table(db: &mut vibesql_storage::Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("Charlie".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             vibesql_types::SqlValue::Integer(42000),
-            vibesql_types::SqlValue::Varchar("Sales".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Sales")),
         ]),
     )
     .unwrap();
@@ -146,7 +146,7 @@ pub fn setup_users_table_with_active(db: &mut vibesql_storage::Database) {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
             vibesql_types::SqlValue::Boolean(true),
         ]),
     )
@@ -156,7 +156,7 @@ pub fn setup_users_table_with_active(db: &mut vibesql_storage::Database) {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
             vibesql_types::SqlValue::Boolean(false),
         ]),
     )
@@ -166,7 +166,7 @@ pub fn setup_users_table_with_active(db: &mut vibesql_storage::Database) {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("Charlie".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             vibesql_types::SqlValue::Boolean(true),
         ]),
     )

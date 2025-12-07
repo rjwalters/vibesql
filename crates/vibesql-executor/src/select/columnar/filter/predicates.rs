@@ -309,7 +309,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                     let column_idx = schema.get_column_index(table.as_deref(), column)?;
                     return Some(PredicateTree::Leaf(ColumnPredicate::Like {
                         column_idx,
-                        pattern: pattern_str.clone(),
+                        pattern: pattern_str.to_string(),
                         negated: *negated,
                     }));
                 }
@@ -472,7 +472,7 @@ fn extract_predicates_recursive(
                     if let Some(column_idx) = schema.get_column_index(table.as_deref(), column) {
                         predicates.push(ColumnPredicate::Like {
                             column_idx,
-                            pattern: pattern_str.clone(),
+                            pattern: pattern_str.to_string(),
                             negated: *negated,
                         });
                     }

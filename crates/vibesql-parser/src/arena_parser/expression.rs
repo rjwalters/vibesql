@@ -493,7 +493,7 @@ impl<'arena> ArenaParser<'arena> {
                 }
             }
             Token::String(s) => {
-                let s = s.clone();
+                let s = std::sync::Arc::from(s.as_str());
                 self.advance();
                 Some(Expression::Literal(SqlValue::Varchar(s)))
             }

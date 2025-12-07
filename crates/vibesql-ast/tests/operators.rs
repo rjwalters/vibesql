@@ -49,8 +49,8 @@ fn test_modulo_operator() {
 fn test_concat_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Concat,
-        left: Box::new(Expression::Literal(SqlValue::Varchar("Hello".to_string()))),
-        right: Box::new(Expression::Literal(SqlValue::Varchar("World".to_string()))),
+        left: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Hello")))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("World")))),
     };
     match expr {
         Expression::BinaryOp { op: BinaryOperator::Concat, .. } => {} // Success
@@ -63,7 +63,7 @@ fn test_not_equal_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::NotEqual,
         left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-        right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))),
     };
     match expr {
         Expression::BinaryOp { op: BinaryOperator::NotEqual, .. } => {} // Success

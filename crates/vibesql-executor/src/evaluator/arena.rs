@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```text
-//! let params = &[SqlValue::Integer(42), SqlValue::Varchar("hello".to_string())];
+//! let params = &[SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("hello"))];
 //! let evaluator = ArenaExpressionEvaluator::new(schema, params);
 //! let result = evaluator.eval(&arena_expr, &row)?;
 //! ```
@@ -599,7 +599,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             | (SqlValue::Character(sub), SqlValue::Varchar(s))
             | (SqlValue::Varchar(sub), SqlValue::Character(s))
             | (SqlValue::Character(sub), SqlValue::Character(s)) => {
-                let pos = s.find(sub.as_str()).map(|i| i + 1).unwrap_or(0);
+                let pos = s.find(&**sub).map(|i| i + 1).unwrap_or(0);
                 Ok(SqlValue::Integer(pos as i64))
             }
             _ => Err(ExecutorError::TypeError(format!(
@@ -620,7 +620,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Null => Ok(SqlValue::Null),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 let remove_chars: &str = match removal_char {
-                    Some(SqlValue::Varchar(r)) | Some(SqlValue::Character(r)) => r.as_str(),
+                    Some(SqlValue::Varchar(r)) | Some(SqlValue::Character(r)) => &**r,
                     Some(SqlValue::Null) => return Ok(SqlValue::Null),
                     None => " ",
                     _ => {
@@ -641,7 +641,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         s.trim_matches(|c| remove_chars.contains(c))
                     }
                 };
-                Ok(SqlValue::Varchar(result.to_string()))
+                Ok(SqlValue::Varchar(std::sync::Arc::from(result)))
             }
             _ => Err(ExecutorError::TypeError(format!(
                 "TRIM requires string operand, got {:?}",
@@ -774,7 +774,7 @@ mod tests {
         let schema = make_schema();
         let params = vec![];
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
 
         let expr = ArenaExpression::Literal(SqlValue::Integer(42));
         let result = evaluator.eval(&expr, &row).unwrap();
@@ -786,9 +786,9 @@ mod tests {
         let arena = Bump::new();
         let interner = ArenaInterner::new(&arena);
         let schema = make_schema();
-        let params = vec![SqlValue::Integer(100), SqlValue::Varchar("test".to_string())];
+        let params = vec![SqlValue::Integer(100), SqlValue::Varchar(std::sync::Arc::from("test"))];
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]);
+        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
 
         // First placeholder (index 0)
         let expr = ArenaExpression::Placeholder(0);
@@ -798,7 +798,7 @@ mod tests {
         // Second placeholder (index 1)
         let expr = ArenaExpression::Placeholder(1);
         let result = evaluator.eval(&expr, &row).unwrap();
-        assert_eq!(result, SqlValue::Varchar("test".to_string()));
+        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("test")));
     }
 
     #[test]
@@ -813,7 +813,7 @@ mod tests {
         let name_sym = interner.intern("NAME");
 
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar("Bob".to_string())]);
+        let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("Bob"))]);
 
         let expr = ArenaExpression::ColumnRef { table: None, column: id_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
@@ -821,7 +821,7 @@ mod tests {
 
         let expr = ArenaExpression::ColumnRef { table: None, column: name_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
-        assert_eq!(result, SqlValue::Varchar("Bob".to_string()));
+        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Bob")));
     }
 
     #[test]

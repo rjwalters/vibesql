@@ -404,7 +404,7 @@ pub fn st_geom_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     let wkt = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => &**s,
         SqlValue::Null => return Ok(SqlValue::Null),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
@@ -427,7 +427,7 @@ pub fn st_point_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
     }
 
     let wkt = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => &**s,
         SqlValue::Null => return Ok(SqlValue::Null),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
@@ -456,7 +456,7 @@ pub fn st_line_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     let wkt = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => &**s,
         SqlValue::Null => return Ok(SqlValue::Null),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(
@@ -485,7 +485,7 @@ pub fn st_polygon_from_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError
     }
 
     let wkt = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => &**s,
         SqlValue::Null => return Ok(SqlValue::Null),
         _ => {
             return Err(ExecutorError::UnsupportedFeature(

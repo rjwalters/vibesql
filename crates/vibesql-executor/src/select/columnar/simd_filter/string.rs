@@ -14,14 +14,14 @@ use vibesql_types::SqlValue;
 /// Evaluate predicate on string column using batch operations
 pub fn evaluate_predicate_string_batch(
     predicate: &ColumnPredicate,
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
 ) -> Result<Vec<bool>, ExecutorError> {
     let result = match predicate {
         ColumnPredicate::Equal { value, .. } => {
             // Extract target string
             let target = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string equality".to_string(),
@@ -35,7 +35,7 @@ pub fn evaluate_predicate_string_batch(
 
         ColumnPredicate::LessThan { value, .. } => {
             let target = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -49,7 +49,7 @@ pub fn evaluate_predicate_string_batch(
 
         ColumnPredicate::GreaterThan { value, .. } => {
             let target = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -63,7 +63,7 @@ pub fn evaluate_predicate_string_batch(
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
             let target = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -77,7 +77,7 @@ pub fn evaluate_predicate_string_batch(
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
             let target = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -91,7 +91,7 @@ pub fn evaluate_predicate_string_batch(
 
         ColumnPredicate::NotEqual { value, .. } => {
             let target = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -126,7 +126,7 @@ pub fn evaluate_predicate_string_batch(
         ColumnPredicate::Between { low, high, .. } => {
             // String BETWEEN - compare lexicographically
             let low_str = match low {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string BETWEEN".to_string(),
@@ -136,7 +136,7 @@ pub fn evaluate_predicate_string_batch(
                 }
             };
             let high_str = match high {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string BETWEEN".to_string(),
@@ -169,7 +169,7 @@ pub fn evaluate_predicate_string_batch(
             // Check each list value
             for list_val in list_values {
                 let target = match list_val {
-                    SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                    SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                     _ => continue, // Skip non-string values
                 };
                 let matches = batch_string_eq(values, nulls, target);

@@ -297,8 +297,8 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
     );
 
     let row = vibesql_storage::Row::new(vec![
-        SqlValue::Varchar("John".to_string()),
-        SqlValue::Varchar("Doe".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("John")),
+        SqlValue::Varchar(std::sync::Arc::from("Doe")),
     ]);
 
     let evaluator = ExpressionEvaluator::new(&schema);
@@ -311,7 +311,7 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
                 column: "first_name".to_string(),
             }),
             op: vibesql_ast::BinaryOperator::Concat,
-            right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(" ".to_string()))),
+            right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from(" ")))),
         }),
         op: vibesql_ast::BinaryOperator::Concat,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -324,8 +324,8 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
     let result1 = evaluator.eval(&full_name(), &row)?;
     let result2 = evaluator.eval(&full_name(), &row)?;
 
-    assert_eq!(result1, SqlValue::Varchar("John Doe".to_string()));
-    assert_eq!(result2, SqlValue::Varchar("John Doe".to_string()));
+    assert_eq!(result1, SqlValue::Varchar(std::sync::Arc::from("John Doe")));
+    assert_eq!(result2, SqlValue::Varchar(std::sync::Arc::from("John Doe")));
 
     Ok(())
 }

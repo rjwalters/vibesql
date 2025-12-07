@@ -44,9 +44,9 @@ fn test_hash_join_simple() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
+            vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))],
         ],
     );
 
@@ -96,8 +96,8 @@ fn test_hash_join_null_values() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Null, SqlValue::Varchar("Unknown".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("Unknown"))],
         ],
     );
 
@@ -117,7 +117,7 @@ fn test_hash_join_null_values() {
     // NULLs should not match each other in equi-joins
     assert_eq!(result.rows().len(), 1);
     assert_eq!(result.rows()[0].values[0], SqlValue::Integer(1)); // user id
-    assert_eq!(result.rows()[0].values[1], SqlValue::Varchar("Alice".to_string())); // user name
+    assert_eq!(result.rows()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice"))); // user name
     assert_eq!(result.rows()[0].values[2], SqlValue::Integer(1)); // order user_id
     assert_eq!(result.rows()[0].values[3], SqlValue::Integer(100)); // order amount
 }
@@ -165,8 +165,8 @@ fn test_hash_join_duplicate_keys() {
         "users",
         vec![("id", DataType::Integer), ("type", DataType::Varchar { max_length: Some(10) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("admin".to_string())],
-            vec![SqlValue::Integer(1), SqlValue::Varchar("user".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("admin"))],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("user"))],
         ],
     );
 
@@ -198,7 +198,7 @@ fn create_test_rows(count: usize) -> Vec<vibesql_storage::Row> {
         .map(|i| vibesql_storage::Row {
             values: vec![
                 SqlValue::Integer(i as i64 % 100), // Keys with duplicates
-                SqlValue::Varchar(format!("value{}", i)),
+                SqlValue::Varchar(std::sync::Arc::from(format!("value{}", i))),
             ],
         })
         .collect()
@@ -237,16 +237,16 @@ fn test_build_hash_table_sequential_with_duplicates() {
 fn test_build_hash_table_sequential_null_values() {
     let rows = vec![
         vibesql_storage::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("one".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar("null1".to_string())],
+            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null1"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("two".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("two"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar("null2".to_string())],
+            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null2"))],
         },
     ];
 
@@ -307,19 +307,19 @@ fn test_parallel_sequential_equivalence_large() {
 fn test_parallel_with_null_values() {
     let rows = vec![
         vibesql_storage::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("one".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar("null1".to_string())],
+            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null1"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("two".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("two"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar("null2".to_string())],
+            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null2"))],
         },
         vibesql_storage::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("one_dup".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one_dup"))],
         },
     ];
 
@@ -341,7 +341,7 @@ fn test_parallel_hash_join_integration() {
 
     // Left table: 6000 rows (above join threshold of 5000)
     let left_rows: Vec<Vec<SqlValue>> = (0..6000)
-        .map(|i| vec![SqlValue::Integer(i % 100), SqlValue::Varchar(format!("left{}", i))])
+        .map(|i| vec![SqlValue::Integer(i % 100), SqlValue::Varchar(std::sync::Arc::from(format!("left{}", i)))])
         .collect();
 
     let left = create_test_from_result(
@@ -352,7 +352,7 @@ fn test_parallel_hash_join_integration() {
 
     // Right table: 6000 rows
     let right_rows: Vec<Vec<SqlValue>> = (0..6000)
-        .map(|i| vec![SqlValue::Integer(i % 100), SqlValue::Varchar(format!("right{}", i))])
+        .map(|i| vec![SqlValue::Integer(i % 100), SqlValue::Varchar(std::sync::Arc::from(format!("right{}", i)))])
         .collect();
 
     let right = create_test_from_result(
@@ -383,9 +383,9 @@ fn test_hash_join_left_outer_basic() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
-            vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
+            vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))],
         ],
     );
 
@@ -406,19 +406,19 @@ fn test_hash_join_left_outer_basic() {
 
     // Verify Alice (id=1) has matching order
     let alice_row = result.rows().iter().find(|r| r.values[0] == SqlValue::Integer(1)).unwrap();
-    assert_eq!(alice_row.values[1], SqlValue::Varchar("Alice".to_string()));
+    assert_eq!(alice_row.values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
     assert_eq!(alice_row.values[2], SqlValue::Integer(1)); // user_id
     assert_eq!(alice_row.values[3], SqlValue::Integer(100)); // amount
 
     // Verify Bob (id=2) has matching order
     let bob_row = result.rows().iter().find(|r| r.values[0] == SqlValue::Integer(2)).unwrap();
-    assert_eq!(bob_row.values[1], SqlValue::Varchar("Bob".to_string()));
+    assert_eq!(bob_row.values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
     assert_eq!(bob_row.values[2], SqlValue::Integer(2)); // user_id
     assert_eq!(bob_row.values[3], SqlValue::Integer(200)); // amount
 
     // Verify Charlie (id=3) has NULL-padded right side
     let charlie_row = result.rows().iter().find(|r| r.values[0] == SqlValue::Integer(3)).unwrap();
-    assert_eq!(charlie_row.values[1], SqlValue::Varchar("Charlie".to_string()));
+    assert_eq!(charlie_row.values[1], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
     assert_eq!(charlie_row.values[2], SqlValue::Null); // user_id
     assert_eq!(charlie_row.values[3], SqlValue::Null); // amount
 }
@@ -430,8 +430,8 @@ fn test_hash_join_left_outer_unmatched_left_rows() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
         ],
     );
 
@@ -465,8 +465,8 @@ fn test_hash_join_left_outer_multiple_matches() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
         ],
     );
 
@@ -512,9 +512,9 @@ fn test_hash_join_left_outer_null_keys() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Null, SqlValue::Varchar("Unknown1".to_string())],
-            vec![SqlValue::Null, SqlValue::Varchar("Unknown2".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("Unknown1"))],
+            vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("Unknown2"))],
         ],
     );
 
@@ -555,8 +555,8 @@ fn test_hash_join_left_outer_empty_right_table() {
         "users",
         vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
-            vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
+            vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
         ],
     );
 
@@ -722,8 +722,8 @@ fn test_hash_join_inner_multi_duplicate_composite_keys() {
             ("data", DataType::Varchar { max_length: Some(10) }),
         ],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("L1".to_string())],
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("L2".to_string())], // Duplicate key
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("L1"))],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("L2"))], // Duplicate key
         ],
     );
 
@@ -735,8 +735,8 @@ fn test_hash_join_inner_multi_duplicate_composite_keys() {
             ("info", DataType::Varchar { max_length: Some(10) }),
         ],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("R1".to_string())],
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar("R2".to_string())], // Duplicate key
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("R1"))],
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("R2"))], // Duplicate key
         ],
     );
 
@@ -750,13 +750,13 @@ fn test_hash_join_inner_multi_duplicate_composite_keys() {
         result.rows().iter().map(|r| (r.values[2].clone(), r.values[5].clone())).collect();
 
     assert!(result_data
-        .contains(&(SqlValue::Varchar("L1".to_string()), SqlValue::Varchar("R1".to_string()))));
+        .contains(&(SqlValue::Varchar(std::sync::Arc::from("L1")), SqlValue::Varchar(std::sync::Arc::from("R1")))));
     assert!(result_data
-        .contains(&(SqlValue::Varchar("L1".to_string()), SqlValue::Varchar("R2".to_string()))));
+        .contains(&(SqlValue::Varchar(std::sync::Arc::from("L1")), SqlValue::Varchar(std::sync::Arc::from("R2")))));
     assert!(result_data
-        .contains(&(SqlValue::Varchar("L2".to_string()), SqlValue::Varchar("R1".to_string()))));
+        .contains(&(SqlValue::Varchar(std::sync::Arc::from("L2")), SqlValue::Varchar(std::sync::Arc::from("R1")))));
     assert!(result_data
-        .contains(&(SqlValue::Varchar("L2".to_string()), SqlValue::Varchar("R2".to_string()))));
+        .contains(&(SqlValue::Varchar(std::sync::Arc::from("L2")), SqlValue::Varchar(std::sync::Arc::from("R2")))));
 }
 
 #[test]
@@ -765,17 +765,17 @@ fn test_composite_key_build_and_hash() {
     let rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("a".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("a")),
             SqlValue::Integer(100),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("b".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("b")),
             SqlValue::Integer(200),
         ]),
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("a".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("a")),
             SqlValue::Integer(300),
         ]), // Duplicate key
     ];
@@ -787,14 +787,14 @@ fn test_composite_key_build_and_hash() {
     assert_eq!(hash_table.len(), 2);
 
     // Key (1, "a") should have 2 row indices
-    let key_1_a = CompositeKey(vec![SqlValue::Integer(1), SqlValue::Varchar("a".to_string())]);
+    let key_1_a = CompositeKey(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("a"))]);
     let indices = hash_table.get(&key_1_a).unwrap();
     assert_eq!(indices.len(), 2);
     assert!(indices.contains(&0));
     assert!(indices.contains(&2));
 
     // Key (2, "b") should have 1 row index
-    let key_2_b = CompositeKey(vec![SqlValue::Integer(2), SqlValue::Varchar("b".to_string())]);
+    let key_2_b = CompositeKey(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("b"))]);
     let indices = hash_table.get(&key_2_b).unwrap();
     assert_eq!(indices.len(), 1);
     assert!(indices.contains(&1));
@@ -804,10 +804,10 @@ fn test_composite_key_build_and_hash() {
 fn test_composite_key_with_nulls() {
     // Test that rows with NULL in composite key are skipped
     let rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("a".to_string())]),
-        Row::new(vec![SqlValue::Null, SqlValue::Varchar("b".to_string())]), // NULL in first column
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("a"))]),
+        Row::new(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("b"))]), // NULL in first column
         Row::new(vec![SqlValue::Integer(2), SqlValue::Null]),               // NULL in second column
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("c".to_string())]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("c"))]),
     ];
 
     let hash_table = build_hash_table_composite_sequential(&rows, &[0, 1]);

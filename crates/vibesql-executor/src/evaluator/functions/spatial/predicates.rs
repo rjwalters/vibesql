@@ -17,7 +17,7 @@ use vibesql_types::SqlValue;
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {
     // Parse WKT string into internal Geometry enum
-    let sql_value = SqlValue::Varchar(wkt_str.to_string());
+    let sql_value = SqlValue::Varchar(std::sync::Arc::from(wkt_str));
     let geom_with_srid = sql_value_to_geometry(&sql_value)?;
 
     // Convert internal Geometry to geo::Geometry
@@ -497,19 +497,19 @@ pub fn st_relate(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 // Full implementation would compute the 9-intersection matrix
                 if !geom1.intersects(&geom2) {
                     // Disjoint
-                    Ok(SqlValue::Varchar("FF*FF****".to_string()))
+                    Ok(SqlValue::Varchar(std::sync::Arc::from("FF*FF****")))
                 } else if geom1.contains(&geom2) && !geom2.contains(&geom1) {
                     // Contains (but not equal)
-                    Ok(SqlValue::Varchar("T*F**F***".to_string()))
+                    Ok(SqlValue::Varchar(std::sync::Arc::from("T*F**F***")))
                 } else if geom2.contains(&geom1) && !geom1.contains(&geom2) {
                     // Within (but not equal)
-                    Ok(SqlValue::Varchar("F*T**F***".to_string()))
+                    Ok(SqlValue::Varchar(std::sync::Arc::from("F*T**F***")))
                 } else if geom1 == geom2 {
                     // Equals
-                    Ok(SqlValue::Varchar("T*F**FFF*".to_string()))
+                    Ok(SqlValue::Varchar(std::sync::Arc::from("T*F**FFF*")))
                 } else {
                     // Intersects (but not fully one way or the other)
-                    Ok(SqlValue::Varchar("T*T***T**".to_string()))
+                    Ok(SqlValue::Varchar(std::sync::Arc::from("T*T***T**")))
                 }
             } else {
                 // ST_Relate(geom1, geom2, pattern) - test against pattern

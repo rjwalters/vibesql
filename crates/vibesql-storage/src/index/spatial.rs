@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_extract_mbr_from_point() {
-        let sql_value = SqlValue::Varchar("__GEOMETRY__|0|POINT(10 20)".to_string());
+        let sql_value = SqlValue::Varchar(std::sync::Arc::from("__GEOMETRY__|0|POINT(10 20)"));
         let mbr = extract_mbr_from_sql_value(&sql_value);
 
         assert!(mbr.is_some());
@@ -352,9 +352,9 @@ mod tests {
 
     #[test]
     fn test_extract_mbr_from_polygon() {
-        let sql_value = SqlValue::Varchar(
-            "__GEOMETRY__|0|POLYGON((0 0, 100 0, 100 100, 0 100, 0 0))".to_string(),
-        );
+        let sql_value = SqlValue::Varchar(std::sync::Arc::from(
+            "__GEOMETRY__|0|POLYGON((0 0, 100 0, 100 100, 0 100, 0 0))",
+        ));
         let mbr = extract_mbr_from_sql_value(&sql_value);
 
         assert!(mbr.is_some());
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_extract_mbr_with_srid() {
-        let sql_value = SqlValue::Varchar("__GEOMETRY__|4326|SRID=4326;POINT(10 20)".to_string());
+        let sql_value = SqlValue::Varchar(std::sync::Arc::from("__GEOMETRY__|4326|SRID=4326;POINT(10 20)"));
         let mbr = extract_mbr_from_sql_value(&sql_value);
 
         assert!(mbr.is_some());

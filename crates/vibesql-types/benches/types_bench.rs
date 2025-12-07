@@ -27,7 +27,7 @@ fn bench_construction(c: &mut Criterion) {
     });
 
     group.bench_function("varchar_short", |b| {
-        b.iter(|| black_box(SqlValue::Varchar("hello".to_string())));
+        b.iter(|| black_box(SqlValue::Varchar(std::sync::Arc::from("hello"))));
     });
 
     group.bench_function("varchar_long", |b| {
@@ -72,7 +72,7 @@ fn bench_clone(c: &mut Criterion) {
         b.iter(|| black_box(int_val.clone()));
     });
 
-    let varchar_short = SqlValue::Varchar("hello".to_string());
+    let varchar_short = SqlValue::Varchar(std::sync::Arc::from("hello"));
     group.bench_function("varchar_short", |b| {
         b.iter(|| black_box(varchar_short.clone()));
     });
@@ -123,8 +123,8 @@ fn bench_comparison(c: &mut Criterion) {
     });
 
     // Varchar comparisons
-    let varchar_a = SqlValue::Varchar("hello world".to_string());
-    let varchar_b = SqlValue::Varchar("hello world!".to_string());
+    let varchar_a = SqlValue::Varchar(std::sync::Arc::from("hello world"));
+    let varchar_b = SqlValue::Varchar(std::sync::Arc::from("hello world!"));
     group.bench_function("varchar_eq", |b| {
         b.iter(|| black_box(varchar_a == varchar_b));
     });
@@ -219,7 +219,7 @@ fn bench_type_checking(c: &mut Criterion) {
 
     let values = [
         SqlValue::Integer(42),
-        SqlValue::Varchar("hello".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("hello")),
         SqlValue::Double(99.99),
         SqlValue::Boolean(true),
         SqlValue::Null,

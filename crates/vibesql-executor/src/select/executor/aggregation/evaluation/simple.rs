@@ -244,7 +244,7 @@ pub(super) fn evaluate(
                     vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s),
                 ) => {
                     // Find position (1-indexed, 0 if not found)
-                    let pos = s.find(sub.as_str()).map(|p| p + 1).unwrap_or(0);
+                    let pos = s.find(&**sub).map(|p| p + 1).unwrap_or(0);
                     Ok(vibesql_types::SqlValue::Integer(pos as i64))
                 }
                 _ => Err(ExecutorError::TypeMismatch {
@@ -262,7 +262,7 @@ pub(super) fn evaluate(
             let removal_val = if let Some(rc) = removal_char {
                 executor.evaluate_with_aggregates(rc, group_rows, group_key, evaluator)?
             } else {
-                vibesql_types::SqlValue::Varchar(" ".to_string())
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(" "))
             };
 
             // Delegate to standard evaluator logic
@@ -276,13 +276,13 @@ pub(super) fn evaluate(
                 ) => {
                     use vibesql_ast::TrimPosition;
                     let trimmed = match position {
-                        Some(TrimPosition::Leading) => s.trim_start_matches(rem.as_str()),
-                        Some(TrimPosition::Trailing) => s.trim_end_matches(rem.as_str()),
+                        Some(TrimPosition::Leading) => s.trim_start_matches(&**rem),
+                        Some(TrimPosition::Trailing) => s.trim_end_matches(&**rem),
                         Some(TrimPosition::Both) | None => {
-                            s.trim_start_matches(rem.as_str()).trim_end_matches(rem.as_str())
+                            s.trim_start_matches(&**rem).trim_end_matches(&**rem)
                         }
                     };
-                    Ok(vibesql_types::SqlValue::Varchar(trimmed.to_string()))
+                    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(trimmed)))
                 }
                 _ => Err(ExecutorError::TypeMismatch {
                     left: string_val,

@@ -378,7 +378,7 @@ impl CompiledWhereClause {
             (Varchar(l), Varchar(r))
             | (Character(l), Character(r))
             | (Varchar(l), Character(r))
-            | (Character(l), Varchar(r)) => Ok(self.apply_op(l.as_str(), r.as_str(), op)),
+            | (Character(l), Varchar(r)) => Ok(self.apply_op(&**l, &**r, op)),
 
             // Cross-type comparisons - fall back to slower path
             _ => self.compare_values_generic(left, right, op),
@@ -573,7 +573,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(20),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar("1994-01-01".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
             ],
         };
         assert!(compiled.evaluate(&row).unwrap());
@@ -583,7 +583,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(30),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar("1994-01-01".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
             ],
         };
         assert!(!compiled.evaluate(&row2).unwrap());
@@ -690,7 +690,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(10),  // l_quantity
                 SqlValue::Double(0.05), // l_discount (doesn't match 999.99)
-                SqlValue::Varchar("1994-01-01".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
             ],
         };
 
@@ -716,7 +716,7 @@ mod tests {
             values: vec![
                 SqlValue::Null, // l_quantity is NULL
                 SqlValue::Double(0.05),
-                SqlValue::Varchar("1994-01-01".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
             ],
         };
 
@@ -781,7 +781,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(50),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar("1994-01-01".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
             ],
         };
         assert!(compiled.evaluate(&row_in_range).unwrap());
@@ -791,7 +791,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(200),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar("1994-01-01".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
             ],
         };
         assert!(!compiled.evaluate(&row_out_of_range).unwrap());

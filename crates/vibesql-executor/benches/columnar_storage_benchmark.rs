@@ -114,14 +114,14 @@ fn generate_lineitem_data(row_count: usize) -> Vec<Row> {
             SqlValue::Numeric(extendedprice),                  // l_extendedprice
             SqlValue::Numeric(discount),                       // l_discount
             SqlValue::Numeric(tax),                            // l_tax
-            SqlValue::Varchar(return_flag.to_string()),        // l_returnflag
-            SqlValue::Varchar(line_status.to_string()),        // l_linestatus
+            SqlValue::Varchar(std::sync::Arc::from(return_flag)),        // l_returnflag
+            SqlValue::Varchar(std::sync::Arc::from(line_status)),        // l_linestatus
             SqlValue::Date(ship_date),                         // l_shipdate
             SqlValue::Date(commit_date),                       // l_commitdate
             SqlValue::Date(receipt_date),                      // l_receiptdate
-            SqlValue::Varchar("DELIVER IN PERSON".to_string()), // l_shipinstruct
-            SqlValue::Varchar("TRUCK".to_string()),            // l_shipmode
-            SqlValue::Varchar("test comment".to_string()),     // l_comment
+            SqlValue::Varchar(std::sync::Arc::from("DELIVER IN PERSON")), // l_shipinstruct
+            SqlValue::Varchar(std::sync::Arc::from("TRUCK")),            // l_shipmode
+            SqlValue::Varchar(std::sync::Arc::from("test comment")),     // l_comment
         ]);
 
         rows.push(row);

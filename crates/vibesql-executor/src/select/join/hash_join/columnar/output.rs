@@ -173,7 +173,7 @@ pub(crate) fn gather_column(
             Ok(ColumnArray::Float32(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::String(values, nulls) => {
-            let gathered: Vec<String> =
+            let gathered: Vec<std::sync::Arc<str>> =
                 indices.iter().map(|&idx| values[idx as usize].clone()).collect();
             let gathered_nulls = nulls
                 .as_ref()
@@ -181,7 +181,7 @@ pub(crate) fn gather_column(
             Ok(ColumnArray::String(Arc::new(gathered), gathered_nulls))
         }
         ColumnArray::FixedString(values, nulls) => {
-            let gathered: Vec<String> =
+            let gathered: Vec<std::sync::Arc<str>> =
                 indices.iter().map(|&idx| values[idx as usize].clone()).collect();
             let gathered_nulls = nulls
                 .as_ref()
@@ -290,12 +290,12 @@ pub(crate) fn gather_column_with_nulls(
             Ok(ColumnArray::Float32(Arc::new(gathered), Some(Arc::new(nulls))))
         }
         ColumnArray::String(values, _existing_nulls) => {
-            let mut gathered = Vec::with_capacity(indices.len());
+            let mut gathered: Vec<std::sync::Arc<str>> = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
             for &idx in indices {
                 if idx == u32::MAX {
-                    gathered.push(String::new());
+                    gathered.push(std::sync::Arc::from(""));
                     nulls.push(true);
                 } else {
                     gathered.push(values[idx as usize].clone());
@@ -306,12 +306,12 @@ pub(crate) fn gather_column_with_nulls(
             Ok(ColumnArray::String(Arc::new(gathered), Some(Arc::new(nulls))))
         }
         ColumnArray::FixedString(values, _existing_nulls) => {
-            let mut gathered = Vec::with_capacity(indices.len());
+            let mut gathered: Vec<std::sync::Arc<str>> = Vec::with_capacity(indices.len());
             let mut nulls = Vec::with_capacity(indices.len());
 
             for &idx in indices {
                 if idx == u32::MAX {
-                    gathered.push(String::new());
+                    gathered.push(std::sync::Arc::from(""));
                     nulls.push(true);
                 } else {
                     gathered.push(values[idx as usize].clone());

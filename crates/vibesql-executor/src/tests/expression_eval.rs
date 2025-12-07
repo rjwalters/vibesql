@@ -23,9 +23,9 @@ fn test_eval_string_literal() {
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr =
-        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string()));
+        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_eval_column_ref() {
     let evaluator = ExpressionEvaluator::new(&schema);
     let row = vibesql_storage::Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar("Alice".to_string()),
+        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
     ]);
 
     let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() };
@@ -68,7 +68,7 @@ fn test_eval_column_ref() {
 
     let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("Alice".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
 }
 
 #[test]
@@ -197,9 +197,7 @@ fn test_eval_type_mismatch_in_addition() {
     let expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         op: vibesql_ast::BinaryOperator::Plus,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "hello".to_string(),
-        ))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")))),
     };
     let err = evaluator.eval(&expr, &row).unwrap_err();
     assert!(matches!(err, ExecutorError::TypeMismatch { .. }));
@@ -279,16 +277,12 @@ fn test_eval_string_concat_varchar() {
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "Hello".to_string(),
-        ))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello")))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            " World".to_string(),
-        ))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(" World")))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("Hello World".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World")));
 }
 
 #[test]
@@ -298,16 +292,12 @@ fn test_eval_string_concat_char() {
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-            "Hello".to_string(),
-        ))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("Hello")))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-            " World".to_string(),
-        ))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from(" World")))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("Hello World".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World")));
 }
 
 #[test]
@@ -317,16 +307,12 @@ fn test_eval_string_concat_mixed() {
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "Hello".to_string(),
-        ))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello")))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-            " World".to_string(),
-        ))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from(" World")))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("Hello World".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World")));
 }
 
 #[test]
@@ -336,9 +322,7 @@ fn test_eval_string_concat_null() {
     let row = vibesql_storage::Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "Hello".to_string(),
-        ))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello")))),
         op: vibesql_ast::BinaryOperator::Concat,
         right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
     };
@@ -355,19 +339,13 @@ fn test_eval_string_concat_multiple() {
     // ("Hello" || " " || "World")
     let expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Hello".to_string(),
-            ))),
+            left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello")))),
             op: vibesql_ast::BinaryOperator::Concat,
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                " ".to_string(),
-            ))),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(" ")))),
         }),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "World".to_string(),
-        ))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("World")))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("Hello World".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World")));
 }

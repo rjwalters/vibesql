@@ -372,7 +372,7 @@ mod tests {
 
         // Should be folded to a literal VARCHAR
         match optimized {
-            Expression::Literal(SqlValue::Varchar(s)) => assert_eq!(s, "42"),
+            Expression::Literal(SqlValue::Varchar(s)) => assert_eq!(s.as_ref(), "42"),
             _ => panic!("Expected folded VARCHAR literal, got {:?}", optimized),
         }
     }
@@ -381,7 +381,7 @@ mod tests {
     fn test_cast_folding_varchar_to_integer() {
         // CAST('123' AS INTEGER) should fold to 123
         let expr = Expression::Cast {
-            expr: Box::new(Expression::Literal(SqlValue::Varchar("123".to_string()))),
+            expr: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("123")))),
             data_type: DataType::Integer,
         };
 
@@ -403,7 +403,7 @@ mod tests {
         // CAST('abc' AS INTEGER) should fail at runtime, not plan time
         // Keep as CAST expression to get proper error message at runtime
         let expr = Expression::Cast {
-            expr: Box::new(Expression::Literal(SqlValue::Varchar("abc".to_string()))),
+            expr: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("abc")))),
             data_type: DataType::Integer,
         };
 

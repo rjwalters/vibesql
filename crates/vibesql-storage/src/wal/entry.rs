@@ -386,7 +386,7 @@ mod tests {
                 row_id: 100,
                 values: vec![
                     SqlValue::Integer(1),
-                    SqlValue::Varchar("test".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
                 ],
             },
@@ -409,8 +409,8 @@ mod tests {
             WalOp::Update {
                 table_id: 42,
                 row_id: 100,
-                old_values: vec![SqlValue::Integer(1), SqlValue::Varchar("old".to_string())],
-                new_values: vec![SqlValue::Integer(2), SqlValue::Varchar("new".to_string())],
+                old_values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("old"))],
+                new_values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("new"))],
             },
         );
 

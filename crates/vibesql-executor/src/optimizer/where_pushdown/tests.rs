@@ -99,7 +99,7 @@ fn test_or_filter_extraction() {
             table: Some("n1".to_string()),
             column: "n_name".to_string(),
         }),
-        right: Box::new(Expression::Literal(SqlValue::Varchar("FRANCE".to_string()))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("FRANCE")))),
     };
     let n2_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
@@ -107,7 +107,7 @@ fn test_or_filter_extraction() {
             table: Some("n2".to_string()),
             column: "n_name".to_string(),
         }),
-        right: Box::new(Expression::Literal(SqlValue::Varchar("GERMANY".to_string()))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("GERMANY")))),
     };
     let n1_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
@@ -115,7 +115,7 @@ fn test_or_filter_extraction() {
             table: Some("n1".to_string()),
             column: "n_name".to_string(),
         }),
-        right: Box::new(Expression::Literal(SqlValue::Varchar("GERMANY".to_string()))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("GERMANY")))),
     };
     let n2_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
@@ -123,7 +123,7 @@ fn test_or_filter_extraction() {
             table: Some("n2".to_string()),
             column: "n_name".to_string(),
         }),
-        right: Box::new(Expression::Literal(SqlValue::Varchar("FRANCE".to_string()))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("FRANCE")))),
     };
 
     // (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY')

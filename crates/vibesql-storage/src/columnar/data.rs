@@ -21,14 +21,15 @@ use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 /// - Enables direct SIMD operations on value vectors
 /// - Provides O(1) NULL checks via bitmap
 /// - Uses Arc for zero-copy sharing with executor layer
+/// - String columns use Arc<str> for O(1) cloning
 #[derive(Debug, Clone)]
 pub enum ColumnData {
     /// 64-bit signed integers
     Int64 { values: Arc<Vec<i64>>, nulls: Arc<Vec<bool>> },
     /// 64-bit floating point
     Float64 { values: Arc<Vec<f64>>, nulls: Arc<Vec<bool>> },
-    /// Variable-length strings
-    String { values: Arc<Vec<String>>, nulls: Arc<Vec<bool>> },
+    /// Variable-length strings (using Arc<str> for O(1) cloning)
+    String { values: Arc<Vec<Arc<str>>>, nulls: Arc<Vec<bool>> },
     /// Boolean values
     Bool { values: Arc<Vec<bool>>, nulls: Arc<Vec<bool>> },
     /// Date values
@@ -87,12 +88,12 @@ impl ColumnData {
                     + nulls.capacity() * std::mem::size_of::<bool>()
             }
             ColumnData::String { values, nulls } => {
-                // For strings, we need to account for the String struct overhead
+                // For Arc<str>, we need to account for the Arc overhead
                 // plus the actual string data on the heap
-                let string_overhead = std::mem::size_of::<String>(); // ptr, len, cap
-                let string_data: usize = values.iter().map(|s| s.capacity()).sum();
+                let arc_overhead = std::mem::size_of::<Arc<str>>(); // ptr + refcount
+                let string_data: usize = values.iter().map(|s| s.len()).sum();
                 VEC_OVERHEAD * 2
-                    + values.capacity() * string_overhead
+                    + values.capacity() * arc_overhead
                     + string_data
                     + nulls.capacity() * std::mem::size_of::<bool>()
             }
@@ -189,7 +190,7 @@ impl ColumnData {
     }
 
     /// Get the underlying Arc for string values (zero-copy sharing with executor)
-    pub fn as_string_arc(&self) -> Option<(&Arc<Vec<String>>, &Arc<Vec<bool>>)> {
+    pub fn as_string_arc(&self) -> Option<(&Arc<Vec<Arc<str>>>, &Arc<Vec<bool>>)> {
         match self {
             ColumnData::String { values, nulls } => Some((values, nulls)),
             _ => None,

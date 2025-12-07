@@ -59,7 +59,7 @@ impl ColumnarHashTable {
     }
 
     /// Build a hash table from a string column
-    pub fn build_from_string(values: &[String]) -> Self {
+    pub fn build_from_string(values: &[std::sync::Arc<str>]) -> Self {
         let row_count = values.len();
         let bucket_count = (row_count * 2).next_power_of_two().max(16);
         let bucket_mask = bucket_count - 1;
@@ -157,7 +157,7 @@ impl ColumnarHashTable {
     pub fn probe_string<'a>(
         &'a self,
         key: &'a str,
-        build_values: &'a [String],
+        build_values: &'a [std::sync::Arc<str>],
     ) -> impl Iterator<Item = u32> + 'a {
         let hash = Self::hash_string(key);
         let bucket_idx = (hash as usize) & (self.bucket_count - 1);
@@ -165,7 +165,7 @@ impl ColumnarHashTable {
         HashTableIter {
             entries: &self.entries,
             current: self.buckets[bucket_idx],
-            key_checker: move |row_idx: u32| build_values[row_idx as usize] == key,
+            key_checker: move |row_idx: u32| &*build_values[row_idx as usize] == key,
         }
     }
 

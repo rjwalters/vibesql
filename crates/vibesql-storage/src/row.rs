@@ -242,7 +242,7 @@ mod tests {
                 SqlValue::Integer(42),
                 SqlValue::Date(Date::from_str("2024-01-01").unwrap()),
                 SqlValue::Boolean(true),
-                SqlValue::Varchar("hello".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("hello")),
             ],
         };
 
@@ -326,7 +326,7 @@ mod tests {
         }
 
         // Test that Character string works
-        let row = Row { values: vec![SqlValue::Character("test".to_string())] };
+        let row = Row { values: vec![SqlValue::Character(std::sync::Arc::from("test"))] };
         unsafe {
             assert_eq!(row.get_string_unchecked(0), "test");
         }

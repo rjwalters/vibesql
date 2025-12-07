@@ -8,10 +8,15 @@ use crate::{
     temporal::{Date, Interval, IntervalField, Time, Timestamp},
     DataType,
 };
+use std::sync::Arc;
 
 /// SQL Values - runtime representation of data
 ///
 /// Represents actual values in SQL, including NULL.
+///
+/// String types use `Arc<str>` for O(1) cloning, which significantly
+/// improves performance for range queries and other operations that
+/// clone rows frequently.
 #[derive(Debug, Clone)]
 pub enum SqlValue {
     Integer(i64),
@@ -24,8 +29,8 @@ pub enum SqlValue {
     Real(f32),
     Double(f64),
 
-    Character(String),
-    Varchar(String),
+    Character(Arc<str>),
+    Varchar(Arc<str>),
 
     Boolean(bool),
 
@@ -83,7 +88,7 @@ impl SqlValue {
             SqlValue::Float(_) => DataType::Float { precision: 53 }, // Default to double precision
             SqlValue::Real(_) => DataType::Real,
             SqlValue::Double(_) => DataType::DoublePrecision,
-            SqlValue::Character(s) => DataType::Character { length: s.len() },
+            SqlValue::Character(s) => DataType::Character { length: s.len() },  // Arc<str> has len()
             SqlValue::Varchar(_) => DataType::Varchar { max_length: None }, /* Unknown/unlimited */
             // length
             SqlValue::Boolean(_) => DataType::Boolean,
@@ -113,8 +118,8 @@ impl SqlValue {
         // Add heap allocation size for variable-length types
         match self {
             SqlValue::Character(s) | SqlValue::Varchar(s) => {
-                // String: base + heap capacity
-                base_size + s.capacity()
+                // Arc<str>: base + string length (capacity == length for Arc<str>)
+                base_size + s.len()
             }
             SqlValue::Interval(i) => {
                 // Interval stores a String internally

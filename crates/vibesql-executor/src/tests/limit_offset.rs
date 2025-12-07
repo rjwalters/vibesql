@@ -47,7 +47,7 @@ fn make_users_table() -> vibesql_storage::Database {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();
@@ -55,7 +55,7 @@ fn make_users_table() -> vibesql_storage::Database {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
         ]),
     )
     .unwrap();
@@ -63,7 +63,7 @@ fn make_users_table() -> vibesql_storage::Database {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("Carol".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Carol")),
         ]),
     )
     .unwrap();
@@ -71,7 +71,7 @@ fn make_users_table() -> vibesql_storage::Database {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar("Dave".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Dave")),
         ]),
     )
     .unwrap();
@@ -164,7 +164,7 @@ fn test_limit_with_inner_join() {
             "users",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Varchar(format!("User{}", i)),
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("User{}", i))),
             ]),
         )
         .unwrap();
@@ -282,7 +282,7 @@ fn test_offset_with_inner_join() {
             "users",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Varchar(format!("User{}", i)),
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("User{}", i))),
             ]),
         )
         .unwrap();
@@ -393,7 +393,7 @@ fn test_limit_offset_with_inner_join() {
             "users",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Varchar(format!("User{}", i)),
+                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("User{}", i))),
             ]),
         )
         .unwrap();

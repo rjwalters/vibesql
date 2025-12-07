@@ -114,7 +114,7 @@ mod adaptive_backend_tests {
 
         // Insert a small number of rows (should stay in memory)
         for i in 0..100 {
-            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("user{}", i))]);
+            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("user{}", i)))]);
             db.insert_row("small_table", row).unwrap();
         }
 
@@ -354,8 +354,8 @@ mod correctness_tests {
         db.insert_row(
             "multi_col",
             Row::new(vec![
-                SqlValue::Varchar("Smith".to_string()),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Smith")),
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Integer(30),
             ]),
         )
@@ -364,8 +364,8 @@ mod correctness_tests {
         db.insert_row(
             "multi_col",
             Row::new(vec![
-                SqlValue::Varchar("Smith".to_string()),
-                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Smith")),
+                SqlValue::Varchar(std::sync::Arc::from("Bob")),
                 SqlValue::Integer(25),
             ]),
         )
@@ -417,7 +417,7 @@ mod correctness_tests {
             "unique_test",
             Row::new(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("alice@example.com".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
             ]),
         )
         .unwrap();
@@ -440,7 +440,7 @@ mod correctness_tests {
             "unique_test",
             Row::new(vec![
                 SqlValue::Integer(2),
-                SqlValue::Varchar("alice@example.com".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
             ]),
         );
 

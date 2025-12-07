@@ -328,7 +328,7 @@ mod tests {
                         }),
                         op: BinaryOperator::Equal,
                         right: Box::new(Expression::Literal(SqlValue::Varchar(
-                            match_value.to_string(),
+                            std::sync::Arc::from(match_value),
                         ))),
                     }],
                     result: Expression::ColumnRef {
@@ -464,22 +464,22 @@ mod tests {
         // Create test data
         let rows = vec![
             Row::new(vec![
-                SqlValue::Varchar("Sunday".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Sunday")),
                 SqlValue::Integer(100),
                 SqlValue::Integer(1),
             ]),
             Row::new(vec![
-                SqlValue::Varchar("Sunday".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Sunday")),
                 SqlValue::Integer(200),
                 SqlValue::Integer(1),
             ]),
             Row::new(vec![
-                SqlValue::Varchar("Monday".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Monday")),
                 SqlValue::Integer(50),
                 SqlValue::Integer(1),
             ]),
             Row::new(vec![
-                SqlValue::Varchar("Wednesday".to_string()), // Not in pivot
+                SqlValue::Varchar(std::sync::Arc::from("Wednesday")), // Not in pivot
                 SqlValue::Integer(999),
                 SqlValue::Integer(1),
             ]),
@@ -491,17 +491,17 @@ mod tests {
         let sun_key = pivot
             .entries
             .iter()
-            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Sunday"))
+            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s.as_ref() == "Sunday"))
             .unwrap();
         let mon_key = pivot
             .entries
             .iter()
-            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Monday"))
+            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s.as_ref() == "Monday"))
             .unwrap();
         let tue_key = pivot
             .entries
             .iter()
-            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s == "Tuesday"))
+            .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s.as_ref() == "Tuesday"))
             .unwrap();
 
         assert_eq!(results.get(&sun_key.cache_key), Some(&SqlValue::Integer(300))); // 100 + 200

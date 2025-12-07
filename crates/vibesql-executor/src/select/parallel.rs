@@ -391,7 +391,7 @@ mod tests {
             .map(|i| Row {
                 values: vec![
                     vibesql_types::SqlValue::Integer(i as i64),
-                    vibesql_types::SqlValue::Varchar(format!("row{}", i)),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("row{}", i))),
                 ],
             })
             .collect()
@@ -512,14 +512,14 @@ mod tests {
             Row {
                 values: vec![
                     vibesql_types::SqlValue::Integer(1),
-                    vibesql_types::SqlValue::Varchar("test".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test")),
                     vibesql_types::SqlValue::Null,
                 ],
             },
             Row {
                 values: vec![
                     vibesql_types::SqlValue::Integer(2),
-                    vibesql_types::SqlValue::Varchar("test2".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test2")),
                     vibesql_types::SqlValue::Double(3.5),
                 ],
             },

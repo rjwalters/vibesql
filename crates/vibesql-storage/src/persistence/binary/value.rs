@@ -136,8 +136,8 @@ pub fn read_sql_value<R: Read>(reader: &mut R) -> Result<SqlValue, StorageError>
         TypeTag::Float => Ok(SqlValue::Float(read_f32(reader)?)),
         TypeTag::Real => Ok(SqlValue::Real(read_f32(reader)?)),
         TypeTag::Double => Ok(SqlValue::Double(read_f64(reader)?)),
-        TypeTag::Character => Ok(SqlValue::Character(read_string(reader)?)),
-        TypeTag::Varchar => Ok(SqlValue::Varchar(read_string(reader)?)),
+        TypeTag::Character => Ok(SqlValue::Character(std::sync::Arc::from(read_string(reader)?))),
+        TypeTag::Varchar => Ok(SqlValue::Varchar(std::sync::Arc::from(read_string(reader)?))),
         TypeTag::Boolean => Ok(SqlValue::Boolean(read_bool(reader)?)),
         TypeTag::Date => {
             let s = read_string(reader)?;
@@ -187,7 +187,7 @@ mod tests {
         let test_values = vec![
             SqlValue::Null,
             SqlValue::Integer(42),
-            SqlValue::Varchar("test".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("test")),
             SqlValue::Boolean(true),
             SqlValue::Float(3.14),
         ];

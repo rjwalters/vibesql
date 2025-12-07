@@ -103,7 +103,7 @@ fn test_join_with_late_materialization() {
     let orders_columns = vec![
         ColumnArray::Int64(Arc::new((0..1000).collect()), None),
         ColumnArray::Int64(Arc::new((0..1000).map(|i| i % 100).collect()), None), // custkey
-        ColumnArray::String(Arc::new((0..1000).map(|i| format!("order_{}", i)).collect()), None),
+        ColumnArray::String(Arc::new((0..1000).map(|i| std::sync::Arc::<str>::from(format!("order_{}", i))).collect()), None),
     ];
     let orders = ColumnarBatch::from_columns(
         orders_columns,
@@ -114,7 +114,7 @@ fn test_join_with_late_materialization() {
     // Right: customers table (100 rows)
     let customers_columns = vec![
         ColumnArray::Int64(Arc::new((0..100).collect()), None),
-        ColumnArray::String(Arc::new((0..100).map(|i| format!("customer_{}", i)).collect()), None),
+        ColumnArray::String(Arc::new((0..100).map(|i| std::sync::Arc::<str>::from(format!("customer_{}", i))).collect()), None),
     ];
     let customers = ColumnarBatch::from_columns(
         customers_columns,
@@ -241,15 +241,15 @@ fn test_memory_estimation() {
 fn test_row_reference_based_join() {
     // Simulate a join using row references instead of copying data
     let left_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".into())]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".into())]),
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Carol".into())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Carol"))]),
     ];
 
     let right_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Order-A".into())]),
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Order-B".into())]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Order-C".into())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Order-A"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Order-B"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Order-C"))]),
     ];
 
     // Instead of copying rows, track references
@@ -279,9 +279,9 @@ fn test_row_reference_based_join() {
     }
 
     assert_eq!(output_rows.len(), 3);
-    assert_eq!(output_rows[0].get(0), Some(&SqlValue::Varchar("Alice".into())));
-    assert_eq!(output_rows[0].get(1), Some(&SqlValue::Varchar("Order-A".into())));
-    assert_eq!(output_rows[2].get(0), Some(&SqlValue::Varchar("Bob".into())));
+    assert_eq!(output_rows[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("Alice"))));
+    assert_eq!(output_rows[0].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("Order-A"))));
+    assert_eq!(output_rows[2].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("Bob"))));
 }
 
 #[test]

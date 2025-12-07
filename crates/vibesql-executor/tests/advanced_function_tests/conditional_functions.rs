@@ -80,13 +80,13 @@ fn test_if_true_condition() {
         name: "IF".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("yes".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("no".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("yes"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("no"))),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("yes".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("yes")));
 }
 
 #[test]
@@ -97,13 +97,13 @@ fn test_if_false_condition() {
         name: "IF".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("yes".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("no".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("yes"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("no"))),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("no".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("no")));
 }
 
 #[test]
@@ -114,11 +114,11 @@ fn test_if_null_condition() {
         name: "IF".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("yes".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("no".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("yes"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("no"))),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("no".to_string())); // NULL treated as false
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("no"))); // NULL treated as false
 }

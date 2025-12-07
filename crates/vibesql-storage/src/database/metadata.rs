@@ -28,16 +28,16 @@ impl Metadata {
         // The tests will remove ONLY_FULL_GROUP_BY to allow non-standard GROUP BY queries
         session_variables.insert(
             "SQL_MODE".to_string(),
-            SqlValue::Varchar("ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION")),
         );
 
         // version - simple version string
         session_variables
-            .insert("VERSION".to_string(), SqlValue::Varchar("8.0.0-vibesql".to_string()));
+            .insert("VERSION".to_string(), SqlValue::Varchar(std::sync::Arc::from("8.0.0-vibesql")));
 
         // character_set_client - default to utf8mb4
         session_variables
-            .insert("CHARACTER_SET_CLIENT".to_string(), SqlValue::Varchar("utf8mb4".to_string()));
+            .insert("CHARACTER_SET_CLIENT".to_string(), SqlValue::Varchar(std::sync::Arc::from("utf8mb4")));
 
         Metadata { session_variables, routine_body_cache: HashMap::new() }
     }

@@ -70,7 +70,7 @@ fn test_cte_in_scalar_subquery_basic() {
 
     assert_eq!(result.len(), 1, "Should return exactly one supplier with max revenue");
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar("Supplier A".to_string()));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Supplier A")));
 }
 
 /// Test tie-handling: multiple suppliers with the same maximum revenue
@@ -527,5 +527,5 @@ fn test_cte_in_not_exists_subquery() {
     // Only product 3 (Gizmo) has not been ordered
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(3));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar("Gizmo".to_string()));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Gizmo")));
 }

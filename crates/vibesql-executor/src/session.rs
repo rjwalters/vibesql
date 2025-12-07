@@ -34,7 +34,7 @@
 //! // For DML statements that modify data, use execute_prepared_mut
 //! let mut session = Session::new(&mut db);
 //! let insert_stmt = session.prepare("INSERT INTO users (id, name) VALUES (?, ?)")?;
-//! session.execute_prepared_mut(&insert_stmt, &[SqlValue::Integer(3), SqlValue::Varchar("Alice".into())])?;
+//! session.execute_prepared_mut(&insert_stmt, &[SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Alice"))])?;
 //! ```
 //!
 //! ## Thread Safety
@@ -705,9 +705,9 @@ mod tests {
         db.create_table(schema).unwrap();
 
         // Insert test data
-        let row1 = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".into())]);
-        let row2 = Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".into())]);
-        let row3 = Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".into())]);
+        let row1 = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
+        let row2 = Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]);
+        let row3 = Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]);
 
         db.insert_row("users", row1).unwrap();
         db.insert_row("users", row2).unwrap();
@@ -738,7 +738,7 @@ mod tests {
         if let PreparedExecutionResult::Select(select_result) = result {
             assert_eq!(select_result.rows.len(), 1);
             assert_eq!(select_result.rows[0].values[0], SqlValue::Integer(1));
-            assert_eq!(select_result.rows[0].values[1], SqlValue::Varchar("Alice".into()));
+            assert_eq!(select_result.rows[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
         } else {
             panic!("Expected Select result");
         }
@@ -757,9 +757,9 @@ mod tests {
         let result3 = session.execute_prepared(&stmt, &[SqlValue::Integer(3)]).unwrap();
 
         // Verify each returned the correct row
-        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar("Alice".into()));
-        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar("Bob".into()));
-        assert_eq!(result3.rows().unwrap()[0].values[1], SqlValue::Varchar("Charlie".into()));
+        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+        assert_eq!(result3.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
 
         // Verify cache was used (should have 1 miss, then hits)
         let stats = session.cache().stats();
@@ -791,7 +791,7 @@ mod tests {
         let stmt = session.prepare("INSERT INTO users (id, name) VALUES (?, ?)").unwrap();
 
         let result = session
-            .execute_prepared_mut(&stmt, &[SqlValue::Integer(4), SqlValue::Varchar("David".into())])
+            .execute_prepared_mut(&stmt, &[SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("David"))])
             .unwrap();
 
         assert_eq!(result.rows_affected(), Some(1));
@@ -802,7 +802,7 @@ mod tests {
             session.execute_prepared(&select_stmt, &[SqlValue::Integer(4)]).unwrap();
 
         assert_eq!(select_result.rows().unwrap().len(), 1);
-        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar("David".into()));
+        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("David")));
     }
 
     #[test]
@@ -815,7 +815,7 @@ mod tests {
         let result = session
             .execute_prepared_mut(
                 &stmt,
-                &[SqlValue::Varchar("Alicia".into()), SqlValue::Integer(1)],
+                &[SqlValue::Varchar(std::sync::Arc::from("Alicia")), SqlValue::Integer(1)],
             )
             .unwrap();
 
@@ -826,7 +826,7 @@ mod tests {
         let select_result =
             session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
 
-        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar("Alicia".into()));
+        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alicia")));
     }
 
     #[test]
@@ -873,8 +873,8 @@ mod tests {
         let result1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
         let result2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
 
-        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar("Alice".into()));
-        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar("Bob".into()));
+        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
     }
 
     #[test]

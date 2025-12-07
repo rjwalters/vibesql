@@ -34,5 +34,5 @@ pub(in crate::evaluator::functions) fn concat(
             }
         }
     }
-    Ok(vibesql_types::SqlValue::Varchar(result))
+    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
 }

@@ -57,14 +57,14 @@ fn test_double_nan_is_incomparable() {
 
 #[test]
 fn test_varchar_ordering() {
-    assert!(SqlValue::Varchar("apple".to_string()) < SqlValue::Varchar("banana".to_string()));
-    assert!(SqlValue::Varchar("zebra".to_string()) > SqlValue::Varchar("aardvark".to_string()));
+    assert!(SqlValue::Varchar(std::sync::Arc::from("apple")) < SqlValue::Varchar(std::sync::Arc::from("banana")));
+    assert!(SqlValue::Varchar(std::sync::Arc::from("zebra")) > SqlValue::Varchar(std::sync::Arc::from("aardvark")));
 }
 
 #[test]
 fn test_character_ordering() {
-    assert!(SqlValue::Character("a".to_string()) < SqlValue::Character("b".to_string()));
-    assert!(SqlValue::Character("z".to_string()) > SqlValue::Character("a".to_string()));
+    assert!(SqlValue::Character(std::sync::Arc::from("a")) < SqlValue::Character(std::sync::Arc::from("b")));
+    assert!(SqlValue::Character(std::sync::Arc::from("z")) > SqlValue::Character(std::sync::Arc::from("a")));
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_null_is_incomparable() {
 #[test]
 fn test_type_mismatch_is_incomparable() {
     // Different types cannot be compared
-    assert_eq!(SqlValue::Integer(1).partial_cmp(&SqlValue::Varchar("1".to_string())), None);
+    assert_eq!(SqlValue::Integer(1).partial_cmp(&SqlValue::Varchar(std::sync::Arc::from("1"))), None);
     assert_eq!(SqlValue::Float(1.0).partial_cmp(&SqlValue::Integer(1)), None);
     assert_eq!(SqlValue::Boolean(true).partial_cmp(&SqlValue::Integer(1)), None);
 }

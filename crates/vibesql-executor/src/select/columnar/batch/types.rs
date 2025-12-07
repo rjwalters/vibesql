@@ -67,10 +67,10 @@ pub enum ColumnArray {
     Float32(Arc<Vec<f32>>, Option<Arc<Vec<bool>>>),
 
     /// Variable-length strings (VARCHAR, TEXT)
-    String(Arc<Vec<String>>, Option<Arc<Vec<bool>>>),
+    String(Arc<Vec<Arc<str>>>, Option<Arc<Vec<bool>>>),
 
     /// Fixed-length strings (CHAR)
-    FixedString(Arc<Vec<String>>, Option<Arc<Vec<bool>>>),
+    FixedString(Arc<Vec<Arc<str>>>, Option<Arc<Vec<bool>>>),
 
     /// Dates (stored as i32 days since epoch)
     Date(Arc<Vec<i32>>, Option<Arc<Vec<bool>>>),

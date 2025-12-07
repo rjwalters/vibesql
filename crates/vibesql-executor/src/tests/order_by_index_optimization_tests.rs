@@ -55,9 +55,9 @@ fn create_products_db() -> Database {
         "products",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Keyboard".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Keyboard")),
             SqlValue::Integer(80),
-            SqlValue::Varchar("Electronics".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Electronics")),
             SqlValue::Integer(50),
         ]),
     )
@@ -67,9 +67,9 @@ fn create_products_db() -> Database {
         "products",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Mouse".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Mouse")),
             SqlValue::Integer(30),
-            SqlValue::Varchar("Electronics".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Electronics")),
             SqlValue::Integer(100),
         ]),
     )
@@ -79,9 +79,9 @@ fn create_products_db() -> Database {
         "products",
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Monitor".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Monitor")),
             SqlValue::Integer(300),
-            SqlValue::Varchar("Electronics".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Electronics")),
             SqlValue::Integer(20),
         ]),
     )
@@ -91,9 +91,9 @@ fn create_products_db() -> Database {
         "products",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Desk".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Desk")),
             SqlValue::Integer(200),
-            SqlValue::Varchar("Furniture".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Furniture")),
             SqlValue::Integer(15),
         ]),
     )
@@ -103,9 +103,9 @@ fn create_products_db() -> Database {
         "products",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Chair".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chair")),
             SqlValue::Integer(150),
-            SqlValue::Varchar("Furniture".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Furniture")),
             SqlValue::Integer(30),
         ]),
     )
@@ -167,11 +167,11 @@ fn test_order_by_single_column_asc_with_index() {
 
         // Verify results are ordered by price ascending
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Chair".to_string()));
-        assert_eq!(result[3].values[0], SqlValue::Varchar("Desk".to_string()));
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Monitor".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Chair")));
+        assert_eq!(result[3].values[0], SqlValue::Varchar(std::sync::Arc::from("Desk")));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -205,11 +205,11 @@ fn test_order_by_single_column_desc_with_index() {
 
         // Verify results are ordered by price descending
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Monitor".to_string()));
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Desk".to_string()));
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Chair".to_string()));
-        assert_eq!(result[3].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Mouse".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Desk")));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Chair")));
+        assert_eq!(result[3].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -252,21 +252,21 @@ fn test_order_by_multi_column_with_composite_index() {
         assert_eq!(result.len(), 5);
 
         // Electronics products (sorted by price)
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[0].values[1], SqlValue::Varchar("Electronics".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Electronics")));
 
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[1].values[1], SqlValue::Varchar("Electronics".to_string()));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[1].values[1], SqlValue::Varchar(std::sync::Arc::from("Electronics")));
 
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Monitor".to_string()));
-        assert_eq!(result[2].values[1], SqlValue::Varchar("Electronics".to_string()));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
+        assert_eq!(result[2].values[1], SqlValue::Varchar(std::sync::Arc::from("Electronics")));
 
         // Furniture products (sorted by price)
-        assert_eq!(result[3].values[0], SqlValue::Varchar("Chair".to_string()));
-        assert_eq!(result[3].values[1], SqlValue::Varchar("Furniture".to_string()));
+        assert_eq!(result[3].values[0], SqlValue::Varchar(std::sync::Arc::from("Chair")));
+        assert_eq!(result[3].values[1], SqlValue::Varchar(std::sync::Arc::from("Furniture")));
 
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Desk".to_string()));
-        assert_eq!(result[4].values[1], SqlValue::Varchar("Furniture".to_string()));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Desk")));
+        assert_eq!(result[4].values[1], SqlValue::Varchar(std::sync::Arc::from("Furniture")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -300,9 +300,9 @@ fn test_order_by_with_where_clause() {
 
         // Should return only Electronics products, ordered by price
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Monitor".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -343,8 +343,8 @@ fn test_order_by_partial_index_match_falls_back_to_sort() {
 
         // Should still work correctly (via sort), ordered by price then category
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Monitor".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -449,13 +449,13 @@ fn test_order_by_mixed_asc_desc_no_index() {
         assert_eq!(result.len(), 5);
 
         // Electronics products (sorted by price DESC)
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Monitor".to_string()));
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Mouse".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
 
         // Furniture products (sorted by price DESC)
-        assert_eq!(result[3].values[0], SqlValue::Varchar("Desk".to_string()));
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Chair".to_string()));
+        assert_eq!(result[3].values[0], SqlValue::Varchar(std::sync::Arc::from("Desk")));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Chair")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -489,8 +489,8 @@ fn test_order_by_positional_reference() {
 
         // Should be ordered by price (second column)
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Monitor".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -524,8 +524,8 @@ fn test_order_by_alias() {
 
         // Should be ordered by price (aliased as cost)
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Monitor".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -663,21 +663,21 @@ fn test_order_by_multi_column_desc_with_index_reversal() {
         assert_eq!(result.len(), 5);
 
         // Furniture products first (sorted by price DESC)
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Desk".to_string()));
-        assert_eq!(result[0].values[1], SqlValue::Varchar("Furniture".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Desk")));
+        assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Furniture")));
 
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Chair".to_string()));
-        assert_eq!(result[1].values[1], SqlValue::Varchar("Furniture".to_string()));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Chair")));
+        assert_eq!(result[1].values[1], SqlValue::Varchar(std::sync::Arc::from("Furniture")));
 
         // Electronics products second (sorted by price DESC)
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Monitor".to_string()));
-        assert_eq!(result[2].values[1], SqlValue::Varchar("Electronics".to_string()));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Monitor")));
+        assert_eq!(result[2].values[1], SqlValue::Varchar(std::sync::Arc::from("Electronics")));
 
-        assert_eq!(result[3].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[3].values[1], SqlValue::Varchar("Electronics".to_string()));
+        assert_eq!(result[3].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[3].values[1], SqlValue::Varchar(std::sync::Arc::from("Electronics")));
 
-        assert_eq!(result[4].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[4].values[1], SqlValue::Varchar("Electronics".to_string()));
+        assert_eq!(result[4].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[4].values[1], SqlValue::Varchar(std::sync::Arc::from("Electronics")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -711,9 +711,9 @@ fn test_order_by_limit_with_index() {
 
         // Should return only first 3 products ordered by price
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Mouse".to_string()));
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Keyboard".to_string()));
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Chair".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Mouse")));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Keyboard")));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Chair")));
     } else {
         panic!("Expected SELECT statement");
     }

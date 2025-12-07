@@ -72,7 +72,7 @@ pub fn assert_expression_result(
 /// ```rust
 /// let expr = Expression::UnaryOp {
 ///     op: UnaryOperator::Plus,
-///     expr: Box::new(Expression::Literal(SqlValue::Varchar("hello".to_string()))),
+///     expr: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("hello")))),
 /// };
 /// assert_expression_error(&db, expr);
 /// ```
@@ -88,7 +88,7 @@ pub fn assert_expression_error(db: &vibesql_storage::Database, expr: vibesql_ast
 /// ```rust
 /// let expr = Expression::UnaryOp {
 ///     op: UnaryOperator::Plus,
-///     expr: Box::new(Expression::Literal(SqlValue::Varchar("hello".to_string()))),
+///     expr: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("hello")))),
 /// };
 /// assert_type_mismatch(&db, expr);
 /// ```

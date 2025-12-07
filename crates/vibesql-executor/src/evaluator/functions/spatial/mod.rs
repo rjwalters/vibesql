@@ -227,13 +227,13 @@ const GEOMETRY_SEPARATOR: &str = "|";
 
 pub fn geometry_to_sql_value(geom: Geometry, srid: i32) -> SqlValue {
     let wkt = geom.to_ewkt(srid);
-    SqlValue::Varchar(format!(
+    SqlValue::Varchar(std::sync::Arc::from(format!(
         "{}{}{}{}",
         GEOMETRY_TYPE_MARKER,
         GEOMETRY_SEPARATOR,
         srid,
         GEOMETRY_SEPARATOR.to_string() + &wkt
-    ))
+    )))
 }
 
 pub fn sql_value_to_geometry(value: &SqlValue) -> Result<GeometryWithSRID, ExecutorError> {
@@ -281,7 +281,7 @@ pub fn sql_value_to_geometry(value: &SqlValue) -> Result<GeometryWithSRID, Execu
 /// Binary data value for WKB representation
 #[allow(dead_code)]
 pub fn binary_to_sql_value(data: Vec<u8>) -> SqlValue {
-    SqlValue::Varchar(format!("0x{}", hex::encode(data)))
+    SqlValue::Varchar(std::sync::Arc::from(format!("0x{}", hex::encode(data))))
 }
 
 /// Parse binary data from hex string

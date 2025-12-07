@@ -15,14 +15,14 @@ fn test_case_expression_simple() {
         when_clauses: vec![
             CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
-                result: Expression::Literal(SqlValue::Varchar("active".to_string())),
+                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active"))),
             },
             CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(2))],
-                result: Expression::Literal(SqlValue::Varchar("inactive".to_string())),
+                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("inactive"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar("unknown".to_string())))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("unknown"))))),
     };
     match expr {
         Expression::Case { .. } => {} // Success
@@ -40,9 +40,9 @@ fn test_case_expression_searched() {
                 left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }],
-            result: Expression::Literal(SqlValue::Varchar("adult".to_string())),
+            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("adult"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar("minor".to_string())))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("minor"))))),
     };
     match expr {
         Expression::Case { operand: None, .. } => {} // Success

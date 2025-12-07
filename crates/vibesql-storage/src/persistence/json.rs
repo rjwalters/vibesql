@@ -420,7 +420,7 @@ fn sql_value_to_json(value: &SqlValue) -> serde_json::Value {
         SqlValue::Float(v) => serde_json::json!(v),
         SqlValue::Real(v) => serde_json::json!(v),
         SqlValue::Double(v) => serde_json::json!(v),
-        SqlValue::Character(s) | SqlValue::Varchar(s) => serde_json::Value::String(s.clone()),
+        SqlValue::Character(s) | SqlValue::Varchar(s) => serde_json::Value::String(s.to_string()),
         SqlValue::Boolean(b) => serde_json::Value::Bool(*b),
         SqlValue::Date(d) => serde_json::Value::String(d.to_string()),
         SqlValue::Time(t) => serde_json::Value::String(t.to_string()),
@@ -617,10 +617,10 @@ fn json_value_to_sql(
             .map(SqlValue::Double)
             .ok_or_else(|| StorageError::NotImplemented(format!("Invalid double value: {}", n))),
         (serde_json::Value::String(s), DataType::Character { .. }) => {
-            Ok(SqlValue::Character(s.clone()))
+            Ok(SqlValue::Character(std::sync::Arc::from(s.as_str())))
         }
         (serde_json::Value::String(s), DataType::Varchar { .. })
-        | (serde_json::Value::String(s), DataType::Name) => Ok(SqlValue::Varchar(s.clone())),
+        | (serde_json::Value::String(s), DataType::Name) => Ok(SqlValue::Varchar(std::sync::Arc::from(s.as_str()))),
         (serde_json::Value::Bool(b), DataType::Boolean) => Ok(SqlValue::Boolean(*b)),
         (serde_json::Value::String(s), DataType::Date) => s
             .parse()

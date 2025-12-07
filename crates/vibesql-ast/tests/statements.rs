@@ -35,7 +35,7 @@ fn test_create_insert_statement() {
         table_name: "users".to_string(),
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
-            "Alice".to_string(),
+            std::sync::Arc::from("Alice"),
         ))]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -53,7 +53,7 @@ fn test_create_update_statement() {
         table_name: "users".to_string(),
         assignments: vec![Assignment {
             column: "name".to_string(),
-            value: Expression::Literal(SqlValue::Varchar("Bob".to_string())),
+            value: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob"))),
         }],
         where_clause: None,
     });

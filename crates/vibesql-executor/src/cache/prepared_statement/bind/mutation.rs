@@ -847,13 +847,13 @@ mod tests {
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
 
         let mut stmt = stmt.clone();
-        let params = vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())];
+        let params = vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))];
         bind_statement_mut(&mut stmt, &params);
 
         if let Statement::Insert(insert) = stmt {
             if let InsertSource::Values(rows) = &insert.source {
                 assert_eq!(rows[0][0], Expression::Literal(SqlValue::Integer(1)));
-                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar("Alice".to_string())));
+                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))));
             } else {
                 panic!("Expected VALUES insert source");
             }
@@ -868,14 +868,14 @@ mod tests {
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
 
         let mut stmt = stmt.clone();
-        let params = vec![SqlValue::Varchar("Bob".to_string()), SqlValue::Integer(42)];
+        let params = vec![SqlValue::Varchar(std::sync::Arc::from("Bob")), SqlValue::Integer(42)];
         bind_statement_mut(&mut stmt, &params);
 
         if let Statement::Update(update) = stmt {
             // Check SET clause
             assert_eq!(
                 update.assignments[0].value,
-                Expression::Literal(SqlValue::Varchar("Bob".to_string()))
+                Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob")))
             );
             // Check WHERE clause
             if let Some(WhereClause::Condition(Expression::BinaryOp { right, .. })) =
@@ -919,7 +919,7 @@ mod tests {
         let mut stmt = stmt.clone();
         let params = vec![
             SqlValue::Integer(42),                // $1
-            SqlValue::Varchar("Bob".to_string()), // $2
+            SqlValue::Varchar(std::sync::Arc::from("Bob")), // $2
         ];
         bind_statement_mut(&mut stmt, &params);
 
@@ -929,7 +929,7 @@ mod tests {
                 if let Expression::BinaryOp { right: left_right, .. } = left.as_ref() {
                     assert_eq!(
                         **left_right,
-                        Expression::Literal(SqlValue::Varchar("Bob".to_string()))
+                        Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob")))
                     );
                 }
                 // right is: id = $1 (should be 42)
@@ -971,7 +971,7 @@ mod tests {
 
         let sql = "SELECT * FROM users WHERE id = ? AND name = ?";
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
-        let params = vec![SqlValue::Integer(42), SqlValue::Varchar("Alice".to_string())];
+        let params = vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("Alice"))];
 
         // Clone-based binding
         let cloned = bind_parameters(&stmt, &params);
