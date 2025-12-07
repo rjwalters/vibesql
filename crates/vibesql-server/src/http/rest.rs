@@ -671,6 +671,29 @@ async fn subscribe_stream(
         vec![]
     };
 
+    // Validate selective updates parameters BEFORE query execution (fail-fast)
+    // This ensures clients get clear parameter validation errors, not mixed with query errors
+    if let Some(max_ratio) = params.selective_max_changed_ratio {
+        if !(0.0..=1.0).contains(&max_ratio) {
+            error!("Invalid selective_max_changed_ratio: {}", max_ratio);
+            let event_data = serde_json::to_string(&SseEvent {
+                event_type: "error".to_string(),
+                columns: None,
+                rows: None,
+                old: None,
+                new: None,
+                error: Some("selective_max_changed_ratio must be between 0.0 and 1.0".to_string()),
+            })
+            .unwrap_or_default();
+
+            let stream = futures::stream::once(async move {
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
+            });
+
+            return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
+        }
+    }
+
     // Execute initial query with the shared database
     let mut session =
         crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
@@ -734,27 +757,8 @@ async fn subscribe_stream(
         selective_config.min_changed_columns = min_changed;
     }
     if let Some(max_ratio) = params.selective_max_changed_ratio {
-        // Validate that ratio is between 0.0 and 1.0
-        if max_ratio >= 0.0 && max_ratio <= 1.0 {
-            selective_config.max_changed_columns_ratio = max_ratio;
-        } else {
-            error!("Invalid selective_max_changed_ratio: {}", max_ratio);
-            let event_data = serde_json::to_string(&SseEvent {
-                event_type: "error".to_string(),
-                columns: None,
-                rows: None,
-                old: None,
-                new: None,
-                error: Some("selective_max_changed_ratio must be between 0.0 and 1.0".to_string()),
-            })
-            .unwrap_or_default();
-
-            let stream = futures::stream::once(async move {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
-            });
-
-            return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
-        }
+        // Already validated in early validation block above
+        selective_config.max_changed_columns_ratio = max_ratio;
     }
 
     // Create subscription via SubscriptionManager

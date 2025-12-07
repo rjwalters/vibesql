@@ -2,7 +2,7 @@ use crate::auth::PasswordStore;
 use crate::config::Config;
 use crate::observability::ObservabilityProvider;
 use crate::protocol::{
-    BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
+    BackendMessage, FieldDescription, FrontendMessage, SelectiveUpdatesConfig, SubscriptionUpdateType, TransactionStatus,
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
@@ -398,9 +398,9 @@ impl ConnectionHandler {
                 Ok(ClientMessageResult::Continue)
             }
 
-            FrontendMessage::Subscribe { query, params, filter } => {
-                debug!("Subscribe: {} (filter: {:?})", query, filter);
-                self.handle_subscribe(&query, params, filter).await?;
+            FrontendMessage::Subscribe { query, params, filter, selective_updates_config } => {
+                debug!("Subscribe: {} (filter: {:?}, selective_config: {:?})", query, filter, selective_updates_config);
+                self.handle_subscribe(&query, params, filter, selective_updates_config).await?;
                 Ok(ClientMessageResult::Continue)
             }
 
@@ -982,6 +982,7 @@ impl ConnectionHandler {
         query: &str,
         _params: Vec<Option<Vec<u8>>>,
         filter: Option<String>,
+        selective_updates_config: Option<SelectiveUpdatesConfig>,
     ) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
@@ -1053,6 +1054,29 @@ impl ConnectionHandler {
             if let Some(metrics) = self.observability.metrics() {
                 metrics.increment_selective_eligible();
             }
+        }
+
+        // Apply per-subscription selective updates override if provided
+        if let Some(wire_config) = selective_updates_config {
+            // Convert wire protocol config to SelectiveColumnConfig
+            // Merge with server defaults for any unspecified fields
+            let server_config = &self.config.subscriptions.selective_updates;
+
+            let override_config = SelectiveColumnConfig {
+                enabled: wire_config.enabled.unwrap_or(server_config.enabled),
+                pk_columns: pk_detection.pk_column_indices.clone(), // Use detected PK columns
+                min_changed_columns: wire_config
+                    .min_changed_columns
+                    .unwrap_or(server_config.min_changed_columns),
+                max_changed_columns_ratio: wire_config
+                    .max_changed_columns_ratio
+                    .unwrap_or(server_config.max_changed_columns_ratio),
+            };
+
+            self.subscription_manager.set_selective_updates_override_by_wire_id(
+                &wire_subscription_id,
+                override_config,
+            );
         }
 
         // Execute the query to get initial data

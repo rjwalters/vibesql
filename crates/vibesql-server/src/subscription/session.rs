@@ -89,6 +89,7 @@ pub struct SessionSubscription {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_pk_info_fallback_to_first_column() {
