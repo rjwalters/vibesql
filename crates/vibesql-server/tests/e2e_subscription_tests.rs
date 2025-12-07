@@ -969,3 +969,269 @@ async fn test_update_all_columns_falls_back_to_full_data() {
     client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
+
+/// test_strict_partial_data_with_guaranteed_pk_detection - Strict 0xF7 assertion test
+///
+/// This test strictly verifies that 0xF7 (SubscriptionPartialData) is sent when:
+/// 1. Table has an explicit PRIMARY KEY constraint
+/// 2. PK detection succeeds (confident)
+/// 3. Only a small subset of columns are updated (within 50% threshold)
+///
+/// Unlike test_selective_update_sends_partial_data, this test FAILS if 0xF2 is received,
+/// as that would indicate a regression in PK detection or selective update logic.
+///
+/// Related: Issue #3943
+#[tokio::test]
+async fn test_strict_partial_data_with_guaranteed_pk_detection() {
+    let server = start_test_server().await;
+    let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
+
+    // Complete handshake
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Drop table first to ensure clean state (avoids IF NOT EXISTS issues)
+    let table_name = "strict_pk_detection_test";
+    client
+        .send_query(&format!("DROP TABLE IF EXISTS {}", table_name))
+        .await
+        .expect("Failed to drop table");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read drop response");
+
+    // Create a table with explicit PRIMARY KEY constraint
+    // Using 5 columns so updating 1 = 20%, well within the 50% threshold
+    client
+        .send_query(&format!(
+            "CREATE TABLE {} (
+                id INT PRIMARY KEY,
+                name VARCHAR,
+                status VARCHAR,
+                value INT,
+                description VARCHAR
+            )",
+            table_name
+        ))
+        .await
+        .expect("Failed to create table");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    // Insert initial data
+    client
+        .send_query(&format!(
+            "INSERT INTO {} VALUES (1, 'Alice', 'active', 100, 'Test user')",
+            table_name
+        ))
+        .await
+        .expect("Failed to insert data");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Subscribe to the table with SELECT *
+    // This should allow PK detection since we're selecting from a single table
+    let select_query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    let initial_data = client
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+    let initial_messages = parse_backend_messages(&initial_data);
+
+    // Verify we got initial data
+    assert!(
+        initial_messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA),
+        "Should receive initial SubscriptionData (0xF2)"
+    );
+
+    // Update ONLY the 'name' column (1 of 5 columns = 20%, well within 50% threshold)
+    client
+        .send_query(&format!(
+            "UPDATE {} SET name = 'Alicia' WHERE id = 1",
+            table_name
+        ))
+        .await
+        .expect("Failed to update data");
+
+    // Read for update notification
+    let data = client
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after update");
+    let messages = parse_backend_messages(&data);
+
+    // STRICT ASSERTION: We expect ONLY 0xF7 (SubscriptionPartialData), NOT 0xF2
+    let has_partial_data = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full_data = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    // If we got 0xF2 instead of 0xF7, this indicates a regression in PK detection
+    assert!(
+        has_partial_data,
+        "Expected SubscriptionPartialData (0xF7) for single-column update. \
+         Got 0xF2 instead, indicating PK detection may have failed. \
+         Messages received: {:?}",
+        messages.iter().map(|m| format!("0x{:02X}", m.msg_type)).collect::<Vec<_>>()
+    );
+
+    assert!(
+        !has_full_data,
+        "Should NOT receive SubscriptionData (0xF2) when updating a single column \
+         on a table with properly detected PK. This indicates a regression."
+    );
+
+    // Verify the column mask in the 0xF7 message
+    if let Some((total_columns, mask)) = parse_partial_data_column_mask(&messages) {
+        assert_eq!(total_columns, 5, "Table should have 5 columns");
+
+        // Column 0 (id/PK) should ALWAYS be present
+        assert!(
+            is_column_present_in_mask(&mask, 0),
+            "PK column 0 (id) must always be present in partial data"
+        );
+
+        // Column 1 (name) was changed, should be present
+        assert!(
+            is_column_present_in_mask(&mask, 1),
+            "Changed column 1 (name) should be present in partial data"
+        );
+
+        // Columns 2, 3, 4 were NOT changed, should NOT be present
+        assert!(
+            !is_column_present_in_mask(&mask, 2),
+            "Unchanged column 2 (status) should NOT be present"
+        );
+        assert!(
+            !is_column_present_in_mask(&mask, 3),
+            "Unchanged column 3 (value) should NOT be present"
+        );
+        assert!(
+            !is_column_present_in_mask(&mask, 4),
+            "Unchanged column 4 (description) should NOT be present"
+        );
+    } else {
+        panic!("Failed to parse column mask from SubscriptionPartialData message");
+    }
+
+    client.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
+
+/// test_strict_partial_data_multiple_updates - Verify 0xF7 with multiple rows
+///
+/// Tests that 0xF7 is correctly sent when updating multiple rows with the same
+/// column changes. Each row should be included in the partial data with the
+/// correct column mask.
+///
+/// Related: Issue #3943
+#[tokio::test]
+async fn test_strict_partial_data_multiple_updates() {
+    let server = start_test_server().await;
+    let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
+
+    // Complete handshake
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Drop and create table
+    let table_name = "strict_pk_multi_update_test";
+    client
+        .send_query(&format!("DROP TABLE IF EXISTS {}", table_name))
+        .await
+        .expect("Failed to drop table");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read drop response");
+
+    // Create a table with 4 columns (updating 1 = 25% < 50% threshold)
+    client
+        .send_query(&format!(
+            "CREATE TABLE {} (
+                id INT PRIMARY KEY,
+                name VARCHAR,
+                status VARCHAR,
+                value INT
+            )",
+            table_name
+        ))
+        .await
+        .expect("Failed to create table");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    // Insert multiple rows
+    client
+        .send_query(&format!(
+            "INSERT INTO {} VALUES
+             (1, 'Alice', 'active', 100),
+             (2, 'Bob', 'active', 200),
+             (3, 'Charlie', 'active', 300)",
+            table_name
+        ))
+        .await
+        .expect("Failed to insert data");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Subscribe
+    let select_query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    let _ = client
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+
+    // Update status column for ALL rows (1 of 4 columns = 25%)
+    client
+        .send_query(&format!(
+            "UPDATE {} SET status = 'inactive'",
+            table_name
+        ))
+        .await
+        .expect("Failed to update data");
+
+    // Read for update notification
+    let data = client
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after update");
+    let messages = parse_backend_messages(&data);
+
+    // STRICT ASSERTION: Expect 0xF7 for bulk single-column update
+    let has_partial_data = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full_data = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    assert!(
+        has_partial_data,
+        "Expected SubscriptionPartialData (0xF7) for bulk single-column update. \
+         Messages: {:?}",
+        messages.iter().map(|m| format!("0x{:02X}", m.msg_type)).collect::<Vec<_>>()
+    );
+
+    assert!(
+        !has_full_data,
+        "Should NOT receive SubscriptionData (0xF2) for bulk single-column update."
+    );
+
+    // Verify column mask structure
+    if let Some((total_columns, mask)) = parse_partial_data_column_mask(&messages) {
+        assert_eq!(total_columns, 4, "Table should have 4 columns");
+
+        // Column 0 (id/PK) must be present
+        assert!(
+            is_column_present_in_mask(&mask, 0),
+            "PK column 0 (id) must be present"
+        );
+
+        // Column 2 (status) was changed
+        assert!(
+            is_column_present_in_mask(&mask, 2),
+            "Changed column 2 (status) should be present"
+        );
+
+        // Columns 1 and 3 were NOT changed
+        assert!(
+            !is_column_present_in_mask(&mask, 1),
+            "Unchanged column 1 (name) should NOT be present"
+        );
+        assert!(
+            !is_column_present_in_mask(&mask, 3),
+            "Unchanged column 3 (value) should NOT be present"
+        );
+    }
+
+    client.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
