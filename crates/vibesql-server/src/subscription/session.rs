@@ -39,6 +39,9 @@ pub struct SessionSubscription {
     pub last_result: Option<Vec<Row>>,
     /// Whether updates are currently paused for this subscription
     pub paused: bool,
+    /// Optional filter expression (SQL WHERE clause) for filtering updates.
+    /// If present, only rows matching the filter are sent to the client.
+    pub filter: Option<String>,
 }
 
 /// Manages subscriptions for a single connection/session
@@ -82,6 +85,13 @@ impl SessionSubscriptionManager {
     ///
     /// Returns the generated subscription ID on success, or an error if limits are exceeded.
     ///
+    /// # Arguments
+    ///
+    /// * `query` - The SQL SELECT query to subscribe to
+    /// * `params` - Parameter values for parameterized queries
+    /// * `table_dependencies` - Tables that this subscription depends on
+    /// * `filter` - Optional filter expression (SQL WHERE clause) to apply to updates
+    ///
     /// # Errors
     ///
     /// - `ConnectionLimitExceeded` if this connection has too many subscriptions
@@ -91,6 +101,7 @@ impl SessionSubscriptionManager {
         query: String,
         params: Vec<Option<Vec<u8>>>,
         table_dependencies: HashSet<String>,
+        filter: Option<String>,
     ) -> Result<SessionSubscriptionId, SubscriptionError> {
         // Check per-connection limit
         if self.subscriptions.len() >= self.config.max_per_connection {
@@ -114,6 +125,7 @@ impl SessionSubscriptionManager {
             last_result_hash: 0,
             last_result: None,
             paused: false,
+            filter,
         };
 
         // Update table -> subscription index (normalize to lowercase for case-insensitive matching)
@@ -320,6 +332,7 @@ mod tests {
                 "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
                 vec![],
                 deps,
+                None,
             )
             .unwrap();
 
@@ -356,12 +369,13 @@ mod tests {
         deps2.insert("users".to_string());
         deps2.insert("products".to_string());
 
-        let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1).unwrap();
+        let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1, None).unwrap();
         let id2 = manager
             .subscribe(
                 "SELECT * FROM users JOIN products ON users.id = products.seller_id".to_string(),
                 vec![],
                 deps2,
+                None,
             )
             .unwrap();
 
@@ -395,8 +409,8 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
-        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps).unwrap();
+        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone(), None).unwrap();
+        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps, None).unwrap();
 
         assert_eq!(manager.subscription_count(), 2);
 
@@ -431,14 +445,14 @@ mod tests {
         deps.insert("users".to_string());
 
         // First two subscriptions should succeed
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
+        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone(), None).unwrap();
         manager
-            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone())
+            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone(), None)
             .unwrap();
 
         // Third subscription should fail with limit exceeded
         let result =
-            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
+            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps, None);
         assert!(matches!(
             result,
             Err(SubscriptionError::ConnectionLimitExceeded { current: 2, max: 2 })
@@ -461,14 +475,14 @@ mod tests {
         deps.insert("users".to_string());
 
         // First two subscriptions should succeed (rate limit = 2/sec)
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone()).unwrap();
+        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone(), None).unwrap();
         manager
-            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone())
+            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone(), None)
             .unwrap();
 
         // Third subscription should be rate limited
         let result =
-            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
+            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps, None);
         assert!(matches!(result, Err(SubscriptionError::RateLimited { .. })));
     }
 
@@ -480,7 +494,7 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
 
         // Initially no result stored
         let sub = manager.get(&id).unwrap();
@@ -511,7 +525,7 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
 
         // Get mutable reference and modify
         let sub = manager.get_mut(&id).unwrap();
@@ -530,7 +544,7 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
 
         // Store initial result
         let initial_rows = vec![crate::Row {
@@ -567,7 +581,7 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
 
         // Initially not paused
         assert_eq!(manager.is_paused(&id), Some(false));
@@ -593,5 +607,26 @@ mod tests {
         assert!(!manager.pause(&fake_id));
         assert!(!manager.resume(&fake_id));
         assert_eq!(manager.is_paused(&fake_id), None);
+    }
+
+    #[test]
+    fn test_subscribe_with_filter() {
+        let mut manager = SessionSubscriptionManager::new();
+
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let filter = Some("status = 'active'".to_string());
+        let id = manager
+            .subscribe(
+                "SELECT * FROM users".to_string(),
+                vec![],
+                deps,
+                filter.clone(),
+            )
+            .unwrap();
+
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.filter, filter);
     }
 }

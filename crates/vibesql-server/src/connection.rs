@@ -2,15 +2,13 @@ use crate::auth::PasswordStore;
 use crate::config::Config;
 use crate::observability::ObservabilityProvider;
 use crate::protocol::{
-    BackendMessage, FieldDescription, FrontendMessage, PartialRowUpdate, SubscriptionUpdateType,
-    TransactionStatus,
+    BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta, create_partial_row_update, extract_table_refs, hash_rows,
-    SelectiveColumnConfig, SessionSubscriptionManager, SubscriptionId, SubscriptionManager,
-    SubscriptionUpdate,
+    compute_delta, extract_table_refs, filter::SubscriptionFilter, hash_rows, SubscriptionId,
+    SubscriptionManager, SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -384,9 +382,9 @@ impl ConnectionHandler {
                 Ok(ClientMessageResult::Continue)
             }
 
-            FrontendMessage::Subscribe { query, params } => {
-                debug!("Subscribe: {}", query);
-                self.handle_subscribe(&query, params).await?;
+            FrontendMessage::Subscribe { query, params, filter } => {
+                debug!("Subscribe: {} (filter: {:?})", query, filter);
+                self.handle_subscribe(&query, params, filter).await?;
                 Ok(ClientMessageResult::Continue)
             }
 
@@ -415,15 +413,17 @@ impl ConnectionHandler {
     /// check if any of our subscriptions are affected and send updates.
     /// This method supports delta updates to reduce network bandwidth when
     /// only a small portion of the result set has changed.
+    /// Supports optional filtering expressions to send only matching rows.
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
         // Collect subscriptions for THIS connection that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
-            .iter()
-            .flat_map(|table| {
-                self.subscription_manager
-                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
-            })
-            .collect();
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
+            affected_tables
+                .iter()
+                .flat_map(|table| {
+                    self.subscription_manager
+                        .get_affected_subscriptions_for_connection(table, &self.connection_id)
+                })
+                .collect();
 
         if subscriptions_to_update.is_empty() {
             return;
@@ -433,7 +433,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _, _, _)| seen.insert(*id))
+            .filter(|(id, _, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -443,13 +443,26 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result, filter) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
-                    Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert to our Row format for delta computation
-                        let new_rows: Vec<Row> =
-                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+                    Ok(ExecutionResult::Select { rows, columns }) => {
+                        // Build filter if present
+                        let filter_opt = filter.as_ref().and_then(|f| {
+                            let col_names: Vec<String> =
+                                columns.iter().map(|c| c.name.clone()).collect();
+                            SubscriptionFilter::new(f, &col_names).ok()
+                        });
+
+                        // Filter rows if filter is present, then convert to Row format
+                        let new_rows: Vec<Row> = if let Some(ref flt) = filter_opt {
+                            rows.iter()
+                                .filter(|row| flt.matches(&row.values))
+                                .map(|r| Row { values: r.values.clone() })
+                                .collect()
+                        } else {
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect()
+                        };
 
                         // Compute hash for change detection
                         let new_hash = hash_rows(&new_rows);
@@ -463,83 +476,52 @@ impl ConnectionHandler {
                             continue;
                         }
 
-                        // Determine update strategy: selective > delta > full
+                        // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // Try selective column updates first (for row updates with few changed columns)
-                            match self
-                                .try_send_selective_updates(&subscription_id, old_rows, &new_rows)
-                                .await
+                            // We have previous results - try to compute delta
+                            // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
+                            if let Some(delta) =
+                                compute_delta(SubscriptionId::default(), old_rows, &new_rows)
                             {
-                                Ok(true) => {
-                                    // Selective updates sent successfully
+                                // Send delta updates
+                                if let Err(e) =
+                                    self.send_delta_updates(&subscription_id, &delta).await
+                                {
+                                    warn!(
+                                        "Failed to send cross-connection delta update: {}",
+                                        e
+                                    );
+                                }
+
+                                // Log delta statistics
+                                if let SubscriptionUpdate::Delta {
+                                    ref inserts,
+                                    ref updates,
+                                    ref deletes,
+                                    ..
+                                } = delta
+                                {
                                     debug!(
-                                        "Cross-connection selective update sent for subscription {:?}",
+                                        "Cross-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
+                                        inserts.len(),
+                                        updates.len(),
+                                        deletes.len(),
                                         subscription_id
                                     );
                                 }
-                                Ok(false) => {
-                                    // Selective not applicable, try delta
-                                    if let Some(delta) =
-                                        compute_delta(SubscriptionId::default(), old_rows, &new_rows)
-                                    {
-                                        if let Err(e) =
-                                            self.send_delta_updates(&subscription_id, &delta).await
-                                        {
-                                            warn!(
-                                                "Failed to send cross-connection delta update: {}",
-                                                e
-                                            );
-                                        }
-
-                                        if let SubscriptionUpdate::Delta {
-                                            ref inserts,
-                                            ref updates,
-                                            ref deletes,
-                                            ..
-                                        } = delta
-                                        {
-                                            debug!(
-                                                "Cross-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
-                                                inserts.len(),
-                                                updates.len(),
-                                                deletes.len(),
-                                                subscription_id
-                                            );
-                                        }
-                                    } else {
-                                        // No delta computed - send full update
-                                        let wire_rows = Self::rows_to_wire_format(&new_rows);
-                                        if let Err(e) = self
-                                            .send_subscription_data(
-                                                &subscription_id,
-                                                SubscriptionUpdateType::Full,
-                                                wire_rows,
-                                            )
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to send cross-connection full update: {}",
-                                                e
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "Error trying selective updates, falling back to full: {}",
-                                        e
-                                    );
-                                    let wire_rows = Self::rows_to_wire_format(&new_rows);
-                                    if let Err(e) = self
-                                        .send_subscription_data(
-                                            &subscription_id,
-                                            SubscriptionUpdateType::Full,
-                                            wire_rows,
-                                        )
-                                        .await
-                                    {
-                                        warn!("Failed to send cross-connection full update: {}", e);
-                                    }
+                            } else {
+                                // No delta computed (shouldn't happen if hash changed)
+                                // Fall back to full update
+                                let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                if let Err(e) = self
+                                    .send_subscription_data(
+                                        &subscription_id,
+                                        SubscriptionUpdateType::Full,
+                                        wire_rows,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to send cross-connection full update: {}", e);
                                 }
                             }
                         } else {
@@ -652,103 +634,6 @@ impl ConnectionHandler {
             .collect()
     }
 
-    /// Try to send selective column updates for row changes
-    ///
-    /// This method attempts to identify rows that have been updated (same primary key,
-    /// different values) and sends only the changed columns using SubscriptionPartialData.
-    ///
-    /// Returns Ok(true) if selective updates were sent, Ok(false) if we should fall back
-    /// to full updates.
-    async fn try_send_selective_updates(
-        &mut self,
-        subscription_id: &[u8; 16],
-        old_rows: &[Row],
-        new_rows: &[Row],
-    ) -> Result<bool> {
-        // Skip if row counts differ significantly (likely not just updates)
-        if old_rows.len() != new_rows.len() {
-            return Ok(false);
-        }
-
-        // Skip for small result sets (not worth the overhead)
-        if new_rows.is_empty() {
-            return Ok(false);
-        }
-
-        // Skip if rows have no columns
-        let total_columns = new_rows.first().map(|r| r.values.len()).unwrap_or(0);
-        if total_columns < 2 {
-            // Need at least 2 columns for selective to be useful (PK + data)
-            return Ok(false);
-        }
-
-        // Default config: assume first column is PK
-        let config = SelectiveColumnConfig::default();
-
-        // Convert to wire format for comparison
-        let old_wire = Self::rows_to_wire_format(old_rows);
-        let new_wire = Self::rows_to_wire_format(new_rows);
-
-        // Build a map of old rows by their first column (PK) for matching
-        let mut old_by_pk: HashMap<Vec<u8>, &Vec<Option<Vec<u8>>>> = HashMap::new();
-        for row in &old_wire {
-            if let Some(Some(pk)) = row.first() {
-                old_by_pk.insert(pk.clone(), row);
-            }
-        }
-
-        // Try to create partial updates for each new row
-        let mut partial_updates = Vec::new();
-        let mut all_selective = true;
-
-        for new_row in &new_wire {
-            // Get the PK value from the new row
-            let pk = match new_row.first() {
-                Some(Some(pk)) => pk,
-                _ => {
-                    all_selective = false;
-                    break;
-                }
-            };
-
-            // Find matching old row
-            if let Some(old_row) = old_by_pk.get(pk) {
-                // Try to create a partial update
-                if let Some(partial) =
-                    create_partial_row_update(old_row, new_row, &config.pk_columns, &config)
-                {
-                    partial_updates.push(partial);
-                } else {
-                    // Row is identical or full update needed
-                    // Check if rows are identical (no update needed)
-                    if old_row != &new_row {
-                        // Rows differ but selective not beneficial
-                        all_selective = false;
-                        break;
-                    }
-                    // Rows are identical - no partial update needed for this row
-                }
-            } else {
-                // New row with no matching old row - can't use selective
-                all_selective = false;
-                break;
-            }
-        }
-
-        // Only send selective updates if all rows could be handled
-        if all_selective && !partial_updates.is_empty() {
-            debug!(
-                "Sending {} selective column updates for subscription {:?}",
-                partial_updates.len(),
-                subscription_id
-            );
-            self.send_subscription_partial_data(subscription_id, partial_updates).await?;
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
     /// Execute a SQL query
     async fn execute_query(&mut self, query: &str) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
@@ -836,7 +721,18 @@ impl ConnectionHandler {
     ///
     /// Parses the query, extracts table dependencies, executes the query,
     /// registers the subscription, and sends the initial data to the client.
-    async fn handle_subscribe(&mut self, query: &str, _params: Vec<Option<Vec<u8>>>) -> Result<()> {
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The SQL SELECT query to subscribe to
+    /// * `_params` - Parameter values for parameterized queries (unused for now)
+    /// * `filter` - Optional filter expression (SQL WHERE clause) to apply to updates
+    async fn handle_subscribe(
+        &mut self,
+        query: &str,
+        _params: Vec<Option<Vec<u8>>>,
+        filter: Option<String>,
+    ) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
         // Parse the query to extract table dependencies
@@ -849,6 +745,16 @@ impl ConnectionHandler {
                 return Ok(());
             }
         };
+
+        // Validate the filter expression if provided
+        if let Some(ref filter_str) = filter {
+            if let Err(e) = vibesql_parser::arena_parser::parse_expression_to_owned(filter_str) {
+                let error_id = [0u8; 16];
+                self.send_subscription_error(&error_id, &format!("Filter parse error: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        }
 
         // Extract table dependencies from the query
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
@@ -867,6 +773,7 @@ impl ConnectionHandler {
             self.connection_id.clone(),
             wire_subscription_id,
             table_dependencies.clone(),
+            filter.clone(),
         ) {
             // Send subscription error with a dummy subscription ID (subscription failed before registration)
             let error_id = [0u8; 16];
@@ -876,10 +783,22 @@ impl ConnectionHandler {
 
         // Execute the query to get initial data
         match session.execute(query).await {
-            Ok(ExecutionResult::Select { rows, .. }) => {
-                // Convert rows to our Row format for delta computation
-                let result_rows: Vec<Row> =
-                    rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+            Ok(ExecutionResult::Select { rows, columns }) => {
+                // Build filter if present
+                let filter_opt = filter.as_ref().and_then(|f| {
+                    let col_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+                    SubscriptionFilter::new(f, &col_names).ok()
+                });
+
+                // Filter rows if filter is present, then convert to Row format
+                let result_rows: Vec<Row> = if let Some(ref flt) = filter_opt {
+                    rows.iter()
+                        .filter(|row| flt.matches(&row.values))
+                        .map(|r| Row { values: r.values.clone() })
+                        .collect()
+                } else {
+                    rows.iter().map(|r| Row { values: r.values.clone() }).collect()
+                };
 
                 // Compute hash and store result for future delta computation
                 let result_hash = hash_rows(&result_rows);
@@ -890,7 +809,7 @@ impl ConnectionHandler {
                 );
 
                 // Convert rows to wire format
-                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
+                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = result_rows
                     .iter()
                     .map(|row| {
                         row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
@@ -931,6 +850,7 @@ impl ConnectionHandler {
     /// finds all subscriptions that depend on that table, re-executes their
     /// queries, and sends updated results to the client.
     /// Supports delta updates to reduce network bandwidth.
+    /// Supports optional filtering expressions to send only matching rows.
     async fn notify_affected_subscriptions(&mut self, mutation_query: &str) {
         // Parse the mutation query to extract affected tables
         let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {
@@ -946,13 +866,14 @@ impl ConnectionHandler {
         }
 
         // Collect subscriptions for THIS connection that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
-            .iter()
-            .flat_map(|table| {
-                self.subscription_manager
-                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
-            })
-            .collect();
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
+            affected_tables
+                .iter()
+                .flat_map(|table| {
+                    self.subscription_manager
+                        .get_affected_subscriptions_for_connection(table, &self.connection_id)
+                })
+                .collect();
 
         if subscriptions_to_update.is_empty() {
             return;
@@ -962,7 +883,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _, _, _)| seen.insert(*id))
+            .filter(|(id, _, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -972,13 +893,26 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result, filter) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
-                    Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert to our Row format for delta computation
-                        let new_rows: Vec<Row> =
-                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+                    Ok(ExecutionResult::Select { rows, columns }) => {
+                        // Build filter if present
+                        let filter_opt = filter.as_ref().and_then(|f| {
+                            let col_names: Vec<String> =
+                                columns.iter().map(|c| c.name.clone()).collect();
+                            SubscriptionFilter::new(f, &col_names).ok()
+                        });
+
+                        // Filter rows if filter is present, then convert to Row format
+                        let new_rows: Vec<Row> = if let Some(ref flt) = filter_opt {
+                            rows.iter()
+                                .filter(|row| flt.matches(&row.values))
+                                .map(|r| Row { values: r.values.clone() })
+                                .collect()
+                        } else {
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect()
+                        };
 
                         // Compute hash for change detection
                         let new_hash = hash_rows(&new_rows);
@@ -992,83 +926,48 @@ impl ConnectionHandler {
                             continue;
                         }
 
-                        // Determine update strategy: selective > delta > full
+                        // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // Try selective column updates first (for row updates with few changed columns)
-                            match self
-                                .try_send_selective_updates(&subscription_id, old_rows, &new_rows)
-                                .await
+                            // We have previous results - try to compute delta
+                            // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
+                            if let Some(delta) =
+                                compute_delta(SubscriptionId::default(), old_rows, &new_rows)
                             {
-                                Ok(true) => {
-                                    // Selective updates sent successfully
+                                // Send delta updates
+                                if let Err(e) =
+                                    self.send_delta_updates(&subscription_id, &delta).await
+                                {
+                                    warn!("Failed to send same-connection delta update: {}", e);
+                                }
+
+                                // Log delta statistics
+                                if let SubscriptionUpdate::Delta {
+                                    ref inserts,
+                                    ref updates,
+                                    ref deletes,
+                                    ..
+                                } = delta
+                                {
                                     debug!(
-                                        "Same-connection selective update sent for subscription {:?}",
+                                        "Same-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
+                                        inserts.len(),
+                                        updates.len(),
+                                        deletes.len(),
                                         subscription_id
                                     );
                                 }
-                                Ok(false) => {
-                                    // Selective not applicable, try delta
-                                    if let Some(delta) =
-                                        compute_delta(SubscriptionId::default(), old_rows, &new_rows)
-                                    {
-                                        if let Err(e) =
-                                            self.send_delta_updates(&subscription_id, &delta).await
-                                        {
-                                            warn!(
-                                                "Failed to send same-connection delta update: {}",
-                                                e
-                                            );
-                                        }
-
-                                        if let SubscriptionUpdate::Delta {
-                                            ref inserts,
-                                            ref updates,
-                                            ref deletes,
-                                            ..
-                                        } = delta
-                                        {
-                                            debug!(
-                                                "Same-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
-                                                inserts.len(),
-                                                updates.len(),
-                                                deletes.len(),
-                                                subscription_id
-                                            );
-                                        }
-                                    } else {
-                                        // No delta computed - send full update
-                                        let wire_rows = Self::rows_to_wire_format(&new_rows);
-                                        if let Err(e) = self
-                                            .send_subscription_data(
-                                                &subscription_id,
-                                                SubscriptionUpdateType::Full,
-                                                wire_rows,
-                                            )
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to send same-connection full update: {}",
-                                                e
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "Error trying selective updates, falling back to full: {}",
-                                        e
-                                    );
-                                    let wire_rows = Self::rows_to_wire_format(&new_rows);
-                                    if let Err(e) = self
-                                        .send_subscription_data(
-                                            &subscription_id,
-                                            SubscriptionUpdateType::Full,
-                                            wire_rows,
-                                        )
-                                        .await
-                                    {
-                                        warn!("Failed to send same-connection full update: {}", e);
-                                    }
+                            } else {
+                                // No delta computed - send full update
+                                let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                if let Err(e) = self
+                                    .send_subscription_data(
+                                        &subscription_id,
+                                        SubscriptionUpdateType::Full,
+                                        wire_rows,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to send same-connection full update: {}", e);
                                 }
                             }
                         } else {
@@ -1372,20 +1271,6 @@ impl ConnectionHandler {
             message: message.to_string(),
         }
         .encode(&mut self.write_buf);
-        self.flush_write_buffer().await
-    }
-
-    /// Send subscription partial data message (selective column updates)
-    ///
-    /// Used when only a subset of columns have changed in a row update,
-    /// reducing network bandwidth for wide tables.
-    async fn send_subscription_partial_data(
-        &mut self,
-        subscription_id: &[u8; 16],
-        rows: Vec<PartialRowUpdate>,
-    ) -> Result<()> {
-        BackendMessage::SubscriptionPartialData { subscription_id: *subscription_id, rows }
-            .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
 

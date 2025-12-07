@@ -235,7 +235,8 @@ pub enum FrontendMessage {
     SSLRequest,
 
     /// Subscribe message (0xF0) - subscribe to query
-    Subscribe { query: String, params: Vec<Option<Vec<u8>>> },
+    /// The optional filter is a SQL WHERE clause expression applied to subscription updates.
+    Subscribe { query: String, params: Vec<Option<Vec<u8>>>, filter: Option<String> },
 
     /// Unsubscribe message (0xF1) - cancel subscription
     Unsubscribe { subscription_id: [u8; 16] },
@@ -535,7 +536,30 @@ impl FrontendMessage {
                     }
                 }
 
-                Ok(Some(FrontendMessage::Subscribe { query, params }))
+                // Read optional filter expression (protocol extension)
+                // If there's data remaining, read the filter length
+                let filter = if buf.remaining() >= 2 {
+                    let filter_len = buf.get_i16();
+                    if filter_len > 0 {
+                        let filter_len = filter_len as usize;
+                        if buf.remaining() >= filter_len {
+                            let mut filter_bytes = vec![0u8; filter_len];
+                            buf.copy_to_slice(&mut filter_bytes);
+                            Some(
+                                String::from_utf8(filter_bytes)
+                                    .map_err(|_| ProtocolError::InvalidString)?,
+                            )
+                        } else {
+                            None // Not enough data for filter
+                        }
+                    } else {
+                        None // No filter (length = 0 or negative)
+                    }
+                } else {
+                    None // No filter field present (backward compatibility)
+                };
+
+                Ok(Some(FrontendMessage::Subscribe { query, params, filter }))
             }
 
             0xF1 => {
@@ -703,8 +727,8 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params })
-            if query == "SELECT * FROM users" && params.is_empty()
+            Some(FrontendMessage::Subscribe { query, params, filter })
+            if query == "SELECT * FROM users" && params.is_empty() && filter.is_none()
         ));
     }
 
@@ -724,8 +748,53 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params })
-            if query == "SELECT * FROM users WHERE id = $1" && params.len() == 1
+            Some(FrontendMessage::Subscribe { query, params, filter })
+            if query == "SELECT * FROM users WHERE id = $1" && params.len() == 1 && filter.is_none()
+        ));
+    }
+
+    #[test]
+    fn test_subscribe_with_filter() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF0); // Subscribe
+        let mut content = BytesMut::new();
+        content.put_slice(b"SELECT * FROM users\0");
+        content.put_i16(0); // No params
+        let filter_str = "status = 'active'";
+        content.put_i16(filter_str.len() as i16); // Filter length
+        content.put_slice(filter_str.as_bytes()); // Filter expression
+
+        buf.put_i32((4 + content.len()) as i32);
+        buf.extend(content);
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        match msg {
+            Some(FrontendMessage::Subscribe { query, params, filter }) => {
+                assert_eq!(query, "SELECT * FROM users");
+                assert!(params.is_empty());
+                assert_eq!(filter, Some("status = 'active'".to_string()));
+            }
+            _ => panic!("Expected Subscribe message"),
+        }
+    }
+
+    #[test]
+    fn test_subscribe_with_empty_filter() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xF0); // Subscribe
+        let mut content = BytesMut::new();
+        content.put_slice(b"SELECT * FROM users\0");
+        content.put_i16(0); // No params
+        content.put_i16(0); // Filter length = 0 (no filter)
+
+        buf.put_i32((4 + content.len()) as i32);
+        buf.extend(content);
+
+        let msg = FrontendMessage::decode(&mut buf).unwrap();
+        assert!(matches!(
+            msg,
+            Some(FrontendMessage::Subscribe { query, params, filter })
+            if query == "SELECT * FROM users" && params.is_empty() && filter.is_none()
         ));
     }
 

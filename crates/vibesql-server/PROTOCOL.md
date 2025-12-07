@@ -48,13 +48,13 @@ Subscribe to receive push notifications when query results change.
 
 **Byte-Level Format:**
 ```
-┌──────────┬──────────────┬─────────────────────┬─────────────┬────────────────────┐
-│  Type    │   Length     │   Query (C-string)  │ Param Count │   Parameters...    │
-│   1B     │   4B (BE)    │   variable + NUL    │   2B (BE)   │     variable       │
-└──────────┴──────────────┴─────────────────────┴─────────────┴────────────────────┘
-     ↓            ↓                  ↓                 ↓                ↓
-   0xF0     Total length      SQL query text      Number of       Each param:
-            after type        null-terminated      params          len (4B) + data
+┌──────────┬──────────────┬─────────────────────┬─────────────┬────────────────────┬─────────────┬────────────────────┐
+│  Type    │   Length     │   Query (C-string)  │ Param Count │   Parameters...    │Filter Length│ Filter (optional)  │
+│   1B     │   4B (BE)    │   variable + NUL    │   2B (BE)   │     variable       │   2B (BE)   │     variable       │
+└──────────┴──────────────┴─────────────────────┴─────────────┴────────────────────┴─────────────┴────────────────────┘
+     ↓            ↓                  ↓                 ↓                ↓                 ↓                ↓
+   0xF0     Total length      SQL query text      Number of       Each param:       Filter length    Filter expression
+            after type        null-terminated      params          len (4B) + data  (0 = no filter)  (SQL WHERE clause)
 ```
 
 **Field Details:**
@@ -66,6 +66,8 @@ Subscribe to receive push notifications when query results change.
 | 5-N | Query | C-string | SQL query, null-terminated |
 | N+1 | Param Count | `i16` BE | Number of query parameters |
 | ... | Parameters | Array | Parameter values (see below) |
+| ... | Filter Length | `i16` BE | Length of filter expression (0 = none, optional) |
+| ... | Filter | bytes | Filter expression (if length > 0) |
 
 **Parameter Encoding:**
 ```
@@ -77,7 +79,26 @@ Subscribe to receive push notifications when query results change.
 - If `Param Length` is `-1` (0xFFFFFFFF), the parameter is NULL
 - Otherwise, `Param Value` contains exactly `Param Length` bytes
 
-**Example 1** - Subscribe to `SELECT * FROM users` (no parameters):
+**Filter Expression:**
+
+The optional filter expression is a SQL WHERE clause body that is applied to subscription results before sending to the client. This allows clients to receive only rows that match their criteria, reducing network traffic and client-side processing.
+
+Supported filter syntax:
+- Comparison operators: `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`
+- Logical operators: `AND`, `OR`, `NOT`
+- NULL checks: `IS NULL`, `IS NOT NULL`
+- List membership: `IN (value1, value2, ...)`
+- Range checks: `BETWEEN low AND high`
+- Pattern matching: `LIKE 'pattern'` (supports `%` and `_` wildcards)
+
+Examples:
+- `status = 'active'`
+- `amount > 100 AND status = 'pending'`
+- `category IN ('electronics', 'books')`
+- `name LIKE 'A%'`
+- `deleted_at IS NULL`
+
+**Example 1** - Subscribe to `SELECT * FROM users` (no parameters, no filter):
 ```
 Byte:  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A
        ─────────────────────────────────────────────────────────────────────────────────
@@ -109,7 +130,22 @@ Breakdown:
   34 32                                  - Param 1 value: "42"
 ```
 
-**Response**: Server sends SubscriptionData (0xF2) with the initial query results, or SubscriptionError (0xF3) on failure.
+**Example 3** - Subscribe with filter expression `status = 'active'`:
+```
+Hex:   F0 00 00 00 2D 53 45 4C 45 43 54 20 2A 20 46 52 4F 4D 20 75 73 65 72 73
+       00 00 00 00 11 73 74 61 74 75 73 20 3D 20 27 61 63 74 69 76 65 27
+
+Breakdown:
+  F0                                     - Message type: Subscribe
+  00 00 00 2D                            - Length: 45 bytes
+  53 45 4C ... 73 00                     - "SELECT * FROM users\0"
+  00 00                                  - Parameter count: 0
+  00 11                                  - Filter length: 17 bytes
+  73 74 61 74 75 73 20 3D 20 27         - "status = '"
+  61 63 74 69 76 65 27                   - "active'"
+```
+
+**Response**: Server sends SubscriptionData (0xF2) with the initial query results (filtered if filter provided), or SubscriptionError (0xF3) on failure.
 
 ### Unsubscribe (0xF1) - Frontend Message
 
@@ -763,6 +799,7 @@ Subscription IDs are 16-byte UUIDs in big-endian byte order:
 | Error Type | Subscription ID | Example Message |
 |------------|-----------------|-----------------|
 | Parse error | Zeroed (`[0x00; 16]`) | "Parse error: unexpected token at position 7" |
+| Filter parse error | Zeroed (`[0x00; 16]`) | "Filter parse error: unexpected token" |
 | Table not found | Valid UUID | "Execution error: table 'users' does not exist" |
 | Permission denied | Valid UUID | "Execution error: permission denied for table 'users'" |
 | Non-SELECT query | Valid UUID | "Only SELECT queries can be subscribed to" |
@@ -839,6 +876,5 @@ To use subscriptions, a client must:
 ## Future Extensions
 
 Potential future enhancements:
-- Filtering expressions for deltas (client-side filters to reduce network traffic)
 - Delta compression (send only changed rows instead of full result set)
 - Subscription batching (combine multiple subscriptions into single updates)
