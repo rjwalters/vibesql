@@ -62,9 +62,7 @@ pub use error::{classify_error, classify_error_str, SubscriptionErrorKind};
 pub use manager::SubscriptionManager;
 pub use pk_detector::{detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionResult};
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
-pub use session::{
-    SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager, TablePkInfo,
-};
+pub use session::{SessionSubscription, SessionSubscriptionId, TablePkInfo};
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 // SubscriptionMetrics is defined inline in this module and exported directly
