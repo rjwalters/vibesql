@@ -16,8 +16,8 @@ use vibesql_storage::Database;
 
 use super::{
     classify_error_str, compute_delta_with_pk, extract_table_refs, hash_rows, PartialRowDelta,
-    Subscription, SubscriptionConfig, SubscriptionError, SubscriptionErrorKind, SubscriptionId,
-    SubscriptionUpdate,
+    SelectiveColumnConfig, Subscription, SubscriptionConfig, SubscriptionError,
+    SubscriptionErrorKind, SubscriptionId, SubscriptionUpdate,
 };
 
 // ============================================================================
@@ -623,14 +623,14 @@ impl SubscriptionManager {
     /// # Arguments
     ///
     /// * `id` - The subscription ID
-    /// * `config` - The new selective updates configuration
+    /// * `config` - The new selective updates configuration (Some to set, None to clear)
     pub fn update_selective_updates(
         &self,
         id: SubscriptionId,
         config: super::SelectiveColumnConfig,
     ) {
         if let Some(mut sub) = self.subscriptions.get_mut(&id) {
-            sub.selective_updates_override = Some(config);
+            sub.set_selective_updates_override(config);
         }
     }
 
@@ -660,6 +660,24 @@ impl SubscriptionManager {
                 sub.set_selective_updates_override(config);
             }
         }
+    }
+
+    /// Get the effective selective column config for a subscription by wire ID
+    ///
+    /// Returns the per-subscription override config if set, otherwise creates
+    /// a config using the server-level settings with subscription-specific pk_columns.
+    pub fn get_effective_selective_config_by_wire_id(
+        &self,
+        wire_id: &[u8; 16],
+        server_config: &SelectiveColumnConfig,
+    ) -> SelectiveColumnConfig {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(sub) = self.subscriptions.get(&id) {
+                return sub.get_effective_selective_config(server_config);
+            }
+        }
+        // Subscription not found, return server config with default pk_columns
+        server_config.with_pk_columns(vec![0])
     }
 
     /// Get the number of active subscriptions
