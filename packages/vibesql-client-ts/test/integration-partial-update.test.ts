@@ -23,7 +23,6 @@ import { MessageCodes, type SubscriptionPartialDataMessage } from '../src/protoc
 import { SubscriptionManager } from '../src/subscription/manager';
 import type { SubscriptionCallbacks } from '../src/types';
 import { ColumnDescription, QueryRow } from '../src/protocol/messages';
-import { bytes } from 'bytes';
 
 /**
  * Helper to create a 0xF7 SubscriptionPartialData message
