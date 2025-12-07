@@ -358,6 +358,7 @@ bench-tpcc-name = TPC-C
 bench-tpcc-title = TPC-C Online Transaction Processing Benchmark
 bench-tpcc-description = The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment with a mix of complex transactions including order entry, payment processing, order status queries, delivery processing, and stock level monitoring.
 bench-tpcc-ops-label = TPC-C transactions
+bench-tpcc-transactions-label = transactions executed
 bench-tpcc-note-intro = TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle concurrent transactions with complex business logic. This benchmark is critical for evaluating <strong>transactional workload performance</strong>.
 bench-tpcc-note-results = <strong>Note:</strong> Results show average transaction latency. Lower is better. TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
 
@@ -369,8 +370,8 @@ bench-tpcc-delivery = Delivery - Batch processing of pending orders
 bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
 
 # TPC-C Discussion
-bench-tpcc-disc-faster-title = 42x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS, a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
+bench-tpcc-disc-faster-title = 32x Faster Than SQLite
+bench-tpcc-disc-faster = VibeSQL achieves <strong>~77,000 transactions per second</strong> compared to SQLite's ~2,400 TPS, a 32x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
 bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
 bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
 bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution

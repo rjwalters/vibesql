@@ -942,7 +942,7 @@ function updateSpeedupSummary(
 /**
  * Current benchmark suite state
  */
-let currentSuite: BenchmarkSuite = 'tpch';
+let currentSuite: BenchmarkSuite = 'tpcc';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let currentChart: any = null;
 
@@ -1784,6 +1784,7 @@ function renderTPCCTable(data: TPCCResults): void {
       <th class="px-4 py-3">Workload</th>
       <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">VibeSQL (TPS)</th>
       <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">SQLite (TPS)</th>
+      <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">DuckDB (TPS)</th>
     `;
   }
 
@@ -1792,13 +1793,14 @@ function renderTPCCTable(data: TPCCResults): void {
   const grouped = groupTPCCBenchmarksByOperation(data.benchmarks);
 
   const sqliteSpeedup = { total: 0, count: 0 };
-  const duckdbSpeedup = { total: 0, count: 0 }; // TPC-C doesn't have DuckDB, but needed for API
+  const duckdbSpeedup = { total: 0, count: 0 };
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
     const sqlite = databases.get('sqlite');
+    const duckdb = databases.get('duckdb');
 
-    if (!vibesql && !sqlite) continue;
+    if (!vibesql && !sqlite && !duckdb) continue;
 
     const row = document.createElement('tr');
     row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
@@ -1818,8 +1820,11 @@ function renderTPCCTable(data: TPCCResults): void {
     // For TPS, higher is better - track which is the winner
     const vibesqlTps = vibesql?.stats.tps ?? 0;
     const sqliteTps = sqlite?.stats.tps ?? 0;
-    const vibesqlWins = vibesqlTps > sqliteTps && vibesqlTps > 0;
-    const sqliteWins = sqliteTps > vibesqlTps && sqliteTps > 0;
+    const duckdbTps = duckdb?.stats.tps ?? 0;
+    const maxTps = Math.max(vibesqlTps, sqliteTps, duckdbTps);
+    const vibesqlWins = vibesqlTps === maxTps && vibesqlTps > 0;
+    const sqliteWins = sqliteTps === maxTps && sqliteTps > 0 && !vibesqlWins;
+    const duckdbWins = duckdbTps === maxTps && duckdbTps > 0 && !vibesqlWins && !sqliteWins;
 
     // VibeSQL TPS
     const vibesqlCell = document.createElement('td');
@@ -1837,11 +1842,24 @@ function renderTPCCTable(data: TPCCResults): void {
     sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : t('bench-na');
     row.appendChild(sqliteCell);
 
-    // Track speedup for summary card (TPS = higher is better, so vibesql/sqlite)
+    // DuckDB TPS
+    const duckdbCell = document.createElement('td');
+    duckdbCell.className = duckdbWins
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+    duckdbCell.textContent = duckdb ? formatTPS(duckdb.stats.tps) : t('bench-na');
+    row.appendChild(duckdbCell);
+
+    // Track speedup for summary cards (TPS = higher is better, so vibesql/other)
     if (vibesql && sqlite && vibesql.stats.tps > 0 && sqlite.stats.tps > 0) {
       const speedup = vibesql.stats.tps / sqlite.stats.tps;
       sqliteSpeedup.total += speedup;
       sqliteSpeedup.count++;
+    }
+    if (vibesql && duckdb && vibesql.stats.tps > 0 && duckdb.stats.tps > 0) {
+      const speedup = vibesql.stats.tps / duckdb.stats.tps;
+      duckdbSpeedup.total += speedup;
+      duckdbSpeedup.count++;
     }
 
     tbody.appendChild(row);
@@ -1850,9 +1868,22 @@ function renderTPCCTable(data: TPCCResults): void {
   // Update summary cards
   updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
 
+  // For TPC-C, show total transactions executed by VibeSQL (in millions)
   const opsTestedEl = document.getElementById('ops-tested');
+  const opsLabelEl = document.getElementById('ops-tested-label');
   if (opsTestedEl) {
-    opsTestedEl.textContent = grouped.size.toString();
+    // Get VibeSQL's total transactions from the first operation
+    const firstOp = grouped.values().next().value;
+    const vibesqlData = firstOp?.get('vibesql');
+    if (vibesqlData && vibesqlData.stats.transactions) {
+      const millionTxns = (vibesqlData.stats.transactions / 1_000_000).toFixed(1);
+      opsTestedEl.textContent = `${millionTxns}M`;
+    } else {
+      opsTestedEl.textContent = grouped.size.toString();
+    }
+  }
+  if (opsLabelEl) {
+    opsLabelEl.textContent = t('bench-tpcc-transactions-label');
   }
 
   // Update last updated timestamp
@@ -1881,14 +1912,17 @@ function renderTPCCChart(data: TPCCResults): void {
   const labels: string[] = [];
   const vibesqlData: number[] = [];
   const sqliteData: number[] = [];
+  const duckdbData: number[] = [];
 
   for (const [operation, databases] of grouped.entries()) {
     const vibesql = databases.get('vibesql');
     const sqlite = databases.get('sqlite');
+    const duckdb = databases.get('duckdb');
 
     labels.push(operation.replace(/_/g, ' ').toUpperCase());
     vibesqlData.push(vibesql ? vibesql.stats.tps / 1000 : 0); // Convert to K TPS
     sqliteData.push(sqlite ? sqlite.stats.tps / 1000 : 0);
+    duckdbData.push(duckdb ? duckdb.stats.tps / 1000 : 0);
   }
 
   currentChart = new Chart(canvas, {
@@ -1898,6 +1932,7 @@ function renderTPCCChart(data: TPCCResults): void {
       datasets: [
         createDataset('vibesql', vibesqlData),
         createDataset('sqlite', sqliteData),
+        createDataset('duckdb', duckdbData),
       ],
     },
     options: {
