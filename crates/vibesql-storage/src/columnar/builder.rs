@@ -2,17 +2,27 @@
 //!
 //! This module provides the `ColumnBuilder` struct for efficiently building
 //! column data with pre-allocated capacity.
+//!
+//! ## String Interning
+//!
+//! For string columns, the builder uses a `StringInterner` to deduplicate
+//! low-cardinality string values. This provides significant memory savings
+//! and enables faster equality comparisons for enum-like columns.
 
 use std::sync::Arc;
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
 use super::data::ColumnData;
+use super::interner::StringInterner;
 use super::types::ColumnTypeClass;
 
 /// Builder for constructing column data with pre-allocated capacity
 ///
 /// The builder pre-allocates storage based on the expected column type,
 /// avoiding reallocation during row processing.
+///
+/// For string columns, uses string interning to deduplicate values when
+/// the number of distinct strings is below a threshold (default: 32).
 pub(crate) struct ColumnBuilder {
     type_class: ColumnTypeClass,
     int64_values: Vec<i64>,
@@ -24,6 +34,8 @@ pub(crate) struct ColumnBuilder {
     timestamp_values: Vec<Timestamp>,
     interval_values: Vec<Interval>,
     nulls: Vec<bool>,
+    /// String interner for deduplicating low-cardinality string columns
+    string_interner: StringInterner,
 }
 
 impl ColumnBuilder {
@@ -44,6 +56,7 @@ impl ColumnBuilder {
             timestamp_values: Vec::new(),
             interval_values: Vec::new(),
             nulls: Vec::with_capacity(capacity),
+            string_interner: StringInterner::default(),
         };
 
         // Pre-allocate the appropriate vector based on type
@@ -135,13 +148,17 @@ impl ColumnBuilder {
                 self.nulls.push(true);
             }
 
-            // String handling
+            // String handling - use interner for deduplication
             (ColumnTypeClass::String, SqlValue::Varchar(v)) => {
-                self.string_values.push(v.clone());
+                // Use intern_arc to potentially deduplicate the string
+                let interned = self.string_interner.intern_arc(v.clone());
+                self.string_values.push(interned);
                 self.nulls.push(false);
             }
             (ColumnTypeClass::String, SqlValue::Character(v)) => {
-                self.string_values.push(v.clone());
+                // Use intern_arc to potentially deduplicate the string
+                let interned = self.string_interner.intern_arc(v.clone());
+                self.string_values.push(interned);
                 self.nulls.push(false);
             }
             (ColumnTypeClass::String, SqlValue::Null) => {

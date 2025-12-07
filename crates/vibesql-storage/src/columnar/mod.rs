@@ -45,11 +45,13 @@
 
 mod builder;
 mod data;
+mod interner;
 mod table;
 mod types;
 
 // Public re-exports
 pub use data::ColumnData;
+pub use interner::{StringInterner, DEFAULT_CARDINALITY_THRESHOLD};
 pub use table::ColumnarTable;
 
 #[cfg(test)]
@@ -232,5 +234,140 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("has 1 columns, expected 2"));
+    }
+
+    #[test]
+    fn test_string_interning_low_cardinality() {
+        // Simulate TPC-H l_returnflag column (3 distinct values: A, N, R)
+        let rows: Vec<Row> = (0..1000)
+            .map(|i| {
+                let flag = match i % 3 {
+                    0 => "A",
+                    1 => "N",
+                    _ => "R",
+                };
+                Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(flag))])
+            })
+            .collect();
+
+        let column_names = vec!["l_returnflag".to_string()];
+        let columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
+
+        assert_eq!(columnar.row_count(), 1000);
+
+        // Verify string interning: get the underlying data and check Arc pointers
+        let col = columnar.get_column("l_returnflag").unwrap();
+        if let ColumnData::String { values, nulls: _ } = col {
+            // With interning, all "A" values should share the same Arc
+            let mut a_arcs: Vec<&std::sync::Arc<str>> = Vec::new();
+            let mut n_arcs: Vec<&std::sync::Arc<str>> = Vec::new();
+            let mut r_arcs: Vec<&std::sync::Arc<str>> = Vec::new();
+
+            for (i, arc) in values.iter().enumerate() {
+                match i % 3 {
+                    0 => a_arcs.push(arc),
+                    1 => n_arcs.push(arc),
+                    _ => r_arcs.push(arc),
+                }
+            }
+
+            // All "A" values should be pointer-equal (same Arc)
+            for i in 1..a_arcs.len() {
+                assert!(
+                    std::sync::Arc::ptr_eq(a_arcs[0], a_arcs[i]),
+                    "String interning failed: 'A' values at positions 0 and {} are different Arcs",
+                    i * 3
+                );
+            }
+
+            // All "N" values should be pointer-equal
+            for i in 1..n_arcs.len() {
+                assert!(
+                    std::sync::Arc::ptr_eq(n_arcs[0], n_arcs[i]),
+                    "String interning failed: 'N' values are different Arcs"
+                );
+            }
+
+            // All "R" values should be pointer-equal
+            for i in 1..r_arcs.len() {
+                assert!(
+                    std::sync::Arc::ptr_eq(r_arcs[0], r_arcs[i]),
+                    "String interning failed: 'R' values are different Arcs"
+                );
+            }
+
+            // Different values should have different Arcs
+            assert!(!std::sync::Arc::ptr_eq(a_arcs[0], n_arcs[0]));
+            assert!(!std::sync::Arc::ptr_eq(a_arcs[0], r_arcs[0]));
+            assert!(!std::sync::Arc::ptr_eq(n_arcs[0], r_arcs[0]));
+        } else {
+            panic!("Expected String column data");
+        }
+    }
+
+    #[test]
+    fn test_string_interning_values_preserved() {
+        // Test that interning preserves the actual string values
+        let rows = vec![
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("active"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("pending"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("active"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("completed"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("pending"))]),
+        ];
+
+        let column_names = vec!["status".to_string()];
+        let columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
+
+        // Verify values are correctly stored
+        let col = columnar.get_column("status").unwrap();
+        assert_eq!(col.get(0), SqlValue::Varchar(std::sync::Arc::from("active")));
+        assert_eq!(col.get(1), SqlValue::Varchar(std::sync::Arc::from("pending")));
+        assert_eq!(col.get(2), SqlValue::Varchar(std::sync::Arc::from("active")));
+        assert_eq!(col.get(3), SqlValue::Varchar(std::sync::Arc::from("completed")));
+        assert_eq!(col.get(4), SqlValue::Varchar(std::sync::Arc::from("pending")));
+
+        // Round trip should preserve values
+        let reconstructed = columnar.to_rows();
+        assert_eq!(reconstructed.len(), 5);
+
+        if let Some(SqlValue::Varchar(v)) = reconstructed[0].get(0) {
+            assert_eq!(v.as_ref(), "active");
+        } else {
+            panic!("Expected Varchar");
+        }
+    }
+
+    #[test]
+    fn test_string_interning_tpch_linestatus() {
+        // Simulate TPC-H l_linestatus column (2 distinct values: O, F)
+        let rows: Vec<Row> = (0..500)
+            .map(|i| {
+                let status = if i % 2 == 0 { "O" } else { "F" };
+                Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(status))])
+            })
+            .collect();
+
+        let column_names = vec!["l_linestatus".to_string()];
+        let columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
+
+        let col = columnar.get_column("l_linestatus").unwrap();
+        if let ColumnData::String { values, .. } = col {
+            // Count unique Arc pointers
+            let mut unique_arcs = std::collections::HashSet::new();
+            for arc in values.iter() {
+                unique_arcs.insert(std::sync::Arc::as_ptr(arc));
+            }
+
+            // With interning, there should be exactly 2 unique Arc pointers
+            assert_eq!(
+                unique_arcs.len(),
+                2,
+                "Expected 2 unique Arc pointers for 2 distinct values, got {}",
+                unique_arcs.len()
+            );
+        } else {
+            panic!("Expected String column data");
+        }
     }
 }
