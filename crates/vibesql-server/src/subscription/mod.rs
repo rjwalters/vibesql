@@ -45,6 +45,7 @@
 pub mod error;
 pub mod filter;
 mod manager;
+pub mod pk_detector;
 mod router;
 pub mod session;
 mod table_dependencies;
@@ -59,6 +60,7 @@ use tokio::sync::mpsc;
 
 pub use error::{classify_error, classify_error_str, SubscriptionErrorKind};
 pub use manager::SubscriptionManager;
+pub use pk_detector::{detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionResult};
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 pub use session::{SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager};
 pub use table_dependencies::extract_table_dependencies;
@@ -319,6 +321,10 @@ pub struct Subscription {
     /// Optional filter expression (SQL WHERE clause) to apply to updates
     /// Only rows matching the filter will be included in subscription updates
     pub filter: Option<String>,
+    /// Primary key column indices in the result set
+    /// Used for selective column updates to always include PK columns
+    /// Default: [0] (assumes first column is PK if not detected)
+    pub pk_columns: Vec<usize>,
 }
 
 impl Subscription {
@@ -354,6 +360,7 @@ impl Subscription {
             connection_id: None,
             wire_subscription_id: None,
             filter: None,
+            pk_columns: vec![0], // default: assume first column is PK
         }
     }
 
@@ -380,6 +387,7 @@ impl Subscription {
             connection_id: None,
             wire_subscription_id: None,
             filter: None,
+            pk_columns: vec![0], // default: assume first column is PK
         }
     }
 
@@ -395,6 +403,33 @@ impl Subscription {
         wire_subscription_id: [u8; 16],
         filter: Option<String>,
         config: &SubscriptionConfig,
+    ) -> Self {
+        Self::for_connection_with_pk(
+            query,
+            tables,
+            notify_tx,
+            connection_id,
+            wire_subscription_id,
+            filter,
+            config,
+            vec![0], // default: assume first column is PK
+        )
+    }
+
+    /// Create a new subscription for a specific connection with custom PK columns
+    ///
+    /// This associates the subscription with a connection ID for tracking
+    /// and cleanup when the connection closes. It also allows specifying
+    /// which columns are primary keys for selective column updates.
+    pub fn for_connection_with_pk(
+        query: String,
+        tables: HashSet<String>,
+        notify_tx: mpsc::Sender<SubscriptionUpdate>,
+        connection_id: String,
+        wire_subscription_id: [u8; 16],
+        filter: Option<String>,
+        config: &SubscriptionConfig,
+        pk_columns: Vec<usize>,
     ) -> Self {
         Self {
             id: SubscriptionId::new(),
@@ -412,7 +447,15 @@ impl Subscription {
             connection_id: Some(connection_id),
             wire_subscription_id: Some(wire_subscription_id),
             filter,
+            pk_columns,
         }
+    }
+
+    /// Set the primary key columns for this subscription
+    ///
+    /// Used after detection to update the subscription with actual PK columns.
+    pub fn set_pk_columns(&mut self, pk_columns: Vec<usize>) {
+        self.pk_columns = pk_columns;
     }
 }
 

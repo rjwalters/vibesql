@@ -553,6 +553,30 @@ impl SubscriptionManager {
         }
     }
 
+    /// Update the primary key columns for a subscription by wire ID
+    ///
+    /// This is called after PK detection to set the actual PK column indices
+    /// for selective column updates.
+    pub fn update_pk_columns_by_wire_id(&self, wire_id: &[u8; 16], pk_columns: Vec<usize>) {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                sub.pk_columns = pk_columns;
+            }
+        }
+    }
+
+    /// Get the primary key columns for a subscription by wire ID
+    ///
+    /// Returns the PK column indices, or default [0] if not found.
+    pub fn get_pk_columns_by_wire_id(&self, wire_id: &[u8; 16]) -> Vec<usize> {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(sub) = self.subscriptions.get(&id) {
+                return sub.pk_columns.clone();
+            }
+        }
+        vec![0] // default
+    }
+
     /// Get the number of active subscriptions
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()

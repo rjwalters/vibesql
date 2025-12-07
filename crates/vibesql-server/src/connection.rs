@@ -7,8 +7,8 @@ use crate::protocol::{
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta, extract_table_refs, filter::SubscriptionFilter, hash_rows, SubscriptionId,
-    SubscriptionManager, SubscriptionUpdate,
+    compute_delta, detect_pk_columns_from_stmt, extract_table_refs, filter::SubscriptionFilter,
+    hash_rows, SubscriptionId, SubscriptionManager, SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -759,6 +759,17 @@ impl ConnectionHandler {
         // Extract table dependencies from the query
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
 
+        // Detect primary key columns for selective updates
+        // This enables bandwidth-efficient delta updates by knowing which columns identify rows
+        let pk_detection = {
+            let db = session.shared_database().read().await;
+            detect_pk_columns_from_stmt(&parsed, &db)
+        };
+        debug!(
+            "PK detection for subscription query: {:?} (confident: {})",
+            pk_detection.pk_column_indices, pk_detection.confident
+        );
+
         // Generate a wire subscription ID (UUID) for the wire protocol
         let wire_subscription_id = *uuid::Uuid::new_v4().as_bytes();
 
@@ -780,6 +791,12 @@ impl ConnectionHandler {
             self.send_subscription_error(&error_id, &format!("{}", e)).await?;
             return Ok(());
         }
+
+        // Store detected PK columns in the subscription for selective updates
+        self.subscription_manager.update_pk_columns_by_wire_id(
+            &wire_subscription_id,
+            pk_detection.pk_column_indices.clone(),
+        );
 
         // Execute the query to get initial data
         match session.execute(query).await {
