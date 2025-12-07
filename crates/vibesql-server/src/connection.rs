@@ -7,8 +7,8 @@ use crate::protocol::{
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta, extract_table_refs, hash_rows, SubscriptionId, SubscriptionManager,
-    SubscriptionUpdate,
+    compute_delta, extract_table_refs, filter::SubscriptionFilter, hash_rows, SubscriptionId,
+    SubscriptionManager, SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -382,9 +382,9 @@ impl ConnectionHandler {
                 Ok(ClientMessageResult::Continue)
             }
 
-            FrontendMessage::Subscribe { query, params } => {
-                debug!("Subscribe: {}", query);
-                self.handle_subscribe(&query, params).await?;
+            FrontendMessage::Subscribe { query, params, filter } => {
+                debug!("Subscribe: {} (filter: {:?})", query, filter);
+                self.handle_subscribe(&query, params, filter).await?;
                 Ok(ClientMessageResult::Continue)
             }
 
@@ -413,15 +413,17 @@ impl ConnectionHandler {
     /// check if any of our subscriptions are affected and send updates.
     /// This method supports delta updates to reduce network bandwidth when
     /// only a small portion of the result set has changed.
+    /// Supports optional filtering expressions to send only matching rows.
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
         // Collect subscriptions for THIS connection that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
-            .iter()
-            .flat_map(|table| {
-                self.subscription_manager
-                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
-            })
-            .collect();
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
+            affected_tables
+                .iter()
+                .flat_map(|table| {
+                    self.subscription_manager
+                        .get_affected_subscriptions_for_connection(table, &self.connection_id)
+                })
+                .collect();
 
         if subscriptions_to_update.is_empty() {
             return;
@@ -431,7 +433,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _, _, _)| seen.insert(*id))
+            .filter(|(id, _, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -441,13 +443,26 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result, filter) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
-                    Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert to our Row format for delta computation
-                        let new_rows: Vec<Row> =
-                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+                    Ok(ExecutionResult::Select { rows, columns }) => {
+                        // Build filter if present
+                        let filter_opt = filter.as_ref().and_then(|f| {
+                            let col_names: Vec<String> =
+                                columns.iter().map(|c| c.name.clone()).collect();
+                            SubscriptionFilter::new(f, &col_names).ok()
+                        });
+
+                        // Filter rows if filter is present, then convert to Row format
+                        let new_rows: Vec<Row> = if let Some(ref flt) = filter_opt {
+                            rows.iter()
+                                .filter(|row| flt.matches(&row.values))
+                                .map(|r| Row { values: r.values.clone() })
+                                .collect()
+                        } else {
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect()
+                        };
 
                         // Compute hash for change detection
                         let new_hash = hash_rows(&new_rows);
@@ -706,7 +721,18 @@ impl ConnectionHandler {
     ///
     /// Parses the query, extracts table dependencies, executes the query,
     /// registers the subscription, and sends the initial data to the client.
-    async fn handle_subscribe(&mut self, query: &str, _params: Vec<Option<Vec<u8>>>) -> Result<()> {
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The SQL SELECT query to subscribe to
+    /// * `_params` - Parameter values for parameterized queries (unused for now)
+    /// * `filter` - Optional filter expression (SQL WHERE clause) to apply to updates
+    async fn handle_subscribe(
+        &mut self,
+        query: &str,
+        _params: Vec<Option<Vec<u8>>>,
+        filter: Option<String>,
+    ) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
         // Parse the query to extract table dependencies
@@ -719,6 +745,16 @@ impl ConnectionHandler {
                 return Ok(());
             }
         };
+
+        // Validate the filter expression if provided
+        if let Some(ref filter_str) = filter {
+            if let Err(e) = vibesql_parser::arena_parser::parse_expression_to_owned(filter_str) {
+                let error_id = [0u8; 16];
+                self.send_subscription_error(&error_id, &format!("Filter parse error: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        }
 
         // Extract table dependencies from the query
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
@@ -737,6 +773,7 @@ impl ConnectionHandler {
             self.connection_id.clone(),
             wire_subscription_id,
             table_dependencies.clone(),
+            filter.clone(),
         ) {
             // Send subscription error with a dummy subscription ID (subscription failed before registration)
             let error_id = [0u8; 16];
@@ -746,10 +783,22 @@ impl ConnectionHandler {
 
         // Execute the query to get initial data
         match session.execute(query).await {
-            Ok(ExecutionResult::Select { rows, .. }) => {
-                // Convert rows to our Row format for delta computation
-                let result_rows: Vec<Row> =
-                    rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+            Ok(ExecutionResult::Select { rows, columns }) => {
+                // Build filter if present
+                let filter_opt = filter.as_ref().and_then(|f| {
+                    let col_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+                    SubscriptionFilter::new(f, &col_names).ok()
+                });
+
+                // Filter rows if filter is present, then convert to Row format
+                let result_rows: Vec<Row> = if let Some(ref flt) = filter_opt {
+                    rows.iter()
+                        .filter(|row| flt.matches(&row.values))
+                        .map(|r| Row { values: r.values.clone() })
+                        .collect()
+                } else {
+                    rows.iter().map(|r| Row { values: r.values.clone() }).collect()
+                };
 
                 // Compute hash and store result for future delta computation
                 let result_hash = hash_rows(&result_rows);
@@ -760,7 +809,7 @@ impl ConnectionHandler {
                 );
 
                 // Convert rows to wire format
-                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
+                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = result_rows
                     .iter()
                     .map(|row| {
                         row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
@@ -801,6 +850,7 @@ impl ConnectionHandler {
     /// finds all subscriptions that depend on that table, re-executes their
     /// queries, and sends updated results to the client.
     /// Supports delta updates to reduce network bandwidth.
+    /// Supports optional filtering expressions to send only matching rows.
     async fn notify_affected_subscriptions(&mut self, mutation_query: &str) {
         // Parse the mutation query to extract affected tables
         let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {
@@ -816,13 +866,14 @@ impl ConnectionHandler {
         }
 
         // Collect subscriptions for THIS connection that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
-            .iter()
-            .flat_map(|table| {
-                self.subscription_manager
-                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
-            })
-            .collect();
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
+            affected_tables
+                .iter()
+                .flat_map(|table| {
+                    self.subscription_manager
+                        .get_affected_subscriptions_for_connection(table, &self.connection_id)
+                })
+                .collect();
 
         if subscriptions_to_update.is_empty() {
             return;
@@ -832,7 +883,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _, _, _)| seen.insert(*id))
+            .filter(|(id, _, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -842,13 +893,26 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result, filter) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
-                    Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert to our Row format for delta computation
-                        let new_rows: Vec<Row> =
-                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+                    Ok(ExecutionResult::Select { rows, columns }) => {
+                        // Build filter if present
+                        let filter_opt = filter.as_ref().and_then(|f| {
+                            let col_names: Vec<String> =
+                                columns.iter().map(|c| c.name.clone()).collect();
+                            SubscriptionFilter::new(f, &col_names).ok()
+                        });
+
+                        // Filter rows if filter is present, then convert to Row format
+                        let new_rows: Vec<Row> = if let Some(ref flt) = filter_opt {
+                            rows.iter()
+                                .filter(|row| flt.matches(&row.values))
+                                .map(|r| Row { values: r.values.clone() })
+                                .collect()
+                        } else {
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect()
+                        };
 
                         // Compute hash for change detection
                         let new_hash = hash_rows(&new_rows);

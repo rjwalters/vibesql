@@ -43,6 +43,7 @@
 //! ```
 
 pub mod error;
+pub mod filter;
 mod manager;
 mod router;
 pub mod session;
@@ -315,6 +316,9 @@ pub struct Subscription {
     /// Optional wire protocol subscription ID (UUID bytes)
     /// Used to bridge between wire protocol IDs and internal SubscriptionId
     pub wire_subscription_id: Option<[u8; 16]>,
+    /// Optional filter expression (SQL WHERE clause) to apply to updates
+    /// Only rows matching the filter will be included in subscription updates
+    pub filter: Option<String>,
 }
 
 impl Subscription {
@@ -349,6 +353,7 @@ impl Subscription {
             slow_consumer_threshold_percent: 80,
             connection_id: None,
             wire_subscription_id: None,
+            filter: None,
         }
     }
 
@@ -374,6 +379,7 @@ impl Subscription {
             slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
             connection_id: None,
             wire_subscription_id: None,
+            filter: None,
         }
     }
 
@@ -387,6 +393,7 @@ impl Subscription {
         notify_tx: mpsc::Sender<SubscriptionUpdate>,
         connection_id: String,
         wire_subscription_id: [u8; 16],
+        filter: Option<String>,
         config: &SubscriptionConfig,
     ) -> Self {
         Self {
@@ -404,6 +411,7 @@ impl Subscription {
             slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
             connection_id: Some(connection_id),
             wire_subscription_id: Some(wire_subscription_id),
+            filter,
         }
     }
 }

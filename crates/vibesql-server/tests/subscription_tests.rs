@@ -12,7 +12,7 @@ fn test_subscription_manager_basic_subscribe() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
     assert!(manager.get(&id).is_some());
@@ -41,6 +41,7 @@ fn test_subscription_manager_with_params() {
             "SELECT * FROM users WHERE id = $1 AND name = $2 AND deleted_at IS $3".to_string(),
             params.clone(),
             deps,
+            None,
         )
         .unwrap();
 
@@ -58,7 +59,7 @@ fn test_subscription_manager_unsubscribe() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
 
@@ -78,7 +79,7 @@ fn test_subscription_manager_table_index() {
     // Subscribe to users table
     let mut deps1 = HashSet::new();
     deps1.insert("users".to_string());
-    let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1).unwrap();
+    let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1, None).unwrap();
 
     // Subscribe to users and orders tables
     let mut deps2 = HashSet::new();
@@ -89,6 +90,7 @@ fn test_subscription_manager_table_index() {
             "SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string(),
             vec![],
             deps2,
+            None,
         )
         .unwrap();
 
@@ -118,12 +120,12 @@ fn test_subscription_manager_clear() {
     deps.insert("users".to_string());
 
     manager
-        .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone())
+        .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone(), None)
         .unwrap();
     manager
-        .subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps.clone())
+        .subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps.clone(), None)
         .unwrap();
-    manager.subscribe("SELECT * FROM users WHERE id = 3".to_string(), vec![], deps).unwrap();
+    manager.subscribe("SELECT * FROM users WHERE id = 3".to_string(), vec![], deps, None).unwrap();
 
     assert_eq!(manager.subscription_count(), 3);
 
@@ -153,7 +155,7 @@ fn test_subscription_manager_unique_ids() {
     let mut ids = Vec::new();
     for i in 0..100 {
         let id =
-            manager.subscribe(format!("SELECT {} FROM test", i), vec![], deps.clone()).unwrap();
+            manager.subscribe(format!("SELECT {} FROM test", i), vec![], deps.clone(), None).unwrap();
         ids.push(id);
     }
 
@@ -167,7 +169,7 @@ fn test_subscription_manager_empty_table_dependencies() {
     let mut manager = SessionSubscriptionManager::new();
 
     // Subscribe with no table dependencies (e.g., SELECT 1)
-    let id = manager.subscribe("SELECT 1".to_string(), vec![], HashSet::new()).unwrap();
+    let id = manager.subscribe("SELECT 1".to_string(), vec![], HashSet::new(), None).unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
 
@@ -186,9 +188,9 @@ fn test_subscription_manager_all_subscription_ids() {
 
     let deps = HashSet::new();
 
-    let id1 = manager.subscribe("SELECT 1".to_string(), vec![], deps.clone()).unwrap();
-    let id2 = manager.subscribe("SELECT 2".to_string(), vec![], deps.clone()).unwrap();
-    let id3 = manager.subscribe("SELECT 3".to_string(), vec![], deps).unwrap();
+    let id1 = manager.subscribe("SELECT 1".to_string(), vec![], deps.clone(), None).unwrap();
+    let id2 = manager.subscribe("SELECT 2".to_string(), vec![], deps.clone(), None).unwrap();
+    let id3 = manager.subscribe("SELECT 3".to_string(), vec![], deps, None).unwrap();
 
     let all_ids = manager.all_subscription_ids();
     assert_eq!(all_ids.len(), 3);

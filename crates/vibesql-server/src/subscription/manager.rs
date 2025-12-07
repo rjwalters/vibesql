@@ -226,6 +226,7 @@ impl SubscriptionManager {
         connection_id: String,
         wire_subscription_id: [u8; 16],
         table_dependencies: HashSet<String>,
+        filter: Option<String>,
     ) -> Result<SubscriptionId, SubscriptionError> {
         // Check per-connection limit first
         let conn_count = self
@@ -287,6 +288,7 @@ impl SubscriptionManager {
             notify_tx,
             connection_id.clone(),
             wire_subscription_id,
+            filter,
             &self.config,
         );
         let id = subscription.id;
@@ -491,13 +493,13 @@ impl SubscriptionManager {
     ///
     /// # Returns
     ///
-    /// Vector of (wire_subscription_id, query, last_result_hash, last_result) for
+    /// Vector of (wire_subscription_id, query, last_result_hash, last_result, filter) for
     /// each affected subscription that belongs to the specified connection.
     pub fn get_affected_subscriptions_for_connection(
         &self,
         table: &str,
         connection_id: &str,
-    ) -> Vec<([u8; 16], String, u64, Option<Vec<crate::Row>>)> {
+    ) -> Vec<([u8; 16], String, u64, Option<Vec<crate::Row>>, Option<String>)> {
         let table_lower = table.to_lowercase();
         let subscription_ids: Vec<SubscriptionId> = self
             .table_index
@@ -517,6 +519,7 @@ impl SubscriptionManager {
                                 sub.query.clone(),
                                 sub.last_result_hash,
                                 sub.last_result.clone(),
+                                sub.filter.clone(),
                             )
                         })
                     } else {
@@ -1685,6 +1688,7 @@ mod tests {
             connection_id.clone(),
             wire_id,
             tables,
+            None, // no filter
         );
 
         assert!(result.is_ok());
@@ -1724,6 +1728,7 @@ mod tests {
                 connection_id.clone(),
                 wire_id,
                 tables,
+                None,
             );
             assert!(result.is_ok(), "Subscription {} should succeed", i);
         }
@@ -1741,6 +1746,7 @@ mod tests {
             connection_id.clone(),
             wire_id,
             tables,
+            None,
         );
 
         assert!(result.is_err());
@@ -1769,6 +1775,7 @@ mod tests {
                 connection_id.clone(),
                 wire_id,
                 tables,
+                None,
             )
             .unwrap();
 
@@ -1805,6 +1812,7 @@ mod tests {
                     connection_id1.clone(),
                     wire_id,
                     tables,
+                    None,
                 )
                 .unwrap();
         }
@@ -1823,6 +1831,7 @@ mod tests {
                     connection_id2.clone(),
                     wire_id,
                     tables,
+                    None,
                 )
                 .unwrap();
         }
@@ -1859,6 +1868,7 @@ mod tests {
                 connection_id.clone(),
                 wire_id,
                 tables,
+                None,
             )
             .unwrap();
 
@@ -1885,6 +1895,7 @@ mod tests {
                 connection_id.clone(),
                 wire_id,
                 tables,
+                None,
             )
             .unwrap();
 
@@ -1915,6 +1926,7 @@ mod tests {
                 connection_id.clone(),
                 wire_id,
                 tables,
+                None,
             )
             .unwrap();
 
