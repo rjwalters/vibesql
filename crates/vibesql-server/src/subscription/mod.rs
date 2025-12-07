@@ -648,13 +648,135 @@ fn hash_row(row: &crate::Row) -> u64 {
 /// - Rows in old but not in new are deletes
 /// - Updates are not detected in this implementation (would appear as delete + insert)
 ///
-/// For proper update detection, primary key information would be needed.
+/// For proper update detection, use `compute_delta_with_pk()` with primary key information.
 ///
 /// # Returns
 ///
 /// Returns `Some(SubscriptionUpdate::Delta)` if there are changes,
 /// or `None` if the result sets are identical.
 pub fn compute_delta(
+    subscription_id: SubscriptionId,
+    old: &[crate::Row],
+    new: &[crate::Row],
+) -> Option<SubscriptionUpdate> {
+    // Delegate to PK-based implementation with empty pk_columns for backward compatibility
+    compute_delta_with_pk(subscription_id, old, new, &[])
+}
+
+/// Compute delta between old and new result sets using primary key columns
+///
+/// This function compares two result sets and produces a delta update
+/// containing the inserts, updates, and deletes needed to transform
+/// the old result into the new result.
+///
+/// # Algorithm
+///
+/// When `pk_columns` is provided and non-empty:
+/// - Builds a lookup map of old rows indexed by their PK values
+/// - For each new row, looks up by PK to determine if it's an INSERT or UPDATE
+/// - Rows in old but not in new (by PK) are DELETEs
+/// - Rows with same PK but different content are UPDATEs
+///
+/// When `pk_columns` is empty, falls back to hash-based matching:
+/// - Rows in new but not in old are inserts
+/// - Rows in old but not in new are deletes
+/// - Updates appear as delete + insert pairs
+///
+/// # Arguments
+///
+/// * `subscription_id` - The subscription ID for the delta update
+/// * `old` - Previous result set rows
+/// * `new` - Current result set rows
+/// * `pk_columns` - Indices of primary key columns in the result set
+///
+/// # Returns
+///
+/// Returns `Some(SubscriptionUpdate::Delta)` if there are changes,
+/// or `None` if the result sets are identical.
+pub fn compute_delta_with_pk(
+    subscription_id: SubscriptionId,
+    old: &[crate::Row],
+    new: &[crate::Row],
+    pk_columns: &[usize],
+) -> Option<SubscriptionUpdate> {
+    use std::collections::HashMap;
+
+    // If no PK columns provided, use hash-based matching
+    if pk_columns.is_empty() {
+        return compute_delta_hash_based(subscription_id, old, new);
+    }
+
+    // Validate PK columns are within bounds for both old and new rows
+    let valid_pk = old.iter().chain(new.iter()).all(|row| {
+        pk_columns.iter().all(|&idx| idx < row.values.len())
+    });
+
+    if !valid_pk {
+        // Fall back to hash-based if PK columns are out of bounds
+        return compute_delta_hash_based(subscription_id, old, new);
+    }
+
+    // Build a lookup map of old rows indexed by PK values
+    // Key: PK values as a vector, Value: list of (index, row) for handling duplicates
+    let mut old_by_pk: HashMap<Vec<&vibesql_types::SqlValue>, Vec<(usize, &crate::Row)>> =
+        HashMap::new();
+    for (idx, row) in old.iter().enumerate() {
+        let pk_values: Vec<&vibesql_types::SqlValue> =
+            pk_columns.iter().map(|&i| &row.values[i]).collect();
+        old_by_pk.entry(pk_values).or_default().push((idx, row));
+    }
+
+    let mut inserts = Vec::new();
+    let mut updates: Vec<(crate::Row, crate::Row)> = Vec::new();
+    let mut matched_old_indices = std::collections::HashSet::new();
+
+    // Process each new row
+    for new_row in new {
+        let pk_values: Vec<&vibesql_types::SqlValue> =
+            pk_columns.iter().map(|&i| &new_row.values[i]).collect();
+
+        if let Some(old_rows) = old_by_pk.get_mut(&pk_values) {
+            // Found matching PK in old - check if it's an update or unchanged
+            if let Some((old_idx, old_row)) = old_rows.pop() {
+                matched_old_indices.insert(old_idx);
+
+                // Compare full row content to detect changes
+                if old_row.values != new_row.values {
+                    // Content differs - this is an UPDATE
+                    updates.push((old_row.clone(), new_row.clone()));
+                }
+                // If content is identical, row is unchanged - no action needed
+            } else {
+                // No more old rows with this PK - treat as insert
+                // (handles case where new has more duplicates than old)
+                inserts.push(new_row.clone());
+            }
+        } else {
+            // No matching PK in old - this is an INSERT
+            inserts.push(new_row.clone());
+        }
+    }
+
+    // Find deletes: old rows that weren't matched
+    let deletes: Vec<crate::Row> = old
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !matched_old_indices.contains(idx))
+        .map(|(_, row)| row.clone())
+        .collect();
+
+    // If no changes, return None
+    if inserts.is_empty() && updates.is_empty() && deletes.is_empty() {
+        return None;
+    }
+
+    Some(SubscriptionUpdate::Delta { subscription_id, inserts, updates, deletes })
+}
+
+/// Hash-based delta computation (original algorithm)
+///
+/// This is the fallback when PK columns are not available.
+fn compute_delta_hash_based(
     subscription_id: SubscriptionId,
     old: &[crate::Row],
     new: &[crate::Row],
@@ -708,9 +830,8 @@ pub fn compute_delta(
         return None;
     }
 
-    // Updates are not detected in this implementation
+    // Updates are not detected in hash-based mode
     // A row update would appear as a delete of the old row + insert of the new row
-    // This is semantically correct, just not optimal for clients that could patch in place
     let updates = Vec::new();
 
     Some(SubscriptionUpdate::Delta { subscription_id, inserts, updates, deletes })
@@ -1173,6 +1294,277 @@ mod tests {
                 assert_eq!(inserts.len(), 1);
                 assert!(updates.is_empty());
                 assert!(deletes.is_empty());
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    // ========================================================================
+    // Tests for PK-based Delta Computation
+    // ========================================================================
+
+    #[test]
+    fn test_compute_delta_with_pk_detects_update() {
+        use vibesql_types::SqlValue;
+
+        // Same PK (1), different name value - should be detected as UPDATE
+        let old = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let new = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+        }];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![0]; // First column is PK
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                // With PK matching, this should be an UPDATE, not insert+delete
+                assert!(inserts.is_empty());
+                assert_eq!(updates.len(), 1);
+                assert!(deletes.is_empty());
+
+                // Verify the update contains old and new row
+                let (old_row, new_row) = &updates[0];
+                assert_eq!(old_row.values[0], SqlValue::Integer(1));
+                assert_eq!(old_row.values[1], SqlValue::Varchar("Alice".to_string()));
+                assert_eq!(new_row.values[0], SqlValue::Integer(1));
+                assert_eq!(new_row.values[1], SqlValue::Varchar("Bob".to_string()));
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_insert_and_delete() {
+        use vibesql_types::SqlValue;
+
+        // Different PKs - should be insert + delete
+        let old = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let new = vec![crate::Row {
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+        }];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![0];
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                assert_eq!(inserts.len(), 1);
+                assert!(updates.is_empty());
+                assert_eq!(deletes.len(), 1);
+                assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
+                assert_eq!(deletes[0].values[0], SqlValue::Integer(1));
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_no_changes() {
+        use vibesql_types::SqlValue;
+
+        let rows = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+        ];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![0];
+        let delta = compute_delta_with_pk(test_id, &rows, &rows, &pk_columns);
+        assert!(delta.is_none());
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_multiple_updates() {
+        use vibesql_types::SqlValue;
+
+        // Multiple rows with updates
+        let old = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+        ];
+
+        let new = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("ALICE".to_string())],
+            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("BOB".to_string())] },
+        ];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![0];
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                assert!(inserts.is_empty());
+                assert_eq!(updates.len(), 2);
+                assert!(deletes.is_empty());
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_composite_pk() {
+        use vibesql_types::SqlValue;
+
+        // Composite PK (order_id, user_id)
+        let old = vec![crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("pending".to_string()),
+            ],
+        }];
+
+        let new = vec![crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("shipped".to_string()),
+            ],
+        }];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![0, 1]; // Composite PK
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                assert!(inserts.is_empty());
+                assert_eq!(updates.len(), 1);
+                assert!(deletes.is_empty());
+
+                let (_, new_row) = &updates[0];
+                assert_eq!(new_row.values[2], SqlValue::Varchar("shipped".to_string()));
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_empty_fallback() {
+        use vibesql_types::SqlValue;
+
+        // With empty pk_columns, should fall back to hash-based and detect as insert+delete
+        let old = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let new = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+        }];
+
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta_with_pk(test_id, &old, &new, &[]);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                // Hash-based: different content = insert + delete, no update detection
+                assert_eq!(inserts.len(), 1);
+                assert!(updates.is_empty());
+                assert_eq!(deletes.len(), 1);
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_mixed_operations() {
+        use vibesql_types::SqlValue;
+
+        // Mix of insert, update, and delete
+        let old = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row {
+                values: vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+            },
+        ];
+
+        let new = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("ALICE".to_string())],
+            }, // Update
+            // Row 2 deleted
+            crate::Row {
+                values: vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+            }, // Unchanged
+            crate::Row {
+                values: vec![SqlValue::Integer(4), SqlValue::Varchar("Diana".to_string())],
+            }, // Insert
+        ];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![0];
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+        assert!(delta.is_some());
+
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                assert_eq!(inserts.len(), 1);
+                assert_eq!(updates.len(), 1);
+                assert_eq!(deletes.len(), 1);
+
+                // Verify insert
+                assert_eq!(inserts[0].values[0], SqlValue::Integer(4));
+
+                // Verify update
+                let (old_row, new_row) = &updates[0];
+                assert_eq!(old_row.values[1], SqlValue::Varchar("Alice".to_string()));
+                assert_eq!(new_row.values[1], SqlValue::Varchar("ALICE".to_string()));
+
+                // Verify delete
+                assert_eq!(deletes[0].values[0], SqlValue::Integer(2));
+            }
+            _ => panic!("Expected Delta update"),
+        }
+    }
+
+    #[test]
+    fn test_compute_delta_with_pk_out_of_bounds_fallback() {
+        use vibesql_types::SqlValue;
+
+        // PK column index out of bounds - should fall back to hash-based
+        let old = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+
+        let new = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+        }];
+
+        let test_id = SubscriptionId::new();
+        let pk_columns = vec![5]; // Out of bounds
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+        assert!(delta.is_some());
+
+        // Should fall back to hash-based matching
+        match delta.unwrap() {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
+                assert_eq!(inserts.len(), 1);
+                assert!(updates.is_empty());
+                assert_eq!(deletes.len(), 1);
             }
             _ => panic!("Expected Delta update"),
         }

@@ -7,8 +7,9 @@ use crate::protocol::{
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta, detect_pk_columns_from_stmt, extract_table_refs, filter::SubscriptionFilter,
-    hash_rows, SubscriptionId, SubscriptionManager, SubscriptionUpdate,
+    compute_delta_with_pk, detect_pk_columns_from_stmt, extract_table_refs,
+    filter::SubscriptionFilter, hash_rows, SubscriptionId, SubscriptionManager,
+    SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -478,11 +479,17 @@ impl ConnectionHandler {
 
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // We have previous results - try to compute delta
+                            // We have previous results - try to compute delta using PK columns
                             // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
-                            if let Some(delta) =
-                                compute_delta(SubscriptionId::default(), old_rows, &new_rows)
-                            {
+                            let pk_columns = self
+                                .subscription_manager
+                                .get_pk_columns_by_wire_id(&subscription_id);
+                            if let Some(delta) = compute_delta_with_pk(
+                                SubscriptionId::default(),
+                                old_rows,
+                                &new_rows,
+                                &pk_columns,
+                            ) {
                                 // Send delta updates
                                 if let Err(e) =
                                     self.send_delta_updates(&subscription_id, &delta).await
@@ -945,11 +952,17 @@ impl ConnectionHandler {
 
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // We have previous results - try to compute delta
+                            // We have previous results - try to compute delta using PK columns
                             // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
-                            if let Some(delta) =
-                                compute_delta(SubscriptionId::default(), old_rows, &new_rows)
-                            {
+                            let pk_columns = self
+                                .subscription_manager
+                                .get_pk_columns_by_wire_id(&subscription_id);
+                            if let Some(delta) = compute_delta_with_pk(
+                                SubscriptionId::default(),
+                                old_rows,
+                                &new_rows,
+                                &pk_columns,
+                            ) {
                                 // Send delta updates
                                 if let Err(e) =
                                     self.send_delta_updates(&subscription_id, &delta).await

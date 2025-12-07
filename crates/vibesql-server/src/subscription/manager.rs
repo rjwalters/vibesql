@@ -15,7 +15,7 @@ use vibesql_storage::change_events::RecvError;
 use vibesql_storage::Database;
 
 use super::{
-    classify_error_str, compute_delta, extract_table_refs, hash_rows, Subscription,
+    classify_error_str, compute_delta_with_pk, extract_table_refs, hash_rows, Subscription,
     SubscriptionConfig, SubscriptionError, SubscriptionErrorKind, SubscriptionId,
     SubscriptionUpdate,
 };
@@ -697,8 +697,13 @@ impl SubscriptionManager {
 
                         // Determine whether to send Delta or Full update
                         let update = if let Some(ref old_rows) = subscription.last_result {
-                            // We have previous results - compute delta
-                            if let Some(delta) = compute_delta(id, old_rows, &result_rows) {
+                            // We have previous results - compute delta using PK columns
+                            if let Some(delta) = compute_delta_with_pk(
+                                id,
+                                old_rows,
+                                &result_rows,
+                                &subscription.pk_columns,
+                            ) {
                                 // Log delta statistics
                                 if let SubscriptionUpdate::Delta {
                                     ref inserts,
