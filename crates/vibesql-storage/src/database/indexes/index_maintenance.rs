@@ -619,20 +619,27 @@ impl IndexManager {
                         }
                     }
                     IndexData::DiskBacked { btree, .. } => {
-                        // Acquire lock once and batch delete
+                        // Build all (key, row_id) pairs first for batch deletion
+                        let entries_to_delete: Vec<(Vec<SqlValue>, usize)> = rows_to_delete
+                            .iter()
+                            .map(|&(row_index, row)| {
+                                let key_values: Vec<SqlValue> = column_info
+                                    .iter()
+                                    .map(|&(col_idx, prefix_length)| {
+                                        let value = &row.values[col_idx];
+                                        let truncated = apply_prefix_truncation(value, prefix_length);
+                                        crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                                    })
+                                    .collect();
+                                (key_values, row_index)
+                            })
+                            .collect();
+
+                        // Use batch delete for better performance
+                        // This sorts keys internally and traverses leaves sequentially
                         match acquire_btree_lock(btree) {
                             Ok(mut guard) => {
-                                for &(row_index, row) in rows_to_delete {
-                                    let key_values: Vec<SqlValue> = column_info
-                                        .iter()
-                                        .map(|&(col_idx, prefix_length)| {
-                                            let value = &row.values[col_idx];
-                                            let truncated = apply_prefix_truncation(value, prefix_length);
-                                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
-                                        })
-                                        .collect();
-                                    let _ = guard.delete_specific(&key_values, row_index);
-                                }
+                                let _ = guard.delete_batch(&entries_to_delete);
                             }
                             Err(e) => {
                                 log::warn!("BTreeIndex lock acquisition failed in batch_update_indexes_for_delete: {}", e);
