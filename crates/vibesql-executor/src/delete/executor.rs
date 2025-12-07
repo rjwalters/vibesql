@@ -1,6 +1,7 @@
 //! DELETE statement execution
 
 use vibesql_ast::DeleteStmt;
+use vibesql_storage::statistics::CostEstimator;
 use vibesql_storage::Database;
 
 use super::integrity::check_no_child_references;
@@ -230,6 +231,31 @@ impl DeleteExecutor {
                 &evaluator,
                 &mut rows_and_indices_to_delete,
             )?;
+        }
+
+        // Estimate DML cost for query analysis and optimization decisions
+        if std::env::var("DML_COST_DEBUG").is_ok() && !rows_and_indices_to_delete.is_empty() {
+            if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
+                if let Some(table) = database.get_table(&stmt.table_name) {
+                    if let Some(table_stats) = table.get_statistics() {
+                        let cost_estimator = CostEstimator::default();
+                        let estimated_cost = cost_estimator.estimate_delete(
+                            rows_and_indices_to_delete.len(),
+                            table_stats,
+                            &index_info,
+                        );
+                        eprintln!(
+                            "DML_COST_DEBUG: DELETE {} rows from {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, deleted_ratio: {:.2})",
+                            rows_and_indices_to_delete.len(),
+                            stmt.table_name,
+                            estimated_cost,
+                            index_info.hash_index_count,
+                            index_info.btree_index_count,
+                            index_info.deleted_ratio
+                        );
+                    }
+                }
+            }
         }
 
         // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger context

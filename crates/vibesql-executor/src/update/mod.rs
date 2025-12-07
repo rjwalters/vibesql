@@ -29,6 +29,7 @@ use foreign_keys::ForeignKeyValidator;
 use row_selector::RowSelector;
 use value_updater::ValueUpdater;
 use vibesql_ast::{BinaryOperator, Expression, UpdateStmt};
+use vibesql_storage::statistics::CostEstimator;
 use vibesql_storage::Database;
 
 use crate::{
@@ -211,6 +212,41 @@ impl UpdateExecutor {
         // Step 4: Select rows to update using RowSelector
         let row_selector = RowSelector::new(schema, &evaluator);
         let candidate_rows = row_selector.select_rows(table, &stmt.where_clause)?;
+
+        // Estimate DML cost for query analysis and optimization decisions
+        if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {
+            if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
+                if let Some(table_stats) = table.get_statistics() {
+                    // Estimate the ratio of indexes affected based on columns being updated
+                    // This is a heuristic: assume columns are distributed evenly across indexes
+                    let total_columns = schema.columns.len();
+                    let changed_columns = stmt.assignments.len();
+                    let indexes_affected_ratio = if total_columns > 0 {
+                        (changed_columns as f64 / total_columns as f64).min(1.0)
+                    } else {
+                        1.0 // Conservative estimate if no columns
+                    };
+
+                    let cost_estimator = CostEstimator::default();
+                    let estimated_cost = cost_estimator.estimate_update(
+                        candidate_rows.len(),
+                        table_stats,
+                        &index_info,
+                        indexes_affected_ratio,
+                    );
+                    eprintln!(
+                        "DML_COST_DEBUG: UPDATE {} rows in {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {}, affected_ratio: {:.2})",
+                        candidate_rows.len(),
+                        stmt.table_name,
+                        estimated_cost,
+                        index_info.hash_index_count,
+                        index_info.btree_index_count,
+                        index_info.is_native_columnar,
+                        indexes_affected_ratio
+                    );
+                }
+            }
+        }
 
         // Step 5: Create value updater
         let value_updater = ValueUpdater::new(schema, &evaluator, &stmt.table_name);

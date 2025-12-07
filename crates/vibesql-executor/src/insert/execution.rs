@@ -1,4 +1,5 @@
 use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker};
+use vibesql_storage::statistics::CostEstimator;
 
 /// Execute an INSERT statement
 /// Returns number of rows inserted
@@ -95,6 +96,30 @@ fn execute_insert_internal(
 
     // Validate each row has correct number of values
     super::validation::validate_row_column_counts(&rows_to_insert, target_column_info.len())?;
+
+    // Estimate DML cost for query analysis and optimization decisions
+    // This helps with profiling and can inform future batch size decisions
+    if std::env::var("DML_COST_DEBUG").is_ok() {
+        if let Some(index_info) = db.get_table_index_info(&stmt.table_name) {
+            // Get table statistics for cost estimation (use cached if available)
+            if let Some(table) = db.get_table(&stmt.table_name) {
+                if let Some(table_stats) = table.get_statistics() {
+                    let cost_estimator = CostEstimator::default();
+                    let estimated_cost =
+                        cost_estimator.estimate_insert(rows_to_insert.len(), table_stats, &index_info);
+                    eprintln!(
+                        "DML_COST_DEBUG: INSERT {} rows into {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {})",
+                        rows_to_insert.len(),
+                        stmt.table_name,
+                        estimated_cost,
+                        index_info.hash_index_count,
+                        index_info.btree_index_count,
+                        index_info.is_native_columnar
+                    );
+                }
+            }
+        }
+    }
 
     // For multi-row INSERT, validate all rows first, then insert all
     // This ensures atomicity: all rows succeed or all fail
