@@ -533,10 +533,8 @@ impl Operations {
             self.index_manager.batch_update_indexes_for_delete(table_name, table_schema, rows_to_delete);
         }
 
-        // Update spatial indexes for each deleted row (batch optimization TODO)
-        for &(row_index, row) in rows_to_delete {
-            self.update_spatial_indexes_for_delete(catalog, table_name, row, row_index);
-        }
+        // Batch update spatial indexes
+        self.batch_update_spatial_indexes_for_delete(catalog, table_name, rows_to_delete);
     }
 
     /// Rebuild user-defined indexes after bulk operations that change row indices
@@ -1079,17 +1077,6 @@ impl Operations {
         }
     }
 
-    /// Update spatial indexes for delete operation
-    fn update_spatial_indexes_for_delete(
-        &mut self,
-        catalog: &vibesql_catalog::Catalog,
-        table_name: &str,
-        row: &Row,
-        row_index: usize,
-    ) {
-        self.update_spatial_indexes_for_delete_with_values(catalog, table_name, &row.values, row_index);
-    }
-
     fn update_spatial_indexes_for_delete_with_values(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -1119,6 +1106,52 @@ impl Operations {
             if let Some(mbr) = extract_mbr_from_sql_value(geom_value) {
                 if let Some((_, index)) = self.spatial_indexes.get_mut(&index_name) {
                     index.remove(row_index, &mbr);
+                }
+            }
+        }
+    }
+
+    /// Batch update spatial indexes for delete operation
+    ///
+    /// This is significantly more efficient than calling `update_spatial_indexes_for_delete` in a loop
+    /// because it pre-computes column indices once per index rather than once per row.
+    fn batch_update_spatial_indexes_for_delete(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        rows_to_delete: &[(usize, &Row)],
+    ) {
+        if rows_to_delete.is_empty() {
+            return;
+        }
+
+        let table_schema = match catalog.get_table(table_name) {
+            Some(schema) => schema,
+            None => return,
+        };
+
+        // Pre-compute which spatial indexes apply to this table and their column indices
+        let indexes_to_update: Vec<(String, usize)> = self
+            .spatial_indexes
+            .iter()
+            .filter(|(_, (metadata, _))| metadata.table_name == table_name)
+            .filter_map(|(index_name, (metadata, _))| {
+                table_schema
+                    .get_column_index(&metadata.column_name)
+                    .map(|col_idx| (index_name.clone(), col_idx))
+            })
+            .collect();
+
+        // Process each spatial index
+        for (index_name, col_idx) in indexes_to_update {
+            if let Some((_, index)) = self.spatial_indexes.get_mut(&index_name) {
+                // Batch remove entries for all rows
+                for &(row_index, row) in rows_to_delete {
+                    let geom_value = &row.values[col_idx];
+
+                    if let Some(mbr) = extract_mbr_from_sql_value(geom_value) {
+                        index.remove(row_index, &mbr);
+                    }
                 }
             }
         }
