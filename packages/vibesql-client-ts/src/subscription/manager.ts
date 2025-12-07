@@ -19,6 +19,7 @@ import {
   QueryRow,
   ColumnDescription,
 } from '../protocol/messages';
+import { parseColumnValue } from '../protocol/typeConversion';
 
 /**
  * Active subscription
@@ -340,10 +341,18 @@ export class SubscriptionManager {
           subscription.cachedRowValues.set(rowIndex, cachedValues);
         }
 
-        // Apply partial updates to cached values
+        // Apply partial updates to cached values with type conversion
         for (let i = 0; i < partialRow.presentColumns.length; i++) {
           const colIndex = partialRow.presentColumns[i];
-          cachedValues[colIndex] = partialRow.values[i];
+          const rawValue = partialRow.values[i];
+
+          // Convert value using column type OID (skip null values)
+          if (rawValue === null) {
+            cachedValues[colIndex] = null;
+          } else {
+            const column = subscription.columns[colIndex];
+            cachedValues[colIndex] = parseColumnValue(rawValue, column.dataTypeOid);
+          }
         }
 
         // Reconstruct full row object from cached values
