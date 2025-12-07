@@ -22,6 +22,7 @@ import {
   SubscriptionPartialDataMessage,
   PartialRow,
 } from './messages';
+import { parseColumnValue } from './typeConversion';
 
 /**
  * Message parser state machine
@@ -313,7 +314,7 @@ export class MessageParser {
           const value = data
             .slice(offset, offset + length)
             .toString('utf8');
-          row[columns[j].name] = this.parseColumnValue(
+          row[columns[j].name] = parseColumnValue(
             value,
             columns[j].dataTypeOid
           );
@@ -435,36 +436,4 @@ export class MessageParser {
     return data.slice(offset, end).toString('utf8');
   }
 
-  /**
-   * Parse column value based on data type OID
-   * Note: This is simplified. A production implementation would handle all PostgreSQL types
-   */
-  private parseColumnValue(value: string, typeOid: number): any {
-    // Common PostgreSQL type OIDs
-    const INT4_OID = 23;
-    const INT8_OID = 20;
-    const FLOAT8_OID = 701;
-    const BOOLEAN_OID = 16;
-    const TEXT_OID = 25;
-    const VARCHAR_OID = 1043;
-    const TIMESTAMP_OID = 1114;
-    const TIMESTAMPTZ_OID = 1184;
-
-    switch (typeOid) {
-      case INT4_OID:
-      case INT8_OID:
-        return parseInt(value, 10);
-      case FLOAT8_OID:
-        return parseFloat(value);
-      case BOOLEAN_OID:
-        return value === 't';
-      case TIMESTAMP_OID:
-      case TIMESTAMPTZ_OID:
-        return new Date(value);
-      case TEXT_OID:
-      case VARCHAR_OID:
-      default:
-        return value;
-    }
-  }
 }
