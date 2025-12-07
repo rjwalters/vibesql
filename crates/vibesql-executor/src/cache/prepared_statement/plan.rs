@@ -301,7 +301,7 @@ fn analyze_delete(stmt: &DeleteStmt) -> CachedPlan {
     };
 
     // Extract parameter-to-column mappings from WHERE clause
-    let param_mappings = match extract_pk_param_mappings(&where_clause) {
+    let param_mappings = match extract_pk_param_mappings(where_clause) {
         Some(mappings) if !mappings.is_empty() => mappings,
         _ => return CachedPlan::Standard,
     };

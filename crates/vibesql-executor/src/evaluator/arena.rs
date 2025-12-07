@@ -620,7 +620,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Null => Ok(SqlValue::Null),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 let remove_chars: &str = match removal_char {
-                    Some(SqlValue::Varchar(r)) | Some(SqlValue::Character(r)) => &**r,
+                    Some(SqlValue::Varchar(r)) | Some(SqlValue::Character(r)) => r,
                     Some(SqlValue::Null) => return Ok(SqlValue::Null),
                     None => " ",
                     _ => {

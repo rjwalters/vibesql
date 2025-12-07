@@ -29,6 +29,7 @@ use vibesql_storage::Row;
 
 /// A change made during a transaction that needs to be applied on commit.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum TransactionChange {
     /// A row was inserted
     Insert {

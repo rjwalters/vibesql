@@ -90,7 +90,7 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             } else {
                 // If parsing fails, fall back to string comparison
                 let date_str = date.to_string();
-                (&**s).cmp(date_str.as_str())
+                (**s).cmp(date_str.as_str())
             }
         }
 

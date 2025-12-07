@@ -435,6 +435,7 @@ impl ConnectionHandler {
     /// This method supports delta updates to reduce network bandwidth when
     /// only a small portion of the result set has changed.
     /// Supports optional filtering expressions to send only matching rows.
+    #[allow(clippy::type_complexity)]
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
         // Collect subscriptions for THIS connection that need updating
         let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
@@ -1231,6 +1232,7 @@ impl ConnectionHandler {
     /// queries, and sends updated results to the client.
     /// Supports delta updates to reduce network bandwidth.
     /// Supports optional filtering expressions to send only matching rows.
+    #[allow(clippy::type_complexity)]
     async fn notify_affected_subscriptions(&mut self, mutation_query: &str) {
         // Parse the mutation query to extract affected tables
         let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {

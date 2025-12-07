@@ -673,7 +673,7 @@ fn parse_partial_data_column_mask(messages: &[common::ParsedMessage]) -> Option<
             // Parse first row's column mask
             if msg.payload.len() >= 23 {
                 let total_columns = i16::from_be_bytes([msg.payload[21], msg.payload[22]]) as u16;
-                let mask_len = ((total_columns + 7) / 8) as usize;
+                let mask_len = total_columns.div_ceil(8) as usize;
 
                 if msg.payload.len() >= 23 + mask_len {
                     let column_mask = msg.payload[23..23 + mask_len].to_vec();
@@ -1817,7 +1817,7 @@ fn parse_partial_data_values(msg: &common::ParsedMessage) -> Option<(std::collec
     pos += 2;
 
     // Column mask
-    let mask_len = ((total_columns + 7) / 8) as usize;
+    let mask_len = total_columns.div_ceil(8) as usize;
     if pos + mask_len > msg.payload.len() {
         return None;
     }

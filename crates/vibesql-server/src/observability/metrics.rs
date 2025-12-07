@@ -357,7 +357,7 @@ impl ServerMetrics {
     ///
     /// # Arguments
     /// * `reason` - The reason for fallback: "threshold_exceeded", "disabled",
-    ///              "row_count_mismatch", "pk_mismatch", "no_changes"
+    ///   "row_count_mismatch", "pk_mismatch", "no_changes"
     pub fn record_partial_update_fallback(&self, reason: &str) {
         self.partial_update_fallbacks_total
             .add(1, &[KeyValue::new("reason", reason.to_string())]);
@@ -452,7 +452,7 @@ impl ServerMetrics {
     /// # Arguments
     /// * `result` - Detection result: "confident" or "not_confident"
     /// * `reason` - For not_confident results: "parse_error", "no_table", "no_pk",
-    ///              "pk_not_in_result", "join_query", "subquery", "set_operation"
+    ///   "pk_not_in_result", "join_query", "subquery", "set_operation"
     pub fn record_pk_detection(&self, result: &str, reason: Option<&str>) {
         let mut attributes = vec![KeyValue::new("result", result.to_string())];
         if let Some(r) = reason {

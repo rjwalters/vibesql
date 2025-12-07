@@ -15,7 +15,6 @@
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use smallvec::SmallVec;
 use std::hint::black_box;
-use std::sync::Arc;
 use vibesql_types::SqlValue;
 
 /// Typical column counts for different query patterns
@@ -33,7 +32,7 @@ fn make_value(i: usize) -> SqlValue {
     match i % 5 {
         0 => SqlValue::Integer(i as i64 * 1000),
         1 => SqlValue::Double(i as f64 * 2.5),
-        2 => SqlValue::Varchar(Arc::from(format!("value_{}", i))),
+        2 => SqlValue::Varchar(arcstr::ArcStr::from(format!("value_{}", i))),
         3 => SqlValue::Boolean(i.is_multiple_of(2)),
         4 => SqlValue::Null,
         _ => unreachable!(),

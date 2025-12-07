@@ -9,6 +9,7 @@ use crate::{Row, StorageError, Table};
 
 /// A single change made during a transaction
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum TransactionChange {
     Insert { table_name: String, row: Row },
     Update { table_name: String, old_row: Row, new_row: Row },

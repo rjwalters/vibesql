@@ -440,6 +440,7 @@ impl Subscription {
     /// This associates the subscription with a connection ID for tracking
     /// and cleanup when the connection closes. It also allows specifying
     /// which columns are primary keys for selective column updates.
+    #[allow(clippy::too_many_arguments)]
     pub fn for_connection_with_pk(
         query: String,
         tables: HashSet<String>,

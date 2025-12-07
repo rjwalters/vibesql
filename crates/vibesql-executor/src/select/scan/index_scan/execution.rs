@@ -272,7 +272,7 @@ pub(crate) fn execute_index_scan(
                     static PROFILE_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);
                     let count = PROFILE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if count % 1000 == 0 {
+                    if count.is_multiple_of(1000) {
                         eprintln!(
                             "[RangeScan Profile] rows={}, index={:?}, lookup={:?}, clone={:?}",
                             row_count, index_time, lookup_time, clone_time

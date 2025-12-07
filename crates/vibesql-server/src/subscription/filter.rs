@@ -374,6 +374,7 @@ impl SubscriptionFilter {
         self.like_match_recursive(&mut text_chars.clone(), &mut chars.clone())
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn like_match_recursive(
         &self,
         text: &mut std::iter::Peekable<std::str::Chars>,

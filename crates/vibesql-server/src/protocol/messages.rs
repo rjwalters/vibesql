@@ -83,7 +83,7 @@ impl PartialRowUpdate {
         debug_assert_eq!(present_columns.len(), values.len());
 
         // Create bitmap
-        let bitmap_bytes = (total_columns as usize + 7) / 8;
+        let bitmap_bytes = (total_columns as usize).div_ceil(8);
         let mut column_mask = vec![0u8; bitmap_bytes];
 
         for &col_idx in present_columns {
@@ -437,9 +437,9 @@ impl BackendMessage {
 BackendMessage::SubscriptionAck { subscription_id, table_count } => {
                 buf.put_u8(0xF4); // SubscriptionAck
 
-                let len = 4 + 16 + 2; // length + subscription_id + table_count
+                let len: i32 = 4 + 16 + 2; // length + subscription_id + table_count
 
-                buf.put_i32(len as i32);
+                buf.put_i32(len);
                 buf.put_slice(subscription_id);
                 buf.put_u16(*table_count);
             }
@@ -596,24 +596,18 @@ impl FrontendMessage {
                         };
 
                         // Read enabled flag if present
-                        if (config_flags & 0x01) != 0 {
-                            if buf.remaining() >= 1 {
-                                config.enabled = Some(buf.get_u8() != 0);
-                            }
+                        if (config_flags & 0x01) != 0 && buf.remaining() >= 1 {
+                            config.enabled = Some(buf.get_u8() != 0);
                         }
 
                         // Read min_changed_columns if present
-                        if (config_flags & 0x02) != 0 {
-                            if buf.remaining() >= 2 {
-                                config.min_changed_columns = Some(buf.get_u16() as usize);
-                            }
+                        if (config_flags & 0x02) != 0 && buf.remaining() >= 2 {
+                            config.min_changed_columns = Some(buf.get_u16() as usize);
                         }
 
                         // Read max_changed_columns_ratio if present
-                        if (config_flags & 0x04) != 0 {
-                            if buf.remaining() >= 8 {
-                                config.max_changed_columns_ratio = Some(buf.get_f64());
-                            }
+                        if (config_flags & 0x04) != 0 && buf.remaining() >= 8 {
+                            config.max_changed_columns_ratio = Some(buf.get_f64());
                         }
 
                         Some(config)

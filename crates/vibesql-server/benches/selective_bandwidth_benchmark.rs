@@ -116,7 +116,7 @@ fn compare_bandwidth(scenario: &BandwidthScenario, config: &SelectiveColumnConfi
     let modified_row = create_modified_row(&original_row, &scenario.columns_to_change, "_modified");
 
     // Measure full update size
-    let full_update_bytes = measure_full_update_size(&[modified_row.clone()], subscription_id);
+    let full_update_bytes = measure_full_update_size(std::slice::from_ref(&modified_row), subscription_id);
 
     // Try to create selective update
     let (selective_update_bytes, selective_used) =

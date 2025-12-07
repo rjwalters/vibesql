@@ -24,7 +24,7 @@ pub(in crate::evaluator::functions) fn replace(
             vibesql_types::SqlValue::Varchar(text) | vibesql_types::SqlValue::Character(text),
             vibesql_types::SqlValue::Varchar(from) | vibesql_types::SqlValue::Character(from),
             vibesql_types::SqlValue::Varchar(to) | vibesql_types::SqlValue::Character(to),
-        ) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(text.replace(&**from, &**to)))),
+        ) => Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(text.replace(&**from, to)))),
         (a, b, c) => Err(ExecutorError::UnsupportedFeature(format!(
             "REPLACE requires string arguments, got {:?}, {:?}, {:?}",
             a, b, c

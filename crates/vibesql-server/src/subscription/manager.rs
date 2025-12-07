@@ -470,6 +470,7 @@ impl SubscriptionManager {
     ///
     /// Vector of (wire_subscription_id, query, last_result_hash, last_result) for
     /// each affected subscription that has a wire ID.
+    #[allow(clippy::type_complexity)]
     pub fn get_affected_subscriptions_for_wire_protocol(
         &self,
         table: &str,
@@ -507,6 +508,7 @@ impl SubscriptionManager {
     ///
     /// Vector of (wire_subscription_id, query, last_result_hash, last_result, filter) for
     /// each affected subscription that belongs to the specified connection.
+    #[allow(clippy::type_complexity)]
     pub fn get_affected_subscriptions_for_connection(
         &self,
         table: &str,

@@ -73,7 +73,7 @@ impl StringInterner {
     ///
     /// # Arguments
     /// * `threshold` - Maximum distinct values before disabling interning.
-    ///                 Recommended: 32 for typical enum-like columns.
+    ///   Recommended: 32 for typical enum-like columns.
     pub fn new(threshold: usize) -> Self {
         Self {
             pool: HashSet::with_capacity(threshold.min(64)),
