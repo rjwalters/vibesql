@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
@@ -30,7 +31,10 @@ pub struct TableMutationNotification {
 
 /// Connection handler for a single client
 pub struct ConnectionHandler {
-    stream: TcpStream,
+    /// Read half of the TCP stream (split for async select! usage)
+    read_half: OwnedReadHalf,
+    /// Write half of the TCP stream (split for async select! usage)
+    write_half: OwnedWriteHalf,
     peer_addr: SocketAddr,
     config: Arc<Config>,
     observability: Arc<ObservabilityProvider>,
@@ -53,6 +57,14 @@ pub struct ConnectionHandler {
     mutation_broadcast_rx: broadcast::Receiver<TableMutationNotification>,
 }
 
+/// Result of handling a client message
+enum ClientMessageResult {
+    /// Continue processing messages
+    Continue,
+    /// Client requested termination
+    Terminate,
+}
+
 impl ConnectionHandler {
     /// Create a new connection handler
     #[allow(clippy::too_many_arguments)]
@@ -67,10 +79,15 @@ impl ConnectionHandler {
         global_subscription_manager: Arc<SubscriptionManager>,
         mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     ) -> Self {
+        // Split the TCP stream for async select! usage
+        // This allows us to wait on both client messages and broadcast notifications simultaneously
+        let (read_half, write_half) = stream.into_split();
+
         // Subscribe to the broadcast channel to receive notifications from other connections
         let mutation_broadcast_rx = mutation_broadcast_tx.subscribe();
         Self {
-            stream,
+            read_half,
+            write_half,
             peer_addr,
             config,
             observability,
@@ -112,8 +129,8 @@ impl ConnectionHandler {
             Some(FrontendMessage::SSLRequest) => {
                 debug!("Received SSL request");
                 // We don't support SSL yet, send 'N'
-                self.stream.write_u8(b'N').await?;
-                self.stream.flush().await?;
+                self.write_half.write_u8(b'N').await?;
+                self.write_half.flush().await?;
 
                 // Read actual startup message after SSL rejection
                 self.read_buf.clear();
@@ -279,80 +296,64 @@ impl ConnectionHandler {
     ///
     /// This enables cross-connection subscription notifications: when connection A
     /// mutates a table, connection B's subscriptions on that table are notified.
+    ///
+    /// Uses `tokio::select!` to wait on both sources simultaneously with near-zero
+    /// latency, avoiding the previous 100ms polling approach.
     async fn process_queries(&mut self) -> Result<()> {
         loop {
-            // First, drain any pending broadcast notifications without blocking
-            // This ensures we process notifications that arrived while handling previous messages
-            loop {
-                match self.mutation_broadcast_rx.try_recv() {
-                    Ok(notification) => {
-                        if self.subscription_manager.subscription_count() > 0 {
-                            self.handle_cross_connection_notification(&notification.affected_tables)
-                                .await;
-                        }
-                    }
-                    Err(broadcast::error::TryRecvError::Empty) => break,
-                    Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                        debug!("Missed {} broadcast notifications (lagged)", n);
-                    }
-                    Err(broadcast::error::TryRecvError::Closed) => {
-                        warn!("Mutation broadcast channel closed");
-                        break;
+            // First, process any complete messages already in the buffer
+            // This handles cases where multiple messages arrived in a single TCP read
+            while let Some(msg) = FrontendMessage::decode(&mut self.read_buf)? {
+                match self.handle_client_message(msg).await? {
+                    ClientMessageResult::Continue => {}
+                    ClientMessageResult::Terminate => {
+                        self.subscription_manager.clear();
+                        return Ok(());
                     }
                 }
             }
 
-            // Now wait for the next event: either a client message or a broadcast notification
-            // We use a short timeout on the client read to periodically check for broadcasts
-            let msg_result = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                self.read_complete_message(),
-            )
-            .await;
+            // No complete message in buffer - wait for either:
+            // 1. More data from the client TCP stream
+            // 2. Broadcast notifications from other connections
+            //
+            // Using select! provides near-zero latency for cross-connection notifications
+            // compared to the previous 100ms timeout polling approach.
+            tokio::select! {
+                biased;  // Prioritize broadcast notifications for lower latency
 
-            match msg_result {
-                Ok(Ok(msg)) => {
-                    // Process the client message
-                    match msg {
-                        FrontendMessage::Query { query } => {
-                            debug!("Query: {}", query);
-                            self.execute_query(&query).await?;
+                // Check for cross-connection mutation notifications
+                notification = self.mutation_broadcast_rx.recv() => {
+                    match notification {
+                        Ok(n) => {
+                            if self.subscription_manager.subscription_count() > 0 {
+                                self.handle_cross_connection_notification(&n.affected_tables).await;
+                            }
                         }
-
-                        FrontendMessage::Subscribe { query, params } => {
-                            debug!("Subscribe: {}", query);
-                            self.handle_subscribe(&query, params).await?;
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            debug!("Missed {} broadcast notifications (lagged)", n);
                         }
-
-                        FrontendMessage::Unsubscribe { subscription_id } => {
-                            debug!("Unsubscribe: {:?}", subscription_id);
-                            self.subscription_manager.unsubscribe(&subscription_id);
-                            // No response needed per protocol spec
+                        Err(broadcast::error::RecvError::Closed) => {
+                            warn!("Mutation broadcast channel closed");
                         }
+                    }
+                }
 
-                        FrontendMessage::Terminate => {
-                            debug!("Client requested termination");
+                // Read more data from the client
+                read_result = self.read_half.read_buf(&mut self.read_buf) => {
+                    match read_result {
+                        Ok(0) => {
+                            // Connection closed by client
+                            debug!("Connection closed by client");
                             break;
                         }
-
-                        msg => {
-                            warn!("Unexpected message: {:?}", msg);
+                        Ok(_) => {
+                            // Data received - loop back to decode and process messages
+                        }
+                        Err(e) => {
+                            return Err(e.into());
                         }
                     }
-                }
-                Ok(Err(e)) => {
-                    // Error reading from client
-                    let err_str = e.to_string();
-                    if err_str.contains("Connection closed") {
-                        debug!("Connection closed by client");
-                        break;
-                    }
-                    return Err(e);
-                }
-                Err(_elapsed) => {
-                    // Timeout - no client message, loop back to check for broadcasts
-                    // This is the normal case when client is idle
-                    continue;
                 }
             }
         }
@@ -361,6 +362,40 @@ impl ConnectionHandler {
         self.subscription_manager.clear();
 
         Ok(())
+    }
+
+    /// Handle a single client message
+    async fn handle_client_message(&mut self, msg: FrontendMessage) -> Result<ClientMessageResult> {
+        match msg {
+            FrontendMessage::Query { query } => {
+                debug!("Query: {}", query);
+                self.execute_query(&query).await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Subscribe { query, params } => {
+                debug!("Subscribe: {}", query);
+                self.handle_subscribe(&query, params).await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Unsubscribe { subscription_id } => {
+                debug!("Unsubscribe: {:?}", subscription_id);
+                self.subscription_manager.unsubscribe(&subscription_id);
+                // No response needed per protocol spec
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Terminate => {
+                debug!("Client requested termination");
+                Ok(ClientMessageResult::Terminate)
+            }
+
+            msg => {
+                warn!("Unexpected message: {:?}", msg);
+                Ok(ClientMessageResult::Continue)
+            }
+        }
     }
 
     /// Handle a cross-connection notification about table mutations
@@ -439,24 +474,6 @@ impl ConnectionHandler {
                     }
                 }
             }
-        }
-    }
-
-    /// Read a complete frontend message, looping until enough data is available
-    ///
-    /// This is critical for proper PostgreSQL wire protocol handling. TCP may deliver
-    /// messages in fragments, so we must continue reading until we have a complete
-    /// message. Previously, partial reads were incorrectly interpreted as connection
-    /// closure, causing connections to drop after ~150-190 queries.
-    async fn read_complete_message(&mut self) -> Result<FrontendMessage> {
-        loop {
-            // Try to decode a message from the existing buffer
-            if let Some(msg) = FrontendMessage::decode(&mut self.read_buf)? {
-                return Ok(msg);
-            }
-
-            // Need more data - read from the stream
-            self.read_message().await?;
         }
     }
 
@@ -979,7 +996,7 @@ impl ConnectionHandler {
     // I/O methods
 
     async fn read_message(&mut self) -> Result<()> {
-        let n = self.stream.read_buf(&mut self.read_buf).await?;
+        let n = self.read_half.read_buf(&mut self.read_buf).await?;
         if n == 0 {
             return Err(anyhow::anyhow!("Connection closed"));
         }
@@ -987,8 +1004,8 @@ impl ConnectionHandler {
     }
 
     async fn flush_write_buffer(&mut self) -> Result<()> {
-        self.stream.write_all(&self.write_buf).await?;
-        self.stream.flush().await?;
+        self.write_half.write_all(&self.write_buf).await?;
+        self.write_half.flush().await?;
         self.write_buf.clear();
         Ok(())
     }
