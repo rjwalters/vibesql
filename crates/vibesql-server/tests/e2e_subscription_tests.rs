@@ -1113,6 +1113,171 @@ async fn test_strict_partial_data_with_guaranteed_pk_detection() {
     server.shutdown();
 }
 
+/// test_cross_connection_selective_update_sends_0xf7 - Cross-connection 0xF7 notification
+///
+/// This test verifies that when client A makes a selective column UPDATE,
+/// client B (subscribed to the same query) receives a 0xF7 message via
+/// the cross-connection broadcast path.
+///
+/// Key differences from same-connection tests:
+/// - Same-connection: notifications use direct channel
+/// - Cross-connection: notifications use broadcast system with async polling
+///
+/// Related: Issue #3942
+#[tokio::test]
+async fn test_cross_connection_selective_update_sends_0xf7() {
+    let server = start_test_server().await;
+
+    // Connect two clients
+    let mut client1 = TestClient::connect(server.addr()).await.expect("Failed to connect client 1");
+    client1.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    let mut client2 = TestClient::connect(server.addr()).await.expect("Failed to connect client 2");
+    client2.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Create a test table with PRIMARY KEY (required for selective updates)
+    // Using 5 columns so updating 1 = 20%, well within the 50% threshold
+    let table_name = "cross_selective_update_test";
+    client1
+        .send_query(&format!("DROP TABLE IF EXISTS {}", table_name))
+        .await
+        .expect("Failed to drop table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read drop response");
+
+    client1
+        .send_query(&format!(
+            "CREATE TABLE {} (
+                id INT PRIMARY KEY,
+                name VARCHAR,
+                status VARCHAR,
+                value INT,
+                description VARCHAR
+            )",
+            table_name
+        ))
+        .await
+        .expect("Failed to create table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    // Insert initial data
+    client1
+        .send_query(&format!(
+            "INSERT INTO {} VALUES (1, 'Alice', 'active', 100, 'Test user')",
+            table_name
+        ))
+        .await
+        .expect("Failed to insert data");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Both clients subscribe to the same query
+    let query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client1, &query).await.expect("Failed to send subscribe from client1");
+    let _ = client1
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+
+    send_subscribe(&mut client2, &query).await.expect("Failed to send subscribe from client2");
+    let _ = client2
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+
+    // Client1 updates ONLY the 'name' column (1 of 5 columns = 20%, within 50% threshold)
+    client1
+        .send_query(&format!(
+            "UPDATE {} SET name = 'Alicia' WHERE id = 1",
+            table_name
+        ))
+        .await
+        .expect("Failed to update data");
+
+    // Client1: Read same-connection notification (direct channel)
+    let data1 = client1
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after update");
+    let messages1 = parse_backend_messages(&data1);
+
+    // Verify client1 received 0xF7 (same-connection path)
+    let has_partial1 = messages1.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full1 = messages1.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    assert!(
+        has_partial1,
+        "Client1 should receive 0xF7 for selective update. Messages: {:?}",
+        messages1.iter().map(|m| format!("0x{:02X}", m.msg_type)).collect::<Vec<_>>()
+    );
+    assert!(
+        !has_full1,
+        "Client1 should NOT receive 0xF2 for selective update"
+    );
+
+    // Client2: Read cross-connection notification (broadcast path)
+    // Use longer timeout for cross-connection which involves async polling
+    let data2 = client2
+        .read_until_message_type_timeout(
+            MSG_SUBSCRIPTION_PARTIAL_DATA,
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .expect("Client2 should receive 0xF7 via cross-connection broadcast");
+    let messages2 = parse_backend_messages(&data2);
+
+    // Verify client2 received 0xF7 (NOT 0xF2) via cross-connection
+    let has_partial2 = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full2 = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    assert!(
+        has_partial2,
+        "Client2 should receive 0xF7 via cross-connection broadcast. Messages: {:?}",
+        messages2.iter().map(|m| format!("0x{:02X}", m.msg_type)).collect::<Vec<_>>()
+    );
+    assert!(
+        !has_full2,
+        "Client2 should NOT receive 0xF2 when selective update is used"
+    );
+
+    // Verify the column mask in client2's 0xF7 message
+    if let Some((total_columns, mask)) = parse_partial_data_column_mask(&messages2) {
+        assert_eq!(total_columns, 5, "Table should have 5 columns");
+
+        // Column 0 (id/PK) should ALWAYS be present
+        assert!(
+            is_column_present_in_mask(&mask, 0),
+            "PK column 0 (id) must be present in cross-connection partial data"
+        );
+
+        // Column 1 (name) was changed, should be present
+        assert!(
+            is_column_present_in_mask(&mask, 1),
+            "Changed column 1 (name) should be present in cross-connection partial data"
+        );
+
+        // Columns 2, 3, 4 were NOT changed, should NOT be present
+        assert!(
+            !is_column_present_in_mask(&mask, 2),
+            "Unchanged column 2 (status) should NOT be present"
+        );
+        assert!(
+            !is_column_present_in_mask(&mask, 3),
+            "Unchanged column 3 (value) should NOT be present"
+        );
+        assert!(
+            !is_column_present_in_mask(&mask, 4),
+            "Unchanged column 4 (description) should NOT be present"
+        );
+    } else {
+        panic!("Failed to parse column mask from cross-connection SubscriptionPartialData message");
+    }
+
+    client1.send_terminate().await.expect("Failed to send terminate");
+    client2.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
+
 /// test_strict_partial_data_multiple_updates - Verify 0xF7 with multiple rows
 ///
 /// Tests that 0xF7 is correctly sent when updating multiple rows with the same
