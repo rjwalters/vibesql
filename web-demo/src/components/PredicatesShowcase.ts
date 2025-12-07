@@ -1,4 +1,5 @@
 import { PREDICATES, PREDICATE_EXAMPLES, type Predicate } from '../data/predicates'
+import { t, onI18nChange } from '../i18n'
 
 export class PredicatesShowcase {
   private root: HTMLElement
@@ -7,6 +8,9 @@ export class PredicatesShowcase {
     this.root = document.createElement('div')
     this.root.className = 'predicates-showcase'
     this.render()
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   private getStatusIcon(status: Predicate['status']): string {
@@ -14,7 +18,7 @@ export class PredicatesShowcase {
   }
 
   private getStatusLabel(status: Predicate['status']): string {
-    return status === 'implemented' ? 'Implemented' : 'Planned'
+    return status === 'implemented' ? t('status-implemented') : t('status-planned')
   }
 
   private getCategoryColor(category: Predicate['category']): string {
@@ -53,10 +57,10 @@ export class PredicatesShowcase {
         <!-- Header with Progress -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            Predicates and Operators
+            ${t('predicates-title')}
           </h2>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            SQL:1999 predicates for filtering and logical operations
+            ${t('predicates-description')}
           </p>
 
           <div class="flex items-center gap-3 mb-4">
@@ -73,7 +77,7 @@ export class PredicatesShowcase {
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              ${implementedPreds.length} of ${PREDICATES.length} predicates (${progressPercent}%)
+              ${t('showcase-progress', { implemented: implementedPreds.length, total: PREDICATES.length, type: t('predicates-progress-type'), percent: progressPercent })}
             </span>
           </div>
 
@@ -96,7 +100,7 @@ export class PredicatesShowcase {
         <!-- Predicates Reference Table -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Predicates Reference
+            ${t('predicates-reference')}
           </h3>
 
           <div class="overflow-x-auto">
@@ -104,19 +108,19 @@ export class PredicatesShowcase {
               <thead class="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Status
+                    ${t('showcase-table-status')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Category
+                    ${t('showcase-table-category')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Predicate
+                    ${t('predicates-table-predicate')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Description
+                    ${t('showcase-table-description')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Syntax
+                    ${t('showcase-table-syntax')}
                   </th>
                 </tr>
               </thead>
@@ -130,37 +134,37 @@ export class PredicatesShowcase {
         <!-- Interactive Examples -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Interactive Examples
+            ${t('showcase-interactive-examples')}
           </h3>
 
           <div class="space-y-6">
             ${this.renderExampleSection(
-              'Comparison Operators',
+              t('predicates-ex-comparison'),
               'comparison',
               PREDICATE_EXAMPLES.comparison
             )}
             ${this.renderExampleSection(
-              'BETWEEN and Range Predicates',
+              t('predicates-ex-between'),
               'between',
               PREDICATE_EXAMPLES.between
             )}
             ${this.renderExampleSection(
-              'NULL Predicates and Three-Valued Logic',
+              t('predicates-ex-null'),
               'nullPredicates',
               PREDICATE_EXAMPLES.nullPredicates
             )}
             ${this.renderExampleSection(
-              'Boolean Logic (AND, OR, NOT)',
+              t('predicates-ex-boolean'),
               'booleanLogic',
               PREDICATE_EXAMPLES.booleanLogic
             )}
             ${this.renderExampleSection(
-              'IN Predicate with Subqueries',
+              t('predicates-ex-in'),
               'inPredicate',
               PREDICATE_EXAMPLES.inPredicate
             )}
             ${this.renderExampleSection(
-              'Combined Predicate Operations',
+              t('predicates-ex-combined'),
               'combined',
               PREDICATE_EXAMPLES.combined
             )}
@@ -227,7 +231,7 @@ export class PredicatesShowcase {
             data-example-query="${query}"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Try This Example
+            ${t('showcase-try-example')}
           </button>
         </div>
         <pre class="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-x-auto"><code class="text-sm text-gray-800 dark:text-gray-200">${this.escapeHtml(query)}</code></pre>

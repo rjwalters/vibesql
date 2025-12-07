@@ -1,4 +1,5 @@
 import { SQL_DATA_TYPES, EXAMPLE_QUERIES, type DataType } from '../data/datatypes'
+import { t, onI18nChange } from '../i18n'
 
 export class DataTypesShowcase {
   private root: HTMLElement
@@ -7,6 +8,9 @@ export class DataTypesShowcase {
     this.root = document.createElement('div')
     this.root.className = 'data-types-showcase'
     this.render()
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   private getStatusIcon(status: DataType['status']): string {
@@ -14,7 +18,7 @@ export class DataTypesShowcase {
   }
 
   private getStatusLabel(status: DataType['status']): string {
-    return status === 'implemented' ? 'Implemented' : 'Planned'
+    return status === 'implemented' ? t('status-implemented') : t('status-planned')
   }
 
   private render(): void {
@@ -28,10 +32,10 @@ export class DataTypesShowcase {
         <!-- Header with Progress -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            Core SQL:1999 Data Types
+            ${t('datatypes-title')}
           </h2>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Explore the fundamental data types defined in the SQL:1999 Core specification
+            ${t('datatypes-description')}
           </p>
 
           <div class="flex items-center gap-3 mb-4">
@@ -48,7 +52,7 @@ export class DataTypesShowcase {
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              ${implementedTypes.length} of ${SQL_DATA_TYPES.length} types (${progressPercent}%)
+              ${t('showcase-progress', { implemented: implementedTypes.length, total: SQL_DATA_TYPES.length, type: t('datatypes-progress-type'), percent: progressPercent })}
             </span>
           </div>
         </div>
@@ -56,7 +60,7 @@ export class DataTypesShowcase {
         <!-- Data Types Table -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Data Type Reference
+            ${t('datatypes-reference')}
           </h3>
 
           <div class="overflow-x-auto">
@@ -64,19 +68,19 @@ export class DataTypesShowcase {
               <thead class="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Status
+                    ${t('showcase-table-status')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Type Name
+                    ${t('datatypes-table-type')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Description
+                    ${t('showcase-table-description')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Example Values
+                    ${t('datatypes-table-example')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Specification
+                    ${t('datatypes-table-spec')}
                   </th>
                 </tr>
               </thead>
@@ -90,22 +94,22 @@ export class DataTypesShowcase {
         <!-- Example Queries -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Interactive Examples
+            ${t('showcase-interactive-examples')}
           </h3>
 
           <div class="space-y-6">
             ${this.renderExampleSection(
-              'Working with Numeric Types',
+              t('datatypes-ex-numeric'),
               'numericTypes',
               EXAMPLE_QUERIES.numericTypes
             )}
             ${this.renderExampleSection(
-              'NULL Handling & Three-Valued Logic',
+              t('datatypes-ex-null'),
               'nullHandling',
               EXAMPLE_QUERIES.nullHandling
             )}
             ${this.renderExampleSection(
-              'Type Comparisons & Operations',
+              t('datatypes-ex-comparisons'),
               'typeComparisons',
               EXAMPLE_QUERIES.typeComparisons
             )}
@@ -170,7 +174,7 @@ export class DataTypesShowcase {
             data-example-query="${query}"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Try This Example
+            ${t('showcase-try-example')}
           </button>
         </div>
         <pre class="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-x-auto"><code class="text-sm text-gray-800 dark:text-gray-200">${this.escapeHtml(query)}</code></pre>

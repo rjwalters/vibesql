@@ -1,4 +1,5 @@
 import { DML_OPERATIONS, DML_EXAMPLES, type DMLOperation } from '../data/dml-operations'
+import { t, onI18nChange } from '../i18n'
 
 export class DMLOperationsShowcase {
   private root: HTMLElement
@@ -7,6 +8,9 @@ export class DMLOperationsShowcase {
     this.root = document.createElement('div')
     this.root.className = 'dml-operations-showcase'
     this.render()
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   private getStatusIcon(status: DMLOperation['status']): string {
@@ -23,11 +27,11 @@ export class DMLOperationsShowcase {
   private getStatusLabel(status: DMLOperation['status']): string {
     switch (status) {
       case 'implemented':
-        return 'Implemented'
+        return t('status-implemented')
       case 'partial':
-        return 'Partial'
+        return t('status-partial')
       case 'planned':
-        return 'Planned'
+        return t('status-planned')
     }
   }
 
@@ -63,10 +67,10 @@ export class DMLOperationsShowcase {
         <!-- Header with Progress -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            DML Operations (Data Manipulation Language)
+            ${t('dml-title')}
           </h2>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Core SQL:1999 operations for querying and modifying data
+            ${t('dml-description')}
           </p>
 
           <div class="flex items-center gap-3 mb-4">
@@ -83,7 +87,7 @@ export class DMLOperationsShowcase {
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              ${implementedOps.length} of ${DML_OPERATIONS.length} operations (${progressPercent}%)
+              ${t('showcase-progress', { implemented: implementedOps.length, total: DML_OPERATIONS.length, type: t('dml-progress-type'), percent: progressPercent })}
             </span>
           </div>
 
@@ -106,7 +110,7 @@ export class DMLOperationsShowcase {
         <!-- Operations Reference Table -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            DML Operations Reference
+            ${t('dml-reference')}
           </h3>
 
           <div class="overflow-x-auto">
@@ -114,19 +118,19 @@ export class DMLOperationsShowcase {
               <thead class="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Status
+                    ${t('showcase-table-status')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Category
+                    ${t('showcase-table-category')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Operation
+                    ${t('dml-table-operation')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Description
+                    ${t('showcase-table-description')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Syntax
+                    ${t('showcase-table-syntax')}
                   </th>
                 </tr>
               </thead>
@@ -140,37 +144,37 @@ export class DMLOperationsShowcase {
         <!-- Interactive Examples -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Interactive Examples
+            ${t('showcase-interactive-examples')}
           </h3>
 
           <div class="space-y-6">
             ${this.renderExampleSection(
-              'SELECT - Basic Queries',
+              t('dml-ex-select-basic'),
               'selectBasic',
               DML_EXAMPLES.selectBasic
             )}
             ${this.renderExampleSection(
-              'SELECT - Ordering and Limiting',
+              t('dml-ex-select-ordering'),
               'selectOrdering',
               DML_EXAMPLES.selectOrdering
             )}
             ${this.renderExampleSection(
-              'INSERT Operations',
+              t('dml-ex-insert'),
               'insertOperations',
               DML_EXAMPLES.insertOperations
             )}
             ${this.renderExampleSection(
-              'UPDATE Operations',
+              t('dml-ex-update'),
               'updateOperations',
               DML_EXAMPLES.updateOperations
             )}
             ${this.renderExampleSection(
-              'DELETE Operations',
+              t('dml-ex-delete'),
               'deleteOperations',
               DML_EXAMPLES.deleteOperations
             )}
             ${this.renderExampleSection(
-              'Combined CRUD Workflow',
+              t('dml-ex-combined'),
               'combined',
               DML_EXAMPLES.combined
             )}
@@ -239,7 +243,7 @@ export class DMLOperationsShowcase {
             data-example-query="${query}"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Try This Example
+            ${t('showcase-try-example')}
           </button>
         </div>
         <pre class="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-x-auto"><code class="text-sm text-gray-800 dark:text-gray-200">${this.escapeHtml(query)}</code></pre>

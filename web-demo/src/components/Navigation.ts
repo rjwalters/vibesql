@@ -3,6 +3,7 @@ import { Theme } from '../theme'
 import { ThemeToggleComponent } from './ThemeToggle'
 import { LocaleSelectorComponent } from './LocaleSelector'
 import type { Locale } from '../locale'
+import { t, onI18nChange } from '../i18n'
 
 export interface NavigationLink {
   id: string
@@ -27,6 +28,9 @@ export class NavigationComponent extends Component<NavigationState> {
     super('#nav-container', { currentPage })
     this.themeSystem = themeSystem || null
     this.localeSystem = localeSystem || null
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   protected render(): void {
@@ -35,32 +39,32 @@ export class NavigationComponent extends Component<NavigationState> {
     const links: NavigationLink[] = [
       {
         id: 'terminal',
-        label: 'SQL Terminal Demo',
+        label: t('nav-terminal'),
         href: './',
         icon: this.getTerminalIcon(),
       },
       {
         id: 'conformance',
-        label: 'SQL Test Compliance Report',
+        label: t('nav-compliance'),
         href: 'conformance.html',
         icon: this.getConformanceIcon(),
       },
       {
         id: 'benchmarks',
-        label: 'Performance Benchmarks',
+        label: t('nav-benchmarks'),
         href: 'benchmarks.html',
         icon: this.getBenchmarkIcon(),
       },
       {
         id: 'github',
-        label: 'GitHub Repository',
+        label: t('nav-github'),
         href: 'https://github.com/rjwalters/vibesql',
         icon: this.getGithubIcon(),
         external: true,
       },
       {
         id: 'home',
-        label: 'Home',
+        label: t('nav-home'),
         href: 'https://rjwalters.info',
         icon: this.getHomeIcon(),
         external: true,

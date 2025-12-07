@@ -1,4 +1,5 @@
 import { SUBQUERY_TYPES, SUBQUERY_EXAMPLES, type SubqueryType } from '../data/subqueries'
+import { t, onI18nChange } from '../i18n'
 
 export class SubqueriesShowcase {
   private root: HTMLElement
@@ -7,6 +8,9 @@ export class SubqueriesShowcase {
     this.root = document.createElement('div')
     this.root.className = 'subqueries-showcase'
     this.render()
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   private getStatusIcon(status: SubqueryType['status']): string {
@@ -14,7 +18,7 @@ export class SubqueriesShowcase {
   }
 
   private getStatusLabel(status: SubqueryType['status']): string {
-    return status === 'implemented' ? 'Implemented' : 'Planned'
+    return status === 'implemented' ? t('status-implemented') : t('status-planned')
   }
 
   private getCategoryColor(category: SubqueryType['category']): string {
@@ -53,10 +57,10 @@ export class SubqueriesShowcase {
         <!-- Header with Progress -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            SQL Subqueries
+            ${t('subqueries-title')}
           </h2>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Core SQL:1999 subquery capabilities for nested query operations
+            ${t('subqueries-description')}
           </p>
 
           <div class="flex items-center gap-3 mb-4">
@@ -73,7 +77,7 @@ export class SubqueriesShowcase {
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              ${implementedSubqueries.length} of ${SUBQUERY_TYPES.length} subquery types (${progressPercent}%)
+              ${t('showcase-progress', { implemented: implementedSubqueries.length, total: SUBQUERY_TYPES.length, type: t('subqueries-progress-type'), percent: progressPercent })}
             </span>
           </div>
 
@@ -96,7 +100,7 @@ export class SubqueriesShowcase {
         <!-- Subquery Types Reference Table -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Subquery Types Reference
+            ${t('subqueries-reference')}
           </h3>
 
           <div class="overflow-x-auto">
@@ -104,22 +108,22 @@ export class SubqueriesShowcase {
               <thead class="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Status
+                    ${t('showcase-table-status')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Category
+                    ${t('showcase-table-category')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Subquery Type
+                    ${t('subqueries-table-type')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Description
+                    ${t('showcase-table-description')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Use Case
+                    ${t('showcase-table-use-case')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Syntax
+                    ${t('showcase-table-syntax')}
                   </th>
                 </tr>
               </thead>
@@ -133,37 +137,37 @@ export class SubqueriesShowcase {
         <!-- Interactive Examples -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Interactive Examples
+            ${t('showcase-interactive-examples')}
           </h3>
 
           <div class="space-y-6">
             ${this.renderExampleSection(
-              'Scalar Subquery in SELECT',
+              t('subqueries-ex-scalar-select'),
               'scalarInSelect',
               SUBQUERY_EXAMPLES.scalarInSelect
             )}
             ${this.renderExampleSection(
-              'Scalar Subquery in WHERE',
+              t('subqueries-ex-scalar-where'),
               'scalarInWhere',
               SUBQUERY_EXAMPLES.scalarInWhere
             )}
             ${this.renderExampleSection(
-              'Derived Tables (Subquery in FROM)',
+              t('subqueries-ex-derived'),
               'derivedTable',
               SUBQUERY_EXAMPLES.derivedTable
             )}
             ${this.renderExampleSection(
-              'IN Predicate with Subquery',
+              t('subqueries-ex-in'),
               'inPredicate',
               SUBQUERY_EXAMPLES.inPredicate
             )}
             ${this.renderExampleSection(
-              'Correlated Subqueries',
+              t('subqueries-ex-correlated'),
               'correlated',
               SUBQUERY_EXAMPLES.correlated
             )}
             ${this.renderExampleSection(
-              'Nested Subqueries',
+              t('subqueries-ex-nested'),
               'nested',
               SUBQUERY_EXAMPLES.nested
             )}
@@ -233,7 +237,7 @@ export class SubqueriesShowcase {
             data-example-query="${this.escapeHtml(query)}"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Try This Example
+            ${t('showcase-try-example')}
           </button>
         </div>
         <pre class="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-x-auto"><code class="text-sm text-gray-800 dark:text-gray-200">${this.escapeHtml(query)}</code></pre>

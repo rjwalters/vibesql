@@ -1,5 +1,6 @@
 import { Component } from './base'
 import type { QueryResult, ExecuteResult } from '../db/types'
+import { t } from '../i18n'
 
 const MAX_DISPLAY_ROWS = 1000
 
@@ -167,7 +168,7 @@ export class ResultsComponent extends Component<ResultsState> {
   private renderEmpty(): string {
     return `
       <div class="text-gray-500 dark:text-gray-400 text-center p-8">
-        <p>Execute a query to see results</p>
+        <p>${t('results-empty')}</p>
       </div>
     `
   }
@@ -184,7 +185,7 @@ export class ResultsComponent extends Component<ResultsState> {
         </p>
         ${result.rows_affected > 0 ? `
           <p class="text-sm text-green-600 dark:text-green-400 mt-1">
-            ${result.rows_affected} row${result.rows_affected === 1 ? '' : 's'} affected
+            ${t('msg-rows-affected', { count: result.rows_affected })}
           </p>
         ` : ''}
       </div>
@@ -197,7 +198,7 @@ export class ResultsComponent extends Component<ResultsState> {
     if (rows.length === 0) {
       return `
         <div class="text-gray-600 dark:text-gray-400 p-4">
-          <p>Query executed successfully (0 rows)</p>
+          <p>${t('results-success-zero')}</p>
         </div>
       `
     }
@@ -221,22 +222,21 @@ export class ResultsComponent extends Component<ResultsState> {
       <div class="overflow-x-auto">
         <div class="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700">
           <div class="text-sm text-gray-600 dark:text-gray-400">
-            ${row_count} row${row_count === 1 ? '' : 's'}${executionTimeText}
+            ${t('results-rows', { count: row_count })}${executionTimeText}
           </div>
           <div class="flex gap-2">
             <button class="button secondary small" data-action="copy-results" type="button">
-              Copy to clipboard
+              ${t('results-copy')}
             </button>
             <button class="button secondary small" data-action="export-csv" type="button">
-              Export CSV
+              ${t('results-export')}
             </button>
           </div>
         </div>
         ${isLimited ? `
           <div class="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 dark:border-yellow-600 p-3 mx-4 mt-2">
             <p class="text-sm text-yellow-700 dark:text-yellow-300">
-              Showing first ${MAX_DISPLAY_ROWS.toLocaleString()} of ${row_count.toLocaleString()} rows.
-              Use LIMIT clause to refine your query.
+              ${t('results-limit-warning', { limit: MAX_DISPLAY_ROWS, total: row_count })}
             </p>
           </div>
         ` : ''}
@@ -260,7 +260,7 @@ export class ResultsComponent extends Component<ResultsState> {
 
   private formatCell(value: unknown): string {
     if (value === null) {
-      return '<span class="text-gray-400 italic">NULL</span>'
+      return `<span class="text-gray-400 italic">${t('results-null')}</span>`
     }
     return this.escapeHtml(String(value))
   }

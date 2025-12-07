@@ -1,4 +1,5 @@
 import { Component } from './base'
+import { t, onI18nChange } from '../i18n'
 
 interface EditorState {
   value: string
@@ -15,6 +16,13 @@ export class EditorComponent extends Component<EditorState> {
   constructor() {
     super('#editor', {
       value: '',
+    })
+
+    // Update placeholder when locale changes
+    onI18nChange(() => {
+      if (this.textarea) {
+        this.textarea.placeholder = t('editor-placeholder')
+      }
     })
   }
 
@@ -48,7 +56,7 @@ export class EditorComponent extends Component<EditorState> {
         <textarea
           id="sql-input"
           class="w-full h-[50vh] p-4 font-mono text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 resize-y focus:outline-none focus:ring-2 focus:ring-primary-light"
-          placeholder="Enter SQL query here... (Ctrl+Enter or Cmd+Enter to execute)"
+          placeholder="${this.escapeHtml(t('editor-placeholder'))}"
           aria-label="SQL Query Editor"
         >${this.escapeHtml(this.state.value)}</textarea>
       </div>

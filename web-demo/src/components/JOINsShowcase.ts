@@ -1,4 +1,5 @@
 import { JOIN_TYPES, JOIN_EXAMPLES, type JoinType } from '../data/joins'
+import { t, onI18nChange } from '../i18n'
 
 export class JOINsShowcase {
   private root: HTMLElement
@@ -7,6 +8,9 @@ export class JOINsShowcase {
     this.root = document.createElement('div')
     this.root.className = 'joins-showcase'
     this.render()
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   private getStatusIcon(status: JoinType['status']): string {
@@ -14,7 +18,7 @@ export class JOINsShowcase {
   }
 
   private getStatusLabel(status: JoinType['status']): string {
-    return status === 'implemented' ? 'Implemented' : 'Planned'
+    return status === 'implemented' ? t('status-implemented') : t('status-planned')
   }
 
   private getCategoryColor(category: JoinType['category']): string {
@@ -49,10 +53,10 @@ export class JOINsShowcase {
         <!-- Header with Progress -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            SQL JOINs
+            ${t('joins-title')}
           </h2>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Core SQL:1999 JOIN operations for combining data from multiple tables
+            ${t('joins-description')}
           </p>
 
           <div class="flex items-center gap-3 mb-4">
@@ -69,7 +73,7 @@ export class JOINsShowcase {
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              ${implementedJoins.length} of ${JOIN_TYPES.length} JOIN types (${progressPercent}%)
+              ${t('showcase-progress', { implemented: implementedJoins.length, total: JOIN_TYPES.length, type: t('joins-progress-type'), percent: progressPercent })}
             </span>
           </div>
 
@@ -80,7 +84,7 @@ export class JOINsShowcase {
                 const implemented = joins.filter(j => j.status === 'implemented').length
                 return `
                   <div class="text-center p-3 rounded-lg ${this.getCategoryColor(category as JoinType['category'])}">
-                    <div class="font-bold text-sm">${category} JOINs</div>
+                    <div class="font-bold text-sm">${category} ${t('joins-category-suffix')}</div>
                     <div class="text-xs">${implemented}/${joins.length}</div>
                   </div>
                 `
@@ -92,7 +96,7 @@ export class JOINsShowcase {
         <!-- JOIN Types Reference Table -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            JOIN Types Reference
+            ${t('joins-reference')}
           </h3>
 
           <div class="overflow-x-auto">
@@ -100,22 +104,22 @@ export class JOINsShowcase {
               <thead class="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Status
+                    ${t('showcase-table-status')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Category
+                    ${t('showcase-table-category')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    JOIN Type
+                    ${t('joins-table-type')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Description
+                    ${t('showcase-table-description')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Use Case
+                    ${t('showcase-table-use-case')}
                   </th>
                   <th class="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Syntax
+                    ${t('showcase-table-syntax')}
                   </th>
                 </tr>
               </thead>
@@ -129,21 +133,21 @@ export class JOINsShowcase {
         <!-- Interactive Examples -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
           <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Interactive Examples
+            ${t('showcase-interactive-examples')}
           </h3>
 
           <div class="space-y-6">
             ${this.renderExampleSection(
-              'Sample Data Setup',
+              t('joins-ex-sample'),
               'sampleData',
               JOIN_EXAMPLES.sampleData
             )}
-            ${this.renderExampleSection('INNER JOIN', 'innerJoin', JOIN_EXAMPLES.innerJoin)}
-            ${this.renderExampleSection('LEFT OUTER JOIN', 'leftJoin', JOIN_EXAMPLES.leftJoin)}
-            ${this.renderExampleSection('RIGHT OUTER JOIN', 'rightJoin', JOIN_EXAMPLES.rightJoin)}
-            ${this.renderExampleSection('FULL OUTER JOIN', 'fullJoin', JOIN_EXAMPLES.fullJoin)}
-            ${this.renderExampleSection('CROSS JOIN', 'crossJoin', JOIN_EXAMPLES.crossJoin)}
-            ${this.renderExampleSection('Multi-table JOIN', 'multiTable', JOIN_EXAMPLES.multiTable)}
+            ${this.renderExampleSection(t('joins-ex-inner'), 'innerJoin', JOIN_EXAMPLES.innerJoin)}
+            ${this.renderExampleSection(t('joins-ex-left'), 'leftJoin', JOIN_EXAMPLES.leftJoin)}
+            ${this.renderExampleSection(t('joins-ex-right'), 'rightJoin', JOIN_EXAMPLES.rightJoin)}
+            ${this.renderExampleSection(t('joins-ex-full'), 'fullJoin', JOIN_EXAMPLES.fullJoin)}
+            ${this.renderExampleSection(t('joins-ex-cross'), 'crossJoin', JOIN_EXAMPLES.crossJoin)}
+            ${this.renderExampleSection(t('joins-ex-multi'), 'multiTable', JOIN_EXAMPLES.multiTable)}
           </div>
         </div>
       </div>
@@ -210,7 +214,7 @@ export class JOINsShowcase {
             data-example-query="${this.escapeHtml(query)}"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Try This Example
+            ${t('showcase-try-example')}
           </button>
         </div>
         <pre class="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-x-auto"><code class="text-sm text-gray-800 dark:text-gray-200">${this.escapeHtml(query)}</code></pre>

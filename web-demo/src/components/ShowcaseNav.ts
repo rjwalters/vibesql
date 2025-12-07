@@ -1,19 +1,21 @@
+import { t, onI18nChange } from '../i18n'
+
 export interface ShowcaseCategory {
   id: string
-  label: string
+  labelKey: string
   status: 'implemented' | 'partial' | 'planned'
   progress: number // 0-100
 }
 
 const CATEGORIES: ShowcaseCategory[] = [
-  { id: 'compliance', label: 'Compliance Dashboard', status: 'implemented', progress: 100 },
-  { id: 'data-types', label: 'Data Types', status: 'partial', progress: 38 },
-  { id: 'dml', label: 'DML Operations', status: 'implemented', progress: 100 },
-  { id: 'predicates', label: 'Predicates & Operators', status: 'implemented', progress: 85 },
-  { id: 'joins', label: 'JOINs', status: 'implemented', progress: 100 },
-  { id: 'subqueries', label: 'Subqueries', status: 'implemented', progress: 90 },
-  { id: 'aggregates', label: 'Aggregates & GROUP BY', status: 'partial', progress: 60 },
-  { id: 'ddl', label: 'DDL & Constraints', status: 'partial', progress: 50 },
+  { id: 'compliance', labelKey: 'showcase-cat-compliance', status: 'implemented', progress: 100 },
+  { id: 'data-types', labelKey: 'showcase-cat-data-types', status: 'partial', progress: 38 },
+  { id: 'dml', labelKey: 'showcase-cat-dml', status: 'implemented', progress: 100 },
+  { id: 'predicates', labelKey: 'showcase-cat-predicates', status: 'implemented', progress: 85 },
+  { id: 'joins', labelKey: 'showcase-cat-joins', status: 'implemented', progress: 100 },
+  { id: 'subqueries', labelKey: 'showcase-cat-subqueries', status: 'implemented', progress: 90 },
+  { id: 'aggregates', labelKey: 'showcase-cat-aggregates', status: 'partial', progress: 60 },
+  { id: 'ddl', labelKey: 'showcase-cat-ddl', status: 'partial', progress: 50 },
 ]
 
 // Calculate overall progress
@@ -35,11 +37,11 @@ function getStatusIcon(status: ShowcaseCategory['status']): string {
 function getStatusLabel(status: ShowcaseCategory['status']): string {
   switch (status) {
     case 'implemented':
-      return 'Fully Implemented'
+      return t('showcase-status-implemented')
     case 'partial':
-      return 'Partially Implemented'
+      return t('showcase-status-partial')
     case 'planned':
-      return 'Planned'
+      return t('showcase-status-planned')
   }
 }
 
@@ -51,6 +53,9 @@ export class ShowcaseNav {
     this.root = document.createElement('nav')
     this.root.className = 'showcase-nav'
     this.render()
+
+    // Re-render when locale changes
+    onI18nChange(() => this.render())
   }
 
   private render(): void {
@@ -59,10 +64,10 @@ export class ShowcaseNav {
         <!-- Overall Progress -->
         <div class="mb-6">
           <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            Core SQL:1999 Showcase
+            ${t('showcase-title')}
           </h2>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
-            Explore the implemented SQL:1999 Core features interactively
+            ${t('showcase-description')}
           </p>
 
           <div class="flex items-center gap-3">
@@ -79,7 +84,7 @@ export class ShowcaseNav {
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">
-              ${OVERALL_PROGRESS}% Complete
+              ${t('showcase-complete', { percent: OVERALL_PROGRESS })}
             </span>
           </div>
         </div>
@@ -87,7 +92,7 @@ export class ShowcaseNav {
         <!-- Category Navigation -->
         <div class="space-y-2">
           <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-wide">
-            Feature Categories
+            ${t('showcase-categories')}
           </h3>
           ${CATEGORIES.map(category => this.renderCategory(category)).join('')}
         </div>
@@ -95,20 +100,20 @@ export class ShowcaseNav {
         <!-- Legend -->
         <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
           <h4 class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 uppercase">
-            Status Legend
+            ${t('showcase-legend')}
           </h4>
           <div class="flex flex-wrap gap-4 text-xs">
             <div class="flex items-center gap-1">
               <span>✅</span>
-              <span class="text-gray-600 dark:text-gray-400">Fully Implemented</span>
+              <span class="text-gray-600 dark:text-gray-400">${t('showcase-status-implemented')}</span>
             </div>
             <div class="flex items-center gap-1">
               <span>🚧</span>
-              <span class="text-gray-600 dark:text-gray-400">Partially Implemented</span>
+              <span class="text-gray-600 dark:text-gray-400">${t('showcase-status-partial')}</span>
             </div>
             <div class="flex items-center gap-1">
               <span>⏳</span>
-              <span class="text-gray-600 dark:text-gray-400">Planned</span>
+              <span class="text-gray-600 dark:text-gray-400">${t('showcase-status-planned')}</span>
             </div>
           </div>
         </div>
@@ -146,7 +151,7 @@ export class ShowcaseNav {
               ${getStatusIcon(category.status)}
             </span>
             <span class="font-medium text-gray-900 dark:text-gray-100">
-              ${category.label}
+              ${t(category.labelKey)}
             </span>
           </div>
           <span class="text-sm font-semibold ${
