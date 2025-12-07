@@ -9,6 +9,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use super::{SubscriptionConfig, SubscriptionError};
+use crate::Row;
 
 /// Unique identifier for a subscription (UUID bytes)
 pub type SessionSubscriptionId = [u8; 16];
@@ -24,6 +25,11 @@ pub struct SessionSubscription {
     pub params: Vec<Option<Vec<u8>>>,
     /// Tables that this subscription depends on (for invalidation)
     pub table_dependencies: HashSet<String>,
+    /// Hash of the last result set (for change detection)
+    pub last_result_hash: u64,
+    /// Last result set (for delta computation)
+    /// This stores the previous result to enable computing deltas on change.
+    pub last_result: Option<Vec<Row>>,
 }
 
 /// Manages subscriptions for a single connection/session
@@ -89,6 +95,8 @@ impl SessionSubscriptionManager {
             query,
             params,
             table_dependencies: table_dependencies.clone(),
+            last_result_hash: 0,
+            last_result: None,
         };
 
         // Update table -> subscription index (normalize to lowercase for case-insensitive matching)
@@ -185,6 +193,30 @@ impl SessionSubscriptionManager {
     #[allow(dead_code)]
     pub fn get(&self, subscription_id: &SessionSubscriptionId) -> Option<&SessionSubscription> {
         self.subscriptions.get(subscription_id)
+    }
+
+    /// Get a mutable reference to a subscription by ID
+    pub fn get_mut(
+        &mut self,
+        subscription_id: &SessionSubscriptionId,
+    ) -> Option<&mut SessionSubscription> {
+        self.subscriptions.get_mut(subscription_id)
+    }
+
+    /// Update the stored result for a subscription (for delta computation)
+    ///
+    /// This should be called after sending subscription data to store the result
+    /// for computing deltas on the next update.
+    pub fn update_result(
+        &mut self,
+        subscription_id: &SessionSubscriptionId,
+        result_hash: u64,
+        result: Vec<Row>,
+    ) {
+        if let Some(sub) = self.subscriptions.get_mut(subscription_id) {
+            sub.last_result_hash = result_hash;
+            sub.last_result = Some(result);
+        }
     }
 
     /// Get the number of active subscriptions
@@ -390,5 +422,93 @@ mod tests {
         let result =
             manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
         assert!(matches!(result, Err(SubscriptionError::RateLimited { .. })));
+    }
+
+    #[test]
+    fn test_update_result_stores_data() {
+        use vibesql_types::SqlValue;
+
+        let mut manager = SessionSubscriptionManager::new();
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Initially no result stored
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 0);
+        assert!(sub.last_result.is_none());
+
+        // Store a result
+        let rows = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+        manager.update_result(&id, 12345, rows.clone());
+
+        // Verify result is stored
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 12345);
+        assert!(sub.last_result.is_some());
+        assert_eq!(sub.last_result.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_get_mut_allows_modification() {
+        let mut manager = SessionSubscriptionManager::new();
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Get mutable reference and modify
+        let sub = manager.get_mut(&id).unwrap();
+        sub.last_result_hash = 99999;
+
+        // Verify modification persisted
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 99999);
+    }
+
+    #[test]
+    fn test_subscription_preserves_result_across_queries() {
+        use vibesql_types::SqlValue;
+
+        let mut manager = SessionSubscriptionManager::new();
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Store initial result
+        let initial_rows = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+        manager.update_result(&id, 11111, initial_rows);
+
+        // Verify initial result
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 11111);
+        assert_eq!(sub.last_result.as_ref().unwrap().len(), 1);
+
+        // Update with new result
+        let new_rows = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+        manager.update_result(&id, 22222, new_rows);
+
+        // Verify new result
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 22222);
+        assert_eq!(sub.last_result.as_ref().unwrap().len(), 2);
     }
 }
