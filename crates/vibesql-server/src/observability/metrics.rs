@@ -42,6 +42,11 @@ pub struct ServerMetrics {
     partial_update_efficiency: Gauge<f64>,
     partial_update_efficiency_numerator: Arc<AtomicU64>,
     partial_update_efficiency_denominator: Arc<AtomicU64>,
+
+    // Selective update eligibility breakdown metrics
+    pk_detection_total: Counter<u64>,
+    selective_update_decisions_total: Counter<u64>,
+    selective_update_column_ratio: Histogram<f64>,
 }
 
 impl ServerMetrics {
@@ -163,6 +168,25 @@ impl ServerMetrics {
         let partial_update_efficiency_numerator = Arc::new(AtomicU64::new(0));
         let partial_update_efficiency_denominator = Arc::new(AtomicU64::new(0));
 
+        // Selective update eligibility breakdown metrics
+        let pk_detection_total = meter
+            .u64_counter("vibesql_subscription_pk_detection_total")
+            .with_description("Primary key detection outcomes during subscription registration")
+            .with_unit("{detection}")
+            .build();
+
+        let selective_update_decisions_total = meter
+            .u64_counter("vibesql_subscription_selective_update_decisions_total")
+            .with_description("Selective update decisions (sent_partial, sent_full, skipped)")
+            .with_unit("{decision}")
+            .build();
+
+        let selective_update_column_ratio = meter
+            .f64_histogram("vibesql_subscription_selective_update_column_ratio")
+            .with_description("Ratio of changed columns to total columns when evaluating selective updates (0.0-1.0)")
+            .with_unit("1")
+            .build();
+
         Self {
             connections_total,
             connection_errors_total,
@@ -185,6 +209,9 @@ impl ServerMetrics {
             partial_update_efficiency,
             partial_update_efficiency_numerator,
             partial_update_efficiency_denominator,
+            pk_detection_total,
+            selective_update_decisions_total,
+            selective_update_column_ratio,
         }
     }
 
@@ -366,6 +393,50 @@ impl ServerMetrics {
             0.0
         }
     }
+
+    // Selective update eligibility breakdown metrics methods
+
+    /// Record a primary key detection outcome during subscription registration
+    ///
+    /// # Arguments
+    /// * `result` - Detection result: "confident" or "not_confident"
+    /// * `reason` - For not_confident results: "parse_error", "no_table", "no_pk",
+    ///              "pk_not_in_result", "join_query", "subquery", "set_operation"
+    pub fn record_pk_detection(&self, result: &str, reason: Option<&str>) {
+        let mut attributes = vec![KeyValue::new("result", result.to_string())];
+        if let Some(r) = reason {
+            attributes.push(KeyValue::new("reason", r.to_string()));
+        }
+        self.pk_detection_total.add(1, &attributes);
+    }
+
+    /// Record a selective update decision
+    ///
+    /// # Arguments
+    /// * `decision` - The decision made: "sent_partial", "sent_full", or "skipped"
+    /// * `reason` - Optional reason for the decision (e.g., "threshold_exceeded", "disabled")
+    pub fn record_selective_update_decision(&self, decision: &str, reason: Option<&str>) {
+        let mut attributes = vec![KeyValue::new("decision", decision.to_string())];
+        if let Some(r) = reason {
+            attributes.push(KeyValue::new("reason", r.to_string()));
+        }
+        self.selective_update_decisions_total.add(1, &attributes);
+    }
+
+    /// Record the column ratio when evaluating selective updates
+    ///
+    /// This histogram tracks the ratio of changed columns to total columns,
+    /// helping operators understand if threshold tuning would improve selective update rates.
+    ///
+    /// # Arguments
+    /// * `changed_columns` - Number of columns that changed
+    /// * `total_columns` - Total number of columns in the row
+    pub fn record_selective_update_column_ratio(&self, changed_columns: usize, total_columns: usize) {
+        if total_columns > 0 {
+            let ratio = changed_columns as f64 / total_columns as f64;
+            self.selective_update_column_ratio.record(ratio, &[]);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -483,5 +554,50 @@ mod tests {
         metrics.record_partial_update_bytes_saved(100);
         metrics.record_partial_update_bytes_saved(500);
         metrics.record_partial_update_bytes_saved(0);
+    }
+
+    #[test]
+    fn test_pk_detection_recording() {
+        // This test verifies the method exists and can be called without panicking.
+        let metrics = create_test_metrics();
+
+        // Test confident detection
+        metrics.record_pk_detection("confident", None);
+
+        // Test not confident detections with various reasons
+        metrics.record_pk_detection("not_confident", Some("parse_error"));
+        metrics.record_pk_detection("not_confident", Some("no_table"));
+        metrics.record_pk_detection("not_confident", Some("no_pk"));
+        metrics.record_pk_detection("not_confident", Some("pk_not_in_result"));
+        metrics.record_pk_detection("not_confident", Some("join_query"));
+        metrics.record_pk_detection("not_confident", Some("subquery"));
+        metrics.record_pk_detection("not_confident", Some("set_operation"));
+    }
+
+    #[test]
+    fn test_selective_update_decision_recording() {
+        // This test verifies the method exists and can be called without panicking.
+        let metrics = create_test_metrics();
+
+        // Test various decisions
+        metrics.record_selective_update_decision("sent_partial", None);
+        metrics.record_selective_update_decision("sent_full", Some("threshold_exceeded"));
+        metrics.record_selective_update_decision("sent_full", Some("disabled"));
+        metrics.record_selective_update_decision("skipped", Some("no_changes"));
+        metrics.record_selective_update_decision("skipped", Some("row_count_mismatch"));
+    }
+
+    #[test]
+    fn test_selective_update_column_ratio_recording() {
+        // This test verifies the method exists and can be called without panicking.
+        let metrics = create_test_metrics();
+
+        // Test various ratios
+        metrics.record_selective_update_column_ratio(1, 10); // 10%
+        metrics.record_selective_update_column_ratio(5, 10); // 50%
+        metrics.record_selective_update_column_ratio(10, 10); // 100%
+
+        // Edge case: zero total columns should not record
+        metrics.record_selective_update_column_ratio(0, 0);
     }
 }

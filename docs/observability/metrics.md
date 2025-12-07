@@ -63,6 +63,38 @@ These metrics track the effectiveness of partial/selective updates, which reduce
 - `pk_mismatch` - Cannot find matching old row by primary key
 - `no_changes` - No column changes detected
 
+### Selective Update Eligibility Breakdown Metrics
+
+These metrics provide visibility into selective update eligibility, helping operators understand what percentage of subscriptions can benefit from 0xF7 optimization.
+
+| Metric | Type | Unit | Labels | Description |
+|--------|------|------|--------|-------------|
+| `vibesql_subscription_pk_detection_total` | Counter | detection | `result`, `reason` | Primary key detection outcomes during subscription registration |
+| `vibesql_subscription_selective_update_decisions_total` | Counter | decision | `decision`, `reason` | Selective update decisions (sent_partial, sent_full, skipped) |
+| `vibesql_subscription_selective_update_column_ratio` | Histogram | ratio (0-1) | - | Ratio of changed columns to total columns when evaluating selective updates |
+
+**PK Detection Results** (`result` label values):
+- `confident` - Successfully detected PK columns from single-table query
+- `not_confident` - Could not confidently detect PK columns
+
+**PK Detection Reasons** (`reason` label values for `not_confident`):
+- `no_table` - No table found in query (e.g., VALUES clause)
+- `join_query` - Multi-table join query (PK detection is complex)
+- `pk_not_in_result` - PK columns not included in SELECT list
+- `unknown` - Other detection issues
+
+**Selective Update Decisions** (`decision` label values):
+- `sent_partial` - Successfully sent partial update (0xF7)
+- `sent_full` - Fell back to full row update
+- `skipped` - Update was skipped (e.g., no changes)
+
+**Decision Reasons** (`reason` label values):
+- `disabled` - Selective updates disabled in configuration
+- `threshold_exceeded` - Too many columns changed (exceeded max_changed_columns_ratio)
+- `row_count_mismatch` - Old and new row counts differ (inserts/deletes mixed with updates)
+- `pk_mismatch` - Cannot find matching old row by primary key
+- `no_changes` - No column changes detected
+
 ## Understanding Partial Update Efficiency
 
 The partial update system optimizes bandwidth for subscriptions by only sending columns that have changed, rather than full rows.
@@ -131,6 +163,35 @@ sum by (type) (rate(vibesql_subscription_updates_total[5m]))
 # Selective update ratio (selective updates / total updates)
 sum(rate(vibesql_subscription_updates_total{type="selective"}[5m]))
   / sum(rate(vibesql_subscription_updates_total[5m])) * 100
+```
+
+### Selective Update Eligibility Analysis
+
+```promql
+# Percentage of subscriptions eligible for selective updates
+sum(vibesql_subscriptions_selective_eligible) / sum(vibesql_subscriptions_active)
+
+# PK detection success rate
+sum(rate(vibesql_subscription_pk_detection_total{result="confident"}[5m]))
+  / sum(rate(vibesql_subscription_pk_detection_total[5m])) * 100
+
+# PK detection failure breakdown by reason
+sum by (reason) (rate(vibesql_subscription_pk_detection_total{result="not_confident"}[5m]))
+
+# Selective update decision breakdown
+sum by (decision, reason) (rate(vibesql_subscription_selective_update_decisions_total[5m]))
+
+# Partial update success rate (sent_partial / total decisions)
+sum(rate(vibesql_subscription_selective_update_decisions_total{decision="sent_partial"}[5m]))
+  / sum(rate(vibesql_subscription_selective_update_decisions_total[5m])) * 100
+
+# Average column change ratio (helps tune max_changed_columns_ratio threshold)
+histogram_quantile(0.50,
+  sum(rate(vibesql_subscription_selective_update_column_ratio_bucket[5m])) by (le))
+
+# 95th percentile column change ratio
+histogram_quantile(0.95,
+  sum(rate(vibesql_subscription_selective_update_column_ratio_bucket[5m])) by (le))
 ```
 
 ### Bandwidth Monitoring
@@ -212,6 +273,20 @@ annotations:
   description: "Ensure tables have primary keys defined for selective update eligibility."
 ```
 
+#### Low PK Detection Success Rate
+```yaml
+alert: VibeSQL_LowPKDetectionRate
+expr: |
+  sum(rate(vibesql_subscription_pk_detection_total{result="confident"}[5m]))
+  / sum(rate(vibesql_subscription_pk_detection_total[5m])) < 0.5
+for: 10m
+labels:
+  severity: info
+annotations:
+  summary: "Low primary key detection success rate"
+  description: "Less than 50% of subscriptions have confident PK detection. Check reason label breakdown for optimization opportunities."
+```
+
 ### Suggested Thresholds
 
 | Metric | Warning | Critical | Notes |
@@ -221,6 +296,7 @@ annotations:
 | Connection error rate | >1% | >10% | Check server resources |
 | Partial update efficiency | <0.3 | <0.1 | Review update patterns |
 | Fallback rate (per eligible) | >0.5/s | >2.0/s | Check fallback reasons |
+| PK detection success rate | <50% | <20% | Review query patterns and table schemas |
 
 ## Grafana Dashboard
 
@@ -242,7 +318,13 @@ Example dashboard panels for VibeSQL monitoring:
    - Fallback reasons over time
    - Bytes saved rate
 
-4. **Network Row**
+4. **Selective Update Eligibility Row**
+   - PK detection success rate (pie chart: confident vs not_confident)
+   - PK detection failure reasons over time (stacked area)
+   - Selective update decision breakdown (pie chart: sent_partial, sent_full, skipped)
+   - Column change ratio distribution (histogram)
+
+5. **Network Row**
    - Bytes sent/received
    - Messages by type
    - Bandwidth savings from partial updates

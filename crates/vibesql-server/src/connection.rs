@@ -737,6 +737,7 @@ impl ConnectionHandler {
         if !selective_config.enabled {
             if let Some(metrics) = self.observability.metrics() {
                 metrics.record_partial_update_fallback("disabled");
+                metrics.record_selective_update_decision("sent_full", Some("disabled"));
             }
             return false;
         }
@@ -745,6 +746,7 @@ impl ConnectionHandler {
         if old_rows.len() != new_rows.len() {
             if let Some(metrics) = self.observability.metrics() {
                 metrics.record_partial_update_fallback("row_count_mismatch");
+                metrics.record_selective_update_decision("sent_full", Some("row_count_mismatch"));
             }
             return false;
         }
@@ -783,6 +785,15 @@ impl ConnectionHandler {
                 if let Some(partial) =
                     create_partial_row_update(old_row, new_row, pk_columns, &selective_config)
                 {
+                    // Record column ratio for successful partial updates
+                    let changed_count = old_row
+                        .iter()
+                        .zip(new_row.iter())
+                        .filter(|(o, n)| o != n)
+                        .count();
+                    if let Some(metrics) = self.observability.metrics() {
+                        metrics.record_selective_update_column_ratio(changed_count, new_row.len());
+                    }
                     partial_updates.push(partial);
                 } else {
                     // Check if this was due to threshold exceeded (too many columns changed)
@@ -793,6 +804,10 @@ impl ConnectionHandler {
                         .count();
                     if changed_count > 0 {
                         let ratio = changed_count as f64 / new_row.len() as f64;
+                        // Record column ratio for analysis (helps tuning threshold)
+                        if let Some(metrics) = self.observability.metrics() {
+                            metrics.record_selective_update_column_ratio(changed_count, new_row.len());
+                        }
                         if ratio > selective_config.max_changed_columns_ratio {
                             threshold_exceeded_count += 1;
                         }
@@ -804,6 +819,7 @@ impl ConnectionHandler {
                 // Fall back to regular updates
                 if let Some(metrics) = self.observability.metrics() {
                     metrics.record_partial_update_fallback("pk_mismatch");
+                    metrics.record_selective_update_decision("sent_full", Some("pk_mismatch"));
                 }
                 return false;
             }
@@ -814,6 +830,7 @@ impl ConnectionHandler {
             if let Some(metrics) = self.observability.metrics() {
                 for _ in 0..threshold_exceeded_count {
                     metrics.record_partial_update_fallback("threshold_exceeded");
+                    metrics.record_selective_update_decision("sent_full", Some("threshold_exceeded"));
                 }
             }
         }
@@ -822,6 +839,7 @@ impl ConnectionHandler {
         if partial_updates.is_empty() {
             if let Some(metrics) = self.observability.metrics() {
                 metrics.record_partial_update_fallback("no_changes");
+                metrics.record_selective_update_decision("skipped", Some("no_changes"));
             }
             return false;
         }
@@ -861,6 +879,11 @@ impl ConnectionHandler {
             // Record bytes saved
             if total_bytes_full > total_bytes_partial {
                 metrics.record_partial_update_bytes_saved(total_bytes_full - total_bytes_partial);
+            }
+
+            // Record successful selective update decision for each partial update
+            for _ in 0..partial_updates.len() {
+                metrics.record_selective_update_decision("sent_partial", None);
             }
         }
 
@@ -1014,6 +1037,26 @@ impl ConnectionHandler {
             "PK detection for subscription query: {:?} (confident: {})",
             pk_detection.pk_column_indices, pk_detection.confident
         );
+
+        // Record PK detection metrics
+        if let Some(metrics) = self.observability.metrics() {
+            if pk_detection.confident {
+                metrics.record_pk_detection("confident", None);
+            } else {
+                // Determine reason for non-confidence based on detection results
+                let reason = if pk_detection.tables.is_empty() {
+                    "no_table"
+                } else if pk_detection.tables.len() > 1 {
+                    "join_query"
+                } else if pk_detection.pk_column_indices == vec![0] {
+                    // Default fallback - could be multiple reasons
+                    "pk_not_in_result"
+                } else {
+                    "unknown"
+                };
+                metrics.record_pk_detection("not_confident", Some(reason));
+            }
+        }
 
         // Generate a wire subscription ID (UUID) for the wire protocol
         let wire_subscription_id = *uuid::Uuid::new_v4().as_bytes();
