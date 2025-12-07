@@ -6,12 +6,12 @@
 //! ## API Design
 //!
 //! ```text
-//! GET    /api/tables/:table/rows          # SELECT * FROM :table
-//! GET    /api/tables/:table/rows/:id      # SELECT * FROM :table WHERE pk = :id
-//! POST   /api/tables/:table/rows          # INSERT INTO :table ...
-//! PUT    /api/tables/:table/rows/:id      # Full UPDATE (all columns)
-//! PATCH  /api/tables/:table/rows/:id      # Partial UPDATE (specified columns only)
-//! DELETE /api/tables/:table/rows/:id      # DELETE FROM :table WHERE pk = :id
+//! GET    /api/tables/{table}/rows          # SELECT * FROM {table}
+//! GET    /api/tables/{table}/rows/{id}     # SELECT * FROM {table} WHERE pk = {id}
+//! POST   /api/tables/{table}/rows          # INSERT INTO {table} ...
+//! PUT    /api/tables/{table}/rows/{id}     # Full UPDATE (all columns)
+//! PATCH  /api/tables/{table}/rows/{id}     # Partial UPDATE (specified columns only)
+//! DELETE /api/tables/{table}/rows/{id}     # DELETE FROM {table} WHERE pk = {id}
 //! ```
 //!
 //! ## Query Parameters (GET collection)
