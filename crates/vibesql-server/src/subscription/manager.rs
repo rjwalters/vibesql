@@ -597,6 +597,25 @@ impl SubscriptionManager {
         false
     }
 
+    /// Update PK columns with eligibility tracking by internal subscription ID
+    ///
+    /// Sets the PK columns and marks whether the subscription is eligible
+    /// for selective column updates (based on confident PK detection).
+    /// This variant is used for HTTP SSE subscriptions that don't have wire IDs.
+    ///
+    /// Returns `true` if the subscription is newly marked as selective-eligible.
+    pub fn update_pk_columns_with_eligibility(
+        &self,
+        id: SubscriptionId,
+        pk_columns: Vec<usize>,
+        confident: bool,
+    ) -> bool {
+        if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+            return sub.set_pk_columns_with_eligibility(pk_columns, confident);
+        }
+        false
+    }
+
     /// Get the primary key columns for a subscription by wire ID
     ///
     /// Returns the PK column indices, or default [0] if not found.
@@ -2002,5 +2021,60 @@ mod tests {
         assert_eq!(affected[0].2, 12345); // last_result_hash
         assert!(affected[0].3.is_some()); // last_result
         assert_eq!(affected[0].3.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_update_pk_columns_with_eligibility() {
+        let manager = SubscriptionManager::new();
+        let (tx, _rx) = mpsc::channel(16);
+
+        // Create a basic subscription (non-connection based)
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
+
+        // Initially not selective eligible
+        let sub = manager.subscriptions.get(&id).unwrap();
+        assert!(!sub.selective_eligible);
+        assert_eq!(sub.pk_columns, vec![0]); // Default
+        drop(sub);
+
+        // Update PK columns with confident detection
+        let newly_eligible = manager.update_pk_columns_with_eligibility(id, vec![0, 1], true);
+        assert!(newly_eligible, "Should be newly eligible");
+
+        // Verify changes
+        let sub = manager.subscriptions.get(&id).unwrap();
+        assert!(sub.selective_eligible);
+        assert_eq!(sub.pk_columns, vec![0, 1]);
+        drop(sub);
+
+        // Updating again should return false (not newly eligible)
+        let newly_eligible2 = manager.update_pk_columns_with_eligibility(id, vec![0, 1], true);
+        assert!(!newly_eligible2, "Should not be newly eligible since already was");
+
+        // Unsubscribe should return true (was selective eligible)
+        let was_eligible = manager.unsubscribe(id);
+        assert!(was_eligible);
+    }
+
+    #[test]
+    fn test_update_pk_columns_with_eligibility_not_confident() {
+        let manager = SubscriptionManager::new();
+        let (tx, _rx) = mpsc::channel(16);
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
+
+        // Update with non-confident detection
+        let newly_eligible = manager.update_pk_columns_with_eligibility(id, vec![0, 2], false);
+        assert!(!newly_eligible, "Should not be eligible when not confident");
+
+        // Verify PK columns updated but not selective eligible
+        let sub = manager.subscriptions.get(&id).unwrap();
+        assert!(!sub.selective_eligible);
+        assert_eq!(sub.pk_columns, vec![0, 2]);
+        drop(sub);
+
+        // Unsubscribe should return false (was not selective eligible)
+        let was_eligible = manager.unsubscribe(id);
+        assert!(!was_eligible);
     }
 }

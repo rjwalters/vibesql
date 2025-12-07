@@ -18,8 +18,9 @@ use vibesql_storage::Database;
 
 use super::graphql;
 use super::types::*;
+use crate::observability::ServerMetrics;
 use crate::registry::DatabaseRegistry;
-use crate::subscription::{SubscriptionManager, SubscriptionUpdate};
+use crate::subscription::{detect_pk_columns_from_stmt, SubscriptionManager, SubscriptionUpdate};
 
 /// Pagination configuration
 #[derive(Debug, Clone)]
@@ -59,6 +60,8 @@ pub struct HttpState {
     pub db: Arc<Database>,
     /// Subscription manager for real-time updates
     pub subscription_manager: Arc<SubscriptionManager>,
+    /// Optional server metrics for observability
+    pub metrics: Option<ServerMetrics>,
 }
 
 /// Create the HTTP API router
@@ -67,15 +70,18 @@ pub struct HttpState {
 /// * `db` - Legacy database reference for backwards compatibility (subscriptions, table listing)
 /// * `registry` - Database registry for shared database access
 /// * `subscription_manager` - Subscription manager for real-time updates
+/// * `metrics` - Optional server metrics for observability
 pub fn create_http_router(
     db: Arc<Database>,
     registry: DatabaseRegistry,
     subscription_manager: Arc<SubscriptionManager>,
+    metrics: Option<ServerMetrics>,
 ) -> Router {
     let state = HttpState {
         registry: registry.clone(),
         db: db.clone(),
         subscription_manager: subscription_manager.clone(),
+        metrics,
     };
 
     // Create main router with state
@@ -733,6 +739,37 @@ async fn subscribe_stream(
         }
     };
 
+    // Detect PK columns for selective column updates
+    // Parse the subscription query to detect primary key columns
+    if let Ok(stmt) = vibesql_parser::Parser::parse_sql(&params.query) {
+        // Get the database for PK detection
+        let db_for_pk = state.registry.get_or_create(&db_name).await;
+        let db_guard_pk = db_for_pk.read().await;
+        let pk_detection = detect_pk_columns_from_stmt(&stmt, &db_guard_pk);
+        drop(db_guard_pk);
+
+        debug!(
+            subscription_id = %subscription_id,
+            pk_columns = ?pk_detection.pk_column_indices,
+            confident = pk_detection.confident,
+            "Detected PK columns for HTTP SSE subscription"
+        );
+
+        // Update subscription with PK columns and eligibility
+        let newly_eligible = state.subscription_manager.update_pk_columns_with_eligibility(
+            subscription_id,
+            pk_detection.pk_column_indices,
+            pk_detection.confident,
+        );
+
+        // Track selective-eligible metric
+        if newly_eligible {
+            if let Some(ref metrics) = state.metrics {
+                metrics.increment_selective_eligible();
+            }
+        }
+    }
+
     // Send initial results using the database from the registry
     let columns_clone = columns.clone();
     // Re-get the database from registry and send initial results
@@ -743,7 +780,12 @@ async fn subscribe_stream(
     {
         drop(db_guard);
         error!("Failed to send initial results: {}", e);
-        state.subscription_manager.unsubscribe(subscription_id);
+        let was_selective_eligible = state.subscription_manager.unsubscribe(subscription_id);
+        if was_selective_eligible {
+            if let Some(ref metrics) = state.metrics {
+                metrics.decrement_selective_eligible();
+            }
+        }
 
         let event_data = serde_json::to_string(&SseEvent {
             event_type: "error".to_string(),
@@ -866,7 +908,12 @@ async fn subscribe_stream(
         }
 
         // Clean up subscription when stream ends
-        state.subscription_manager.unsubscribe(subscription_id);
+        let was_selective_eligible = state.subscription_manager.unsubscribe(subscription_id);
+        if was_selective_eligible {
+            if let Some(ref metrics) = state.metrics {
+                metrics.decrement_selective_eligible();
+            }
+        }
     };
 
     // Create SSE response with keepalive
