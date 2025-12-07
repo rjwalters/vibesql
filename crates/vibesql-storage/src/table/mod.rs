@@ -644,6 +644,15 @@ impl Table {
         self.rows.len()
     }
 
+    /// Get count of deleted (logically removed) rows
+    ///
+    /// This is used for DML cost estimation, as tables with many deleted rows
+    /// may have degraded performance for UPDATE/DELETE operations.
+    #[inline]
+    pub fn deleted_count(&self) -> usize {
+        self.deleted_count
+    }
+
     /// Get table statistics, computing if necessary
     ///
     /// Statistics are computed lazily on first access and cached.

@@ -45,7 +45,7 @@ pub use query_buffer_pool::{
     QueryBufferPool, QueryBufferPoolStats, RowBufferGuard, ValueBufferGuard,
 };
 pub use row::Row;
-pub use statistics::{ColumnStatistics, TableStatistics};
+pub use statistics::{ColumnStatistics, TableIndexInfo, TableStatistics};
 pub use table::{DeleteResult, Table};
 pub use wal::{
     DurabilityConfig, DurabilityMode, Lsn, PersistenceConfig, PersistenceEngine, PersistenceStats,
