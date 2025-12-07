@@ -5,7 +5,6 @@
 use super::core::Database;
 use super::operations::SpatialIndexMetadata;
 use crate::{Row, StorageError};
-use std::sync::Arc;
 use vibesql_ast::IndexColumn;
 
 // ============================================================================

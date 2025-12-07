@@ -8,7 +8,6 @@ use crate::{
     temporal::{Date, Interval, IntervalField, Time, Timestamp},
     DataType,
 };
-use std::sync::Arc;
 
 // Conditional string type based on feature flag:
 // - With `arcstr` feature: Uses ArcStr with small string optimization (SSO)
