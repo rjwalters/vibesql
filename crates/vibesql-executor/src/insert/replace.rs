@@ -84,9 +84,10 @@ pub fn handle_replace_conflicts(
 
     // Remove entries from user-defined indexes BEFORE deleting rows
     // (while row indices are still valid)
-    for (row_index, row) in &rows_to_delete {
-        db.update_indexes_for_delete(table_name, row, *row_index);
-    }
+    // Use batch method for better performance (pre-computes column indices once)
+    let rows_refs: Vec<(usize, &vibesql_storage::Row)> =
+        rows_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
+    db.batch_update_indexes_for_delete(table_name, &rows_refs);
 
     // Collect indices for deletion
     let mut deleted_indices: Vec<usize> = rows_to_delete.iter().map(|(idx, _)| *idx).collect();
@@ -97,7 +98,7 @@ pub fn handle_replace_conflicts(
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
-    let delete_result = table_mut.delete_by_indices(&deleted_indices);
+    let delete_result = table_mut.delete_by_indices_batch(&deleted_indices);
 
     // Handle index maintenance based on whether compaction occurred
     if delete_result.compacted {
