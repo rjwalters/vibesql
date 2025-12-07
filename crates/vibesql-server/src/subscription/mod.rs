@@ -1937,4 +1937,290 @@ mod tests {
             panic!("Expected Delta");
         }
     }
+
+    // ========================================================================
+    // Additional Tests for Selective Column Updates (Issue #3924)
+    // ========================================================================
+
+    #[test]
+    fn test_should_use_selective_update_below_min_changed_columns() {
+        // Only 1 column changed, but min_changed_columns is 2
+        let diff = ColumnDiff { changed_columns: vec![1], included_columns: vec![0, 1] };
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0],
+            min_changed_columns: 2, // Require at least 2 columns to change
+            max_changed_columns_ratio: 0.5,
+        };
+
+        // Should return false because only 1 column changed
+        assert!(!should_use_selective_update(&diff, 10, &config));
+    }
+
+    #[test]
+    fn test_should_use_selective_update_at_min_changed_columns() {
+        // Exactly 2 columns changed, min_changed_columns is 2
+        let diff = ColumnDiff { changed_columns: vec![1, 2], included_columns: vec![0, 1, 2] };
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0],
+            min_changed_columns: 2, // Require at least 2 columns to change
+            max_changed_columns_ratio: 0.5,
+        };
+
+        // Should return true because exactly min_changed_columns changed (2 of 10 = 20%)
+        assert!(should_use_selective_update(&diff, 10, &config));
+    }
+
+    #[test]
+    fn test_should_use_selective_update_at_max_ratio() {
+        // 5 of 10 columns changed = 50%, exactly at max_changed_columns_ratio
+        let diff = ColumnDiff {
+            changed_columns: vec![1, 2, 3, 4, 5],
+            included_columns: vec![0, 1, 2, 3, 4, 5],
+        };
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0],
+            min_changed_columns: 1,
+            max_changed_columns_ratio: 0.5, // Allow up to 50%
+        };
+
+        // Should return true because exactly at threshold (not over)
+        assert!(should_use_selective_update(&diff, 10, &config));
+    }
+
+    #[test]
+    fn test_create_partial_row_update_all_columns_changed() {
+        // All 3 columns change - should fall back (ratio = 100% > 50%)
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec()), Some(b"100".to_vec())];
+        let new_row = vec![Some(b"2".to_vec()), Some(b"Bob".to_vec()), Some(b"200".to_vec())];
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0],
+            min_changed_columns: 1,
+            max_changed_columns_ratio: 0.5,
+        };
+
+        // Should return None because all columns changed (100% > 50%)
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config);
+        assert!(partial.is_none());
+    }
+
+    #[test]
+    fn test_create_partial_row_update_empty_pk_columns() {
+        // Empty PK columns - should still work, just won't include extra columns
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec()), Some(b"100".to_vec())];
+        let new_row = vec![Some(b"1".to_vec()), Some(b"Bob".to_vec()), Some(b"100".to_vec())];
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![],
+            min_changed_columns: 1,
+            max_changed_columns_ratio: 0.5,
+        };
+
+        // Should work - only column 1 changed (33% < 50%)
+        let partial = create_partial_row_update(&old_row, &new_row, &[], &config).unwrap();
+
+        assert_eq!(partial.total_columns, 3);
+        // Only column 1 is present (no PK to force-include)
+        assert!(!partial.is_column_present(0));
+        assert!(partial.is_column_present(1));
+        assert!(!partial.is_column_present(2));
+        assert_eq!(partial.present_column_count(), 1);
+        assert_eq!(partial.values.len(), 1);
+        assert_eq!(partial.values[0], Some(b"Bob".to_vec()));
+    }
+
+    #[test]
+    fn test_create_partial_row_update_disabled_returns_none() {
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec())];
+        let new_row = vec![Some(b"1".to_vec()), Some(b"Bob".to_vec())];
+
+        let config = SelectiveColumnConfig {
+            enabled: false, // Disabled
+            pk_columns: vec![0],
+            min_changed_columns: 1,
+            max_changed_columns_ratio: 0.5,
+        };
+
+        // Should return None because selective updates are disabled
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config);
+        assert!(partial.is_none());
+    }
+
+    #[test]
+    fn test_create_partial_row_update_different_row_lengths() {
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec())];
+        let new_row = vec![Some(b"1".to_vec()), Some(b"Bob".to_vec()), Some(b"extra".to_vec())];
+
+        let config =
+            SelectiveColumnConfig { enabled: true, pk_columns: vec![0], ..Default::default() };
+
+        // Should return None because row lengths differ
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config);
+        assert!(partial.is_none());
+    }
+
+    #[test]
+    fn test_compute_column_diff_different_row_lengths() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] };
+        let new = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(100),
+            ],
+        };
+
+        // Should return None because row lengths differ
+        let diff = compute_column_diff(&old, &new, &[0]);
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn test_compute_column_diff_composite_pk() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),   // PK col 0
+                SqlValue::Integer(100), // PK col 1
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(50),
+            ],
+        };
+        let new = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),   // PK col 0 unchanged
+                SqlValue::Integer(100), // PK col 1 unchanged
+                SqlValue::Varchar("Bob".to_string()), // Changed
+                SqlValue::Integer(50), // Unchanged
+            ],
+        };
+
+        // Composite PK: columns 0 and 1
+        let diff = compute_column_diff(&old, &new, &[0, 1]).unwrap();
+        assert_eq!(diff.changed_columns, vec![2]); // Only column 2 changed
+        // Included columns should be PK (0, 1) + changed (2)
+        assert_eq!(diff.included_columns, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_create_partial_row_update_composite_pk() {
+        let old_row = vec![
+            Some(b"1".to_vec()),     // PK col 0
+            Some(b"100".to_vec()),   // PK col 1
+            Some(b"Alice".to_vec()), // Data
+            Some(b"50".to_vec()),    // Data
+        ];
+        let new_row = vec![
+            Some(b"1".to_vec()),   // PK col 0 unchanged
+            Some(b"100".to_vec()), // PK col 1 unchanged
+            Some(b"Bob".to_vec()), // Changed
+            Some(b"50".to_vec()),  // Unchanged
+        ];
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0, 1],
+            min_changed_columns: 1,
+            max_changed_columns_ratio: 0.5,
+        };
+
+        let partial = create_partial_row_update(&old_row, &new_row, &[0, 1], &config).unwrap();
+
+        assert_eq!(partial.total_columns, 4);
+        // Columns 0, 1 (PK) and 2 (changed) should be present
+        assert!(partial.is_column_present(0));
+        assert!(partial.is_column_present(1));
+        assert!(partial.is_column_present(2));
+        assert!(!partial.is_column_present(3));
+        assert_eq!(partial.present_column_count(), 3);
+    }
+
+    #[test]
+    fn test_partial_row_update_large_column_count() {
+        use crate::protocol::messages::PartialRowUpdate;
+
+        // Test with 20 columns (requires 3 bytes for column mask)
+        let partial = PartialRowUpdate::new(
+            20,
+            &[0, 7, 8, 15, 16], // Spread across multiple bytes
+            vec![
+                Some(b"a".to_vec()),
+                Some(b"b".to_vec()),
+                Some(b"c".to_vec()),
+                Some(b"d".to_vec()),
+                Some(b"e".to_vec()),
+            ],
+        );
+
+        assert_eq!(partial.total_columns, 20);
+        assert_eq!(partial.column_mask.len(), 3); // ceil(20/8) = 3 bytes
+
+        // Check column presence across bytes
+        assert!(partial.is_column_present(0));  // Byte 0, bit 0
+        assert!(partial.is_column_present(7));  // Byte 0, bit 7
+        assert!(partial.is_column_present(8));  // Byte 1, bit 0
+        assert!(partial.is_column_present(15)); // Byte 1, bit 7
+        assert!(partial.is_column_present(16)); // Byte 2, bit 0
+        assert!(!partial.is_column_present(19)); // Not present
+        assert_eq!(partial.present_column_count(), 5);
+    }
+
+    #[test]
+    fn test_compute_column_diff_null_to_value() {
+        use vibesql_types::SqlValue;
+
+        // Test NULL -> value transition
+        let old = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
+        let new = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+
+        let diff = compute_column_diff(&old, &new, &[0]).unwrap();
+        assert_eq!(diff.changed_columns, vec![1]);
+        assert_eq!(diff.included_columns, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_compute_column_diff_value_to_null() {
+        use vibesql_types::SqlValue;
+
+        // Test value -> NULL transition
+        let old = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
+
+        let diff = compute_column_diff(&old, &new, &[0]).unwrap();
+        assert_eq!(diff.changed_columns, vec![1]);
+        assert_eq!(diff.included_columns, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_create_partial_row_update_null_to_value() {
+        let old_row = vec![Some(b"1".to_vec()), None]; // NULL in column 1
+        let new_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec())];
+
+        let config =
+            SelectiveColumnConfig { enabled: true, pk_columns: vec![0], ..Default::default() };
+
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config).unwrap();
+
+        assert_eq!(partial.total_columns, 2);
+        assert!(partial.is_column_present(0));
+        assert!(partial.is_column_present(1));
+        assert_eq!(partial.values.len(), 2);
+        assert_eq!(partial.values[0], Some(b"1".to_vec()));
+        assert_eq!(partial.values[1], Some(b"Alice".to_vec())); // Changed from NULL
+    }
 }
