@@ -10,7 +10,7 @@ import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
 import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
-import { initI18n, setI18nLocale, updateDOM } from './i18n';
+import { initI18n, setI18nLocale, updateDOM, t } from './i18n';
 
 // Chart.js is loaded via CDN in benchmarks.html
 declare const Chart: any;
@@ -130,9 +130,17 @@ function getLinearChartOptions(yAxisLabel: string): object {
 const li = (label: string, value: string): string =>
   `<li><strong>${label}:</strong> ${value}</li>`;
 
+/** Generate a methodology detail list item with i18n key */
+const liI18n = (labelKey: string, value: string): string =>
+  `<li><strong>${t(labelKey)}:</strong> ${value}</li>`;
+
 /** Generate a bullet list for discussions */
 const bullet = (label: string, desc: string): string =>
   `<li><strong>${label}:</strong> ${desc}</li>`;
+
+/** Generate a bullet list item with i18n key */
+const bulletI18n = (labelKey: string, descKey: string): string =>
+  `<li><strong>${t(labelKey)}:</strong> ${t(descKey)}</li>`;
 
 /** Generate methodology section with title, description, details list, and optional notes */
 const methodology = (
@@ -144,24 +152,53 @@ const methodology = (
   <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${title}</h3>
   <p class="text-gray-500 dark:text-gray-400 mb-4">${description}</p>
   <ul class="space-y-2 text-gray-500 dark:text-gray-400">
-    ${li('Hardware', HARDWARE)}
+    ${li(t('bench-hardware'), HARDWARE)}
     ${details.join('\n    ')}
   </ul>
   ${notes?.map(note => `
   <p class="mt-4 text-gray-500 dark:text-gray-400 text-sm">${note}</p>`).join('') ?? ''}
 `;
 
+/** Generate methodology section from i18n keys */
+const methodologyI18n = (
+  titleKey: string,
+  descKey: string,
+  detailKeys: { labelKey: string; value: string }[],
+  noteKeys?: string[]
+): string => `
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${t(titleKey)}</h3>
+  <p class="text-gray-500 dark:text-gray-400 mb-4">${t(descKey)}</p>
+  <ul class="space-y-2 text-gray-500 dark:text-gray-400">
+    ${li(t('bench-hardware'), HARDWARE)}
+    ${detailKeys.map(d => liI18n(d.labelKey, d.value)).join('\n    ')}
+  </ul>
+  ${noteKeys?.map(key => `
+  <p class="mt-4 text-gray-500 dark:text-gray-400 text-sm">${t(key)}</p>`).join('') ?? ''}
+`;
+
 /** Generate discussion section with multiple subsections */
 const discussion = (sections: { title: string; content: string }[]): string => `
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Analysis &amp; Roadmap</h3>
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${t('bench-analysis-roadmap')}</h3>
   ${sections.map(({ title, content }) => `
   <h4 class="text-md font-medium text-gray-900 dark:text-gray-100 mt-4 mb-2">${title}</h4>
   ${content}`).join('')}
 `;
 
+/** Generate discussion section from i18n keys */
+const discussionI18n = (sections: { titleKey: string; contentKey?: string; content?: string }[]): string => `
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${t('bench-analysis-roadmap')}</h3>
+  ${sections.map(({ titleKey, contentKey, content }) => `
+  <h4 class="text-md font-medium text-gray-900 dark:text-gray-100 mt-4 mb-2">${t(titleKey)}</h4>
+  ${contentKey ? pI18n(contentKey) : content ?? ''}`).join('')}
+`;
+
 /** Generate a paragraph */
 const p = (text: string): string =>
   `<p class="text-gray-500 dark:text-gray-400 mb-2">${text}</p>`;
+
+/** Generate a paragraph from i18n key */
+const pI18n = (key: string): string =>
+  `<p class="text-gray-500 dark:text-gray-400 mb-2">${t(key)}</p>`;
 
 /** Generate a bullet list for discussion items */
 const bullets = (items: string[]): string =>
@@ -169,21 +206,31 @@ const bullets = (items: string[]): string =>
     ${items.join('\n    ')}
   </ul>`;
 
+/** Generate a bullet list from i18n keys */
+const bulletsI18n = (itemKeys: { labelKey: string; descKey: string }[]): string =>
+  `<ul class="list-disc list-inside space-y-1 text-gray-500 dark:text-gray-400 text-sm ml-2">
+    ${itemKeys.map(k => bulletI18n(k.labelKey, k.descKey)).join('\n    ')}
+  </ul>`;
+
 // ============================================================================
 // Suite Configuration
 // ============================================================================
 
 /**
- * Suite configuration
+ * Suite configuration - methodology and discussion are now functions
+ * that generate content on-demand so i18n translations work correctly
  */
 interface SuiteConfig {
   id: BenchmarkSuite;
   name: string;
+  nameKey: string;  // i18n key for display name
   dataFile: string;
   opsLabel: string;
+  opsLabelKey: string;  // i18n key for ops label
   descriptions: Record<string, string>;
-  methodology: string;
-  discussion: string;
+  descriptionKeys?: Record<string, string>;  // i18n keys for descriptions
+  getMethodology: () => string;  // Dynamic generation for i18n
+  getDiscussion: () => string;   // Dynamic generation for i18n
 }
 
 /**
@@ -193,8 +240,10 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
   tpch: {
     id: 'tpch',
     name: 'TPC-H',
+    nameKey: 'bench-tpch-name',
     dataFile: 'benchmark_results.json',
     opsLabel: 'TPC-H queries',
+    opsLabelKey: 'bench-tpch-ops-label',
     descriptions: {
       'q1': 'Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY',
       'q2': 'Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT',
@@ -219,60 +268,54 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'q21': 'Suppliers Who Kept Orders Waiting - Multi-table EXISTS',
       'q22': 'Global Sales Opportunity - SUBSTR with NOT EXISTS subquery',
     },
-    methodology: methodology(
-      'TPC-H Decision Support Benchmark',
-      `These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>,
-        which simulates real-world decision support workloads with complex analytical queries
-        involving aggregations, joins, subqueries, and sorting.`,
+    descriptionKeys: {
+      'q1': 'bench-tpch-q1', 'q2': 'bench-tpch-q2', 'q3': 'bench-tpch-q3', 'q4': 'bench-tpch-q4',
+      'q5': 'bench-tpch-q5', 'q6': 'bench-tpch-q6', 'q7': 'bench-tpch-q7', 'q8': 'bench-tpch-q8',
+      'q9': 'bench-tpch-q9', 'q10': 'bench-tpch-q10', 'q11': 'bench-tpch-q11', 'q12': 'bench-tpch-q12',
+      'q13': 'bench-tpch-q13', 'q14': 'bench-tpch-q14', 'q15': 'bench-tpch-q15', 'q16': 'bench-tpch-q16',
+      'q17': 'bench-tpch-q17', 'q18': 'bench-tpch-q18', 'q19': 'bench-tpch-q19', 'q20': 'bench-tpch-q20',
+      'q21': 'bench-tpch-q21', 'q22': 'bench-tpch-q22',
+    },
+    getMethodology: () => methodology(
+      t('bench-tpch-title'),
+      t('bench-tpch-description'),
       [
-        li('Benchmark Framework', 'Criterion.rs (Rust native benchmarking)'),
-        li('Scale Factor', 'SF 0.01 (~60,000 rows across 8 tables)'),
-        li('Data', 'Deterministic TPC-H compliant dataset'),
-        li('Databases Tested', 'VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs)'),
-        li('Execution Mode', 'All databases run in-memory (no disk I/O)'),
-        li('Measurement', 'Native Rust API calls (no Python/FFI overhead)'),
+        li(t('bench-benchmark-framework'), 'Criterion.rs (Rust native benchmarking)'),
+        li(t('bench-scale-factor'), 'SF 0.01 (~60,000 rows across 8 tables)'),
+        li(t('bench-data'), 'Deterministic TPC-H compliant dataset'),
+        li(t('bench-databases-tested'), 'VibeSQL, SQLite (via rusqlite), DuckDB (via duckdb-rs)'),
+        li(t('bench-execution-mode'), 'All databases run in-memory (no disk I/O)'),
+        li(t('bench-measurement'), 'Native Rust API calls (no Python/FFI overhead)'),
       ],
-      [
-        `All benchmarks measure end-to-end query execution time including parsing,
-        planning, execution, and result materialization. This represents <strong>real-world
-        SQL engine performance</strong> for analytical workloads.`,
-        `<strong>Note:</strong> TPC-H queries test different aspects of SQL performance:
-        simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15),
-        and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.`,
-      ]
+      [t('bench-tpch-note-intro'), t('bench-tpch-note-queries')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: 'Where VibeSQL Excels',
-        content: p(`VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20)
-          where our columnar execution engine and SIMD-accelerated aggregations shine. These queries
-          involve filtering large tables and computing aggregates without complex join patterns.`),
+        title: t('bench-tpch-disc-excels-title'),
+        content: pI18n('bench-tpch-disc-excels'),
       },
       {
-        title: 'Current Optimization Targets',
-        content: p(`Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck
-          is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's
-          decades-refined B-tree joins. Specific areas under active development:`) + bullets([
-          bullet('Join ordering', 'Improved cardinality estimation for better join order selection'),
-          bullet('Hash table sizing', 'Adaptive hash table growth and spill-to-disk for large joins'),
-          bullet('Vectorized joins', 'Batch processing in the join inner loop to improve cache utilization'),
-          bullet('Index-nested-loop joins', 'Leveraging B-tree indexes when beneficial'),
+        title: t('bench-tpch-disc-targets-title'),
+        content: pI18n('bench-tpch-disc-targets') + bulletsI18n([
+          { labelKey: 'bench-bullet-join-ordering', descKey: 'bench-tpch-disc-join-ordering' },
+          { labelKey: 'bench-bullet-hash-sizing', descKey: 'bench-tpch-disc-hash-sizing' },
+          { labelKey: 'bench-bullet-vectorized', descKey: 'bench-tpch-disc-vectorized' },
+          { labelKey: 'bench-bullet-inl-joins', descKey: 'bench-tpch-disc-inl-joins' },
         ]),
       },
       {
-        title: 'Path to Leadership',
-        content: p(`VibeSQL's architecture is designed for modern hardware with features like columnar storage,
-          vectorized execution, and lock-free concurrency. As these optimizations mature, we expect
-          VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design
-          supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.`),
+        title: t('bench-tpch-disc-path-title'),
+        content: pI18n('bench-tpch-disc-path'),
       },
     ]),
   },
   tpcds: {
     id: 'tpcds',
     name: 'TPC-DS',
+    nameKey: 'bench-tpcds-name',
     dataFile: 'tpcds_results.json',
     opsLabel: 'TPC-DS queries',
+    opsLabelKey: 'bench-tpcds-ops-label',
     descriptions: {
       'q1': 'Q1 - Store returns analysis with date filtering',
       'q2': 'Q2 - Catalog and web sales comparison',
@@ -374,54 +417,44 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'q98': 'Q98 - Store sales category analysis',
       'q99': 'Q99 - Multi-channel shipping analysis',
     },
-    methodology: methodology(
-      'TPC-DS Decision Support Benchmark',
-      `<strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model
-        a modern decision support system with significantly more complex query patterns
-        including multiple fact tables, snow-flake schema, and advanced SQL features.`,
+    getMethodology: () => methodology(
+      t('bench-tpcds-title'),
+      t('bench-tpcds-description'),
       [
-        li('Schema', '24 tables with star/snowflake schema design'),
-        li('Query Count', '99 queries (currently 88/99 passing)'),
-        li('Scale Factor', 'SF 0.01'),
-        li('Query Types', 'Reporting, ad-hoc, data mining patterns'),
-        li('SQL Features', 'Window functions, CTEs, complex subqueries, ROLLUP/CUBE'),
+        li(t('bench-schema'), '24 tables with star/snowflake schema design'),
+        li(t('bench-query-count'), '99 queries (currently 88/99 passing)'),
+        li(t('bench-scale-factor'), 'SF 0.01'),
+        li(t('bench-query-types'), 'Reporting, ad-hoc, data mining patterns'),
+        li(t('bench-sql-features'), 'Window functions, CTEs, complex subqueries, ROLLUP/CUBE'),
       ],
-      [
-        `TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features
-        like window functions, common table expressions (WITH clause), and complex join patterns
-        across multiple fact and dimension tables.`,
-        `<strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or
-        specific date arithmetic functions not yet implemented.`,
-      ]
+      [t('bench-tpcds-note-intro'), t('bench-tpcds-note-remaining')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: 'SQL:1999 Feature Coverage',
-        content: p(`TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>,
-          demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with
-          complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.`),
+        title: t('bench-tpcds-disc-coverage-title'),
+        content: pI18n('bench-tpcds-disc-coverage'),
       },
       {
-        title: 'Complex Query Optimization',
-        content: p('TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:') + bullets([
-          bullet('CTE materialization', 'Intelligent decision between materialized and inline CTEs'),
-          bullet('Subquery decorrelation', 'Converting correlated subqueries to joins when beneficial'),
-          bullet('Star schema optimization', 'Fact-dimension join ordering for analytical patterns'),
+        title: t('bench-tpcds-disc-optimization-title'),
+        content: pI18n('bench-tpcds-disc-optimization') + bulletsI18n([
+          { labelKey: 'bench-bullet-cte-materialization', descKey: 'bench-tpcds-disc-cte' },
+          { labelKey: 'bench-bullet-decorrelation', descKey: 'bench-tpcds-disc-decorrelation' },
+          { labelKey: 'bench-bullet-star-optimization', descKey: 'bench-tpcds-disc-star' },
         ]),
       },
       {
-        title: 'Toward 99/99',
-        content: p(`INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set
-          operations fit naturally into our existing query algebra and will be implemented as hash-based
-          operators similar to our DISTINCT processing.`),
+        title: t('bench-tpcds-disc-toward-title'),
+        content: pI18n('bench-tpcds-disc-toward'),
       },
     ]),
   },
   tpcc: {
     id: 'tpcc',
     name: 'TPC-C',
+    nameKey: 'bench-tpcc-name',
     dataFile: 'tpcc_results.json',
     opsLabel: 'TPC-C transactions',
+    opsLabelKey: 'bench-tpcc-ops-label',
     descriptions: {
       'new_order': 'New Order - Complex transaction with inventory checks and order creation',
       'payment': 'Payment - Update customer balance and warehouse/district totals',
@@ -429,55 +462,52 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'delivery': 'Delivery - Batch processing of pending orders',
       'stock_level': 'Stock Level - Count items below threshold in recent orders',
     },
-    methodology: methodology(
-      'TPC-C Online Transaction Processing Benchmark',
-      `The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment
-        with a mix of complex transactions including order entry, payment processing,
-        order status queries, delivery processing, and stock level monitoring.`,
+    descriptionKeys: {
+      'new_order': 'bench-tpcc-new-order',
+      'payment': 'bench-tpcc-payment',
+      'order_status': 'bench-tpcc-order-status',
+      'delivery': 'bench-tpcc-delivery',
+      'stock_level': 'bench-tpcc-stock-level',
+    },
+    getMethodology: () => methodology(
+      t('bench-tpcc-title'),
+      t('bench-tpcc-description'),
       [
-        li('Workload', 'OLTP (Online Transaction Processing)'),
-        li('Transaction Mix', '45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level'),
-        li('Warehouses', '1 warehouse (scaled for in-memory testing)'),
-        li('Concurrency', 'Single-threaded baseline measurements'),
-        li('ACID Compliance', 'Full transaction isolation testing'),
+        li(t('bench-workload'), 'OLTP (Online Transaction Processing)'),
+        li(t('bench-transaction-mix'), '45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level'),
+        li(t('bench-warehouses'), '1 warehouse (scaled for in-memory testing)'),
+        li(t('bench-concurrency'), 'Single-threaded baseline measurements'),
+        li(t('bench-acid-compliance'), 'Full transaction isolation testing'),
       ],
-      [
-        `TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle
-        concurrent transactions with complex business logic. This benchmark is critical for
-        evaluating <strong>transactional workload performance</strong>.`,
-        `<strong>Note:</strong> Results show average transaction latency. Lower is better.
-        TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.`,
-      ]
+      [t('bench-tpcc-note-intro'), t('bench-tpcc-note-results')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: '42x Faster Than SQLite',
-        content: p(`VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS,
-          a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids
-          SQLite's coarse-grained locking on every write operation.`),
+        title: t('bench-tpcc-disc-faster-title'),
+        content: pI18n('bench-tpcc-disc-faster'),
       },
       {
-        title: 'Why VibeSQL Dominates OLTP',
-        content: bullets([
-          bullet('Lock-free reads', 'MVCC allows readers and writers to proceed concurrently without blocking'),
-          bullet('Optimistic concurrency', 'Transactions only conflict at commit time, not during execution'),
-          bullet('In-memory B-tree', 'Purpose-built index structure optimized for in-memory workloads'),
-          bullet('Prepared statement caching', 'Query plans are compiled once and reused'),
+        title: t('bench-tpcc-disc-dominates-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-lock-free', descKey: 'bench-tpcc-disc-lockfree' },
+          { labelKey: 'bench-bullet-optimistic', descKey: 'bench-tpcc-disc-optimistic' },
+          { labelKey: 'bench-bullet-btree', descKey: 'bench-tpcc-disc-btree' },
+          { labelKey: 'bench-bullet-prepared', descKey: 'bench-tpcc-disc-prepared' },
         ]),
       },
       {
-        title: 'Scaling Further',
-        content: p(`Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction
-          processing, and we expect near-linear scaling as we add parallel execution support. Our goal is
-          to achieve 500K+ TPS on modern multi-core hardware.`),
+        title: t('bench-tpcc-disc-scaling-title'),
+        content: pI18n('bench-tpcc-disc-scaling'),
       },
     ]),
   },
   'sysbench-embedded': {
     id: 'sysbench-embedded',
     name: 'Sysbench (Embedded)',
+    nameKey: 'bench-sysbench-embedded-name',
     dataFile: 'sysbench_results.json',
     opsLabel: 'Sysbench operations',
+    opsLabelKey: 'bench-sysbench-embedded-ops-label',
     descriptions: {
       'point_select': 'Point Select - Single row lookup by primary key',
       'insert': 'Insert - Insert new rows into table',
@@ -486,57 +516,57 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'delete': 'Delete - Remove rows by primary key',
       'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
     },
-    methodology: methodology(
-      'Sysbench Micro-Benchmarks (Embedded)',
-      `<strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific
-        database operations. These tests measure raw performance for fundamental operations
-        without the complexity of full transaction workloads.`,
+    descriptionKeys: {
+      'point_select': 'bench-sysbench-point-select',
+      'insert': 'bench-sysbench-insert',
+      'update_index': 'bench-sysbench-update-index',
+      'update_non_index': 'bench-sysbench-update-non-index',
+      'delete': 'bench-sysbench-delete',
+      'range_queries': 'bench-sysbench-range-queries',
+    },
+    getMethodology: () => methodology(
+      t('bench-sysbench-embedded-title'),
+      t('bench-sysbench-embedded-description'),
       [
-        li('Mode', 'Embedded (in-process, zero network overhead)'),
-        li('Workload Types', 'Point queries, range scans, updates, inserts, deletes'),
-        li('Table Size', '10,000 rows per table'),
-        li('Index Types', 'Primary key and secondary indexes'),
-        li('Operations', 'Single-statement operations (no multi-statement transactions)'),
-        li('Databases', 'VibeSQL, SQLite, DuckDB'),
+        li(t('bench-mode'), 'Embedded (in-process, zero network overhead)'),
+        li(t('bench-workload-types'), 'Point queries, range scans, updates, inserts, deletes'),
+        li(t('bench-table-size'), '10,000 rows per table'),
+        li(t('bench-index-types'), 'Primary key and secondary indexes'),
+        li(t('bench-operations'), 'Single-statement operations (no multi-statement transactions)'),
+        li(t('bench-databases'), 'VibeSQL, SQLite, DuckDB'),
       ],
-      [
-        `Embedded mode runs the database in-process with zero network overhead, ideal for
-        single-process applications where minimal latency is critical.`,
-      ]
+      [t('bench-sysbench-embedded-note')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: 'Point Lookups: VibeSQL Leads',
-        content: p(`VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly
-          outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with
-          minimal pointer chasing and cache-friendly node layouts.`),
+        title: t('bench-sysbench-emb-disc-point-title'),
+        content: pI18n('bench-sysbench-emb-disc-point'),
       },
       {
-        title: 'Index Updates: 2x Faster',
-        content: p(`VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design
-          allows in-place index updates without write-ahead logging overhead for each operation.`),
+        title: t('bench-sysbench-emb-disc-index-title'),
+        content: pI18n('bench-sysbench-emb-disc-index'),
       },
       {
-        title: 'Areas for Improvement',
-        content: bullets([
-          bullet('Bulk inserts', "SQLite's batch insert path is highly optimized; we're adding batched B-tree operations"),
-          bullet('Non-indexed updates', 'Full table scans for non-indexed columns need predicate pushdown optimization'),
-          bullet('Deletes', 'Our tombstone-based deletion has cleanup overhead; compaction improvements are planned'),
+        title: t('bench-sysbench-emb-disc-improve-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-bulk-inserts', descKey: 'bench-sysbench-emb-disc-bulk' },
+          { labelKey: 'bench-bullet-non-indexed', descKey: 'bench-sysbench-emb-disc-nonindex' },
+          { labelKey: 'bench-bullet-deletes', descKey: 'bench-sysbench-emb-disc-deletes' },
         ]),
       },
       {
-        title: 'DuckDB Comparison',
-        content: p(`DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower
-          results here reflect architectural choices (columnar storage, vectorized execution) that
-          trade single-row latency for bulk throughput. VibeSQL targets both use cases.`),
+        title: t('bench-sysbench-emb-disc-duckdb-title'),
+        content: pI18n('bench-sysbench-emb-disc-duckdb'),
       },
     ]),
   },
   'sysbench-server': {
     id: 'sysbench-server',
     name: 'Sysbench (Server)',
+    nameKey: 'bench-sysbench-server-name',
     dataFile: 'sysbench_results.json',
     opsLabel: 'Sysbench operations',
+    opsLabelKey: 'bench-sysbench-server-ops-label',
     descriptions: {
       'point_select': 'Point Select - Single row lookup by primary key',
       'insert': 'Insert - Insert new rows into table',
@@ -545,41 +575,41 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       'delete': 'Delete - Remove rows by primary key',
       'range_queries': 'Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans',
     },
-    methodology: methodology(
-      'Sysbench Micro-Benchmarks (Server)',
-      `<strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol)
-        against MySQL, measuring performance for multi-client database deployments.`,
+    descriptionKeys: {
+      'point_select': 'bench-sysbench-point-select',
+      'insert': 'bench-sysbench-insert',
+      'update_index': 'bench-sysbench-update-index',
+      'update_non_index': 'bench-sysbench-update-non-index',
+      'delete': 'bench-sysbench-delete',
+      'range_queries': 'bench-sysbench-range-queries',
+    },
+    getMethodology: () => methodology(
+      t('bench-sysbench-server-title'),
+      t('bench-sysbench-server-description'),
       [
-        li('Mode', 'Server (PostgreSQL wire protocol)'),
-        li('Workload Types', 'Point queries, range scans, updates, inserts, deletes'),
-        li('Table Size', '10,000 rows per table'),
-        li('Protocol Overhead', '~10-50µs per query for wire protocol handling'),
-        li('Databases', 'VibeSQL Server, MySQL'),
+        li(t('bench-mode'), 'Server (PostgreSQL wire protocol)'),
+        li(t('bench-workload-types'), 'Point queries, range scans, updates, inserts, deletes'),
+        li(t('bench-table-size'), '10,000 rows per table'),
+        li(t('bench-protocol-overhead'), '~10-50µs per query for wire protocol handling'),
+        li(t('bench-databases'), 'VibeSQL Server, MySQL'),
       ],
-      [
-        `Server mode uses the PostgreSQL wire protocol, enabling multi-client access and
-        compatibility with existing PostgreSQL tooling and drivers.`,
-      ]
+      [t('bench-sysbench-server-note')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: 'PostgreSQL Wire Protocol',
-        content: p(`VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with
-          existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query
-          compared to embedded mode, but enables multi-client deployments.`),
+        title: t('bench-sysbench-srv-disc-protocol-title'),
+        content: pI18n('bench-sysbench-srv-disc-protocol'),
       },
       {
-        title: 'MySQL Comparison',
-        content: p(`Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement
-          for traditional client-server databases. Results vary by operation type, with VibeSQL
-          showing advantages in read-heavy workloads.`),
+        title: t('bench-sysbench-srv-disc-mysql-title'),
+        content: pI18n('bench-sysbench-srv-disc-mysql'),
       },
       {
-        title: 'Server Roadmap',
-        content: bullets([
-          bullet('Connection pooling', 'Reduce connection establishment overhead for high-throughput scenarios'),
-          bullet('Prepared statement caching', 'Server-side caching of query plans across connections'),
-          bullet('Extended query protocol', 'Full PostgreSQL extended query protocol support for batch operations'),
+        title: t('bench-sysbench-srv-disc-roadmap-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-sysbench-srv-disc-pooling' },
+          { labelKey: 'bench-bullet-stmt-caching', descKey: 'bench-sysbench-srv-disc-caching' },
+          { labelKey: 'bench-bullet-extended-protocol', descKey: 'bench-sysbench-srv-disc-extended' },
         ]),
       },
     ]),
@@ -587,53 +617,50 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
   'footprint-embedded': {
     id: 'footprint-embedded',
     name: 'Footprint (Embedded)',
+    nameKey: 'bench-footprint-embedded-name',
     dataFile: 'footprint_results.json',
     opsLabel: 'databases compared',
+    opsLabelKey: 'bench-footprint-embedded-ops-label',
     descriptions: {
       'binary_size': 'Binary Size - Size of the compiled database binary on disk',
       'startup_time': 'Startup Time - Time to cold-start and execute first query',
       'peak_memory': 'Peak Memory - Maximum resident set size during initialization',
     },
-    methodology: methodology(
-      'Native Binary Footprint',
-      `<strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries,
-        comparing binary size, cold startup time, and peak memory usage.`,
+    descriptionKeys: {
+      'binary_size': 'bench-footprint-binary-size',
+      'startup_time': 'bench-footprint-startup-time',
+      'peak_memory': 'bench-footprint-peak-memory',
+    },
+    getMethodology: () => methodology(
+      t('bench-footprint-embedded-title'),
+      t('bench-footprint-embedded-description'),
       [
-        li('Binary Size', 'Size of the compiled native binary in bytes (stripped release build)'),
-        li('Startup Time', 'Time from process start to first query result (CREATE TABLE, INSERT, SELECT)'),
-        li('Peak Memory', 'Maximum resident set size (RSS) during cold startup'),
-        li('Databases', 'VibeSQL, SQLite, DuckDB'),
+        li(t('bench-binary-size'), 'Size of the compiled native binary in bytes (stripped release build)'),
+        li(t('bench-startup-time'), 'Time from process start to first query result (CREATE TABLE, INSERT, SELECT)'),
+        li(t('bench-peak-memory'), 'Maximum resident set size (RSS) during cold startup'),
+        li(t('bench-databases'), 'VibeSQL, SQLite, DuckDB'),
       ],
-      [
-        `Native binary footprint is critical for <strong>embedded and edge deployments</strong> where
-        binary size, startup latency, and memory consumption directly impact deployment feasibility.`,
-      ]
+      [t('bench-footprint-embedded-note')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: 'Binary Size: Middle Ground',
-        content: p(`VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects
-          our choice to include advanced features (window functions, CTEs, columnar execution) while
-          keeping the binary manageable for embedded deployments.`),
+        title: t('bench-footprint-emb-disc-size-title'),
+        content: pI18n('bench-footprint-emb-disc-size'),
       },
       {
-        title: 'Startup: Fastest Cold Start',
-        content: p(`VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and
-          significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only
-          essential metadata structures on startup.`),
+        title: t('bench-footprint-emb-disc-startup-title'),
+        content: pI18n('bench-footprint-emb-disc-startup'),
       },
       {
-        title: 'Memory Efficiency',
-        content: p(`Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB.
-          The difference from SQLite reflects our more sophisticated query optimizer and columnar
-          execution infrastructure that's allocated upfront.`),
+        title: t('bench-footprint-emb-disc-memory-title'),
+        content: pI18n('bench-footprint-emb-disc-memory'),
       },
       {
-        title: 'Size Reduction Roadmap',
-        content: bullets([
-          bullet('Feature flags', 'Compile-time feature selection to exclude unused functionality'),
-          bullet('LTO optimization', 'Whole-program link-time optimization for dead code elimination'),
-          bullet('Modular builds', 'Separate core engine from optional features (e.g., window functions)'),
+        title: t('bench-footprint-emb-disc-roadmap-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-feature-flags', descKey: 'bench-footprint-emb-disc-flags' },
+          { labelKey: 'bench-bullet-lto', descKey: 'bench-footprint-emb-disc-lto' },
+          { labelKey: 'bench-bullet-modular', descKey: 'bench-footprint-emb-disc-modular' },
         ]),
       },
     ]),
@@ -641,57 +668,53 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
   'footprint-server': {
     id: 'footprint-server',
     name: 'Footprint (Server/WASM)',
+    nameKey: 'bench-footprint-server-name',
     dataFile: 'footprint_results.json',
     opsLabel: 'deployment targets',
+    opsLabelKey: 'bench-footprint-server-ops-label',
     descriptions: {
       'wasm_size': 'WASM Size - Size of the WebAssembly module for browser deployment',
       'wasm_gzip': 'WASM (gzip) - Compressed size for web delivery',
     },
-    methodology: methodology(
-      'WASM Footprint',
-      `<strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment,
-        critical for web applications where download size impacts user experience.`,
+    descriptionKeys: {
+      'wasm_size': 'bench-footprint-wasm-size',
+      'wasm_gzip': 'bench-footprint-wasm-gzip',
+    },
+    getMethodology: () => methodology(
+      t('bench-footprint-server-title'),
+      t('bench-footprint-server-description'),
       [
-        li('WASM Size', 'Size of the raw WebAssembly module'),
-        li('WASM (gzip)', 'Compressed size for HTTP delivery (browsers auto-decompress)'),
-        li('WASM (brotli)', 'Brotli-compressed size for optimal web delivery'),
+        li(t('bench-wasm-size'), 'Size of the raw WebAssembly module'),
+        li(t('bench-wasm-gzip'), 'Compressed size for HTTP delivery (browsers auto-decompress)'),
+        li(t('bench-wasm-brotli'), 'Brotli-compressed size for optimal web delivery'),
       ],
-      [
-        `WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts
-        time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.`,
-        `<strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining
-        full SQL:1999 compliance in the browser.`,
-      ]
+      [t('bench-footprint-server-note'), t('bench-footprint-server-note2')]
     ),
-    discussion: discussion([
+    getDiscussion: () => discussion([
       {
-        title: 'WASM: 2.2MB Compressed',
-        content: p(`VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast
-          initial page loads. This is a full SQL:1999 database with window functions, CTEs, and
-          ACID transactions running entirely in the browser.`),
+        title: t('bench-footprint-srv-disc-wasm-title'),
+        content: pI18n('bench-footprint-srv-disc-wasm'),
       },
       {
-        title: "What's Included",
+        title: t('bench-footprint-srv-disc-included-title'),
         content: bullets([
-          '<li>Complete SQL parser and query optimizer</li>',
-          '<li>B-tree storage engine with MVCC</li>',
-          '<li>Window functions and advanced aggregations</li>',
-          '<li>Common table expressions (WITH clause)</li>',
-          '<li>Full ACID transaction support</li>',
+          `<li>${t('bench-footprint-srv-disc-parser')}</li>`,
+          `<li>${t('bench-footprint-srv-disc-btree')}</li>`,
+          `<li>${t('bench-footprint-srv-disc-window')}</li>`,
+          `<li>${t('bench-footprint-srv-disc-cte')}</li>`,
+          `<li>${t('bench-footprint-srv-disc-acid')}</li>`,
         ]),
       },
       {
-        title: 'Browser Deployment Benefits',
-        content: p(`Running SQL in the browser eliminates round-trip latency to servers, enables offline-first
-          applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is
-          designed for this use case with minimal dependencies and efficient memory usage.`),
+        title: t('bench-footprint-srv-disc-benefits-title'),
+        content: pI18n('bench-footprint-srv-disc-benefits'),
       },
       {
-        title: 'WASM Roadmap',
-        content: bullets([
-          bullet('Streaming compilation', 'Start executing while the module downloads'),
-          bullet('IndexedDB persistence', 'Durable storage across browser sessions'),
-          bullet('Worker thread support', 'Run queries off the main thread for responsive UIs'),
+        title: t('bench-footprint-srv-disc-roadmap-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-streaming', descKey: 'bench-footprint-srv-disc-streaming' },
+          { labelKey: 'bench-bullet-indexeddb', descKey: 'bench-footprint-srv-disc-indexeddb' },
+          { labelKey: 'bench-bullet-worker', descKey: 'bench-footprint-srv-disc-worker' },
         ]),
       },
     ]),
@@ -854,17 +877,17 @@ function updateSpeedupDisplay(elementId: string, avgSpeedup: number): void {
   el.className = 'text-3xl font-bold';
 
   if (avgSpeedup > 1) {
-    el.textContent = `${avgSpeedup.toFixed(2)}x faster`;
+    el.textContent = t('bench-faster', { value: avgSpeedup.toFixed(2) });
     el.className += ' text-green-600 dark:text-green-400';
   } else if (avgSpeedup < 1 && avgSpeedup > 0) {
     const slowerBy = 1 / avgSpeedup;
-    el.textContent = `${slowerBy.toFixed(2)}x slower`;
+    el.textContent = t('bench-slower', { value: slowerBy.toFixed(2) });
     el.className += ' text-red-600 dark:text-red-400';
   } else if (avgSpeedup === 0) {
-    el.textContent = 'N/A';
+    el.textContent = t('bench-na');
     el.className += ' text-gray-500 dark:text-gray-400';
   } else {
-    el.textContent = `${avgSpeedup.toFixed(2)}x`;
+    el.textContent = t('bench-speedup', { value: avgSpeedup.toFixed(2) });
     el.className += ' text-primary-light dark:text-primary-dark';
   }
 }
@@ -874,14 +897,14 @@ function updateSpeedupDisplay(elementId: string, avgSpeedup: number): void {
  */
 function resetSummaryCardHeaders(): void {
   const sqliteHeader = document.querySelector('#avg-speedup-sqlite')?.parentElement?.querySelector('h3');
-  if (sqliteHeader) sqliteHeader.textContent = 'vs SQLite';
+  if (sqliteHeader) sqliteHeader.textContent = t('bench-vs-sqlite');
   const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
-  if (sqliteLabelEl) sqliteLabelEl.textContent = 'average speedup';
+  if (sqliteLabelEl) sqliteLabelEl.textContent = t('bench-avg-speedup');
 
   const duckdbHeader = document.querySelector('#avg-speedup-duckdb')?.parentElement?.querySelector('h3');
-  if (duckdbHeader) duckdbHeader.textContent = 'vs DuckDB';
+  if (duckdbHeader) duckdbHeader.textContent = t('bench-vs-duckdb');
   const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
-  if (duckdbLabelEl) duckdbLabelEl.textContent = 'average speedup';
+  if (duckdbLabelEl) duckdbLabelEl.textContent = t('bench-avg-speedup');
 }
 
 /**
@@ -899,7 +922,7 @@ function updateSpeedupSummary(
   } else {
     const sqliteEl = document.getElementById('avg-speedup-sqlite');
     if (sqliteEl) {
-      sqliteEl.textContent = 'N/A';
+      sqliteEl.textContent = t('bench-na');
       sqliteEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
   }
@@ -910,7 +933,7 @@ function updateSpeedupSummary(
   } else {
     const duckdbEl = document.getElementById('avg-speedup-duckdb');
     if (duckdbEl) {
-      duckdbEl.textContent = 'N/A';
+      duckdbEl.textContent = t('bench-na');
       duckdbEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
   }
@@ -1074,9 +1097,9 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
         cell.textContent = formatTime(bench.stats.mean, bench.stats.stddev);
         times.push({ name, mean: bench.stats.mean, cell });
       } else if (bench && bench.stats.mean < 0) {
-        cell.innerHTML = '<span class="text-red-500" title="Query failed (timeout or error)">FAILED</span>';
+        cell.innerHTML = `<span class="text-red-500" title="${t('bench-failed-title')}">${t('bench-failed')}</span>`;
       } else {
-        cell.textContent = 'N/A';
+        cell.textContent = t('bench-na');
       }
 
       return cell;
@@ -1305,32 +1328,32 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
   if (sqliteEl && vibesql && sqlite && vibesql.available && sqlite.available) {
     const startupSpeedup = sqlite.startup_time_ms / vibesql.startup_time_ms;
     if (startupSpeedup > 1) {
-      sqliteEl.textContent = `${startupSpeedup.toFixed(2)}x faster`;
+      sqliteEl.textContent = t('bench-faster', { value: startupSpeedup.toFixed(2) });
       sqliteEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
     } else {
       const slower = 1 / startupSpeedup;
-      sqliteEl.textContent = `${slower.toFixed(2)}x slower`;
+      sqliteEl.textContent = t('bench-slower', { value: slower.toFixed(2) });
       sqliteEl.className = 'text-3xl font-bold text-red-600 dark:text-red-400';
     }
   }
   const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
-  if (sqliteLabelEl) sqliteLabelEl.textContent = 'startup time';
+  if (sqliteLabelEl) sqliteLabelEl.textContent = t('bench-startup-time-label');
 
   // DuckDB comparison (startup time)
   const duckdbEl = document.getElementById('avg-speedup-duckdb');
   if (duckdbEl && vibesql && duckdb && vibesql.available && duckdb.available) {
     const startupSpeedup = duckdb.startup_time_ms / vibesql.startup_time_ms;
     if (startupSpeedup > 1) {
-      duckdbEl.textContent = `${startupSpeedup.toFixed(2)}x faster`;
+      duckdbEl.textContent = t('bench-faster', { value: startupSpeedup.toFixed(2) });
       duckdbEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
     } else {
       const slower = 1 / startupSpeedup;
-      duckdbEl.textContent = `${slower.toFixed(2)}x slower`;
+      duckdbEl.textContent = t('bench-slower', { value: slower.toFixed(2) });
       duckdbEl.className = 'text-3xl font-bold text-red-600 dark:text-red-400';
     }
   }
   const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
-  if (duckdbLabelEl) duckdbLabelEl.textContent = 'startup time';
+  if (duckdbLabelEl) duckdbLabelEl.textContent = t('bench-startup-time-label');
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -1398,7 +1421,7 @@ function renderFootprintServerTable(data: FootprintResults): void {
 
   if (!vibesql || !vibesql.wasm_size_bytes) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="3" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No WASM data available</td>`;
+    row.innerHTML = `<td colspan="3" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">${t('bench-no-wasm-data')}</td>`;
     tbody.appendChild(row);
     return;
   }
@@ -1455,9 +1478,9 @@ function renderFootprintServerTable(data: FootprintResults): void {
   }
   // Update the header since this isn't a comparison
   const sqliteHeader = sqliteEl?.parentElement?.querySelector('h3');
-  if (sqliteHeader) sqliteHeader.textContent = 'WASM (gzip)';
+  if (sqliteHeader) sqliteHeader.textContent = t('bench-wasm-gzip');
   const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
-  if (sqliteLabelEl) sqliteLabelEl.textContent = 'download size';
+  if (sqliteLabelEl) sqliteLabelEl.textContent = t('bench-download-size');
 
   // Show raw WASM size in DuckDB slot
   const duckdbEl = document.getElementById('avg-speedup-duckdb');
@@ -1466,9 +1489,9 @@ function renderFootprintServerTable(data: FootprintResults): void {
     duckdbEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
   }
   const duckdbHeader = duckdbEl?.parentElement?.querySelector('h3');
-  if (duckdbHeader) duckdbHeader.textContent = 'WASM (raw)';
+  if (duckdbHeader) duckdbHeader.textContent = t('bench-wasm-size');
   const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
-  if (duckdbLabelEl) duckdbLabelEl.textContent = 'uncompressed';
+  if (duckdbLabelEl) duckdbLabelEl.textContent = t('bench-uncompressed');
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -1478,7 +1501,7 @@ function renderFootprintServerTable(data: FootprintResults): void {
   // Update label below ops tested
   const opsLabelEl = document.getElementById('ops-tested-label');
   if (opsLabelEl) {
-    opsLabelEl.textContent = 'size metrics';
+    opsLabelEl.textContent = t('bench-size-metrics');
   }
 }
 
@@ -1599,10 +1622,10 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     const primaryCell = document.createElement('td');
     primaryCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     if (primary && primary.stats.mean > 0) {
-      primaryCell.textContent = formatTime(primary.stats.mean, primary.stats.stddev) || 'N/A';
+      primaryCell.textContent = formatTime(primary.stats.mean, primary.stats.stddev) || t('bench-na');
       times.push({ mean: primary.stats.mean, cell: primaryCell });
     } else {
-      primaryCell.textContent = 'N/A';
+      primaryCell.textContent = t('bench-na');
     }
     row.appendChild(primaryCell);
 
@@ -1610,10 +1633,10 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     const compCell = document.createElement('td');
     compCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     if (comparison && comparison.stats.mean > 0) {
-      compCell.textContent = formatTime(comparison.stats.mean, comparison.stats.stddev) || 'N/A';
+      compCell.textContent = formatTime(comparison.stats.mean, comparison.stats.stddev) || t('bench-na');
       times.push({ mean: comparison.stats.mean, cell: compCell });
     } else {
-      compCell.textContent = 'N/A';
+      compCell.textContent = t('bench-na');
     }
     row.appendChild(compCell);
 
@@ -1622,10 +1645,10 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
       const duckdbCell = document.createElement('td');
       duckdbCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
       if (duckdb && duckdb.stats.mean > 0) {
-        duckdbCell.textContent = formatTime(duckdb.stats.mean, duckdb.stats.stddev) || 'N/A';
+        duckdbCell.textContent = formatTime(duckdb.stats.mean, duckdb.stats.stddev) || t('bench-na');
         times.push({ mean: duckdb.stats.mean, cell: duckdbCell });
       } else {
-        duckdbCell.textContent = 'N/A';
+        duckdbCell.textContent = t('bench-na');
       }
       row.appendChild(duckdbCell);
     }
@@ -1803,7 +1826,7 @@ function renderTPCCTable(data: TPCCResults): void {
     vibesqlCell.className = vibesqlWins
       ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
       : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-    vibesqlCell.textContent = vibesql ? formatTPS(vibesql.stats.tps) : 'N/A';
+    vibesqlCell.textContent = vibesql ? formatTPS(vibesql.stats.tps) : t('bench-na');
     row.appendChild(vibesqlCell);
 
     // SQLite TPS
@@ -1811,7 +1834,7 @@ function renderTPCCTable(data: TPCCResults): void {
     sqliteCell.className = sqliteWins
       ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
       : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-    sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : 'N/A';
+    sqliteCell.textContent = sqlite ? formatTPS(sqlite.stats.tps) : t('bench-na');
     row.appendChild(sqliteCell);
 
     // Track speedup for summary card (TPS = higher is better, so vibesql/sqlite)
@@ -1958,7 +1981,7 @@ function renderTPCDSTable(data: TPCDSResults): void {
     const timeCell = document.createElement('td');
     timeCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
     if (isPassed && bench.stats.mean > 0) {
-      timeCell.textContent = formatTime(bench.stats.mean, bench.stats.stddev) || 'N/A';
+      timeCell.textContent = formatTime(bench.stats.mean, bench.stats.stddev) || t('bench-na');
     } else {
       timeCell.textContent = '-';
     }
@@ -2079,7 +2102,7 @@ function renderTPCDSChart(data: TPCDSResults): void {
 function updateMethodology(suite: BenchmarkSuite): void {
   const methodologyEl = document.getElementById('methodology-content');
   if (methodologyEl) {
-    methodologyEl.innerHTML = SUITE_CONFIGS[suite].methodology;
+    methodologyEl.innerHTML = SUITE_CONFIGS[suite].getMethodology();
   }
 }
 
@@ -2089,7 +2112,7 @@ function updateMethodology(suite: BenchmarkSuite): void {
 function updateDiscussion(suite: BenchmarkSuite): void {
   const discussionEl = document.getElementById('discussion-content');
   if (discussionEl) {
-    discussionEl.innerHTML = SUITE_CONFIGS[suite].discussion;
+    discussionEl.innerHTML = SUITE_CONFIGS[suite].getDiscussion();
   }
 }
 
@@ -2099,7 +2122,7 @@ function updateDiscussion(suite: BenchmarkSuite): void {
 function updateOpsLabel(suite: BenchmarkSuite): void {
   const opsLabelEl = document.querySelector('#ops-tested + p');
   if (opsLabelEl) {
-    opsLabelEl.textContent = SUITE_CONFIGS[suite].opsLabel;
+    opsLabelEl.textContent = t(SUITE_CONFIGS[suite].opsLabelKey);
   }
 }
 
@@ -2115,25 +2138,25 @@ function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
     // Sysbench embedded shows VibeSQL vs SQLite vs DuckDB
     if (suite === 'sysbench-embedded') {
       thead.innerHTML = `
-        <th class="px-4 py-3">Operation</th>
-        <th class="px-4 py-3 text-right">VibeSQL</th>
-        <th class="px-4 py-3 text-right">SQLite</th>
-        <th class="px-4 py-3 text-right">DuckDB</th>
+        <th class="px-4 py-3">${t('bench-table-operation')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-sqlite')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-duckdb')}</th>
       `;
     // Sysbench server shows VibeSQL Server vs MySQL
     } else if (suite === 'sysbench-server') {
       thead.innerHTML = `
-        <th class="px-4 py-3">Operation</th>
-        <th class="px-4 py-3 text-right" title="VibeSQL via PostgreSQL wire protocol">VibeSQL Server</th>
-        <th class="px-4 py-3 text-right">MySQL</th>
+        <th class="px-4 py-3">${t('bench-table-operation')}</th>
+        <th class="px-4 py-3 text-right" title="${t('bench-vibesql-server-title')}">${t('bench-table-vibesql-server')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-mysql')}</th>
       `;
     } else {
       // TPC-H, TPC-DS, TPC-C: VibeSQL vs SQLite vs DuckDB (embedded databases only)
       thead.innerHTML = `
-        <th class="px-4 py-3">Operation</th>
-        <th class="px-4 py-3 text-right">VibeSQL</th>
-        <th class="px-4 py-3 text-right">SQLite</th>
-        <th class="px-4 py-3 text-right">DuckDB</th>
+        <th class="px-4 py-3">${t('bench-table-operation')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-sqlite')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-duckdb')}</th>
       `;
     }
   }
@@ -2298,12 +2321,12 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
 
     const sqliteEl = document.getElementById('avg-speedup-sqlite');
     if (sqliteEl) {
-      sqliteEl.textContent = 'N/A';
+      sqliteEl.textContent = t('bench-na');
       sqliteEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
     const duckdbEl = document.getElementById('avg-speedup-duckdb');
     if (duckdbEl) {
-      duckdbEl.textContent = 'N/A';
+      duckdbEl.textContent = t('bench-na');
       duckdbEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
     }
 
@@ -2378,6 +2401,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setI18nLocale(localeCode);
     updateDOM();
     document.documentElement.lang = localeCode;
+    // Re-render the current suite to update dynamically generated i18n content
+    loadBenchmarkData(currentSuite);
   });
 
   // Initialize navigation component with theme and locale
