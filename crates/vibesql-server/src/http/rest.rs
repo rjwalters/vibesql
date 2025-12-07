@@ -84,14 +84,14 @@ pub fn create_http_router(
         .route("/api/query", post(execute_query))
         .route("/api/subscribe", get(subscribe_stream))
         .route("/api/tables", get(list_tables))
-        .route("/api/tables/:table_name", get(get_table_info))
+        .route("/api/tables/{table_name}", get(get_table_info))
         // CRUD endpoints for auto-generated RESTful access
-        .route("/api/tables/:table_name/rows", get(super::crud::list_rows))
-        .route("/api/tables/:table_name/rows", post(super::crud::create_row))
-        .route("/api/tables/:table_name/rows/:id", get(super::crud::get_row))
-        .route("/api/tables/:table_name/rows/:id", put(super::crud::update_row))
-        .route("/api/tables/:table_name/rows/:id", patch(super::crud::patch_row))
-        .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
+        .route("/api/tables/{table_name}/rows", get(super::crud::list_rows))
+        .route("/api/tables/{table_name}/rows", post(super::crud::create_row))
+        .route("/api/tables/{table_name}/rows/{id}", get(super::crud::get_row))
+        .route("/api/tables/{table_name}/rows/{id}", put(super::crud::update_row))
+        .route("/api/tables/{table_name}/rows/{id}", patch(super::crud::patch_row))
+        .route("/api/tables/{table_name}/rows/{id}", delete(super::crud::delete_row))
         // GraphQL endpoint
         .route("/api/graphql", post(graphql_handler))
         .with_state(state);
