@@ -131,8 +131,9 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
 
         // Spawn HTTP server
         let db_for_http = Arc::clone(&db);
+        let metrics_for_http = observability.metrics().cloned();
         tokio::spawn(async move {
-            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http);
+            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http, metrics_for_http);
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });
 

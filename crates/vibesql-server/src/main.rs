@@ -139,8 +139,9 @@ async fn main() -> Result<()> {
         // Share the database registry with the HTTP server
         let registry_for_http = database_registry.clone();
 
+        let metrics_for_http = observability.metrics().cloned();
         tokio::spawn(async move {
-            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http);
+            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http, metrics_for_http);
             let listener = tokio::net::TcpListener::bind(&http_addr)
                 .await
                 .expect("Failed to bind HTTP server");

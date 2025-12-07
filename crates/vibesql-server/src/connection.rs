@@ -1543,20 +1543,6 @@ impl ConnectionHandler {
         self.flush_write_buffer().await
     }
 
-    /// Send subscription partial data (0xF7) for selective column updates
-    ///
-    /// This is more bandwidth-efficient than sending full rows when only
-    /// a few columns have changed.
-    async fn send_subscription_partial_data(
-        &mut self,
-        subscription_id: &[u8; 16],
-        rows: Vec<crate::protocol::messages::PartialRowUpdate>,
-    ) -> Result<()> {
-        BackendMessage::SubscriptionPartialData { subscription_id: *subscription_id, rows }
-            .encode(&mut self.write_buf);
-        self.flush_write_buffer().await
-    }
-
     // I/O methods
 
     async fn read_message(&mut self) -> Result<()> {
