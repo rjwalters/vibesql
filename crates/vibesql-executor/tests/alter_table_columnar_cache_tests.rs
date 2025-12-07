@@ -6,6 +6,7 @@
 //!
 //! Related: #3933
 
+use std::sync::Arc;
 use vibesql_ast::{
     AddColumnStmt, AlterColumnStmt, AlterTableStmt, ChangeColumnStmt, ColumnDef,
     DropColumnStmt, ModifyColumnStmt,
@@ -36,7 +37,7 @@ fn insert_row(db: &mut Database, id: i64, name: &str, value: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(name.to_string())),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(value)),
         ]]),
         conflict_clause: None,
