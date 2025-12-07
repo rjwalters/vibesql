@@ -1,13 +1,12 @@
 //! DELETE statement execution
 
 use vibesql_ast::DeleteStmt;
-use vibesql_storage::statistics::CostEstimator;
 use vibesql_storage::Database;
 
 use super::integrity::check_no_child_references;
 use crate::{
-    errors::ExecutorError, evaluator::ExpressionEvaluator, privilege_checker::PrivilegeChecker,
-    truncate_validation::can_use_truncate,
+    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
+    privilege_checker::PrivilegeChecker, truncate_validation::can_use_truncate,
 };
 
 /// Executor for DELETE statements
@@ -233,28 +232,27 @@ impl DeleteExecutor {
             )?;
         }
 
-        // Estimate DML cost for query analysis and optimization decisions
-        if std::env::var("DML_COST_DEBUG").is_ok() && !rows_and_indices_to_delete.is_empty() {
-            if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
-                if let Some(table) = database.get_table(&stmt.table_name) {
-                    if let Some(table_stats) = table.get_statistics() {
-                        let cost_estimator = CostEstimator::default();
-                        let estimated_cost = cost_estimator.estimate_delete(
-                            rows_and_indices_to_delete.len(),
-                            table_stats,
-                            &index_info,
-                        );
-                        eprintln!(
-                            "DML_COST_DEBUG: DELETE {} rows from {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, deleted_ratio: {:.2})",
-                            rows_and_indices_to_delete.len(),
-                            stmt.table_name,
-                            estimated_cost,
-                            index_info.hash_index_count,
-                            index_info.btree_index_count,
-                            index_info.deleted_ratio
-                        );
-                    }
-                }
+        // Cost-based optimization: Log delete cost and check for early compaction recommendation
+        let optimizer = DmlOptimizer::new(database, &stmt.table_name);
+        if optimizer.should_chunk_delete(rows_and_indices_to_delete.len()) {
+            // Log recommendation for potential chunked delete (informational only)
+            // Actual chunked delete would require transaction support to be safe
+            if std::env::var("DML_COST_DEBUG").is_ok() {
+                eprintln!(
+                    "DML_COST_DEBUG: DELETE on {} - {} rows qualifies for chunked delete",
+                    stmt.table_name,
+                    rows_and_indices_to_delete.len()
+                );
+            }
+        }
+        if optimizer.should_trigger_early_compaction() {
+            // Log early compaction recommendation (informational only)
+            // Table compaction is triggered automatically after >50% deleted rows
+            if std::env::var("DML_COST_DEBUG").is_ok() {
+                eprintln!(
+                    "DML_COST_DEBUG: DELETE on {} - early compaction recommended due to high deleted ratio",
+                    stmt.table_name
+                );
             }
         }
 
@@ -296,7 +294,7 @@ impl DeleteExecutor {
         // BEFORE deleting rows (while row indices are still valid and we have old values)
         // First emit WAL entries for each row (needed for recovery replay)
         for (idx, row) in &rows_and_indices_to_delete {
-            database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.clone());
+            database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.to_vec());
         }
 
         // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)

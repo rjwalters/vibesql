@@ -3,6 +3,22 @@ use std::collections::HashMap;
 use std::io;
 use thiserror::Error;
 
+/// Wire protocol configuration for selective column updates
+///
+/// Sent by clients to override server-level selective update thresholds
+/// on a per-subscription basis.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectiveUpdatesConfig {
+    /// Enable/disable selective updates for this subscription
+    pub enabled: Option<bool>,
+    /// Minimum columns that must change to use selective update
+    /// If fewer columns change, send full row instead
+    pub min_changed_columns: Option<usize>,
+    /// Maximum ratio of changed columns before falling back to full row
+    /// E.g., 0.5 means if >50% of columns changed, send full row instead
+    pub max_changed_columns_ratio: Option<f64>,
+}
+
 /// PostgreSQL protocol errors
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -236,7 +252,13 @@ pub enum FrontendMessage {
 
     /// Subscribe message (0xF0) - subscribe to query
     /// The optional filter is a SQL WHERE clause expression applied to subscription updates.
-    Subscribe { query: String, params: Vec<Option<Vec<u8>>>, filter: Option<String> },
+    /// The optional selective_updates_config allows clients to override server-level selective update settings.
+    Subscribe {
+        query: String,
+        params: Vec<Option<Vec<u8>>>,
+        filter: Option<String>,
+        selective_updates_config: Option<SelectiveUpdatesConfig>,
+    },
 
     /// Unsubscribe message (0xF1) - cancel subscription
     Unsubscribe { subscription_id: [u8; 16] },
@@ -559,7 +581,50 @@ impl FrontendMessage {
                     None // No filter field present (backward compatibility)
                 };
 
-                Ok(Some(FrontendMessage::Subscribe { query, params, filter }))
+                // Read optional selective updates configuration (protocol extension)
+                // Format: 1 byte flags + optional values
+                // Bit 0: enabled flag present
+                // Bit 1: min_changed_columns present
+                // Bit 2: max_changed_columns_ratio present
+                let selective_updates_config = if buf.remaining() >= 1 {
+                    let config_flags = buf.get_u8();
+                    if config_flags != 0 {
+                        let mut config = SelectiveUpdatesConfig {
+                            enabled: None,
+                            min_changed_columns: None,
+                            max_changed_columns_ratio: None,
+                        };
+
+                        // Read enabled flag if present
+                        if (config_flags & 0x01) != 0 {
+                            if buf.remaining() >= 1 {
+                                config.enabled = Some(buf.get_u8() != 0);
+                            }
+                        }
+
+                        // Read min_changed_columns if present
+                        if (config_flags & 0x02) != 0 {
+                            if buf.remaining() >= 2 {
+                                config.min_changed_columns = Some(buf.get_u16() as usize);
+                            }
+                        }
+
+                        // Read max_changed_columns_ratio if present
+                        if (config_flags & 0x04) != 0 {
+                            if buf.remaining() >= 8 {
+                                config.max_changed_columns_ratio = Some(buf.get_f64());
+                            }
+                        }
+
+                        Some(config)
+                    } else {
+                        None // config_flags = 0 means no config
+                    }
+                } else {
+                    None // No config field present (backward compatibility)
+                };
+
+                Ok(Some(FrontendMessage::Subscribe { query, params, filter, selective_updates_config }))
             }
 
             0xF1 => {
@@ -727,7 +792,7 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params, filter })
+            Some(FrontendMessage::Subscribe { query, params, filter, .. })
             if query == "SELECT * FROM users" && params.is_empty() && filter.is_none()
         ));
     }
@@ -748,7 +813,7 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params, filter })
+            Some(FrontendMessage::Subscribe { query, params, filter, .. })
             if query == "SELECT * FROM users WHERE id = $1" && params.len() == 1 && filter.is_none()
         ));
     }
@@ -769,7 +834,7 @@ mod tests {
 
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         match msg {
-            Some(FrontendMessage::Subscribe { query, params, filter }) => {
+            Some(FrontendMessage::Subscribe { query, params, filter, .. }) => {
                 assert_eq!(query, "SELECT * FROM users");
                 assert!(params.is_empty());
                 assert_eq!(filter, Some("status = 'active'".to_string()));
@@ -793,7 +858,7 @@ mod tests {
         let msg = FrontendMessage::decode(&mut buf).unwrap();
         assert!(matches!(
             msg,
-            Some(FrontendMessage::Subscribe { query, params, filter })
+            Some(FrontendMessage::Subscribe { query, params, filter, .. })
             if query == "SELECT * FROM users" && params.is_empty() && filter.is_none()
         ));
     }

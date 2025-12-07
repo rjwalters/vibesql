@@ -14,6 +14,7 @@
 //! execution strategies and choose the most efficient one.
 
 use super::{ColumnStatistics, TableStatistics};
+use vibesql_types::DataType;
 
 /// Cost estimator for access methods (scans, index lookups) and DML operations
 ///
@@ -122,6 +123,103 @@ impl Default for CostEstimator {
     }
 }
 
+/// Base row size in bytes for WAL cost scaling (64 bytes)
+/// This represents a minimal row with a few small columns.
+/// Rows larger than this will have proportionally higher WAL costs.
+pub const BASE_ROW_SIZE: f64 = 64.0;
+
+/// Maximum WAL size scaling factor (10x)
+/// Caps the row size multiplier to prevent extreme cost estimates
+/// for tables with very large rows.
+pub const MAX_WAL_SIZE_FACTOR: f64 = 10.0;
+
+/// Estimate the average row size in bytes for a given data type.
+///
+/// These are heuristic estimates used for WAL cost estimation:
+/// - Fixed-size types: actual size
+/// - Variable-size types: typical/average fill based on field definition
+///
+/// # Arguments
+/// * `data_type` - The SQL data type
+///
+/// # Returns
+/// Estimated size in bytes for storing a value of this type.
+pub fn estimate_type_size(data_type: &DataType) -> usize {
+    match data_type {
+        // Boolean: 1 byte
+        DataType::Boolean => 1,
+
+        // Integer types
+        DataType::Smallint => 2,
+        DataType::Integer => 4,
+        DataType::Bigint | DataType::Unsigned => 8,
+
+        // Decimal/Numeric: 16 bytes (typical for DECIMAL storage)
+        DataType::Numeric { .. } | DataType::Decimal { .. } => 16,
+
+        // Floating point
+        DataType::Real => 4,
+        DataType::DoublePrecision => 8,
+        DataType::Float { precision } => {
+            if *precision <= 24 { 4 } else { 8 }
+        }
+
+        // Character types
+        DataType::Character { length } => *length,
+        DataType::Varchar { max_length } => {
+            // For VARCHAR, use half the max length or 32 bytes, whichever is smaller
+            match max_length {
+                Some(len) => (*len / 2).min(32),
+                None => 32, // Default for unbounded VARCHAR
+            }
+        }
+        DataType::CharacterLargeObject => 64, // CLOB: heuristic average
+        DataType::Name => 32, // NAME type: typically short identifiers
+
+        // Date/time types
+        DataType::Date => 4,
+        DataType::Time { .. } => 8,
+        DataType::Timestamp { .. } => 8,
+        DataType::Interval { .. } => 16,
+
+        // Binary types
+        DataType::BinaryLargeObject => 128, // BLOB: heuristic average
+        DataType::Bit { length } => {
+            match length {
+                Some(len) => (*len).div_ceil(8), // Convert bits to bytes
+                None => 1, // Default BIT(1)
+            }
+        }
+
+        // Vector types: dimensions * 8 bytes (f64 per dimension)
+        DataType::Vector { dimensions } => *dimensions as usize * 8,
+
+        // User-defined types: estimate as 64 bytes (unknown size)
+        DataType::UserDefined { .. } => 64,
+
+        // Null: 0 bytes (just a marker)
+        DataType::Null => 0,
+    }
+}
+
+/// Estimate the average row size for a table schema.
+///
+/// Sums the estimated size of each column plus a small overhead per row
+/// for metadata (e.g., null bitmap, row header).
+///
+/// # Arguments
+/// * `columns` - Slice of column data types
+///
+/// # Returns
+/// Estimated average row size in bytes.
+pub fn estimate_row_size(columns: &[DataType]) -> usize {
+    // Per-row overhead: null bitmap + row header (estimate 8 bytes)
+    const ROW_OVERHEAD: usize = 8;
+
+    let column_size: usize = columns.iter().map(estimate_type_size).sum();
+    (column_size + ROW_OVERHEAD).max(BASE_ROW_SIZE as usize)
+}
+
 /// Metadata about table indexes for DML cost estimation
 #[derive(Debug, Clone, Default)]
 pub struct TableIndexInfo {
@@ -134,6 +232,10 @@ pub struct TableIndexInfo {
     /// Current ratio of deleted rows (0.0 to 1.0)
     /// Used to estimate compaction probability
     pub deleted_ratio: f64,
+    /// Average row size in bytes (estimated from schema)
+    /// Used to scale WAL cost based on actual row size.
+    /// Defaults to BASE_ROW_SIZE (64 bytes) if unknown.
+    pub avg_row_size: usize,
 }
 
 impl TableIndexInfo {
@@ -143,13 +245,28 @@ impl TableIndexInfo {
         btree_index_count: usize,
         is_native_columnar: bool,
         deleted_ratio: f64,
+        avg_row_size: usize,
     ) -> Self {
         Self {
             hash_index_count,
             btree_index_count,
             is_native_columnar,
             deleted_ratio,
+            avg_row_size,
         }
+    }
+
+    /// Calculate the WAL size scaling factor based on average row size.
+    ///
+    /// The factor is clamped between 1.0 (for small rows <= BASE_ROW_SIZE)
+    /// and MAX_WAL_SIZE_FACTOR (for very large rows).
+    ///
+    /// # Returns
+    /// A multiplier to apply to the per-row WAL write cost.
+    #[inline]
+    pub fn wal_size_factor(&self) -> f64 {
+        let size_factor = self.avg_row_size as f64 / BASE_ROW_SIZE;
+        size_factor.clamp(1.0, MAX_WAL_SIZE_FACTOR)
     }
 }
 
@@ -313,9 +430,10 @@ impl CostEstimator {
             self.columnar_cache_invalidation_cost
         };
 
-        // 5. WAL write cost
-        // Per-row WAL entry cost + fixed sync overhead (amortized for batches)
-        let wal_cost = rows * self.wal_write_cost + self.wal_sync_cost;
+        // 5. WAL write cost (scaled by row size)
+        // Per-row WAL entry cost scales with row size + fixed sync overhead
+        let wal_size_factor = index_info.wal_size_factor();
+        let wal_cost = rows * self.wal_write_cost * wal_size_factor + self.wal_sync_cost;
 
         tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + wal_cost
     }
@@ -382,9 +500,10 @@ impl CostEstimator {
             self.columnar_cache_invalidation_cost
         };
 
-        // 5. WAL write cost
-        // Per-row WAL entry cost + fixed sync overhead (amortized for batches)
-        let wal_cost = rows * self.wal_write_cost + self.wal_sync_cost;
+        // 5. WAL write cost (scaled by row size)
+        // Per-row WAL entry cost scales with row size + fixed sync overhead
+        let wal_size_factor = index_info.wal_size_factor();
+        let wal_cost = rows * self.wal_write_cost * wal_size_factor + self.wal_sync_cost;
 
         tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + wal_cost
     }
@@ -467,9 +586,10 @@ impl CostEstimator {
             0.0
         };
 
-        // 6. WAL write cost (dominant cost per profiling #3862)
-        // Per-row WAL entry cost + fixed sync overhead (amortized for batches)
-        let wal_cost = rows * self.wal_write_cost + self.wal_sync_cost;
+        // 6. WAL write cost (scaled by row size, dominant cost per profiling #3862)
+        // Per-row WAL entry cost scales with row size + fixed sync overhead
+        let wal_size_factor = index_info.wal_size_factor();
+        let wal_cost = rows * self.wal_write_cost * wal_size_factor + self.wal_sync_cost;
 
         tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + compaction_cost + wal_cost
     }
@@ -647,7 +767,7 @@ mod tests {
     fn test_insert_cost_basic() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 0, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
 
         // Insert 100 rows with 1 hash index (PK)
         let cost = estimator.estimate_insert(100, &table_stats, &index_info);
@@ -665,7 +785,7 @@ mod tests {
     fn test_insert_cost_with_btree_indexes() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 2, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 2, false, 0.0, 64);
 
         // Insert 100 rows with 1 PK and 2 B-tree indexes
         let cost = estimator.estimate_insert(100, &table_stats, &index_info);
@@ -674,7 +794,7 @@ mod tests {
         let cost_no_btree = estimator.estimate_insert(
             100,
             &table_stats,
-            &TableIndexInfo::new(1, 0, false, 0.0),
+            &TableIndexInfo::new(1, 0, false, 0.0, 64),
         );
         assert!(cost > cost_no_btree, "B-tree indexes should increase cost");
     }
@@ -684,8 +804,8 @@ mod tests {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
 
-        let row_index_info = TableIndexInfo::new(1, 0, false, 0.0);
-        let columnar_index_info = TableIndexInfo::new(1, 0, true, 0.0);
+        let row_index_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
+        let columnar_index_info = TableIndexInfo::new(1, 0, true, 0.0, 64);
 
         let row_cost = estimator.estimate_insert(10, &table_stats, &row_index_info);
         let columnar_cost = estimator.estimate_insert(10, &table_stats, &columnar_index_info);
@@ -703,7 +823,7 @@ mod tests {
     fn test_update_cost_basic() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 1, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 1, false, 0.0, 64);
 
         // Update 50 rows, all indexes affected
         let full_cost = estimator.estimate_update(50, &table_stats, &index_info, 1.0);
@@ -724,7 +844,7 @@ mod tests {
     fn test_update_cost_scales_with_affected_ratio() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(2, 3, false, 0.0);
+        let index_info = TableIndexInfo::new(2, 3, false, 0.0, 64);
 
         let cost_0 = estimator.estimate_update(100, &table_stats, &index_info, 0.0);
         let cost_50 = estimator.estimate_update(100, &table_stats, &index_info, 0.5);
@@ -739,7 +859,7 @@ mod tests {
     fn test_delete_cost_basic() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 1, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 1, false, 0.0, 64);
 
         // Delete 100 rows (10% of table) - no compaction
         let cost = estimator.estimate_delete(100, &table_stats, &index_info);
@@ -755,11 +875,11 @@ mod tests {
         let table_stats = create_test_table_stats(1000);
 
         // Case 1: Delete 40% - no compaction yet
-        let index_info_40 = TableIndexInfo::new(1, 0, false, 0.0);
+        let index_info_40 = TableIndexInfo::new(1, 0, false, 0.0, 64);
         let cost_40 = estimator.estimate_delete(400, &table_stats, &index_info_40);
 
         // Case 2: Delete 10% when already at 45% deleted - will trigger compaction
-        let index_info_trigger = TableIndexInfo::new(1, 0, false, 0.45);
+        let index_info_trigger = TableIndexInfo::new(1, 0, false, 0.45, 64);
         let cost_trigger = estimator.estimate_delete(100, &table_stats, &index_info_trigger);
 
         // Compaction should add overhead
@@ -777,8 +897,8 @@ mod tests {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
 
-        let no_indexes = TableIndexInfo::new(0, 0, false, 0.0);
-        let many_indexes = TableIndexInfo::new(2, 5, false, 0.0);
+        let no_indexes = TableIndexInfo::new(0, 0, false, 0.0, 64);
+        let many_indexes = TableIndexInfo::new(2, 5, false, 0.0, 64);
 
         let cost_no_indexes = estimator.estimate_delete(100, &table_stats, &no_indexes);
         let cost_many_indexes = estimator.estimate_delete(100, &table_stats, &many_indexes);
@@ -795,7 +915,7 @@ mod tests {
     fn test_delete_cheaper_than_insert() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 2, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 2, false, 0.0, 64);
 
         // DELETE uses O(1) bitmap marking, INSERT adds to vector
         let delete_cost = estimator.estimate_delete(100, &table_stats, &index_info);
@@ -814,7 +934,7 @@ mod tests {
     fn test_dml_costs_scale_with_row_count() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(10000);
-        let index_info = TableIndexInfo::new(1, 1, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 1, false, 0.0, 64);
 
         let insert_10 = estimator.estimate_insert(10, &table_stats, &index_info);
         let insert_100 = estimator.estimate_insert(100, &table_stats, &index_info);
@@ -835,7 +955,7 @@ mod tests {
     fn test_wal_cost_included_in_insert() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(0, 0, false, 0.0);
+        let index_info = TableIndexInfo::new(0, 0, false, 0.0, 64);
 
         // Insert 100 rows with no indexes
         let cost = estimator.estimate_insert(100, &table_stats, &index_info);
@@ -861,7 +981,7 @@ mod tests {
     fn test_wal_cost_included_in_update() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(0, 0, false, 0.0);
+        let index_info = TableIndexInfo::new(0, 0, false, 0.0, 64);
 
         // Update 50 rows with no index updates
         let cost = estimator.estimate_update(50, &table_stats, &index_info, 0.0);
@@ -877,7 +997,7 @@ mod tests {
     fn test_wal_cost_included_in_delete() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(0, 0, false, 0.0);
+        let index_info = TableIndexInfo::new(0, 0, false, 0.0, 64);
 
         // Delete 100 rows with no indexes
         let cost = estimator.estimate_delete(100, &table_stats, &index_info);
@@ -893,8 +1013,8 @@ mod tests {
     fn test_wal_cost_dominant_in_delete() {
         // Per profiling (#3862), WAL is 56% of DELETE time
         let estimator = CostEstimator::default();
-        let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 0, false, 0.0);
+        let _table_stats = create_test_table_stats(1000);
+        let _index_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
 
         // Calculate components
         let rows = 100.0;
@@ -916,7 +1036,7 @@ mod tests {
     fn test_wal_sync_cost_amortized_for_batches() {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(10000);
-        let index_info = TableIndexInfo::new(1, 0, false, 0.0);
+        let index_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
 
         // Single-row insert
         let cost_1 = estimator.estimate_insert(1, &table_stats, &index_info);
@@ -948,6 +1068,263 @@ mod tests {
         assert!(
             (wal_100 - wal_10 * 10.0).abs() < 0.001,
             "WAL write cost should scale linearly: 10x rows should be 10x cost"
+        );
+    }
+
+    // ============================================================================
+    // Row Size-Scaled WAL Cost Tests
+    // ============================================================================
+
+    #[test]
+    fn test_estimate_type_size_fixed_types() {
+        // Boolean
+        assert_eq!(estimate_type_size(&DataType::Boolean), 1);
+
+        // Integer types
+        assert_eq!(estimate_type_size(&DataType::Smallint), 2);
+        assert_eq!(estimate_type_size(&DataType::Integer), 4);
+        assert_eq!(estimate_type_size(&DataType::Bigint), 8);
+        assert_eq!(estimate_type_size(&DataType::Unsigned), 8);
+
+        // Floating point
+        assert_eq!(estimate_type_size(&DataType::Real), 4);
+        assert_eq!(estimate_type_size(&DataType::DoublePrecision), 8);
+        assert_eq!(estimate_type_size(&DataType::Float { precision: 24 }), 4);
+        assert_eq!(estimate_type_size(&DataType::Float { precision: 53 }), 8);
+
+        // Date/time
+        assert_eq!(estimate_type_size(&DataType::Date), 4);
+        assert_eq!(estimate_type_size(&DataType::Time { with_timezone: false }), 8);
+        assert_eq!(estimate_type_size(&DataType::Timestamp { with_timezone: false }), 8);
+    }
+
+    #[test]
+    fn test_estimate_type_size_variable_types() {
+        // VARCHAR with max length
+        assert_eq!(
+            estimate_type_size(&DataType::Varchar { max_length: Some(100) }),
+            32 // min(100/2, 32) = 32
+        );
+        assert_eq!(
+            estimate_type_size(&DataType::Varchar { max_length: Some(20) }),
+            10 // min(20/2, 32) = 10
+        );
+        assert_eq!(
+            estimate_type_size(&DataType::Varchar { max_length: None }),
+            32 // default
+        );
+
+        // Character with fixed length
+        assert_eq!(estimate_type_size(&DataType::Character { length: 50 }), 50);
+
+        // BLOB/CLOB
+        assert_eq!(estimate_type_size(&DataType::BinaryLargeObject), 128);
+        assert_eq!(estimate_type_size(&DataType::CharacterLargeObject), 64);
+    }
+
+    #[test]
+    fn test_estimate_type_size_vector() {
+        // Vector with dimensions
+        assert_eq!(estimate_type_size(&DataType::Vector { dimensions: 128 }), 128 * 8);
+        assert_eq!(estimate_type_size(&DataType::Vector { dimensions: 512 }), 512 * 8);
+    }
+
+    #[test]
+    fn test_estimate_row_size() {
+        // Small row: 2 columns (INTEGER, BOOLEAN)
+        let small_row = vec![DataType::Integer, DataType::Boolean];
+        let size = estimate_row_size(&small_row);
+        // Expected: 4 + 1 + 8 (overhead) = 13, but min is 64
+        assert_eq!(size, 64);
+
+        // Medium row: 5 columns
+        let medium_row = vec![
+            DataType::Integer,
+            DataType::Bigint,
+            DataType::Varchar { max_length: Some(100) },
+            DataType::Timestamp { with_timezone: false },
+            DataType::Boolean,
+        ];
+        let size = estimate_row_size(&medium_row);
+        // Expected: 4 + 8 + 32 + 8 + 1 + 8 (overhead) = 61, but min is 64
+        assert_eq!(size, 64);
+
+        // Large row: many columns
+        let large_row = vec![
+            DataType::Integer,
+            DataType::Bigint,
+            DataType::DoublePrecision,
+            DataType::Varchar { max_length: Some(200) },
+            DataType::Varchar { max_length: Some(200) },
+            DataType::Varchar { max_length: Some(200) },
+            DataType::Timestamp { with_timezone: false },
+            DataType::Decimal { precision: 18, scale: 2 },
+            DataType::Boolean,
+            DataType::Character { length: 100 },
+        ];
+        let size = estimate_row_size(&large_row);
+        // Expected: 4 + 8 + 8 + 32 + 32 + 32 + 8 + 16 + 1 + 100 + 8 = 249
+        assert_eq!(size, 249);
+    }
+
+    #[test]
+    fn test_wal_size_factor_small_rows() {
+        // Row size equal to BASE_ROW_SIZE (64 bytes)
+        let info = TableIndexInfo::new(1, 0, false, 0.0, 64);
+        assert!((info.wal_size_factor() - 1.0).abs() < 0.01);
+
+        // Row size smaller than BASE_ROW_SIZE (clamped to 1.0)
+        let info = TableIndexInfo::new(1, 0, false, 0.0, 32);
+        assert!((info.wal_size_factor() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_wal_size_factor_medium_rows() {
+        // Row size 2x BASE_ROW_SIZE
+        let info = TableIndexInfo::new(1, 0, false, 0.0, 128);
+        assert!((info.wal_size_factor() - 2.0).abs() < 0.01);
+
+        // Row size 4x BASE_ROW_SIZE
+        let info = TableIndexInfo::new(1, 0, false, 0.0, 256);
+        assert!((info.wal_size_factor() - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_wal_size_factor_large_rows_capped() {
+        // Row size 15x BASE_ROW_SIZE (should be capped at MAX_WAL_SIZE_FACTOR = 10)
+        let info = TableIndexInfo::new(1, 0, false, 0.0, 960); // 64 * 15
+        assert!((info.wal_size_factor() - 10.0).abs() < 0.01);
+
+        // Extremely large rows also capped
+        let info = TableIndexInfo::new(1, 0, false, 0.0, 10000);
+        assert!((info.wal_size_factor() - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_insert_wal_cost_scales_with_row_size() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+
+        // Small row (64 bytes) - factor of 1.0
+        let small_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
+        let small_cost = estimator.estimate_insert(100, &table_stats, &small_info);
+
+        // Large row (256 bytes) - factor of 4.0
+        let large_info = TableIndexInfo::new(1, 0, false, 0.0, 256);
+        let large_cost = estimator.estimate_insert(100, &table_stats, &large_info);
+
+        // Large row should have higher WAL cost
+        assert!(
+            large_cost > small_cost,
+            "Large row insert cost ({}) should be higher than small row cost ({})",
+            large_cost,
+            small_cost
+        );
+
+        // The difference should be approximately 3x the WAL cost (4x - 1x = 3x factor)
+        // WAL base cost = 100 * 0.12 = 12.0
+        // Expected increase = 12.0 * 3 = 36.0
+        let cost_diff = large_cost - small_cost;
+        assert!(
+            cost_diff > 30.0 && cost_diff < 40.0,
+            "Cost difference ({}) should be approximately 3x WAL base cost",
+            cost_diff
+        );
+    }
+
+    #[test]
+    fn test_update_wal_cost_scales_with_row_size() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+
+        // Small row (64 bytes)
+        let small_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
+        let small_cost = estimator.estimate_update(50, &table_stats, &small_info, 0.0);
+
+        // Large row (320 bytes) - factor of 5.0
+        let large_info = TableIndexInfo::new(1, 0, false, 0.0, 320);
+        let large_cost = estimator.estimate_update(50, &table_stats, &large_info, 0.0);
+
+        // Large row should have higher WAL cost
+        assert!(
+            large_cost > small_cost,
+            "Large row update cost ({}) should be higher than small row cost ({})",
+            large_cost,
+            small_cost
+        );
+    }
+
+    #[test]
+    fn test_delete_wal_cost_scales_with_row_size() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+
+        // Small row (64 bytes)
+        let small_info = TableIndexInfo::new(0, 0, false, 0.0, 64);
+        let small_cost = estimator.estimate_delete(100, &table_stats, &small_info);
+
+        // Large row (640 bytes) - factor would be 10.0 but capped at MAX_WAL_SIZE_FACTOR
+        let large_info = TableIndexInfo::new(0, 0, false, 0.0, 640);
+        let large_cost = estimator.estimate_delete(100, &table_stats, &large_info);
+
+        // Large row should have higher WAL cost
+        assert!(
+            large_cost > small_cost,
+            "Large row delete cost ({}) should be higher than small row cost ({})",
+            large_cost,
+            small_cost
+        );
+    }
+
+    #[test]
+    fn test_2_column_vs_50_column_wal_cost() {
+        // This is the key test from the issue: verify that a 50-column table
+        // has higher WAL cost than a 2-column table
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+
+        // 2-column table: INTEGER + VARCHAR(50) = 4 + 25 + 8 = 37 bytes (min 64)
+        let small_row_size = estimate_row_size(&[
+            DataType::Integer,
+            DataType::Varchar { max_length: Some(50) },
+        ]);
+        assert_eq!(small_row_size, 64); // min row size
+
+        // 50-column table: mix of types, much larger
+        let large_columns: Vec<DataType> = (0..10)
+            .map(|_| DataType::Integer)
+            .chain((0..10).map(|_| DataType::Bigint))
+            .chain((0..10).map(|_| DataType::DoublePrecision))
+            .chain((0..10).map(|_| DataType::Varchar { max_length: Some(100) }))
+            .chain((0..10).map(|_| DataType::Timestamp { with_timezone: false }))
+            .collect();
+        assert_eq!(large_columns.len(), 50);
+
+        let large_row_size = estimate_row_size(&large_columns);
+        // Expected: 10*4 + 10*8 + 10*8 + 10*32 + 10*8 + 8 = 40+80+80+320+80+8 = 608 bytes
+        assert!(large_row_size > 500, "Large row should be > 500 bytes, got {}", large_row_size);
+
+        // Create index infos with row sizes
+        let small_info = TableIndexInfo::new(1, 0, false, 0.0, small_row_size);
+        let large_info = TableIndexInfo::new(1, 0, false, 0.0, large_row_size);
+
+        // Insert costs
+        let small_insert = estimator.estimate_insert(100, &table_stats, &small_info);
+        let large_insert = estimator.estimate_insert(100, &table_stats, &large_info);
+
+        assert!(
+            large_insert > small_insert,
+            "50-column table insert cost ({}) should exceed 2-column table cost ({})",
+            large_insert,
+            small_insert
+        );
+
+        // The factor should be significant (large row is ~9.5x base, but capped at 10x)
+        let factor = large_info.wal_size_factor() / small_info.wal_size_factor();
+        assert!(
+            factor >= 9.0,
+            "WAL size factor ratio ({}) should be at least 9x",
+            factor
         );
     }
 }

@@ -1,4 +1,4 @@
-use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker};
+use crate::{dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker};
 use vibesql_storage::statistics::CostEstimator;
 
 /// Execute an INSERT statement
@@ -101,22 +101,24 @@ fn execute_insert_internal(
     // This helps with profiling and can inform future batch size decisions
     if std::env::var("DML_COST_DEBUG").is_ok() {
         if let Some(index_info) = db.get_table_index_info(&stmt.table_name) {
-            // Get table statistics for cost estimation (use cached if available)
+            // Get table statistics for cost estimation (use cached if available, or fallback to estimate)
             if let Some(table) = db.get_table(&stmt.table_name) {
-                if let Some(table_stats) = table.get_statistics() {
-                    let cost_estimator = CostEstimator::default();
-                    let estimated_cost =
-                        cost_estimator.estimate_insert(rows_to_insert.len(), table_stats, &index_info);
-                    eprintln!(
-                        "DML_COST_DEBUG: INSERT {} rows into {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {})",
-                        rows_to_insert.len(),
-                        stmt.table_name,
-                        estimated_cost,
-                        index_info.hash_index_count,
-                        index_info.btree_index_count,
-                        index_info.is_native_columnar
-                    );
-                }
+                let table_stats = table
+                    .get_statistics()
+                    .cloned()
+                    .unwrap_or_else(|| vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count()));
+                let cost_estimator = CostEstimator::default();
+                let estimated_cost =
+                    cost_estimator.estimate_insert(rows_to_insert.len(), &table_stats, &index_info);
+                eprintln!(
+                    "DML_COST_DEBUG: INSERT {} rows into {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {})",
+                    rows_to_insert.len(),
+                    stmt.table_name,
+                    estimated_cost,
+                    index_info.hash_index_count,
+                    index_info.btree_index_count,
+                    index_info.is_native_columnar
+                );
             }
         }
     }
@@ -226,12 +228,30 @@ fn execute_insert_internal(
 
     if use_batch_insert && validated_rows.len() > 1 {
         // Fast path: Use batch insert for multiple rows without triggers
-        let rows: Vec<vibesql_storage::Row> =
-            validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
+        // Use cost-based batch sizing to optimize for tables with many indexes
+        let optimizer = DmlOptimizer::new(db, &stmt.table_name);
+        let optimal_batch_size = optimizer.optimal_insert_batch_size(validated_rows.len());
 
-        rows_inserted = db
-            .insert_rows_batch(&stmt.table_name, rows)
-            .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
+        // If optimal batch size is smaller than total rows, insert in batches
+        if optimal_batch_size < validated_rows.len() {
+            // Chunked batch insert for high-cost tables
+            for chunk in validated_rows.chunks(optimal_batch_size) {
+                let rows: Vec<vibesql_storage::Row> =
+                    chunk.iter().map(|v| vibesql_storage::Row::new(v.clone())).collect();
+
+                rows_inserted += db
+                    .insert_rows_batch(&stmt.table_name, rows)
+                    .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
+            }
+        } else {
+            // Single batch insert for low-cost tables
+            let rows: Vec<vibesql_storage::Row> =
+                validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
+
+            rows_inserted = db
+                .insert_rows_batch(&stmt.table_name, rows)
+                .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
+        }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
         for full_row_values in validated_rows {

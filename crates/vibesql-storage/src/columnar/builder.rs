@@ -5,15 +5,15 @@
 //!
 //! ## String Interning
 //!
-//! String columns can optionally use string interning to reduce memory usage
-//! when columns have many repeated values (enum-like data, status codes, etc.).
-//! Enable with `ColumnBuilder::with_string_interning()`.
+//! For string columns, the builder uses a `StringInterner` to deduplicate
+//! low-cardinality string values. This provides significant memory savings
+//! and enables faster equality comparisons for enum-like columns.
 
 use std::sync::Arc;
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
 use super::data::ColumnData;
-use super::string_interner::StringInterner;
+use super::interner::StringInterner;
 use super::types::ColumnTypeClass;
 
 /// Builder for constructing column data with pre-allocated capacity
@@ -21,7 +21,8 @@ use super::types::ColumnTypeClass;
 /// The builder pre-allocates storage based on the expected column type,
 /// avoiding reallocation during row processing.
 ///
-/// Supports optional string interning for columns with many repeated values.
+/// For string columns, uses string interning to deduplicate values when
+/// the number of distinct strings is below a threshold (default: 32).
 pub(crate) struct ColumnBuilder {
     type_class: ColumnTypeClass,
     int64_values: Vec<i64>,
@@ -33,8 +34,8 @@ pub(crate) struct ColumnBuilder {
     timestamp_values: Vec<Timestamp>,
     interval_values: Vec<Interval>,
     nulls: Vec<bool>,
-    /// Optional string interner for low-cardinality string columns
-    string_interner: Option<StringInterner>,
+    /// String interner for deduplicating low-cardinality string columns
+    string_interner: StringInterner,
 }
 
 impl ColumnBuilder {
@@ -55,7 +56,7 @@ impl ColumnBuilder {
             timestamp_values: Vec::new(),
             interval_values: Vec::new(),
             nulls: Vec::with_capacity(capacity),
-            string_interner: None,
+            string_interner: StringInterner::default(),
         };
 
         // Pre-allocate the appropriate vector based on type
@@ -91,36 +92,6 @@ impl ColumnBuilder {
         }
 
         builder
-    }
-
-    /// Enable string interning for this string column
-    ///
-    /// String interning caches repeated string values, deduplicating storage.
-    /// This is beneficial for columns with limited distinct values.
-    ///
-    /// # Arguments
-    /// * `capacity` - Expected number of unique strings in the column
-    ///
-    /// # Example
-    /// ```ignore
-    /// let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 10000);
-    /// builder.with_string_interning(500); // Expect ~500 distinct values
-    /// ```
-    pub fn with_string_interning(mut self, capacity: usize) -> Self {
-        self.string_interner = Some(StringInterner::with_capacity(capacity));
-        self
-    }
-
-    /// Check if string interning is enabled
-    pub fn has_string_interning(&self) -> bool {
-        self.string_interner.is_some()
-    }
-
-    /// Get statistics from string interning (if enabled)
-    ///
-    /// Returns None if string interning is not enabled.
-    pub fn string_interner_stats(&self) -> Option<super::string_interner::InternerStats> {
-        self.string_interner.as_ref().map(|interner| interner.stats())
     }
 
     /// Push a value into the column builder
@@ -177,33 +148,21 @@ impl ColumnBuilder {
                 self.nulls.push(true);
             }
 
-            // String handling
+            // String handling - use interner for deduplication
             (ColumnTypeClass::String, SqlValue::Varchar(v)) => {
-                let interned = if let Some(interner) = &mut self.string_interner {
-                    interner.intern(v)
-                } else {
-                    v.clone()
-                };
+                // Use intern_arc to potentially deduplicate the string
+                let interned = self.string_interner.intern_arc(v.clone());
                 self.string_values.push(interned);
                 self.nulls.push(false);
             }
             (ColumnTypeClass::String, SqlValue::Character(v)) => {
-                let interned = if let Some(interner) = &mut self.string_interner {
-                    interner.intern(v)
-                } else {
-                    v.clone()
-                };
+                // Use intern_arc to potentially deduplicate the string
+                let interned = self.string_interner.intern_arc(v.clone());
                 self.string_values.push(interned);
                 self.nulls.push(false);
             }
             (ColumnTypeClass::String, SqlValue::Null) => {
-                let empty_arc = Arc::from("");
-                let interned = if let Some(interner) = &mut self.string_interner {
-                    interner.intern("")
-                } else {
-                    empty_arc
-                };
-                self.string_values.push(interned);
+                self.string_values.push(Arc::from(""));
                 self.nulls.push(true);
             }
 
@@ -311,121 +270,5 @@ impl ColumnBuilder {
                 ColumnData::Vector { values: Arc::new(Vec::new()), nulls: Arc::new(self.nulls) }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_string_interning_basic() {
-        let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 100)
-            .with_string_interning(10);
-
-        builder.push(&SqlValue::Varchar(Arc::from("status"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("status"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("pending"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("status"))).unwrap();
-
-        let stats = builder.string_interner_stats().unwrap();
-        assert_eq!(stats.total_interned, 4);
-        assert_eq!(stats.cache_hits, 2); // Second and fourth "status"
-        assert_eq!(stats.unique_strings, 2); // "status" and "pending"
-    }
-
-    #[test]
-    fn test_string_interning_deduplication() {
-        let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 100)
-            .with_string_interning(5);
-
-        // Push 6 values, 3 unique
-        builder.push(&SqlValue::Varchar(Arc::from("active"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("pending"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("active"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("completed"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("pending"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("active"))).unwrap();
-
-        let stats = builder.string_interner_stats().unwrap();
-        assert_eq!(stats.unique_strings, 3);
-        // Hit rate should be > 0.5 (3 cache hits out of 6 total)
-        let hit_rate = stats.cache_hits as f64 / stats.total_interned as f64;
-        assert!(hit_rate > 0.4);
-
-        let column = builder.build();
-        assert_eq!(column.len(), 6);
-    }
-
-    #[test]
-    fn test_without_string_interning() {
-        let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 100);
-
-        assert!(!builder.has_string_interning());
-
-        builder.push(&SqlValue::Varchar(Arc::from("test"))).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("test"))).unwrap();
-
-        assert!(builder.string_interner_stats().is_none());
-
-        let column = builder.build();
-        assert_eq!(column.len(), 2);
-    }
-
-    #[test]
-    fn test_string_interning_with_null() {
-        let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 100)
-            .with_string_interning(5);
-
-        builder.push(&SqlValue::Varchar(Arc::from("active"))).unwrap();
-        builder.push(&SqlValue::Null).unwrap();
-        builder.push(&SqlValue::Varchar(Arc::from("active"))).unwrap();
-        builder.push(&SqlValue::Null).unwrap();
-
-        let stats = builder.string_interner_stats().unwrap();
-        // The empty string "" for NULL values should also be interned
-        assert!(stats.unique_strings > 0);
-
-        let column = builder.build();
-        assert_eq!(column.len(), 4);
-        assert!(column.is_null(1));
-        assert!(column.is_null(3));
-    }
-
-    #[test]
-    fn test_enum_like_column() {
-        // Simulate a status column with 4 possible values and 1000 rows
-        let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 1000)
-            .with_string_interning(10);
-
-        let statuses = vec!["pending", "active", "completed", "cancelled"];
-
-        for i in 0..1000 {
-            let status = statuses[i % 4];
-            builder.push(&SqlValue::Varchar(Arc::from(status))).unwrap();
-        }
-
-        let stats = builder.string_interner_stats().unwrap();
-        assert_eq!(stats.unique_strings, 4);
-        assert_eq!(stats.total_interned, 1000);
-        // Should have ~750 cache hits (all but first occurrence of each status)
-        assert_eq!(stats.cache_hits, 996); // 1000 - 4 initial insertions
-
-        let column = builder.build();
-        assert_eq!(column.len(), 1000);
-    }
-
-    #[test]
-    fn test_character_type_with_interning() {
-        let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 100)
-            .with_string_interning(5);
-
-        builder.push(&SqlValue::Character(Arc::from("A"))).unwrap();
-        builder.push(&SqlValue::Character(Arc::from("B"))).unwrap();
-        builder.push(&SqlValue::Character(Arc::from("A"))).unwrap();
-
-        let stats = builder.string_interner_stats().unwrap();
-        assert_eq!(stats.unique_strings, 2);
-        assert_eq!(stats.cache_hits, 1);
     }
 }

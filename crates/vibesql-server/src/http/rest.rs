@@ -20,7 +20,7 @@ use super::graphql;
 use super::types::*;
 use crate::observability::ServerMetrics;
 use crate::registry::DatabaseRegistry;
-use crate::subscription::{detect_pk_columns_from_stmt, SubscriptionManager, SubscriptionUpdate};
+use crate::subscription::{detect_pk_columns_from_stmt, SelectiveColumnConfig, SubscriptionManager, SubscriptionUpdate};
 
 /// Pagination configuration
 #[derive(Debug, Clone)]
@@ -599,6 +599,16 @@ pub struct SubscribeQuery {
     /// Optional query parameters (comma-separated values)
     #[serde(default)]
     pub params: Option<String>,
+    /// Enable selective column updates (default: true if not specified)
+    #[serde(default)]
+    pub selective_enabled: Option<bool>,
+    /// Minimum columns that must change to use selective update (default: 1)
+    #[serde(default)]
+    pub selective_min_changed_columns: Option<usize>,
+    /// Maximum ratio of changed columns before falling back to full row (default: 0.5)
+    /// E.g., 0.3 means if >30% of columns changed, send full row instead
+    #[serde(default)]
+    pub selective_max_changed_ratio: Option<f64>,
 }
 
 /// SSE event sent to clients
@@ -661,6 +671,29 @@ async fn subscribe_stream(
         vec![]
     };
 
+    // Validate selective updates parameters BEFORE query execution (fail-fast)
+    // This ensures clients get clear parameter validation errors, not mixed with query errors
+    if let Some(max_ratio) = params.selective_max_changed_ratio {
+        if !(0.0..=1.0).contains(&max_ratio) {
+            error!("Invalid selective_max_changed_ratio: {}", max_ratio);
+            let event_data = serde_json::to_string(&SseEvent {
+                event_type: "error".to_string(),
+                columns: None,
+                rows: None,
+                old: None,
+                new: None,
+                error: Some("selective_max_changed_ratio must be between 0.0 and 1.0".to_string()),
+            })
+            .unwrap_or_default();
+
+            let stream = futures::stream::once(async move {
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Event::default().data(event_data))
+            });
+
+            return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
+        }
+    }
+
     // Execute initial query with the shared database
     let mut session =
         crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
@@ -715,6 +748,19 @@ async fn subscribe_stream(
         }
     };
 
+    // Build selective updates config from query parameters
+    let mut selective_config = SelectiveColumnConfig::default();
+    if let Some(enabled) = params.selective_enabled {
+        selective_config.enabled = enabled;
+    }
+    if let Some(min_changed) = params.selective_min_changed_columns {
+        selective_config.min_changed_columns = min_changed;
+    }
+    if let Some(max_ratio) = params.selective_max_changed_ratio {
+        // Already validated in early validation block above
+        selective_config.max_changed_columns_ratio = max_ratio;
+    }
+
     // Create subscription via SubscriptionManager
     let (tx, mut rx) = mpsc::channel(32);
     let subscription_id = match state.subscription_manager.subscribe(params.query.clone(), tx) {
@@ -738,6 +784,9 @@ async fn subscribe_stream(
             return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
         }
     };
+
+    // Apply selective updates configuration to the subscription
+    state.subscription_manager.update_selective_updates(subscription_id, selective_config);
 
     // Detect PK columns for selective column updates
     // Parse the subscription query to detect primary key columns

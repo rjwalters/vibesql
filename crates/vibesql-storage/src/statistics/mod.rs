@@ -22,7 +22,10 @@ mod sampling;
 mod table;
 
 pub use column::ColumnStatistics;
-pub use cost::{AccessMethod, CostEstimator, TableIndexInfo};
+pub use cost::{
+    estimate_row_size, estimate_type_size, AccessMethod, CostEstimator, TableIndexInfo,
+    BASE_ROW_SIZE, MAX_WAL_SIZE_FACTOR,
+};
 pub use histogram::{BucketStrategy, Histogram, HistogramBucket};
 pub use sampling::{SampleMetadata, SampleSize, SamplingConfig, SamplingMethod};
 pub use table::TableStatistics;

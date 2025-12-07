@@ -8,15 +8,23 @@ use crate::{
     temporal::{Date, Interval, IntervalField, Time, Timestamp},
     DataType,
 };
-use std::sync::Arc;
+
+// Conditional string type based on feature flag:
+// - With `arcstr` feature: Uses ArcStr with small string optimization (SSO)
+//   Strings ≤22 bytes are stored inline without heap allocation
+// - Without `arcstr` feature: Uses standard Arc<str> for O(1) cloning
+#[cfg(feature = "arcstr")]
+pub type StringValue = arcstr::ArcStr;
+#[cfg(not(feature = "arcstr"))]
+pub type StringValue = std::sync::Arc<str>;
 
 /// SQL Values - runtime representation of data
 ///
 /// Represents actual values in SQL, including NULL.
 ///
-/// String types use `Arc<str>` for O(1) cloning, which significantly
-/// improves performance for range queries and other operations that
-/// clone rows frequently.
+/// String types use `StringValue` which provides O(1) cloning.
+/// When compiled with the `arcstr` feature, strings ≤22 bytes
+/// are stored inline (small string optimization) avoiding heap allocation.
 #[derive(Debug, Clone)]
 pub enum SqlValue {
     Integer(i64),
@@ -29,8 +37,8 @@ pub enum SqlValue {
     Real(f32),
     Double(f64),
 
-    Character(Arc<str>),
-    Varchar(Arc<str>),
+    Character(StringValue),
+    Varchar(StringValue),
 
     Boolean(bool),
 
@@ -118,7 +126,9 @@ impl SqlValue {
         // Add heap allocation size for variable-length types
         match self {
             SqlValue::Character(s) | SqlValue::Varchar(s) => {
-                // Arc<str>: base + string length (capacity == length for Arc<str>)
+// StringValue: base + string length
+                // Note: With arcstr feature, strings ≤22 bytes use SSO (no heap)
+                // but we still count the string length for accounting purposes
                 base_size + s.len()
             }
             SqlValue::Interval(i) => {

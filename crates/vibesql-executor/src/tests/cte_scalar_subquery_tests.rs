@@ -453,7 +453,7 @@ fn test_multi_column_left_outer_join_issue_3656() {
     // Verify the specific results
     // Row 1: (1, 100) has a return
     assert_eq!(
-        result[0].values,
+        result[0].values.to_vec(),
         vec![
             vibesql_types::SqlValue::Integer(1),
             vibesql_types::SqlValue::Integer(100),
@@ -464,7 +464,7 @@ fn test_multi_column_left_outer_join_issue_3656() {
 
     // Row 2: (1, 200) - same ticket but different item, should NOT match return
     assert_eq!(
-        result[1].values,
+        result[1].values.to_vec(),
         vec![
             vibesql_types::SqlValue::Integer(1),
             vibesql_types::SqlValue::Integer(200),
@@ -475,7 +475,7 @@ fn test_multi_column_left_outer_join_issue_3656() {
 
     // Row 3: (2, 100) - different ticket but same item, should NOT match return
     assert_eq!(
-        result[2].values,
+        result[2].values.to_vec(),
         vec![
             vibesql_types::SqlValue::Integer(2),
             vibesql_types::SqlValue::Integer(100),
@@ -486,7 +486,7 @@ fn test_multi_column_left_outer_join_issue_3656() {
 
     // Row 4: (3, 300) - completely unmatched
     assert_eq!(
-        result[3].values,
+        result[3].values.to_vec(),
         vec![
             vibesql_types::SqlValue::Integer(3),
             vibesql_types::SqlValue::Integer(300),

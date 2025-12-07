@@ -16,8 +16,8 @@ use vibesql_storage::Database;
 
 use super::{
     classify_error_str, compute_delta_with_pk, extract_table_refs, hash_rows, PartialRowDelta,
-    Subscription, SubscriptionConfig, SubscriptionError, SubscriptionErrorKind, SubscriptionId,
-    SubscriptionUpdate,
+    SelectiveColumnConfig, Subscription, SubscriptionConfig, SubscriptionError,
+    SubscriptionErrorKind, SubscriptionId, SubscriptionUpdate,
 };
 
 // ============================================================================
@@ -616,6 +616,24 @@ impl SubscriptionManager {
         false
     }
 
+    /// Update selective updates configuration for a subscription
+    ///
+    /// Allows per-subscription overrides of the server-level selective updates config.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The subscription ID
+    /// * `config` - The new selective updates configuration (Some to set, None to clear)
+    pub fn update_selective_updates(
+        &self,
+        id: SubscriptionId,
+        config: super::SelectiveColumnConfig,
+    ) {
+        if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+            sub.set_selective_updates_override(config);
+        }
+    }
+
     /// Get the primary key columns for a subscription by wire ID
     ///
     /// Returns the PK column indices, or default [0] if not found.
@@ -626,6 +644,40 @@ impl SubscriptionManager {
             }
         }
         vec![0] // default
+    }
+
+    /// Set per-subscription selective updates configuration override by wire ID
+    ///
+    /// Allows clients to override server-level selective update thresholds
+    /// on a per-subscription basis via the wire protocol.
+    pub fn set_selective_updates_override_by_wire_id(
+        &self,
+        wire_id: &[u8; 16],
+        config: super::SelectiveColumnConfig,
+    ) {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                sub.set_selective_updates_override(config);
+            }
+        }
+    }
+
+    /// Get the effective selective column config for a subscription by wire ID
+    ///
+    /// Returns the per-subscription override config if set, otherwise creates
+    /// a config using the server-level settings with subscription-specific pk_columns.
+    pub fn get_effective_selective_config_by_wire_id(
+        &self,
+        wire_id: &[u8; 16],
+        server_config: &SelectiveColumnConfig,
+    ) -> SelectiveColumnConfig {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(sub) = self.subscriptions.get(&id) {
+                return sub.get_effective_selective_config(server_config);
+            }
+        }
+        // Subscription not found, return server config with default pk_columns
+        server_config.with_pk_columns(vec![0])
     }
 
     /// Get the number of active subscriptions
@@ -732,7 +784,7 @@ impl SubscriptionManager {
 
                     // Convert to Row format
                     let result_rows: Vec<crate::Row> =
-                        rows.iter().map(|r| crate::Row { values: r.values.clone() }).collect();
+                        rows.iter().map(|r| crate::Row { values: r.values.to_vec() }).collect();
 
                     // Hash results for comparison
                     let new_hash = hash_rows(&result_rows);
@@ -1080,7 +1132,7 @@ impl SubscriptionManager {
 
         // Convert to Row format
         let result_rows: Vec<crate::Row> =
-            rows.iter().map(|r| crate::Row { values: r.values.clone() }).collect();
+            rows.iter().map(|r| crate::Row { values: r.values.to_vec() }).collect();
 
         // Update hash and store result for delta computation
         subscription.last_result_hash = hash_rows(&result_rows);

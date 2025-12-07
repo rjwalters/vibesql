@@ -569,23 +569,19 @@ mod tests {
         let compiled = CompiledWhereClause::try_compile(&expr, &schema).unwrap();
 
         // Test row that matches
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Integer(20),
                 SqlValue::Double(0.05),
                 SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
-            ],
-        };
+            ]);
         assert!(compiled.evaluate(&row).unwrap());
 
         // Test row that doesn't match
-        let row2 = Row {
-            values: vec![
+        let row2 = Row::from_vec(vec![
                 SqlValue::Integer(30),
                 SqlValue::Double(0.05),
                 SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
-            ],
-        };
+            ]);
         assert!(!compiled.evaluate(&row2).unwrap());
     }
 
@@ -686,13 +682,11 @@ mod tests {
         let compiled = CompiledWhereClause::try_compile(&expr, &schema).unwrap();
 
         // Test row where first predicate fails
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Integer(10),  // l_quantity
                 SqlValue::Double(0.05), // l_discount (doesn't match 999.99)
                 SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
-            ],
-        };
+            ]);
 
         // Should return false (short-circuit on first predicate)
         assert!(!compiled.evaluate(&row).unwrap());
@@ -712,13 +706,11 @@ mod tests {
         let compiled = CompiledWhereClause::try_compile(&expr, &schema).unwrap();
 
         // Test row with NULL value
-        let row = Row {
-            values: vec![
+        let row = Row::from_vec(vec![
                 SqlValue::Null, // l_quantity is NULL
                 SqlValue::Double(0.05),
                 SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
-            ],
-        };
+            ]);
 
         // NULL > 10 should return false (not true, not NULL)
         assert!(!compiled.evaluate(&row).unwrap());
@@ -777,23 +769,19 @@ mod tests {
         let compiled = compiled.unwrap();
 
         // Test row in range
-        let row_in_range = Row {
-            values: vec![
+        let row_in_range = Row::from_vec(vec![
                 SqlValue::Integer(50),
                 SqlValue::Double(0.05),
                 SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
-            ],
-        };
+            ]);
         assert!(compiled.evaluate(&row_in_range).unwrap());
 
         // Test row out of range
-        let row_out_of_range = Row {
-            values: vec![
+        let row_out_of_range = Row::from_vec(vec![
                 SqlValue::Integer(200),
                 SqlValue::Double(0.05),
                 SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
-            ],
-        };
+            ]);
         assert!(!compiled.evaluate(&row_out_of_range).unwrap());
     }
 }

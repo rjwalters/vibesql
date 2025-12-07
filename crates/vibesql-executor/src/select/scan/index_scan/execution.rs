@@ -567,10 +567,20 @@ fn apply_where_filter_zerocopy<'a>(
     use crate::select::scan::predicates::combine_predicates_with_and;
 
     // Get table statistics for selectivity-based ordering
-    let table_stats = database.get_table(table_name).and_then(|table| table.get_statistics());
+    // If no statistics available, create fallback estimates based on schema
+    let table_stats_owned = database.get_table(table_name).map(|table| {
+        table.get_statistics().cloned().unwrap_or_else(|| {
+            // Fallback: create estimated statistics from table schema
+            // This enables cost-based optimization even without ANALYZE
+            vibesql_storage::statistics::TableStatistics::estimate_from_schema(
+                table.row_count(),
+                &table.schema,
+            )
+        })
+    });
 
     // Get predicates ordered by selectivity (most selective first)
-    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats);
+    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
 
     // If no table-local predicates, return all rows
     if ordered_preds.is_empty() {
