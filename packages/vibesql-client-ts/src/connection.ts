@@ -19,6 +19,9 @@ import {
   DataRowMessage,
   RowDescriptionMessage,
   CommandCompleteMessage,
+  SubscriptionDataMessage,
+  SubscriptionErrorMessage,
+  SubscriptionPartialDataMessage,
   QueryRow,
   ColumnDescription,
 } from './protocol/messages';
@@ -240,6 +243,21 @@ export class Connection extends EventEmitter {
           } else {
             this.emit('error', new QueryError(errorText));
           }
+          break;
+
+        case 'SubscriptionData':
+          this.emit('subscriptionData', message as SubscriptionDataMessage);
+          break;
+
+        case 'SubscriptionError':
+          this.emit('subscriptionError', message as SubscriptionErrorMessage);
+          break;
+
+        case 'SubscriptionPartialData':
+          this.emit(
+            'subscriptionPartialData',
+            message as SubscriptionPartialDataMessage
+          );
           break;
 
         default:
