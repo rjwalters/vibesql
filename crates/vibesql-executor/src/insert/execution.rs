@@ -319,5 +319,14 @@ fn execute_insert_internal(
         db.set_last_insert_rowid(id);
     }
 
+    // Invalidate the database-level columnar cache since table data changed.
+    // Note: The table-level cache is already invalidated by insert_row()/insert_rows_batch().
+    // Both invalidations are necessary because they manage separate caches:
+    // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+    // - Database-level cache: used by Database::get_columnar() for cached access
+    if rows_inserted > 0 {
+        db.invalidate_columnar_cache(&stmt.table_name);
+    }
+
     Ok(rows_inserted)
 }

@@ -4,17 +4,17 @@
 //! ensuring that subsequent reads via `Database::get_columnar()` return empty data
 //! rather than stale cached data.
 //!
-//! Related: #3932
+//! Related: #3915, #3932
 
 use vibesql_ast::{TruncateCascadeOption, TruncateTableStmt};
-use vibesql_catalog::{ColumnSchema, TableSchema};
-use vibesql_executor::TruncateTableExecutor;
-use vibesql_storage::{Database, Row};
+use vibesql_catalog::{ColumnSchema, ForeignKeyConstraint, ReferentialAction, TableSchema};
+use vibesql_executor::{InsertExecutor, TruncateTableExecutor};
+use vibesql_storage::Database;
 use vibesql_types::{DataType, SqlValue};
 
 /// Sets up a products table for TRUNCATE testing
 fn setup_products_table(db: &mut Database) {
-    let schema = TableSchema::new(
+    let schema = TableSchema::with_primary_key(
         "products".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
@@ -25,24 +25,28 @@ fn setup_products_table(db: &mut Database) {
             ),
             ColumnSchema::new("price".to_string(), DataType::Integer, true),
         ],
+        vec!["id".to_string()], // id is PRIMARY KEY
     );
     db.create_table(schema).unwrap();
 }
 
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
-    db.insert_row(
-        "products",
-        Row::new(vec![
-            SqlValue::Integer(id),
-            SqlValue::Varchar(name.to_string()),
-            SqlValue::Integer(price),
-        ]),
-    )
-    .unwrap();
+    let stmt = vibesql_ast::InsertStmt {
+        table_name: "products".to_string(),
+        columns: vec![],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(name.to_string())),
+            vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
+        ]]),
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+    InsertExecutor::execute(db, &stmt).unwrap();
 }
 
-/// Regression test for issue #3932:
+/// Regression test for issue #3915, #3932:
 /// Verify that TRUNCATE TABLE correctly invalidates the database-level columnar cache.
 ///
 /// This test:
@@ -78,7 +82,7 @@ fn test_truncate_invalidates_columnar_cache() {
         .collect();
     assert_eq!(prices, vec![100, 200, 300], "Initial prices should be 100, 200, 300");
 
-    // Execute TRUNCATE TABLE
+    // Execute TRUNCATE TABLE - this should invalidate the cache
     let stmt = TruncateTableStmt {
         table_names: vec!["products".to_string()],
         if_exists: false,
@@ -147,7 +151,7 @@ fn test_truncate_invalidates_prewarmed_cache() {
 
 /// Test that inserting after TRUNCATE returns correct data in columnar cache
 #[test]
-fn test_truncate_then_insert_updates_cache() {
+fn test_truncate_then_insert_cache_coherence() {
     let mut db = Database::new();
     setup_products_table(&mut db);
 
@@ -172,6 +176,7 @@ fn test_truncate_then_insert_updates_cache() {
     let columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(columnar.row_count(), 1, "Should have 1 new row");
 
+    // Verify the new price is present, old price is gone
     let price_col = columnar.get_column("price").expect("Column should exist");
     let price = match price_col.get(0) {
         SqlValue::Integer(v) => v,
@@ -191,18 +196,18 @@ fn test_truncate_empty_table_cache() {
     let initial_columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(initial_columnar.row_count(), 0);
 
-    // TRUNCATE empty table
+    // TRUNCATE empty table (should be a no-op but shouldn't fail)
     let stmt = TruncateTableStmt {
         table_names: vec!["products".to_string()],
         if_exists: false,
         cascade: None,
     };
     let deleted = TruncateTableExecutor::execute(&stmt, &mut db).unwrap();
-    assert_eq!(deleted, 0);
+    assert_eq!(deleted, 0, "Truncating empty table should delete 0 rows");
 
     // Get columnar data again - should still be empty
     let updated_columnar = db.get_columnar("products").unwrap().expect("Table should exist");
-    assert_eq!(updated_columnar.row_count(), 0);
+    assert_eq!(updated_columnar.row_count(), 0, "Should still have 0 rows");
 }
 
 /// Test TRUNCATE with CASCADE also invalidates columnar cache
@@ -233,48 +238,58 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
             ColumnSchema::new("category_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("price".to_string(), DataType::Integer, true),
         ],
-        vec![vibesql_catalog::ForeignKeyConstraint {
+        vec![ForeignKeyConstraint {
             name: Some("fk_items_categories".to_string()),
             column_names: vec!["category_id".to_string()],
             column_indices: vec![1],
             parent_table: "categories".to_string(),
             parent_column_names: vec!["id".to_string()],
             parent_column_indices: vec![0],
-            on_delete: vibesql_catalog::ReferentialAction::Cascade,
-            on_update: vibesql_catalog::ReferentialAction::NoAction,
+            on_delete: ReferentialAction::Cascade,
+            on_update: ReferentialAction::NoAction,
         }],
     );
     db.create_table(child_schema).unwrap();
 
-    // Insert data into parent
-    db.insert_row(
-        "categories",
-        Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar("Electronics".to_string()),
-        ]),
-    )
-    .unwrap();
+    // Insert data into parent using InsertExecutor
+    let parent_stmt = vibesql_ast::InsertStmt {
+        table_name: "categories".to_string(),
+        columns: vec![],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar("Electronics".to_string())),
+        ]]),
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+    InsertExecutor::execute(&mut db, &parent_stmt).unwrap();
 
-    // Insert data into child
-    db.insert_row(
-        "items",
-        Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Integer(1),
-            SqlValue::Integer(500),
-        ]),
-    )
-    .unwrap();
-    db.insert_row(
-        "items",
-        Row::new(vec![
-            SqlValue::Integer(2),
-            SqlValue::Integer(1),
-            SqlValue::Integer(300),
-        ]),
-    )
-    .unwrap();
+    // Insert data into child using InsertExecutor
+    let child_stmt1 = vibesql_ast::InsertStmt {
+        table_name: "items".to_string(),
+        columns: vec![],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(SqlValue::Integer(500)),
+        ]]),
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+    InsertExecutor::execute(&mut db, &child_stmt1).unwrap();
+
+    let child_stmt2 = vibesql_ast::InsertStmt {
+        table_name: "items".to_string(),
+        columns: vec![],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
+            vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(SqlValue::Integer(300)),
+        ]]),
+        conflict_clause: None,
+        on_duplicate_key_update: None,
+    };
+    InsertExecutor::execute(&mut db, &child_stmt2).unwrap();
 
     // Warm the columnar cache for both tables
     let parent_columnar = db.get_columnar("categories").unwrap().expect("Table should exist");
