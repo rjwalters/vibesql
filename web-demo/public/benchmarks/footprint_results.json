@@ -11,9 +11,9 @@
       "version": "vibesql 0.1.0",
       "available": true,
       "error": null,
-      "wasm_size_bytes": 8312999,
-      "wasm_size_gzip_bytes": 2248778,
-      "wasm_size_brotli_bytes": null
+      "wasm_size_bytes": 5336369,
+      "wasm_size_gzip_bytes": 1510815,
+      "wasm_size_brotli_bytes": 1051534
     },
     {
       "database": "sqlite",
