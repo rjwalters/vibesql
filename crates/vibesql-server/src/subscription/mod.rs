@@ -506,6 +506,26 @@ impl Subscription {
     pub fn clear_selective_updates_override(&mut self) {
         self.selective_updates_override = None;
     }
+
+    /// Get the effective selective column update config for this subscription
+    ///
+    /// Returns the per-subscription override if set, otherwise creates a config
+    /// from the server-level config with this subscription's PK columns.
+    pub fn get_effective_selective_config(
+        &self,
+        server_config: &SelectiveColumnConfig,
+    ) -> SelectiveColumnConfig {
+        match &self.selective_updates_override {
+            Some(override_config) => {
+                // Use override but ensure pk_columns is always from the subscription
+                override_config.with_pk_columns(self.pk_columns.clone())
+            }
+            None => {
+                // Use server config with this subscription's pk_columns
+                server_config.with_pk_columns(self.pk_columns.clone())
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -1012,6 +1032,20 @@ impl Default for SelectiveColumnConfig {
             pk_columns: vec![0], // Assume first column is PK by default
             min_changed_columns: default_min_changed_columns(),
             max_changed_columns_ratio: default_max_changed_columns_ratio(),
+        }
+    }
+}
+
+impl SelectiveColumnConfig {
+    /// Create a copy of this config with the specified pk_columns
+    ///
+    /// Useful for creating subscription-specific configs from a server-level template.
+    pub fn with_pk_columns(&self, pk_columns: Vec<usize>) -> Self {
+        Self {
+            enabled: self.enabled,
+            pk_columns,
+            min_changed_columns: self.min_changed_columns,
+            max_changed_columns_ratio: self.max_changed_columns_ratio,
         }
     }
 }
