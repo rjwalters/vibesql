@@ -366,6 +366,7 @@ fn generate_subscription_id() -> SessionSubscriptionId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_subscribe_and_unsubscribe() {

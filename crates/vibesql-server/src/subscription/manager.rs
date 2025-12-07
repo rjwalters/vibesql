@@ -630,7 +630,7 @@ impl SubscriptionManager {
         config: super::SelectiveColumnConfig,
     ) {
         if let Some(mut sub) = self.subscriptions.get_mut(&id) {
-            sub.selective_updates = config;
+            sub.selective_updates_override = Some(config);
         }
     }
 
