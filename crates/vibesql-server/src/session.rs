@@ -272,7 +272,7 @@ impl Session {
 
                 // Convert to our result format
                 let result_rows: Vec<Row> =
-                    rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+                    rows.iter().map(|r| Row { values: r.values.to_vec() }).collect();
 
                 // TODO: Get actual column names from select statement
                 let columns = if !rows.is_empty() {
@@ -598,7 +598,7 @@ impl Session {
 
         // Convert cursor rows to session rows
         let rows: Vec<Row> =
-            fetch_result.rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+            fetch_result.rows.iter().map(|r| Row { values: r.values.to_vec() }).collect();
         let columns: Vec<Column> =
             fetch_result.columns.iter().map(|name| Column { name: name.clone() }).collect();
 

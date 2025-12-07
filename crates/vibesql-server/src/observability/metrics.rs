@@ -35,6 +35,13 @@ pub struct ServerMetrics {
     selective_update_changed_ratio: Histogram<f64>,
     subscriptions_selective_eligible: Gauge<u64>,
     subscriptions_selective_eligible_count: Arc<AtomicU64>,
+
+    // Partial update efficiency metrics
+    partial_update_fallbacks_total: Counter<u64>,
+    partial_update_bytes_saved: Histogram<u64>,
+    partial_update_efficiency: Gauge<f64>,
+    partial_update_efficiency_numerator: Arc<AtomicU64>,
+    partial_update_efficiency_denominator: Arc<AtomicU64>,
 }
 
 impl ServerMetrics {
@@ -135,6 +142,27 @@ impl ServerMetrics {
             .build();
         let subscriptions_selective_eligible_count = Arc::new(AtomicU64::new(0));
 
+        // Partial update efficiency metrics
+        let partial_update_fallbacks_total = meter
+            .u64_counter("vibesql_partial_update_fallbacks_total")
+            .with_description("Times partial update was skipped, by reason (threshold_exceeded, disabled, row_count_mismatch, pk_mismatch, no_changes)")
+            .with_unit("{fallback}")
+            .build();
+
+        let partial_update_bytes_saved = meter
+            .u64_histogram("vibesql_partial_update_bytes_saved")
+            .with_description("Estimated bytes saved per partial update compared to full row update")
+            .with_unit("By")
+            .build();
+
+        let partial_update_efficiency = meter
+            .f64_gauge("vibesql_partial_update_efficiency")
+            .with_description("Rolling average of column efficiency (columns_sent / total_columns) for partial updates")
+            .with_unit("1")
+            .build();
+        let partial_update_efficiency_numerator = Arc::new(AtomicU64::new(0));
+        let partial_update_efficiency_denominator = Arc::new(AtomicU64::new(0));
+
         Self {
             connections_total,
             connection_errors_total,
@@ -152,6 +180,11 @@ impl ServerMetrics {
             selective_update_changed_ratio,
             subscriptions_selective_eligible,
             subscriptions_selective_eligible_count,
+            partial_update_fallbacks_total,
+            partial_update_bytes_saved,
+            partial_update_efficiency,
+            partial_update_efficiency_numerator,
+            partial_update_efficiency_denominator,
         }
     }
 
@@ -251,20 +284,6 @@ impl ServerMetrics {
         );
     }
 
-    /// Record selective update column statistics
-    ///
-    /// # Arguments
-    /// * `columns_sent` - Number of columns included in the selective update
-    /// * `total_columns` - Total number of columns in the full row
-    pub fn record_selective_update_columns(&self, columns_sent: u64, total_columns: u64) {
-        self.selective_update_columns_sent.record(columns_sent, &[]);
-
-        if total_columns > 0 {
-            let ratio = columns_sent as f64 / total_columns as f64;
-            self.selective_update_changed_ratio.record(ratio, &[]);
-        }
-    }
-
     /// Increment the count of selective-eligible subscriptions
     ///
     /// Called when a subscription is registered with successfully detected PK columns.
@@ -286,6 +305,68 @@ impl ServerMetrics {
         self.subscriptions_selective_eligible_count.load(Ordering::Relaxed)
     }
 
+    // Partial update efficiency metrics methods
+
+    /// Record a partial update fallback (when partial update was skipped)
+    ///
+    /// # Arguments
+    /// * `reason` - The reason for fallback: "threshold_exceeded", "disabled",
+    ///              "row_count_mismatch", "pk_mismatch", "no_changes"
+    pub fn record_partial_update_fallback(&self, reason: &str) {
+        self.partial_update_fallbacks_total
+            .add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// Record bytes saved by a partial update compared to full row update
+    ///
+    /// # Arguments
+    /// * `bytes_saved` - Estimated bytes saved (full_row_size - partial_update_size)
+    pub fn record_partial_update_bytes_saved(&self, bytes_saved: u64) {
+        self.partial_update_bytes_saved.record(bytes_saved, &[]);
+    }
+
+    /// Record selective update columns and update efficiency gauge
+    ///
+    /// This method records both the column-level statistics and updates
+    /// the rolling efficiency gauge.
+    ///
+    /// # Arguments
+    /// * `columns_sent` - Number of columns included in the selective update
+    /// * `total_columns` - Total number of columns in the full row
+    pub fn record_selective_update_columns(&self, columns_sent: u64, total_columns: u64) {
+        self.selective_update_columns_sent.record(columns_sent, &[]);
+
+        if total_columns > 0 {
+            let ratio = columns_sent as f64 / total_columns as f64;
+            self.selective_update_changed_ratio.record(ratio, &[]);
+
+            // Update rolling efficiency (columns saved ratio = 1 - columns_sent/total)
+            // We track cumulative columns_sent and total_columns to compute average
+            self.partial_update_efficiency_numerator.fetch_add(columns_sent, Ordering::Relaxed);
+            self.partial_update_efficiency_denominator.fetch_add(total_columns, Ordering::Relaxed);
+
+            // Compute and record rolling average efficiency
+            let total_sent = self.partial_update_efficiency_numerator.load(Ordering::Relaxed);
+            let total_possible = self.partial_update_efficiency_denominator.load(Ordering::Relaxed);
+            if total_possible > 0 {
+                // Efficiency = ratio of columns NOT sent (i.e., bandwidth saved)
+                let efficiency = 1.0 - (total_sent as f64 / total_possible as f64);
+                self.partial_update_efficiency.record(efficiency, &[]);
+            }
+        }
+    }
+
+    /// Get the current partial update efficiency (columns saved ratio)
+    pub fn partial_update_efficiency(&self) -> f64 {
+        let total_sent = self.partial_update_efficiency_numerator.load(Ordering::Relaxed);
+        let total_possible = self.partial_update_efficiency_denominator.load(Ordering::Relaxed);
+        if total_possible > 0 {
+            1.0 - (total_sent as f64 / total_possible as f64)
+        } else {
+            0.0
+        }
+    }
+
     /// Get subscription efficiency stats
     ///
     /// Computes efficiency metrics based on the subscription update types and selective update records.
@@ -296,12 +377,9 @@ impl ServerMetrics {
         // we compute approximate efficiency based on the available gauge and recorded metrics.
         // A production implementation might want to track these separately or use a custom metrics backend.
 
-        // For now, we provide a baseline implementation that shows the structure
-        // In future, we can enhance this with actual metric collection
-
         crate::http::types::SubscriptionEfficiencyStats {
-            partial_update_efficiency: 0.0,
-            total_bytes_saved: 0,
+            partial_update_efficiency: self.partial_update_efficiency(),
+            total_bytes_saved: 0, // Would need separate tracking
             fallbacks: crate::http::types::PartialUpdateFallbacks {
                 disabled: 0,
                 threshold_exceeded: 0,
@@ -309,8 +387,8 @@ impl ServerMetrics {
                 pk_mismatch: 0,
                 no_changes: 0,
             },
-            partial_updates_sent: 0,
-            full_updates_sent: 0,
+            partial_updates_sent: 0, // Would need separate tracking
+            full_updates_sent: 0,    // Would need separate tracking
         }
     }
 }
@@ -365,5 +443,70 @@ mod tests {
         metrics2.increment_selective_eligible();
         assert_eq!(metrics1.selective_eligible_count(), 2);
         assert_eq!(metrics2.selective_eligible_count(), 2);
+    }
+
+    #[test]
+    fn test_partial_update_efficiency_calculation() {
+        let metrics = create_test_metrics();
+
+        // Initially zero efficiency (no data)
+        assert_eq!(metrics.partial_update_efficiency(), 0.0);
+
+        // Record some selective update columns
+        // 3 columns sent out of 10 total = 70% efficiency (columns saved)
+        metrics.record_selective_update_columns(3, 10);
+        let efficiency = metrics.partial_update_efficiency();
+        assert!((efficiency - 0.7).abs() < 0.001, "Expected ~0.7, got {}", efficiency);
+
+        // Record more: 5 columns sent out of 10 total
+        // Cumulative: 8 sent out of 20 = 60% efficiency
+        metrics.record_selective_update_columns(5, 10);
+        let efficiency = metrics.partial_update_efficiency();
+        assert!((efficiency - 0.6).abs() < 0.001, "Expected ~0.6, got {}", efficiency);
+    }
+
+    #[test]
+    fn test_partial_update_efficiency_shared_across_clones() {
+        let metrics1 = create_test_metrics();
+
+        // Record on first instance
+        metrics1.record_selective_update_columns(2, 10);
+        let eff1 = metrics1.partial_update_efficiency();
+
+        // Clone and verify shared state
+        let metrics2 = metrics1.clone();
+        let eff2 = metrics2.partial_update_efficiency();
+        assert!((eff1 - eff2).abs() < 0.001, "Clones should share efficiency state");
+
+        // Record on clone, both should see updated value
+        metrics2.record_selective_update_columns(2, 10);
+        // Cumulative: 4 sent out of 20 = 80% efficiency
+        let eff_after = metrics1.partial_update_efficiency();
+        assert!((eff_after - 0.8).abs() < 0.001, "Expected ~0.8, got {}", eff_after);
+    }
+
+    #[test]
+    fn test_partial_update_fallback_recording() {
+        // This test verifies the method exists and can be called without panicking.
+        // The actual counter value is tracked in OpenTelemetry and harder to verify.
+        let metrics = create_test_metrics();
+
+        // Should not panic when recording various fallback reasons
+        metrics.record_partial_update_fallback("disabled");
+        metrics.record_partial_update_fallback("threshold_exceeded");
+        metrics.record_partial_update_fallback("row_count_mismatch");
+        metrics.record_partial_update_fallback("pk_mismatch");
+        metrics.record_partial_update_fallback("no_changes");
+    }
+
+    #[test]
+    fn test_partial_update_bytes_saved_recording() {
+        // This test verifies the method exists and can be called without panicking.
+        let metrics = create_test_metrics();
+
+        // Should not panic when recording bytes saved
+        metrics.record_partial_update_bytes_saved(100);
+        metrics.record_partial_update_bytes_saved(500);
+        metrics.record_partial_update_bytes_saved(0);
     }
 }

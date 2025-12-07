@@ -1,15 +1,37 @@
+use smallvec::SmallVec;
 use vibesql_types::{Date, SqlValue};
 
+/// Inline capacity for Row values.
+/// Rows with up to this many columns avoid heap allocation.
+/// Set to 8 to cover most common queries (TPC-H, typical OLTP).
+pub const ROW_INLINE_CAPACITY: usize = 8;
+
+/// Type alias for the SmallVec used in Row.
+pub type RowValues = SmallVec<[SqlValue; ROW_INLINE_CAPACITY]>;
+
 /// A single row of data - vector of SqlValues
+///
+/// Uses SmallVec to avoid heap allocations for rows with up to
+/// [`ROW_INLINE_CAPACITY`] columns. This optimization significantly
+/// reduces allocation overhead for common query patterns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
-    pub values: Vec<SqlValue>,
+    pub values: RowValues,
 }
 
 impl Row {
-    /// Create a new row from values
-    pub fn new(values: Vec<SqlValue>) -> Self {
-        Row { values }
+    /// Create a new row from values.
+    ///
+    /// Accepts any iterable that can be converted into a SmallVec.
+    pub fn new(values: impl Into<RowValues>) -> Self {
+        Row { values: values.into() }
+    }
+
+    /// Create a new row from a Vec of values.
+    ///
+    /// This is a convenience method that accepts Vec<SqlValue> directly.
+    pub fn from_vec(values: Vec<SqlValue>) -> Self {
+        Row { values: SmallVec::from_vec(values) }
     }
 
     /// Get value at column index
@@ -34,13 +56,20 @@ impl Row {
     pub fn estimated_size_bytes(&self) -> usize {
         use std::mem::size_of;
 
-        // Base overhead: Vec header + Row struct
-        let base_overhead = size_of::<Vec<SqlValue>>() + size_of::<Row>();
+        // Base overhead: Row struct (includes SmallVec inline storage)
+        let base_overhead = size_of::<Row>();
 
-        // Estimate size of each value
-        let values_size: usize = self.values.iter().map(|v| v.estimated_size_bytes()).sum();
+        // If spilled to heap, add the heap allocation size
+        let heap_overhead = if self.values.spilled() {
+            self.values.capacity() * size_of::<SqlValue>()
+        } else {
+            0
+        };
 
-        base_overhead + values_size
+        // Estimate size of each value's heap allocations (e.g., strings)
+        let values_heap_size: usize = self.values.iter().map(|v| v.estimated_size_bytes()).sum();
+
+        base_overhead + heap_overhead + values_heap_size
     }
 
     /// Set value at column index
@@ -236,15 +265,13 @@ mod tests {
 
     #[test]
     fn test_unchecked_accessors_correct_types() {
-        let row = Row {
-            values: vec![
-                SqlValue::Double(3.14),
-                SqlValue::Integer(42),
-                SqlValue::Date(Date::from_str("2024-01-01").unwrap()),
-                SqlValue::Boolean(true),
-                SqlValue::Varchar(std::sync::Arc::from("hello")),
-            ],
-        };
+        let row = Row::from_vec(vec![
+            SqlValue::Double(3.14),
+            SqlValue::Integer(42),
+            SqlValue::Date(Date::from_str("2024-01-01").unwrap()),
+            SqlValue::Boolean(true),
+            SqlValue::Varchar(std::sync::Arc::from("hello")),
+        ]);
 
         unsafe {
             assert_eq!(row.get_f64_unchecked(0), 3.14);
@@ -259,7 +286,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "get_f64_unchecked called on non-float value")]
     fn test_get_f64_unchecked_wrong_type() {
-        let row = Row { values: vec![SqlValue::Integer(42)] };
+        let row = Row::from_vec(vec![SqlValue::Integer(42)]);
         unsafe {
             row.get_f64_unchecked(0); // Should panic in debug mode
         }
@@ -269,7 +296,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "get_i64_unchecked called on non-integer value")]
     fn test_get_i64_unchecked_wrong_type() {
-        let row = Row { values: vec![SqlValue::Double(3.14)] };
+        let row = Row::from_vec(vec![SqlValue::Double(3.14)]);
         unsafe {
             row.get_i64_unchecked(0); // Should panic in debug mode
         }
@@ -279,7 +306,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "get_date_unchecked called on non-date value")]
     fn test_get_date_unchecked_wrong_type() {
-        let row = Row { values: vec![SqlValue::Integer(42)] };
+        let row = Row::from_vec(vec![SqlValue::Integer(42)]);
         unsafe {
             row.get_date_unchecked(0); // Should panic in debug mode
         }
@@ -289,7 +316,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "get_bool_unchecked called on non-boolean value")]
     fn test_get_bool_unchecked_wrong_type() {
-        let row = Row { values: vec![SqlValue::Integer(42)] };
+        let row = Row::from_vec(vec![SqlValue::Integer(42)]);
         unsafe {
             row.get_bool_unchecked(0); // Should panic in debug mode
         }
@@ -299,7 +326,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "get_string_unchecked called on non-string value")]
     fn test_get_string_unchecked_wrong_type() {
-        let row = Row { values: vec![SqlValue::Integer(42)] };
+        let row = Row::from_vec(vec![SqlValue::Integer(42)]);
         unsafe {
             row.get_string_unchecked(0); // Should panic in debug mode
         }
@@ -308,25 +335,25 @@ mod tests {
     #[test]
     fn test_unchecked_accessor_with_type_coercion() {
         // Test that Float is coerced to f64
-        let row = Row { values: vec![SqlValue::Float(3.14)] };
+        let row = Row::from_vec(vec![SqlValue::Float(3.14)]);
         unsafe {
             assert_eq!(row.get_f64_unchecked(0), 3.14f32 as f64);
         }
 
         // Test that Smallint is coerced to i64
-        let row = Row { values: vec![SqlValue::Smallint(42)] };
+        let row = Row::from_vec(vec![SqlValue::Smallint(42)]);
         unsafe {
             assert_eq!(row.get_i64_unchecked(0), 42i64);
         }
 
         // Test that Bigint works
-        let row = Row { values: vec![SqlValue::Bigint(1000000)] };
+        let row = Row::from_vec(vec![SqlValue::Bigint(1000000)]);
         unsafe {
             assert_eq!(row.get_i64_unchecked(0), 1000000i64);
         }
 
         // Test that Character string works
-        let row = Row { values: vec![SqlValue::Character(std::sync::Arc::from("test"))] };
+        let row = Row::from_vec(vec![SqlValue::Character(std::sync::Arc::from("test"))]);
         unsafe {
             assert_eq!(row.get_string_unchecked(0), "test");
         }

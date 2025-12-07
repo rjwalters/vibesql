@@ -368,15 +368,15 @@ mod tests {
         // Small dataset with pre-populated sort keys
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
-                Row { values: vec![SqlValue::Integer(3)] },
+                Row::from_vec(vec![SqlValue::Integer(3)]),
                 Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row { values: vec![SqlValue::Integer(1)] },
+                Row::from_vec(vec![SqlValue::Integer(1)]),
                 Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row { values: vec![SqlValue::Integer(2)] },
+                Row::from_vec(vec![SqlValue::Integer(2)]),
                 Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc)]),
             ),
         ];
@@ -433,7 +433,7 @@ mod tests {
         let mut rows: Vec<RowWithSortKeys> = Vec::new();
         for i in (0..15000).rev() {
             rows.push((
-                Row { values: vec![SqlValue::Integer(i)] },
+                Row::from_vec(vec![SqlValue::Integer(i)]),
                 Some(vec![(SqlValue::Integer(i), vibesql_ast::OrderDirection::Asc)]),
             ));
         }
@@ -490,15 +490,15 @@ mod tests {
     fn test_sort_descending_with_keys() {
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
-                Row { values: vec![SqlValue::Integer(1)] },
+                Row::from_vec(vec![SqlValue::Integer(1)]),
                 Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Desc)]),
             ),
             (
-                Row { values: vec![SqlValue::Integer(3)] },
+                Row::from_vec(vec![SqlValue::Integer(3)]),
                 Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Desc)]),
             ),
             (
-                Row { values: vec![SqlValue::Integer(2)] },
+                Row::from_vec(vec![SqlValue::Integer(2)]),
                 Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Desc)]),
             ),
         ];
@@ -552,15 +552,15 @@ mod tests {
         // NULLs should always sort last regardless of ASC/DESC
         let mut rows_asc: Vec<RowWithSortKeys> = vec![
             (
-                Row { values: vec![SqlValue::Integer(2)] },
+                Row::from_vec(vec![SqlValue::Integer(2)]),
                 Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row { values: vec![SqlValue::Null] },
+                Row::from_vec(vec![SqlValue::Null]),
                 Some(vec![(SqlValue::Null, vibesql_ast::OrderDirection::Asc)]),
             ),
             (
-                Row { values: vec![SqlValue::Integer(1)] },
+                Row::from_vec(vec![SqlValue::Integer(1)]),
                 Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc)]),
             ),
         ];

@@ -318,7 +318,7 @@ impl Database {
         self.emit_wal_op(WalOp::Insert {
             table_id: self.table_name_to_id(table_name),
             row_id: row_index as u64,
-            values: row.values.clone(),
+            values: row.values.to_vec(),
         });
 
         // Broadcast change event to subscribers
@@ -395,7 +395,7 @@ impl Database {
             self.emit_wal_op(WalOp::Insert {
                 table_id,
                 row_id: row_index as u64,
-                values: row.values.clone(),
+                values: row.values.to_vec(),
             });
 
             // Broadcast change event to subscribers
@@ -570,8 +570,8 @@ impl Database {
         self.emit_wal_op(WalOp::Update {
             table_id: self.table_name_to_id(&resolved_name),
             row_id: row_index as u64,
-            old_values: old_row.values.clone(),
-            new_values: new_row.values.clone(),
+            old_values: old_row.values.to_vec(),
+            new_values: new_row.values.to_vec(),
         });
 
         // Broadcast change event to subscribers

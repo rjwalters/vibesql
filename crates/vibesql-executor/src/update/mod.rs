@@ -33,7 +33,8 @@ use vibesql_storage::statistics::CostEstimator;
 use vibesql_storage::Database;
 
 use crate::{
-    errors::ExecutorError, evaluator::ExpressionEvaluator, privilege_checker::PrivilegeChecker,
+    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
+    privilege_checker::PrivilegeChecker,
 };
 
 /// Executor for UPDATE statements
@@ -216,35 +217,39 @@ impl UpdateExecutor {
         // Estimate DML cost for query analysis and optimization decisions
         if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {
             if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
-                if let Some(table_stats) = table.get_statistics() {
-                    // Estimate the ratio of indexes affected based on columns being updated
-                    // This is a heuristic: assume columns are distributed evenly across indexes
-                    let total_columns = schema.columns.len();
-                    let changed_columns = stmt.assignments.len();
-                    let indexes_affected_ratio = if total_columns > 0 {
-                        (changed_columns as f64 / total_columns as f64).min(1.0)
-                    } else {
-                        1.0 // Conservative estimate if no columns
-                    };
+                // Get table statistics for cost estimation (use cached if available, or fallback to estimate)
+                let table_stats = table
+                    .get_statistics()
+                    .cloned()
+                    .unwrap_or_else(|| vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count()));
 
-                    let cost_estimator = CostEstimator::default();
-                    let estimated_cost = cost_estimator.estimate_update(
-                        candidate_rows.len(),
-                        table_stats,
-                        &index_info,
-                        indexes_affected_ratio,
-                    );
-                    eprintln!(
-                        "DML_COST_DEBUG: UPDATE {} rows in {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {}, affected_ratio: {:.2})",
-                        candidate_rows.len(),
-                        stmt.table_name,
-                        estimated_cost,
-                        index_info.hash_index_count,
-                        index_info.btree_index_count,
-                        index_info.is_native_columnar,
-                        indexes_affected_ratio
-                    );
-                }
+                // Estimate the ratio of indexes affected based on columns being updated
+                // This is a heuristic: assume columns are distributed evenly across indexes
+                let total_columns = schema.columns.len();
+                let changed_columns = stmt.assignments.len();
+                let indexes_affected_ratio = if total_columns > 0 {
+                    (changed_columns as f64 / total_columns as f64).min(1.0)
+                } else {
+                    1.0 // Conservative estimate if no columns
+                };
+
+                let cost_estimator = CostEstimator::default();
+                let estimated_cost = cost_estimator.estimate_update(
+                    candidate_rows.len(),
+                    &table_stats,
+                    &index_info,
+                    indexes_affected_ratio,
+                );
+                eprintln!(
+                    "DML_COST_DEBUG: UPDATE {} rows in {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {}, affected_ratio: {:.2})",
+                    candidate_rows.len(),
+                    stmt.table_name,
+                    estimated_cost,
+                    index_info.hash_index_count,
+                    index_info.btree_index_count,
+                    index_info.is_native_columnar,
+                    indexes_affected_ratio
+                );
             }
         }
 
@@ -320,6 +325,30 @@ impl UpdateExecutor {
                     old_row,
                     new_row,
                 )?;
+            }
+        }
+
+        // Cost-based optimization: Log update cost with indexes_affected_ratio
+        if !updates.is_empty() {
+            // Compute aggregate changed columns across all updates
+            let mut all_changed_columns = std::collections::HashSet::new();
+            for (_, _, _, changed_cols, _) in &updates {
+                all_changed_columns.extend(changed_cols.iter().copied());
+            }
+
+            let optimizer = DmlOptimizer::new(database, &stmt.table_name);
+            let indexes_affected_ratio =
+                optimizer.compute_indexes_affected_ratio(&all_changed_columns, schema);
+            let _update_cost = optimizer.estimate_update_cost(updates.len(), indexes_affected_ratio);
+
+            // Log optimization insight: selective updates (low affected ratio) are much cheaper
+            if std::env::var("DML_COST_DEBUG").is_ok() && indexes_affected_ratio < 1.0 {
+                eprintln!(
+                    "DML_COST_DEBUG: UPDATE on {} - {} rows, {:.0}% indexes affected (selective update optimization)",
+                    stmt.table_name,
+                    updates.len(),
+                    indexes_affected_ratio * 100.0
+                );
             }
         }
 

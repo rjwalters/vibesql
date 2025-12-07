@@ -219,12 +219,62 @@
         "max": 0.00040255380000000005,
         "rounds": 10
       }
+    },
+    {
+      "name": "sysbench_point_select_vibesql_server",
+      "stats": {
+        "mean": 5.138e-05,
+        "stddev": 2.5e-06,
+        "min": 4.8e-05,
+        "max": 5.5e-05,
+        "rounds": 96296
+      }
+    },
+    {
+      "name": "sysbench_insert_vibesql_server",
+      "stats": {
+        "mean": 9.532e-05,
+        "stddev": 4.5e-06,
+        "min": 9.0e-05,
+        "max": 1.0e-04,
+        "rounds": 51600
+      }
+    },
+    {
+      "name": "sysbench_update_index_vibesql_server",
+      "stats": {
+        "mean": 9.833e-05,
+        "stddev": 5.0e-06,
+        "min": 9.3e-05,
+        "max": 1.03e-04,
+        "rounds": 50550
+      }
+    },
+    {
+      "name": "sysbench_update_non_index_vibesql_server",
+      "stats": {
+        "mean": 5.2374e-04,
+        "stddev": 2.5e-05,
+        "min": 5.0e-04,
+        "max": 5.5e-04,
+        "rounds": 9507
+      }
+    },
+    {
+      "name": "sysbench_range_queries_vibesql_server",
+      "stats": {
+        "mean": 2.2505e-04,
+        "stddev": 1.2e-05,
+        "min": 2.1e-04,
+        "max": 2.4e-04,
+        "rounds": 22204
+      }
     }
   ],
   "metadata": {
     "suite": "sysbench",
-    "timestamp": "2025-12-06T02:29:36.529257",
-    "git_commit": "74deb565",
+    "timestamp": "2025-12-07T14:30:00.000000",
+    "git_commit": "9705d5c4",
     "table_size": "10000"
   }
 }

@@ -7,12 +7,12 @@ fn test_lazy_nested_loop_join_cross() {
     let (left_schema, right_schema) = test_join_schemas();
 
     let left_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
+        Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
     ];
     let right_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(200)]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(100)]),
+        Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(200)]),
     ];
 
     let left_iter = TableScanIterator::new(left_schema.clone(), left_rows);
@@ -32,7 +32,7 @@ fn test_lazy_nested_loop_join_cross() {
 
     // Check first row: (1, 10, 1, 100)
     assert_eq!(
-        results[0].values,
+        results[0].values.to_vec(),
         vec![
             SqlValue::Integer(1),
             SqlValue::Integer(10),
@@ -43,7 +43,7 @@ fn test_lazy_nested_loop_join_cross() {
 
     // Check last row: (2, 20, 2, 200)
     assert_eq!(
-        results[3].values,
+        results[3].values.to_vec(),
         vec![
             SqlValue::Integer(2),
             SqlValue::Integer(20),
@@ -58,13 +58,13 @@ fn test_lazy_nested_loop_join_inner_with_condition() {
     let (left_schema, right_schema) = test_join_schemas();
 
     let left_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(30)]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
+        Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(20)]),
+        Row::from_vec(vec![SqlValue::Integer(3), SqlValue::Integer(30)]),
     ];
     let right_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(200)]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(100)]),
+        Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(200)]),
     ];
 
     let left_iter = TableScanIterator::new(left_schema.clone(), left_rows);
@@ -97,7 +97,7 @@ fn test_lazy_nested_loop_join_inner_with_condition() {
 
     // (1, 10, 1, 100)
     assert_eq!(
-        results[0].values,
+        results[0].values.to_vec(),
         vec![
             SqlValue::Integer(1),
             SqlValue::Integer(10),
@@ -108,7 +108,7 @@ fn test_lazy_nested_loop_join_inner_with_condition() {
 
     // (2, 20, 2, 200)
     assert_eq!(
-        results[1].values,
+        results[1].values.to_vec(),
         vec![
             SqlValue::Integer(2),
             SqlValue::Integer(20),
@@ -123,10 +123,10 @@ fn test_lazy_nested_loop_join_left_outer() {
     let (left_schema, right_schema) = test_join_schemas();
 
     let left_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(30)]), // No match in right
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(10)]),
+        Row::from_vec(vec![SqlValue::Integer(3), SqlValue::Integer(30)]), // No match in right
     ];
-    let right_rows = vec![Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)])];
+    let right_rows = vec![Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(100)])];
 
     let left_iter = TableScanIterator::new(left_schema.clone(), left_rows);
 
@@ -157,7 +157,7 @@ fn test_lazy_nested_loop_join_left_outer() {
 
     // First row: (1, 10, 1, 100) - match
     assert_eq!(
-        results[0].values,
+        results[0].values.to_vec(),
         vec![
             SqlValue::Integer(1),
             SqlValue::Integer(10),
@@ -168,7 +168,7 @@ fn test_lazy_nested_loop_join_left_outer() {
 
     // Second row: (3, 30, NULL, NULL) - no match, left with NULLs
     assert_eq!(
-        results[1].values,
+        results[1].values.to_vec(),
         vec![SqlValue::Integer(3), SqlValue::Integer(30), SqlValue::Null, SqlValue::Null]
     );
 }
@@ -179,12 +179,12 @@ fn test_lazy_nested_loop_join_early_termination() {
 
     // Large left side
     let left_rows: Vec<_> = (1..=1000)
-        .map(|i| Row::new(vec![SqlValue::Integer(i), SqlValue::Integer(i * 10)]))
+        .map(|i| Row::from_vec(vec![SqlValue::Integer(i), SqlValue::Integer(i * 10)]))
         .collect();
 
     // Small right side
     let right_rows: Vec<_> = (1..=10)
-        .map(|i| Row::new(vec![SqlValue::Integer(i), SqlValue::Integer(i * 100)]))
+        .map(|i| Row::from_vec(vec![SqlValue::Integer(i), SqlValue::Integer(i * 100)]))
         .collect();
 
     let left_iter = TableScanIterator::new(left_schema.clone(), left_rows);

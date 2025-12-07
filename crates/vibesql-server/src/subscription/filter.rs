@@ -422,6 +422,7 @@ impl SubscriptionFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_simple_equality_filter() {
@@ -431,7 +432,7 @@ mod tests {
         // Row that matches
         let row1 = vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(Arc::from("Alice")),
+            SqlValue::Varchar("Alice".into()),
             SqlValue::Varchar(Arc::from("active")),
         ];
         assert!(filter.matches(&row1));
@@ -555,7 +556,7 @@ mod tests {
         let columns = vec!["name".to_string()];
         let filter = SubscriptionFilter::new("name LIKE 'A%'", &columns).unwrap();
 
-        let row1 = vec![SqlValue::Varchar(Arc::from("Alice"))];
+        let row1 = vec![SqlValue::Varchar("Alice".into())];
         assert!(filter.matches(&row1));
 
         let row2 = vec![SqlValue::Varchar(Arc::from("Bob"))];

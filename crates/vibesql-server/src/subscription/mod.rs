@@ -62,9 +62,6 @@ pub use error::{classify_error, classify_error_str, SubscriptionErrorKind};
 pub use manager::SubscriptionManager;
 pub use pk_detector::{detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionResult};
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
-pub use session::{
-    SessionSubscription, SessionSubscriptionId, SessionSubscriptionManager, TablePkInfo,
-};
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 // SubscriptionMetrics is defined inline in this module and exported directly
@@ -338,6 +335,9 @@ pub struct Subscription {
     /// Whether this subscription is eligible for selective column updates
     /// True when PK columns were confidently detected
     pub selective_eligible: bool,
+    /// Per-subscription override for selective column update configuration
+    /// If set, this overrides the server-level selective_updates config for this subscription
+    pub selective_updates_override: Option<SelectiveColumnConfig>,
 }
 
 impl Subscription {
@@ -375,6 +375,7 @@ impl Subscription {
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
+            selective_updates_override: None,
         }
     }
 
@@ -403,6 +404,7 @@ impl Subscription {
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
+            selective_updates_override: None,
         }
     }
 
@@ -464,6 +466,7 @@ impl Subscription {
             filter,
             pk_columns,
             selective_eligible: false,
+            selective_updates_override: None,
         }
     }
 
@@ -488,6 +491,39 @@ impl Subscription {
         self.selective_eligible = confident;
         // Return true if newly eligible (wasn't before, is now)
         !was_eligible && confident
+    }
+
+    /// Set per-subscription selective updates override
+    ///
+    /// Allows clients to override server-level selective update thresholds
+    /// on a per-subscription basis.
+    pub fn set_selective_updates_override(&mut self, config: SelectiveColumnConfig) {
+        self.selective_updates_override = Some(config);
+    }
+
+    /// Clear the selective updates override (use server defaults)
+    pub fn clear_selective_updates_override(&mut self) {
+        self.selective_updates_override = None;
+    }
+
+    /// Get the effective selective column update config for this subscription
+    ///
+    /// Returns the per-subscription override if set, otherwise creates a config
+    /// from the server-level config with this subscription's PK columns.
+    pub fn get_effective_selective_config(
+        &self,
+        server_config: &SelectiveColumnConfig,
+    ) -> SelectiveColumnConfig {
+        match &self.selective_updates_override {
+            Some(override_config) => {
+                // Use override but ensure pk_columns is always from the subscription
+                override_config.with_pk_columns(self.pk_columns.clone())
+            }
+            None => {
+                // Use server config with this subscription's pk_columns
+                server_config.with_pk_columns(self.pk_columns.clone())
+            }
+        }
     }
 }
 
@@ -999,6 +1035,20 @@ impl Default for SelectiveColumnConfig {
     }
 }
 
+impl SelectiveColumnConfig {
+    /// Create a copy of this config with the specified pk_columns
+    ///
+    /// Useful for creating subscription-specific configs from a server-level template.
+    pub fn with_pk_columns(&self, pk_columns: Vec<usize>) -> Self {
+        Self {
+            enabled: self.enabled,
+            pk_columns,
+            min_changed_columns: self.min_changed_columns,
+            max_changed_columns_ratio: self.max_changed_columns_ratio,
+        }
+    }
+}
+
 /// Result of column-level diff computation
 #[derive(Debug, Clone)]
 pub struct ColumnDiff {
@@ -1083,6 +1133,36 @@ pub fn should_use_selective_update(
     true
 }
 
+pub fn should_use_selective_update_with_metrics(
+    diff: &ColumnDiff,
+    total_columns: usize,
+    config: &SelectiveColumnConfig,
+    metrics: Option<&crate::observability::metrics::ServerMetrics>,
+) -> bool {
+    if !config.enabled {
+        if let Some(m) = metrics {
+            m.record_partial_update_fallback("disabled");
+        }
+        return false;
+    }
+
+    // Check minimum changed columns
+    if diff.changed_columns.len() < config.min_changed_columns {
+        return false;
+    }
+
+    // Check maximum ratio
+    let changed_ratio = diff.changed_columns.len() as f64 / total_columns as f64;
+    if changed_ratio > config.max_changed_columns_ratio {
+        if let Some(m) = metrics {
+            m.record_partial_update_fallback("threshold_exceeded");
+        }
+        return false;
+    }
+
+    true
+}
+
 /// Create a partial row update from old and new rows
 ///
 /// # Arguments
@@ -1149,9 +1229,91 @@ pub fn create_partial_row_update(
     ))
 }
 
+/// Create a partial row update from old and new rows with metrics recording
+///
+/// # Arguments
+/// * `old_row` - The previous row values (wire format)
+/// * `new_row` - The current row values (wire format)
+/// * `pk_columns` - Primary key column indices
+/// * `config` - Selective column configuration
+/// * `metrics` - Optional metrics for recording fallback reasons
+///
+/// # Returns
+/// * `Some(PartialRowUpdate)` if selective update should be used
+/// * `None` if full row should be sent instead
+pub fn create_partial_row_update_with_metrics(
+    old_row: &[Option<Vec<u8>>],
+    new_row: &[Option<Vec<u8>>],
+    pk_columns: &[usize],
+    config: &SelectiveColumnConfig,
+    metrics: Option<&crate::observability::metrics::ServerMetrics>,
+) -> Option<crate::protocol::messages::PartialRowUpdate> {
+    // Rows must have same number of columns
+    if old_row.len() != new_row.len() {
+        if let Some(m) = metrics {
+            m.record_partial_update_fallback("row_count_mismatch");
+        }
+        return None;
+    }
+
+    let total_columns = new_row.len();
+    let mut changed_columns = Vec::new();
+
+    // Compare each column
+    for (idx, (old_val, new_val)) in old_row.iter().zip(new_row.iter()).enumerate() {
+        if old_val != new_val {
+            changed_columns.push(idx);
+        }
+    }
+
+    // If no columns changed, return None
+    if changed_columns.is_empty() {
+        if let Some(m) = metrics {
+            m.record_partial_update_fallback("no_changes");
+        }
+        return None;
+    }
+
+    // Check if we should use selective update
+    let changed_ratio = changed_columns.len() as f64 / total_columns as f64;
+    if !config.enabled || changed_ratio > config.max_changed_columns_ratio {
+        if let Some(m) = metrics {
+            if !config.enabled {
+                m.record_partial_update_fallback("disabled");
+            } else {
+                m.record_partial_update_fallback("threshold_exceeded");
+            }
+        }
+        return None;
+    }
+
+    // Build included columns: PK columns + changed columns, sorted
+    let mut included_columns: Vec<usize> = pk_columns.to_vec();
+    for &idx in &changed_columns {
+        if !included_columns.contains(&idx) {
+            included_columns.push(idx);
+        }
+    }
+    included_columns.sort_unstable();
+
+    // Extract values for included columns
+    let values: Vec<Option<Vec<u8>>> =
+        included_columns.iter().map(|&idx| new_row[idx].clone()).collect();
+
+    // Convert to u16 for protocol
+    let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
+
+    Some(crate::protocol::messages::PartialRowUpdate::new(
+        total_columns as u16,
+        &present_columns,
+        values,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_subscription_id_uniqueness() {
@@ -2324,14 +2486,14 @@ mod tests {
         let old_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
             ],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(150),
             ],
         };
@@ -2355,17 +2517,17 @@ mod tests {
         let old_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("active".to_string()),
+                SqlValue::Varchar(Arc::from("active")),
             ],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar(Arc::from("Bob")),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("inactive".to_string()),
+                SqlValue::Varchar(Arc::from("inactive")),
             ],
         };
 
@@ -2381,16 +2543,16 @@ mod tests {
             delta.old_values,
             vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Varchar("active".to_string())
+                SqlValue::Varchar(Arc::from("Alice")),
+                SqlValue::Varchar(Arc::from("active"))
             ]
         );
         assert_eq!(
             delta.new_values,
             vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Bob".to_string()),
-                SqlValue::Varchar("inactive".to_string())
+                SqlValue::Varchar(Arc::from("Bob")),
+                SqlValue::Varchar(Arc::from("inactive"))
             ]
         );
     }
@@ -2400,7 +2562,7 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let pk_columns = vec![0];
@@ -2414,10 +2576,10 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old_row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new_row = crate::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let pk_columns = vec![0];
@@ -2437,7 +2599,7 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old_row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new_row = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
 
@@ -2460,14 +2622,14 @@ mod tests {
             values: vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("old".to_string()),
+                SqlValue::Varchar(Arc::from("old")),
             ],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("new".to_string()),
+                SqlValue::Varchar(Arc::from("new")),
             ],
         };
 
@@ -2484,7 +2646,7 @@ mod tests {
             vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("old".to_string())
+                SqlValue::Varchar(Arc::from("old"))
             ]
         );
         assert_eq!(
@@ -2492,7 +2654,7 @@ mod tests {
             vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("new".to_string())
+                SqlValue::Varchar(Arc::from("new"))
             ]
         );
     }
@@ -2502,12 +2664,12 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old_row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
             ],
         };

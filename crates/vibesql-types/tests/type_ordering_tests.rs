@@ -1,5 +1,11 @@
 use vibesql_types::*;
 
+// Helper to create StringValue from &str (works with both Arc<str> and ArcStr)
+fn sv(s: &str) -> vibesql_types::StringValue {
+    vibesql_types::StringValue::from(s)
+}
+
+
 // ============================================================================
 // PartialOrd Tests for SqlValue
 // ============================================================================
@@ -57,14 +63,14 @@ fn test_double_nan_is_incomparable() {
 
 #[test]
 fn test_varchar_ordering() {
-    assert!(SqlValue::Varchar(std::sync::Arc::from("apple")) < SqlValue::Varchar(std::sync::Arc::from("banana")));
-    assert!(SqlValue::Varchar(std::sync::Arc::from("zebra")) > SqlValue::Varchar(std::sync::Arc::from("aardvark")));
+    assert!(SqlValue::Varchar(sv("apple")) < SqlValue::Varchar(sv("banana")));
+    assert!(SqlValue::Varchar(sv("zebra")) > SqlValue::Varchar(sv("aardvark")));
 }
 
 #[test]
 fn test_character_ordering() {
-    assert!(SqlValue::Character(std::sync::Arc::from("a")) < SqlValue::Character(std::sync::Arc::from("b")));
-    assert!(SqlValue::Character(std::sync::Arc::from("z")) > SqlValue::Character(std::sync::Arc::from("a")));
+    assert!(SqlValue::Character(sv("a")) < SqlValue::Character(sv("b")));
+    assert!(SqlValue::Character(sv("z")) > SqlValue::Character(sv("a")));
 }
 
 #[test]
@@ -126,7 +132,7 @@ fn test_null_is_incomparable() {
 #[test]
 fn test_type_mismatch_is_incomparable() {
     // Different types cannot be compared
-    assert_eq!(SqlValue::Integer(1).partial_cmp(&SqlValue::Varchar(std::sync::Arc::from("1"))), None);
+    assert_eq!(SqlValue::Integer(1).partial_cmp(&SqlValue::Varchar(sv("1"))), None);
     assert_eq!(SqlValue::Float(1.0).partial_cmp(&SqlValue::Integer(1)), None);
     assert_eq!(SqlValue::Boolean(true).partial_cmp(&SqlValue::Integer(1)), None);
 }

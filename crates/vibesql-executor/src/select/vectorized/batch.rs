@@ -172,7 +172,7 @@ pub fn record_batch_to_rows(batch: &RecordBatch) -> Result<Vec<Row>, ExecutorErr
             values.push(value);
         }
 
-        rows.push(Row { values });
+        rows.push(Row::from_vec(values));
     }
 
     Ok(rows)
@@ -433,7 +433,7 @@ fn arrow_value_to_sql(array: &dyn Array, idx: usize) -> Result<SqlValue, Executo
                     context: "arrow_value_to_sql".to_string(),
                 }
             })?;
-            Ok(SqlValue::Varchar(std::sync::Arc::from(arr.value(idx))))
+            Ok(SqlValue::Varchar(arr.value(idx).into()))
         }
         DataType::Boolean => {
             let arr = array.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
@@ -479,8 +479,8 @@ mod tests {
     #[test]
     fn test_rows_to_record_batch_basic() {
         let rows = vec![
-            Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("hello"))] },
-            Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("world"))] },
+            Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("hello"))]),
+            Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("world"))]),
         ];
 
         let column_names = vec!["id".to_string(), "name".to_string()];
@@ -493,22 +493,18 @@ mod tests {
     #[test]
     fn test_round_trip_conversion() {
         let original_rows = vec![
-            Row {
-                values: vec![
+            Row::from_vec(vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(3.5),
                     SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
-                ],
-            },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![
                     SqlValue::Integer(2),
                     SqlValue::Double(2.5),
                     SqlValue::Varchar(std::sync::Arc::from("data")),
                     SqlValue::Boolean(false),
-                ],
-            },
+                ]),
         ];
 
         let column_names =
@@ -525,22 +521,18 @@ mod tests {
     fn test_column_pruning() {
         // Test that column pruning only converts specified columns
         let rows = vec![
-            Row {
-                values: vec![
+            Row::from_vec(vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(3.5),
                     SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
-                ],
-            },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![
                     SqlValue::Integer(2),
                     SqlValue::Double(2.5),
                     SqlValue::Varchar(std::sync::Arc::from("data")),
                     SqlValue::Boolean(false),
-                ],
-            },
+                ]),
         ];
 
         let column_names =
@@ -585,8 +577,8 @@ mod tests {
         let date2 = Date::new(2024, 12, 25).unwrap();
 
         let rows = vec![
-            Row { values: vec![SqlValue::Date(date1), SqlValue::Integer(1)] },
-            Row { values: vec![SqlValue::Date(date2), SqlValue::Integer(2)] },
+            Row::from_vec(vec![SqlValue::Date(date1), SqlValue::Integer(1)]),
+            Row::from_vec(vec![SqlValue::Date(date2), SqlValue::Integer(2)]),
         ];
 
         let column_names = vec!["date_col".to_string(), "id".to_string()];
@@ -608,7 +600,7 @@ mod tests {
         let time = Time::new(14, 30, 45, 123456000).unwrap(); // 123.456 milliseconds in nanoseconds
         let ts = Timestamp::new(date, time);
 
-        let rows = vec![Row { values: vec![SqlValue::Timestamp(ts), SqlValue::Integer(1)] }];
+        let rows = vec![Row::from_vec(vec![SqlValue::Timestamp(ts), SqlValue::Integer(1)])];
 
         let column_names = vec!["ts_col".to_string(), "id".to_string()];
         let batch = rows_to_record_batch(&rows, &column_names).unwrap();
@@ -632,20 +624,16 @@ mod tests {
         let ts = Timestamp::new(ts_date, ts_time);
 
         let original_rows = vec![
-            Row {
-                values: vec![
+            Row::from_vec(vec![
                     SqlValue::Date(date1),
                     SqlValue::Timestamp(ts),
                     SqlValue::Integer(100),
-                ],
-            },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![
                     SqlValue::Date(date2),
                     SqlValue::Timestamp(ts),
                     SqlValue::Integer(200),
-                ],
-            },
+                ]),
         ];
 
         let column_names = vec!["date_col".to_string(), "ts_col".to_string(), "id".to_string()];
@@ -661,25 +649,19 @@ mod tests {
     fn test_null_values_in_numeric_columns() {
         // Test that NULL values are preserved in Int64 and Float64 columns
         let original_rows = vec![
-            Row { values: vec![SqlValue::Integer(100), SqlValue::Double(3.5)] },
-            Row {
-                values: vec![
+            Row::from_vec(vec![SqlValue::Integer(100), SqlValue::Double(3.5)]),
+            Row::from_vec(vec![
                     SqlValue::Null, // NULL integer
                     SqlValue::Double(2.5),
-                ],
-            },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![
                     SqlValue::Integer(200),
                     SqlValue::Null, // NULL float
-                ],
-            },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![
                     SqlValue::Null, // NULL integer
                     SqlValue::Null, // NULL float
-                ],
-            },
+                ]),
         ];
 
         let column_names = vec!["int_col".to_string(), "float_col".to_string()];
@@ -717,23 +699,19 @@ mod tests {
     fn test_null_values_in_all_column_types() {
         // Test NULL handling across different column types
         let original_rows = vec![
-            Row {
-                values: vec![
+            Row::from_vec(vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(1.1),
                     SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
-                ],
-            },
-            Row { values: vec![SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null] },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null]),
+            Row::from_vec(vec![
                     SqlValue::Integer(3),
                     SqlValue::Double(3.3),
                     SqlValue::Varchar(std::sync::Arc::from("data")),
                     SqlValue::Boolean(false),
-                ],
-            },
+                ]),
         ];
 
         let column_names = vec![
@@ -779,20 +757,16 @@ mod tests {
         // Simulates a query like: SELECT quantity * discount FROM orders
         // where discount can be NULL for some rows
         let original_rows = vec![
-            Row { values: vec![SqlValue::Integer(10), SqlValue::Double(0.1)] },
-            Row {
-                values: vec![
+            Row::from_vec(vec![SqlValue::Integer(10), SqlValue::Double(0.1)]),
+            Row::from_vec(vec![
                     SqlValue::Integer(20),
                     SqlValue::Null, // No discount applied
-                ],
-            },
-            Row { values: vec![SqlValue::Integer(30), SqlValue::Double(0.2)] },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![SqlValue::Integer(30), SqlValue::Double(0.2)]),
+            Row::from_vec(vec![
                     SqlValue::Integer(40),
                     SqlValue::Null, // No discount applied
-                ],
-            },
+                ]),
         ];
 
         let column_names = vec!["quantity".to_string(), "discount".to_string()];

@@ -1140,7 +1140,7 @@ mod tests {
     }
 
     fn create_row(id: i64, name: &str) -> Row {
-        Row { values: vec![SqlValue::Integer(id), SqlValue::Varchar(std::sync::Arc::from(name))] }
+        Row::from_vec(vec![SqlValue::Integer(id), SqlValue::Varchar(std::sync::Arc::from(name))])
     }
 
     #[test]
@@ -1210,9 +1210,9 @@ mod tests {
         let mut table = Table::new(schema);
 
         // Insert rows with NULL values
-        table.insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Integer(100)] }).unwrap();
-        table.insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Null] }).unwrap();
-        table.insert(Row { values: vec![SqlValue::Integer(3), SqlValue::Integer(300)] }).unwrap();
+        table.insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
+        table.insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Null])).unwrap();
+        table.insert(Row::from_vec(vec![SqlValue::Integer(3), SqlValue::Integer(300)])).unwrap();
 
         // Convert to columnar format
         let columnar = table.scan_columnar().unwrap();

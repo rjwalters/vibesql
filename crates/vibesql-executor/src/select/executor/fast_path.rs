@@ -674,7 +674,7 @@ impl SelectExecutor<'_> {
         {
             let projected_values: Vec<SqlValue> =
                 col_indices.iter().map(|&idx| row.values[idx].clone()).collect();
-            return Ok(Some(vec![Row { values: projected_values }]));
+            return Ok(Some(vec![Row::from_vec(projected_values)]));
         }
 
         // Fall back to full projection with evaluator for complex expressions
@@ -1762,7 +1762,7 @@ impl SelectExecutor<'_> {
             streaming_iter
                 .filter_map(|idx| {
                     table.get_row(idx).map(|row| {
-                        Row { values: vec![row.values[col_idx].clone()] }
+                        Row::from_vec(vec![row.values[col_idx].clone()])
                     })
                 })
                 .collect()
@@ -1772,7 +1772,7 @@ impl SelectExecutor<'_> {
                     table.get_row(idx).map(|row| {
                         let projected_values: Vec<SqlValue> =
                             col_indices.iter().map(|&col_idx| row.values[col_idx].clone()).collect();
-                        Row { values: projected_values }
+                        Row::from_vec(projected_values)
                     })
                 })
                 .collect()
@@ -1906,7 +1906,7 @@ impl SelectExecutor<'_> {
             .map(|row| {
                 let projected_values: Vec<SqlValue> =
                     col_indices.iter().map(|&idx| row.values[idx].clone()).collect();
-                Row { values: projected_values }
+                Row::from_vec(projected_values)
             })
             .collect()
     }
@@ -2033,7 +2033,7 @@ impl SelectExecutor<'_> {
         let result_values: Vec<SqlValue> =
             accumulators.iter().map(|(acc, _)| acc.finalize()).collect();
 
-        Ok(vec![Row { values: result_values }])
+        Ok(vec![Row::from_vec(result_values)])
     }
 }
 

@@ -930,7 +930,7 @@ impl Database {
         // Move ownership of values to avoid a second clone
         let phase_start = start.map(|_| Instant::now());
         if self.persistence_enabled() {
-            self.emit_wal_delete(table_name, row_index as u64, values);
+            self.emit_wal_delete(table_name, row_index as u64, values.to_vec());
         }
         if let Some(ps) = phase_start {
             phase_times[2] = ps.elapsed().as_nanos(); // wal
@@ -1043,11 +1043,17 @@ impl Database {
         // Check if table uses native columnar storage
         let is_native_columnar = table.is_native_columnar();
 
+        // Estimate average row size from schema
+        let column_types: Vec<_> =
+            table.schema.columns.iter().map(|col| col.data_type.clone()).collect();
+        let avg_row_size = crate::statistics::estimate_row_size(&column_types);
+
         Some(crate::statistics::TableIndexInfo::new(
             hash_index_count,
             btree_index_count,
             is_native_columnar,
             deleted_ratio,
+            avg_row_size,
         ))
     }
 }

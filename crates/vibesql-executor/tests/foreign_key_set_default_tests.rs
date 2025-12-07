@@ -46,7 +46,7 @@ fn execute_statement(stmt: &vibesql_ast::Statement, db: &mut Database) {
 /// Helper to get all rows from a table
 fn get_all_rows(db: &Database, table_name: &str) -> Vec<Vec<SqlValue>> {
     let table = db.get_table(table_name).expect("Table not found");
-    table.scan().iter().map(|row| row.values.clone()).collect()
+    table.scan().iter().map(|row| row.values.to_vec()).collect()
 }
 
 #[test]

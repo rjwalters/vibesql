@@ -2,7 +2,7 @@ use crate::auth::PasswordStore;
 use crate::config::Config;
 use crate::observability::ObservabilityProvider;
 use crate::protocol::{
-    BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
+    BackendMessage, FieldDescription, FrontendMessage, SelectiveUpdatesConfig, SubscriptionUpdateType, TransactionStatus,
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
@@ -398,9 +398,9 @@ impl ConnectionHandler {
                 Ok(ClientMessageResult::Continue)
             }
 
-            FrontendMessage::Subscribe { query, params, filter } => {
-                debug!("Subscribe: {} (filter: {:?})", query, filter);
-                self.handle_subscribe(&query, params, filter).await?;
+            FrontendMessage::Subscribe { query, params, filter, selective_updates_config } => {
+                debug!("Subscribe: {} (filter: {:?}, selective_config: {:?})", query, filter, selective_updates_config);
+                self.handle_subscribe(&query, params, filter, selective_updates_config).await?;
                 Ok(ClientMessageResult::Continue)
             }
 
@@ -499,19 +499,14 @@ impl ConnectionHandler {
 
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // First, try selective column updates (0xF7) if PK columns are known
-                            let pk_columns = self
-                                .subscription_manager
-                                .get_pk_columns_by_wire_id(&subscription_id);
-                            if !pk_columns.is_empty()
-                                && self
-                                    .try_send_selective_updates(
-                                        &subscription_id,
-                                        old_rows,
-                                        &new_rows,
-                                        &pk_columns,
-                                    )
-                                    .await
+                            // First, try selective column updates (0xF7) using effective config
+                            if self
+                                .try_send_selective_updates(
+                                    &subscription_id,
+                                    old_rows,
+                                    &new_rows,
+                                )
+                                .await
                             {
                                 // Selective updates sent successfully - update stored result
                                 self.subscription_manager.update_result_by_wire_id(
@@ -523,6 +518,9 @@ impl ConnectionHandler {
                             }
 
                             // Fall back to delta updates using PK columns
+                            let pk_columns = self
+                                .subscription_manager
+                                .get_pk_columns_by_wire_id(&subscription_id);
                             if let Some(delta) = compute_delta_with_pk(
                                 SubscriptionId::default(),
                                 old_rows,
@@ -638,15 +636,13 @@ impl ConnectionHandler {
 
             // Send updates using partial row format when beneficial
             if !updates.is_empty() {
-                // Get PK columns for this subscription
-                let pk_columns = self.subscription_manager.get_pk_columns_by_wire_id(subscription_id);
-
-                // Create config for selective column updates
-                let config = SelectiveColumnConfig {
-                    enabled: true,
-                    pk_columns: pk_columns.clone(),
-                    ..Default::default()
-                };
+                // Get effective selective config for this subscription
+                // Uses per-subscription override if set, otherwise falls back to server config
+                let config = self.subscription_manager.get_effective_selective_config_by_wire_id(
+                    subscription_id,
+                    &self.config.subscriptions.selective_updates,
+                );
+                let pk_columns = config.pk_columns.clone();
 
                 // Separate updates into partial and full based on threshold
                 let mut partial_updates: Vec<PartialRowUpdate> = Vec::new();
@@ -730,22 +726,34 @@ impl ConnectionHandler {
         subscription_id: &[u8; 16],
         old_rows: &[Row],
         new_rows: &[Row],
-        pk_columns: &[usize],
     ) -> bool {
-        // Check if selective updates are enabled in config
-        let config = &self.config.subscriptions.selective_updates;
-        if !config.enabled {
+        // Get effective selective config (uses per-subscription override if set)
+        let selective_config = self.subscription_manager.get_effective_selective_config_by_wire_id(
+            subscription_id,
+            &self.config.subscriptions.selective_updates,
+        );
+
+        // Check if selective updates are enabled in effective config
+        if !selective_config.enabled {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_partial_update_fallback("disabled");
+            }
             return false;
         }
 
         // Row counts must match for selective updates (no inserts/deletes)
         if old_rows.len() != new_rows.len() {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_partial_update_fallback("row_count_mismatch");
+            }
             return false;
         }
 
         if old_rows.is_empty() {
             return false;
         }
+
+        let pk_columns = &selective_config.pk_columns;
 
         // Convert rows to wire format for comparison
         let old_wire: Vec<Vec<Option<Vec<u8>>>> = Self::rows_to_wire_format(old_rows);
@@ -759,16 +767,9 @@ impl ConnectionHandler {
             pk_to_old_idx.insert(pk_values, idx);
         }
 
-        // Create SelectiveColumnConfig from server config
-        let selective_config = SelectiveColumnConfig {
-            enabled: config.enabled,
-            pk_columns: pk_columns.to_vec(),
-            min_changed_columns: config.min_changed_columns,
-            max_changed_columns_ratio: config.max_changed_columns_ratio,
-        };
-
         // Try to create partial row updates for each new row
         let mut partial_updates = Vec::new();
+        let mut threshold_exceeded_count = 0u64;
         for new_row in &new_wire {
             // Extract PK from new row
             let pk_values: Vec<Option<Vec<u8>>> =
@@ -784,19 +785,83 @@ impl ConnectionHandler {
                 {
                     partial_updates.push(partial);
                 } else {
-                    // No changes for this row, skip it
+                    // Check if this was due to threshold exceeded (too many columns changed)
+                    let changed_count = old_row
+                        .iter()
+                        .zip(new_row.iter())
+                        .filter(|(o, n)| o != n)
+                        .count();
+                    if changed_count > 0 {
+                        let ratio = changed_count as f64 / new_row.len() as f64;
+                        if ratio > selective_config.max_changed_columns_ratio {
+                            threshold_exceeded_count += 1;
+                        }
+                    }
                     continue;
                 }
             } else {
                 // Can't find matching old row - this is an insert, not an update
                 // Fall back to regular updates
+                if let Some(metrics) = self.observability.metrics() {
+                    metrics.record_partial_update_fallback("pk_mismatch");
+                }
                 return false;
+            }
+        }
+
+        // Record threshold exceeded fallbacks if any
+        if threshold_exceeded_count > 0 {
+            if let Some(metrics) = self.observability.metrics() {
+                for _ in 0..threshold_exceeded_count {
+                    metrics.record_partial_update_fallback("threshold_exceeded");
+                }
             }
         }
 
         // If no partial updates were generated, nothing changed
         if partial_updates.is_empty() {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_partial_update_fallback("no_changes");
+            }
             return false;
+        }
+
+        // Calculate and record metrics before sending
+        if let Some(metrics) = self.observability.metrics() {
+            let total_columns = if !new_wire.is_empty() { new_wire[0].len() as u64 } else { 0 };
+            let mut total_columns_sent: u64 = 0;
+            let mut total_bytes_full: u64 = 0;
+            let mut total_bytes_partial: u64 = 0;
+
+            for (partial, new_row) in partial_updates.iter().zip(new_wire.iter()) {
+                // Count columns sent in this partial update
+                total_columns_sent += partial.present_column_count() as u64;
+
+                // Estimate bytes for full row vs partial update
+                let full_row_bytes: u64 = new_row
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| b.len() as u64).unwrap_or(0) + 4) // value + length prefix
+                    .sum();
+                let partial_bytes: u64 = partial
+                    .values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| b.len() as u64).unwrap_or(0) + 4)
+                    .sum::<u64>()
+                    + partial.column_mask.len() as u64
+                    + 2; // mask + total_columns header
+
+                total_bytes_full += full_row_bytes;
+                total_bytes_partial += partial_bytes;
+            }
+
+            // Record column efficiency metrics
+            let total_possible = total_columns * partial_updates.len() as u64;
+            metrics.record_selective_update_columns(total_columns_sent, total_possible);
+
+            // Record bytes saved
+            if total_bytes_full > total_bytes_partial {
+                metrics.record_partial_update_bytes_saved(total_bytes_full - total_bytes_partial);
+            }
         }
 
         // Send the partial updates
@@ -911,6 +976,7 @@ impl ConnectionHandler {
         query: &str,
         _params: Vec<Option<Vec<u8>>>,
         filter: Option<String>,
+        selective_updates_config: Option<SelectiveUpdatesConfig>,
     ) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
@@ -982,6 +1048,29 @@ impl ConnectionHandler {
             if let Some(metrics) = self.observability.metrics() {
                 metrics.increment_selective_eligible();
             }
+        }
+
+        // Apply per-subscription selective updates override if provided
+        if let Some(wire_config) = selective_updates_config {
+            // Convert wire protocol config to SelectiveColumnConfig
+            // Merge with server defaults for any unspecified fields
+            let server_config = &self.config.subscriptions.selective_updates;
+
+            let override_config = SelectiveColumnConfig {
+                enabled: wire_config.enabled.unwrap_or(server_config.enabled),
+                pk_columns: pk_detection.pk_column_indices.clone(), // Use detected PK columns
+                min_changed_columns: wire_config
+                    .min_changed_columns
+                    .unwrap_or(server_config.min_changed_columns),
+                max_changed_columns_ratio: wire_config
+                    .max_changed_columns_ratio
+                    .unwrap_or(server_config.max_changed_columns_ratio),
+            };
+
+            self.subscription_manager.set_selective_updates_override_by_wire_id(
+                &wire_subscription_id,
+                override_config,
+            );
         }
 
         // Execute the query to get initial data
@@ -1141,19 +1230,14 @@ impl ConnectionHandler {
 
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // First, try selective column updates (0xF7) if PK columns are known
-                            let pk_columns = self
-                                .subscription_manager
-                                .get_pk_columns_by_wire_id(&subscription_id);
-                            if !pk_columns.is_empty()
-                                && self
-                                    .try_send_selective_updates(
-                                        &subscription_id,
-                                        old_rows,
-                                        &new_rows,
-                                        &pk_columns,
-                                    )
-                                    .await
+                            // First, try selective column updates (0xF7) using effective config
+                            if self
+                                .try_send_selective_updates(
+                                    &subscription_id,
+                                    old_rows,
+                                    &new_rows,
+                                )
+                                .await
                             {
                                 // Selective updates sent successfully - update stored result
                                 self.subscription_manager.update_result_by_wire_id(
@@ -1165,6 +1249,9 @@ impl ConnectionHandler {
                             }
 
                             // Fall back to delta updates using PK columns
+                            let pk_columns = self
+                                .subscription_manager
+                                .get_pk_columns_by_wire_id(&subscription_id);
                             if let Some(delta) = compute_delta_with_pk(
                                 SubscriptionId::default(),
                                 old_rows,

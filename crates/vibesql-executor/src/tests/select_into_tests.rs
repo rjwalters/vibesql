@@ -36,12 +36,10 @@ fn test_select_into_single_row() {
     // Insert one row
     db.insert_row(
         "source",
-        vibesql_storage::Row {
-            values: vec![
+        vibesql_storage::Row::from_vec(vec![
                 vibesql_types::SqlValue::Integer(1),
                 vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            ],
-        },
+            ]),
     )
     .unwrap();
 
@@ -192,12 +190,12 @@ fn test_select_into_multiple_rows_error() {
     // Insert multiple rows
     db.insert_row(
         "source",
-        vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(1)] },
+        vibesql_storage::Row::from_vec(vec![vibesql_types::SqlValue::Integer(1)]),
     )
     .unwrap();
     db.insert_row(
         "source",
-        vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(2)] },
+        vibesql_storage::Row::from_vec(vec![vibesql_types::SqlValue::Integer(2)]),
     )
     .unwrap();
 
@@ -259,7 +257,7 @@ fn test_select_into_with_expressions() {
     // Insert one row
     db.insert_row(
         "source",
-        vibesql_storage::Row { values: vec![vibesql_types::SqlValue::Integer(10)] },
+        vibesql_storage::Row::from_vec(vec![vibesql_types::SqlValue::Integer(10)]),
     )
     .unwrap();
 

@@ -43,6 +43,7 @@ rand = "0.9"  # For statistical sampling (Phase 5.2)
 instant = { version = "0.1", features = ["wasm-bindgen"] }  # WASM-compatible time primitives
 # uuid is specified per-target below to add "js" feature for WASM
 bytes = "1.5"
+smallvec = { version = "1.13", features = ["serde"] }
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
 opendal = { version = "0.55", optional = true }
 
