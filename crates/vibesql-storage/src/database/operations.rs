@@ -246,14 +246,15 @@ impl Operations {
         // Generate row indices for return
         let row_indices: Vec<usize> = (start_index..start_index + count).collect();
 
-        // Update user-defined indexes for all inserted rows (only if we cloned)
-        if let (Some(schema), Some(rows_ref)) = (table_schema, rows_for_indexes) {
-            for (i, row) in rows_ref.iter().enumerate() {
-                let row_index = start_index + i;
-                self.index_manager.add_to_indexes_for_insert(table_name, schema, row, row_index);
-                // Update spatial indexes
-                self.update_spatial_indexes_for_insert(catalog, table_name, row, row_index);
-            }
+        // Update user-defined indexes for all inserted rows using batch optimization
+        // This pre-computes column indices once per index rather than once per row
+        if let Some(rows_ref) = rows_for_indexes {
+            let rows_to_insert: Vec<(usize, &Row)> = rows_ref
+                .iter()
+                .enumerate()
+                .map(|(i, row)| (start_index + i, row))
+                .collect();
+            self.batch_add_to_indexes_for_insert(catalog, table_name, &rows_to_insert);
         }
 
         Ok(row_indices)
@@ -535,6 +536,24 @@ impl Operations {
 
         // Batch update spatial indexes
         self.batch_update_spatial_indexes_for_delete(catalog, table_name, rows_to_delete);
+    }
+
+    /// Batch add to user-defined indexes for insert operation
+    ///
+    /// This is significantly more efficient than calling `add_to_indexes_for_insert` in a loop
+    /// because it pre-computes column indices once per index rather than once per row.
+    pub fn batch_add_to_indexes_for_insert(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        rows_to_insert: &[(usize, &Row)],
+    ) {
+        if let Some(table_schema) = catalog.get_table(table_name) {
+            self.index_manager.batch_add_to_indexes_for_insert(table_name, table_schema, rows_to_insert);
+        }
+
+        // Update spatial indexes in batch
+        self.batch_update_spatial_indexes_for_insert(catalog, table_name, rows_to_insert);
     }
 
     /// Rebuild user-defined indexes after bulk operations that change row indices
@@ -1029,6 +1048,55 @@ impl Operations {
             if let Some(mbr) = extract_mbr_from_sql_value(geom_value) {
                 if let Some((_, index)) = self.spatial_indexes.get_mut(&index_name) {
                     index.insert(row_index, mbr);
+                }
+            }
+        }
+    }
+
+    /// Batch update spatial indexes for insert operation
+    ///
+    /// This is more efficient than calling `update_spatial_indexes_for_insert` in a loop
+    /// because it pre-computes column indices once per index rather than once per row.
+    ///
+    /// # Arguments
+    /// * `catalog` - The database catalog
+    /// * `table_name` - The table name
+    /// * `rows_to_insert` - Vec of (row_index, row) pairs to insert
+    fn batch_update_spatial_indexes_for_insert(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        rows_to_insert: &[(usize, &Row)],
+    ) {
+        if rows_to_insert.is_empty() {
+            return;
+        }
+
+        let table_schema = match catalog.get_table(table_name) {
+            Some(schema) => schema,
+            None => return,
+        };
+
+        // Pre-compute indexes and column indices once
+        let indexes_to_update: Vec<(String, usize)> = self
+            .spatial_indexes
+            .iter()
+            .filter(|(_, (metadata, _))| metadata.table_name == table_name)
+            .filter_map(|(index_name, (metadata, _))| {
+                table_schema
+                    .get_column_index(&metadata.column_name)
+                    .map(|col_idx| (index_name.clone(), col_idx))
+            })
+            .collect();
+
+        // Process each index
+        for (index_name, col_idx) in indexes_to_update {
+            if let Some((_, index)) = self.spatial_indexes.get_mut(&index_name) {
+                for &(row_index, row) in rows_to_insert {
+                    let geom_value = &row.values[col_idx];
+                    if let Some(mbr) = extract_mbr_from_sql_value(geom_value) {
+                        index.insert(row_index, mbr);
+                    }
                 }
             }
         }

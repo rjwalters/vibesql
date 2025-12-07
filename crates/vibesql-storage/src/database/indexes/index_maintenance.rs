@@ -322,6 +322,106 @@ impl IndexManager {
         }
     }
 
+    /// Batch add rows to user-defined indexes after insert
+    ///
+    /// This is significantly more efficient than calling `add_to_indexes_for_insert` in a loop
+    /// because it:
+    /// 1. Pre-computes column indices once per index (not per row)
+    /// 2. Builds all keys in a single pass per index
+    /// 3. Batch-inserts entries into each index
+    ///
+    /// # Arguments
+    /// * `table_name` - The table name
+    /// * `table_schema` - The table schema (for column lookups)
+    /// * `rows_to_insert` - Vec of (row_index, row) pairs to insert
+    pub fn batch_add_to_indexes_for_insert(
+        &mut self,
+        table_name: &str,
+        table_schema: &vibesql_catalog::TableSchema,
+        rows_to_insert: &[(usize, &Row)],
+    ) {
+        if rows_to_insert.is_empty() {
+            return;
+        }
+
+        // Collect indexes that need updating for this table
+        // Pre-compute column indices once per index (not per row)
+        #[allow(clippy::type_complexity)]
+        let indexes_to_update: Vec<(String, Vec<(usize, Option<u64>)>)> = self
+            .indexes
+            .iter()
+            .filter(|(_, metadata)| metadata.table_name.eq_ignore_ascii_case(table_name))
+            .map(|(index_name, metadata)| {
+                // Pre-compute column indices and prefix lengths for this index
+                let column_info: Vec<(usize, Option<u64>)> = metadata
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        let col_idx = table_schema
+                            .get_column_index(&col.column_name)
+                            .expect("Index column should exist");
+                        (col_idx, col.prefix_length)
+                    })
+                    .collect();
+                (index_name.clone(), column_info)
+            })
+            .collect();
+
+        // Process each index
+        for (index_name, column_info) in indexes_to_update {
+            if let Some(index_data) = self.index_data.get_mut(&index_name) {
+                match index_data {
+                    IndexData::InMemory { data, .. } => {
+                        // Build all keys and insert in batch
+                        for &(row_index, row) in rows_to_insert {
+                            let key_values: Vec<SqlValue> = column_info
+                                .iter()
+                                .map(|&(col_idx, prefix_length)| {
+                                    let value = &row.values[col_idx];
+                                    let truncated = apply_prefix_truncation(value, prefix_length);
+                                    crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                                })
+                                .collect();
+
+                            data.entry(key_values).or_default().push(row_index);
+                        }
+                    }
+                    IndexData::DiskBacked { btree, .. } => {
+                        // Acquire lock once and batch insert
+                        match acquire_btree_lock(btree) {
+                            Ok(mut guard) => {
+                                for &(row_index, row) in rows_to_insert {
+                                    let key_values: Vec<SqlValue> = column_info
+                                        .iter()
+                                        .map(|&(col_idx, prefix_length)| {
+                                            let value = &row.values[col_idx];
+                                            let truncated = apply_prefix_truncation(value, prefix_length);
+                                            crate::database::indexes::index_operations::normalize_for_comparison(&truncated)
+                                        })
+                                        .collect();
+                                    if let Err(e) = guard.insert(key_values, row_index) {
+                                        log::warn!(
+                                            "Failed to insert into disk-backed index '{}': {:?}",
+                                            index_name,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("BTreeIndex lock acquisition failed in batch_add_to_indexes_for_insert: {}", e);
+                            }
+                        }
+                    }
+                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                        // Vector indexes don't support incremental inserts via this path
+                        // They need to be rebuilt after bulk operations
+                    }
+                }
+            }
+        }
+    }
+
     /// Update user-defined indexes for update operation
     ///
     /// # Arguments
