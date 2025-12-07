@@ -5,6 +5,11 @@ use std::cmp::Ordering;
 
 use vibesql_types::SqlValue;
 
+// Helper to create StringValue from &str (works with both Arc<str> and ArcStr)
+fn sv(s: &str) -> vibesql_types::StringValue {
+    vibesql_types::StringValue::from(s)
+}
+
 /// Verify that Eq and Ord are consistent for all SqlValue variants
 /// This is a requirement for BTreeMap keys:
 /// - If a == b, then a.cmp(b) must return Ordering::Equal
@@ -33,8 +38,8 @@ fn test_eq_ord_consistency() {
         SqlValue::Numeric(2.718),
         SqlValue::Numeric(f64::NAN),
         // Strings
-        SqlValue::Character(std::sync::Arc::from("hello")),
-        SqlValue::Varchar(std::sync::Arc::from("world")),
+        SqlValue::Character(sv("hello")),
+        SqlValue::Varchar(sv("world")),
         // Boolean
         SqlValue::Boolean(true),
         SqlValue::Boolean(false),
@@ -136,7 +141,7 @@ fn test_eq_reflexivity() {
         SqlValue::Integer(42),
         SqlValue::Float(f32::NAN),
         SqlValue::Double(f64::NAN),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(sv("test")),
     ];
 
     for val in test_values {
@@ -158,7 +163,7 @@ fn test_btreemap_usage() {
     map.insert(SqlValue::Float(f32::NAN), "nan_float".to_string());
     map.insert(SqlValue::Double(f64::NAN), "nan_double".to_string());
     map.insert(SqlValue::Null, "null".to_string());
-    map.insert(SqlValue::Varchar(std::sync::Arc::from("hello")), "greeting".to_string());
+    map.insert(SqlValue::Varchar(sv("hello")), "greeting".to_string());
 
     // Verify retrieval works
     assert_eq!(map.get(&SqlValue::Integer(1)), Some(&"one".to_string()));
@@ -181,7 +186,7 @@ fn test_btreemap_vec_keys() {
         vec![SqlValue::Integer(3), SqlValue::Integer(4)],
         vec![SqlValue::Integer(1), SqlValue::Integer(2)], // Duplicate
         vec![SqlValue::Float(1.5), SqlValue::Float(2.5)],
-        vec![SqlValue::Varchar(std::sync::Arc::from("a")), SqlValue::Varchar(std::sync::Arc::from("b"))],
+        vec![SqlValue::Varchar(sv("a")), SqlValue::Varchar(sv("b"))],
     ];
 
     let mut btree: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();

@@ -1,4 +1,10 @@
 // ============================================================================
+
+// Helper to create StringValue from &str (works with both Arc<str> and ArcStr)
+fn sv(s: &str) -> vibesql_types::StringValue {
+    vibesql_types::StringValue::from(s)
+}
+
 // Hash Implementation Tests (for DISTINCT operations)
 // ============================================================================
 use std::{
@@ -89,15 +95,15 @@ fn test_double_nan_hash() {
 
 #[test]
 fn test_varchar_hash() {
-    let v1 = SqlValue::Varchar(std::sync::Arc::from("hello"));
-    let v2 = SqlValue::Varchar(std::sync::Arc::from("hello"));
+    let v1 = SqlValue::Varchar(sv("hello"));
+    let v2 = SqlValue::Varchar(sv("hello"));
     assert_eq!(calculate_hash(&v1), calculate_hash(&v2));
 }
 
 #[test]
 fn test_character_hash() {
-    let v1 = SqlValue::Character(std::sync::Arc::from("test"));
-    let v2 = SqlValue::Character(std::sync::Arc::from("test"));
+    let v1 = SqlValue::Character(sv("test"));
+    let v2 = SqlValue::Character(sv("test"));
     assert_eq!(calculate_hash(&v1), calculate_hash(&v2));
 }
 

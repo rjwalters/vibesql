@@ -1,12 +1,18 @@
 use vibesql_types::*;
 
+// Helper to create StringValue from &str (works with both Arc<str> and ArcStr)
+fn sv(s: &str) -> vibesql_types::StringValue {
+    vibesql_types::StringValue::from(s)
+}
+
+
 // ============================================================================
 // Edge Case Tests
 // ============================================================================
 
 #[test]
 fn test_empty_string_varchar() {
-    let value = SqlValue::Varchar(std::sync::Arc::from(""));
+    let value = SqlValue::Varchar(sv(""));
     assert_eq!(format!("{}", value), "");
     assert!(!value.is_null());
 }
@@ -31,6 +37,6 @@ fn test_very_small_bigint() {
 
 #[test]
 fn test_special_characters_in_varchar() {
-    let value = SqlValue::Varchar(std::sync::Arc::from("Hello, 世界! 🌍"));
+    let value = SqlValue::Varchar(sv("Hello, 世界! 🌍"));
     assert_eq!(format!("{}", value), "Hello, 世界! 🌍");
 }
