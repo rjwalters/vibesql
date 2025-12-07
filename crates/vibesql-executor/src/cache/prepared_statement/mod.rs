@@ -38,7 +38,7 @@ mod bind;
 pub mod plan;
 
 pub use plan::{
-    CachedPlan, ColumnProjection, PkPointLookupPlan, ProjectionPlan, ResolvedProjection,
+    CachedPlan, ColumnProjection, PkDeletePlan, PkPointLookupPlan, ProjectionPlan, ResolvedProjection,
     SimpleFastPathPlan,
 };
 

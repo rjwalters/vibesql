@@ -281,6 +281,10 @@ impl<'a> Session<'a> {
                 }
                 // Fall through for non-SELECT (shouldn't happen for SimpleFastPath)
             }
+            CachedPlan::PkDelete(_) => {
+                // DELETE requires mutable access, use execute_prepared_mut instead
+                // Fall through to standard execution which will return an error
+            }
             CachedPlan::Standard => {
                 // Fall through to standard execution
             }
@@ -523,8 +527,97 @@ impl<'a> SessionMut<'a> {
         stmt: &PreparedStatement,
         params: &[SqlValue],
     ) -> Result<PreparedExecutionResult, SessionError> {
+        // Try fast-path execution using cached plan
+        if let CachedPlan::PkDelete(plan) = stmt.cached_plan() {
+            if let Some(result) = self.try_execute_pk_delete(plan, params)? {
+                return Ok(result);
+            }
+            // Fall through to standard execution if fast path fails
+        }
+
         let bound_stmt = stmt.bind(params)?;
         self.execute_statement_mut(&bound_stmt)
+    }
+
+    /// Try to execute a PK delete using the cached plan
+    ///
+    /// Returns `Ok(Some(result))` if execution succeeded via fast path,
+    /// `Ok(None)` if we need to fall back to standard execution.
+    fn try_execute_pk_delete(
+        &mut self,
+        plan: &crate::cache::PkDeletePlan,
+        params: &[SqlValue],
+    ) -> Result<Option<PreparedExecutionResult>, SessionError> {
+        // Check cached validation first (fast path for repeated executions)
+        if let Some(valid) = plan.is_fast_path_valid() {
+            if !valid {
+                return Ok(None); // Cached as invalid, fall back immediately
+            }
+            // Cached as valid, skip expensive checks and execute directly
+        } else {
+            // Not cached yet - do the expensive validation and cache result
+            let valid = self.validate_delete_fast_path(plan);
+            plan.set_fast_path_valid(valid);
+            if !valid {
+                return Ok(None);
+            }
+        }
+
+        // Build PK values from parameters
+        let pk_values = plan.build_pk_values(params);
+
+        // Execute the fast delete
+        match self.db.delete_by_pk_fast(&plan.table_name, &pk_values) {
+            Ok(deleted) => Ok(Some(PreparedExecutionResult::RowsAffected(if deleted {
+                1
+            } else {
+                0
+            }))),
+            Err(_) => Ok(None), // Fall back to standard path on error
+        }
+    }
+
+    /// Validate whether fast delete path can be used for this table
+    /// This is expensive (iterates triggers and FKs) so result is cached
+    fn validate_delete_fast_path(&self, plan: &crate::cache::PkDeletePlan) -> bool {
+        // Check for triggers - if any exist, we must use standard path
+        let has_triggers = self
+            .db
+            .catalog
+            .get_triggers_for_table(&plan.table_name, Some(vibesql_ast::TriggerEvent::Delete))
+            .next()
+            .is_some();
+
+        if has_triggers {
+            return false;
+        }
+
+        // Check for referencing FKs - if any exist, we must use standard path
+        let schema = match self.db.catalog.get_table(&plan.table_name) {
+            Some(s) => s,
+            None => return false, // Table not found
+        };
+
+        let has_pk = schema.get_primary_key_indices().is_some();
+        if has_pk {
+            let has_referencing_fks = self.db.catalog.list_tables().iter().any(|t| {
+                self.db
+                    .catalog
+                    .get_table(t)
+                    .map(|s| {
+                        s.foreign_keys
+                            .iter()
+                            .any(|fk| fk.parent_table.eq_ignore_ascii_case(&plan.table_name))
+                    })
+                    .unwrap_or(false)
+            });
+
+            if has_referencing_fks {
+                return false;
+            }
+        }
+
+        true // No blockers, fast path is valid
     }
 
     /// Execute a read-only statement
@@ -557,20 +650,26 @@ impl<'a> SessionMut<'a> {
             }
             Statement::Insert(insert_stmt) => {
                 let rows_affected = InsertExecutor::execute(self.db, insert_stmt)?;
-                // Invalidate cache for affected table
-                self.cache.invalidate_table(&insert_stmt.table_name);
+                // Note: We don't invalidate prepared statement cache for DML operations.
+                // Prepared statements (parsed AST) don't depend on data values.
+                // Only schema changes (DDL) require cache invalidation.
+                // Query result caches are handled separately by IntegrationCache.
                 Ok(PreparedExecutionResult::RowsAffected(rows_affected))
             }
             Statement::Update(update_stmt) => {
                 let rows_affected = UpdateExecutor::execute(update_stmt, self.db)?;
-                // Invalidate cache for affected table
-                self.cache.invalidate_table(&update_stmt.table_name);
+                // Note: We don't invalidate prepared statement cache for DML operations.
+                // Prepared statements (parsed AST) don't depend on data values.
+                // Only schema changes (DDL) require cache invalidation.
+                // Query result caches are handled separately by IntegrationCache.
                 Ok(PreparedExecutionResult::RowsAffected(rows_affected))
             }
             Statement::Delete(delete_stmt) => {
                 let rows_affected = DeleteExecutor::execute(delete_stmt, self.db)?;
-                // Invalidate cache for affected table
-                self.cache.invalidate_table(&delete_stmt.table_name);
+                // Note: We don't invalidate prepared statement cache for DML operations.
+                // Prepared statements (parsed AST) don't depend on data values.
+                // Only schema changes (DDL) require cache invalidation.
+                // Query result caches are handled separately by IntegrationCache.
                 Ok(PreparedExecutionResult::RowsAffected(rows_affected))
             }
             _ => Err(SessionError::UnsupportedStatement(format!(
@@ -872,5 +971,48 @@ mod tests {
         // Test prepare_arena for SELECT statement
         let stmt = session.prepare_arena("SELECT * FROM users WHERE id = ?").unwrap();
         assert_eq!(stmt.param_count(), 1);
+    }
+
+    #[test]
+    fn test_delete_fast_path_plan() {
+        use crate::cache::CachedPlan;
+
+        let mut db = create_test_db();
+        let mut session = SessionMut::new(&mut db);
+
+        // Prepare DELETE statement
+        let stmt = session.prepare("DELETE FROM users WHERE id = ?").unwrap();
+
+        // Verify it creates a PkDelete plan
+        match stmt.cached_plan() {
+            CachedPlan::PkDelete(plan) => {
+                // Table name should be uppercase
+                assert_eq!(plan.table_name, "USERS");
+                // Should have one PK column
+                assert_eq!(plan.pk_columns, vec!["ID"]);
+                // Param 0 maps to PK column 0
+                assert_eq!(plan.param_to_pk_col, vec![(0, 0)]);
+                // Fast path should not be validated yet
+                assert!(plan.is_fast_path_valid().is_none());
+            }
+            other => panic!("Expected PkDelete plan, got {:?}", other),
+        }
+
+        // Execute DELETE - this should validate and use fast path
+        let result = session.execute_prepared_mut(&stmt, &[SqlValue::Integer(1)]).unwrap();
+        assert_eq!(result.rows_affected(), Some(1));
+
+        // After execution, fast path should be cached as valid (no triggers/FKs on users table)
+        match stmt.cached_plan() {
+            CachedPlan::PkDelete(plan) => {
+                assert_eq!(plan.is_fast_path_valid(), Some(true), "Fast path should be valid after execution");
+            }
+            _ => panic!("Plan should still be PkDelete"),
+        }
+
+        // Verify the row was deleted
+        let select_stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        let select_result = session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
+        assert_eq!(select_result.rows().unwrap().len(), 0);
     }
 }

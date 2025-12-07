@@ -788,8 +788,11 @@ impl Database {
             (row_index, row)
         };
 
-        // Emit WAL entry before deleting (needed for crash recovery)
-        self.emit_wal_delete(table_name, row_index as u64, row_clone.values.clone());
+        // Emit WAL entry before any modifications (needed for crash recovery)
+        // Only clone values if persistence is actually enabled to avoid unnecessary allocation
+        if self.persistence_enabled() {
+            self.emit_wal_delete(table_name, row_index as u64, row_clone.values.clone());
+        }
 
         // Update user-defined indexes with the cloned row
         self.operations.update_indexes_for_delete(&self.catalog, table_name, &row_clone, row_index);
