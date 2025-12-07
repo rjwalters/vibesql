@@ -26,6 +26,11 @@ pub struct ServerMetrics {
     bytes_received_total: Counter<u64>,
     #[allow(dead_code)]
     bytes_sent_total: Counter<u64>,
+
+    // Subscription metrics
+    subscription_updates_total: Counter<u64>,
+    selective_update_columns_sent: Histogram<u64>,
+    selective_update_changed_ratio: Histogram<f64>,
 }
 
 impl ServerMetrics {
@@ -100,6 +105,25 @@ impl ServerMetrics {
             .with_unit("By")
             .build();
 
+        // Subscription metrics
+        let subscription_updates_total = meter
+            .u64_counter("vibesql_subscription_updates_total")
+            .with_description("Subscription updates sent by type (full, delta_insert, delta_update, delta_delete, selective)")
+            .with_unit("{update}")
+            .build();
+
+        let selective_update_columns_sent = meter
+            .u64_histogram("vibesql_selective_update_columns_sent")
+            .with_description("Number of columns sent in selective updates")
+            .with_unit("{column}")
+            .build();
+
+        let selective_update_changed_ratio = meter
+            .f64_histogram("vibesql_selective_update_changed_ratio")
+            .with_description("Ratio of changed columns to total columns in selective updates (0.0-1.0)")
+            .with_unit("1")
+            .build();
+
         Self {
             connections_total,
             connection_errors_total,
@@ -112,6 +136,9 @@ impl ServerMetrics {
             messages_sent_total,
             bytes_received_total,
             bytes_sent_total,
+            subscription_updates_total,
+            selective_update_columns_sent,
+            selective_update_changed_ratio,
         }
     }
 
@@ -192,5 +219,36 @@ impl ServerMetrics {
     #[allow(dead_code)]
     pub fn record_bytes_sent(&self, bytes: u64) {
         self.bytes_sent_total.add(bytes, &[]);
+    }
+
+    // Subscription metrics methods
+
+    /// Record a subscription update
+    ///
+    /// # Arguments
+    /// * `update_type` - The type of update: "full", "delta_insert", "delta_update", "delta_delete", or "selective"
+    /// * `row_count` - Number of rows in the update
+    pub fn record_subscription_update(&self, update_type: &str, row_count: u64) {
+        self.subscription_updates_total.add(
+            1,
+            &[
+                KeyValue::new("type", update_type.to_string()),
+                KeyValue::new("row_count", row_count as i64),
+            ],
+        );
+    }
+
+    /// Record selective update column statistics
+    ///
+    /// # Arguments
+    /// * `columns_sent` - Number of columns included in the selective update
+    /// * `total_columns` - Total number of columns in the full row
+    pub fn record_selective_update_columns(&self, columns_sent: u64, total_columns: u64) {
+        self.selective_update_columns_sent.record(columns_sent, &[]);
+
+        if total_columns > 0 {
+            let ratio = columns_sent as f64 / total_columns as f64;
+            self.selective_update_changed_ratio.record(ratio, &[]);
+        }
     }
 }
