@@ -33,7 +33,8 @@ use vibesql_storage::statistics::CostEstimator;
 use vibesql_storage::Database;
 
 use crate::{
-    errors::ExecutorError, evaluator::ExpressionEvaluator, privilege_checker::PrivilegeChecker,
+    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
+    privilege_checker::PrivilegeChecker,
 };
 
 /// Executor for UPDATE statements
@@ -320,6 +321,30 @@ impl UpdateExecutor {
                     old_row,
                     new_row,
                 )?;
+            }
+        }
+
+        // Cost-based optimization: Log update cost with indexes_affected_ratio
+        if !updates.is_empty() {
+            // Compute aggregate changed columns across all updates
+            let mut all_changed_columns = std::collections::HashSet::new();
+            for (_, _, _, changed_cols, _) in &updates {
+                all_changed_columns.extend(changed_cols.iter().copied());
+            }
+
+            let optimizer = DmlOptimizer::new(database, &stmt.table_name);
+            let indexes_affected_ratio =
+                optimizer.compute_indexes_affected_ratio(&all_changed_columns, schema);
+            let _update_cost = optimizer.estimate_update_cost(updates.len(), indexes_affected_ratio);
+
+            // Log optimization insight: selective updates (low affected ratio) are much cheaper
+            if std::env::var("DML_COST_DEBUG").is_ok() && indexes_affected_ratio < 1.0 {
+                eprintln!(
+                    "DML_COST_DEBUG: UPDATE on {} - {} rows, {:.0}% indexes affected (selective update optimization)",
+                    stmt.table_name,
+                    updates.len(),
+                    indexes_affected_ratio * 100.0
+                );
             }
         }
 
