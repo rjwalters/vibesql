@@ -235,7 +235,7 @@ pub fn create_multiple_parent_child_tables(db: &mut Database) {
 pub fn insert_parent_row(db: &mut Database, table: &str, id: i64, name: &str) {
     db.insert_row(
         table,
-        Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(name.to_string())]),
+        Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(std::sync::Arc::from(name))]),
     )
     .unwrap();
 }
@@ -247,7 +247,7 @@ pub fn insert_child_row(db: &mut Database, table: &str, id: i64, parent_id: i64,
         Row::new(vec![
             SqlValue::Integer(id),
             SqlValue::Integer(parent_id),
-            SqlValue::Varchar(data.to_string()),
+            SqlValue::Varchar(std::sync::Arc::from(data)),
         ]),
     )
     .unwrap();
@@ -257,7 +257,7 @@ pub fn insert_child_row(db: &mut Database, table: &str, id: i64, parent_id: i64,
 pub fn insert_child_row_null_fk(db: &mut Database, table: &str, id: i64, data: &str) {
     db.insert_row(
         table,
-        Row::new(vec![SqlValue::Integer(id), SqlValue::Null, SqlValue::Varchar(data.to_string())]),
+        Row::new(vec![SqlValue::Integer(id), SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from(data))]),
     )
     .unwrap();
 }

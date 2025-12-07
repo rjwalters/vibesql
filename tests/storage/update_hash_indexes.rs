@@ -39,8 +39,8 @@ fn test_update_hash_indexes() {
     for i in 0..1000 {
         let row = Row::new(vec![
             SqlValue::Integer(i),
-            SqlValue::Varchar(format!("user{}@example.com", i)),
-            SqlValue::Varchar(format!("user{}", i)),
+            SqlValue::Varchar(format!("user{}@example.com", i).into()),
+            SqlValue::Varchar(format!("user{}", i).into()),
         ]);
         db.insert_row("users", row).unwrap();
     }

@@ -60,7 +60,7 @@ pub fn format_sql_value(value: &SqlValue, expected_type: Option<&DefaultColumnTy
             // Always format with 3 decimal places for SQLLogicTest compatibility
             format!("{:.3}", f)
         }
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
         SqlValue::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
         SqlValue::Null => "NULL".to_string(),
         SqlValue::Date(d) => d.to_string(),
@@ -129,7 +129,7 @@ pub fn format_sql_value_canonical(
             // Always format with 3 decimal places for SQLLogicTest compatibility
             format!("{:.3}", f)
         }
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
         SqlValue::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
         SqlValue::Null => "NULL".to_string(),
         SqlValue::Date(d) => d.to_string(),

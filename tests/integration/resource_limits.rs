@@ -42,7 +42,7 @@ fn create_test_db(table_name: &str, num_rows: usize) -> Database {
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Integer((i % 100) as i64),
-            SqlValue::Varchar(format!("cat_{}", i % 10)),
+            SqlValue::Varchar(format!("cat_{}", i % 10).into()),
         ]);
         db.insert_row(table_name, row).unwrap();
     }
@@ -174,7 +174,7 @@ fn test_row_limit_enforcement_in_large_join() {
     for i in 0..5000 {
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer((i % 1000) as i64),
-            SqlValue::Varchar(format!("data_{}", i)),
+            SqlValue::Varchar(format!("data_{}", i).into()),
         ]);
         db.insert_row("JOIN_B", row).unwrap();
     }
@@ -361,7 +361,7 @@ fn test_large_join_intermediate_result_management() {
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Integer((i % 100) as i64),
-            SqlValue::Varchar(format!("left_{}", i)),
+            SqlValue::Varchar(format!("left_{}", i).into()),
         ]);
         db.insert_row("BIG_LEFT", row).unwrap();
     }
@@ -371,7 +371,7 @@ fn test_large_join_intermediate_result_management() {
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Integer((i % 100) as i64),
-            SqlValue::Varchar(format!("right_{}", i)),
+            SqlValue::Varchar(format!("right_{}", i).into()),
         ]);
         db.insert_row("BIG_RIGHT", row).unwrap();
     }

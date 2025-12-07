@@ -32,7 +32,7 @@ fn bench_construction(c: &mut Criterion) {
 
     group.bench_function("varchar_long", |b| {
         let s = "a".repeat(100);
-        b.iter(|| black_box(SqlValue::Varchar(s.clone())));
+        b.iter(|| black_box(SqlValue::Varchar(std::sync::Arc::from(s.clone()))));
     });
 
     group.bench_function("double", |b| {
@@ -77,7 +77,7 @@ fn bench_clone(c: &mut Criterion) {
         b.iter(|| black_box(varchar_short.clone()));
     });
 
-    let varchar_long = SqlValue::Varchar("a".repeat(100));
+    let varchar_long = SqlValue::Varchar(std::sync::Arc::from("a".repeat(100)));
     group.bench_function("varchar_long", |b| {
         b.iter(|| black_box(varchar_long.clone()));
     });
@@ -133,8 +133,8 @@ fn bench_comparison(c: &mut Criterion) {
     });
 
     // Long varchar comparisons
-    let varchar_long_a = SqlValue::Varchar("a".repeat(100));
-    let varchar_long_b = SqlValue::Varchar("a".repeat(99) + "b");
+    let varchar_long_a = SqlValue::Varchar(std::sync::Arc::from("a".repeat(100)));
+    let varchar_long_b = SqlValue::Varchar(std::sync::Arc::from("a".repeat(99) + "b"));
     group.bench_function("varchar_long_eq", |b| {
         b.iter(|| black_box(varchar_long_a == varchar_long_b));
     });
@@ -177,7 +177,7 @@ fn bench_hashing(c: &mut Criterion) {
         b.iter(|| {
             let mut map = HashMap::new();
             for i in 0..100 {
-                map.insert(SqlValue::Varchar(format!("key_{}", i)), i);
+                map.insert(SqlValue::Varchar(std::sync::Arc::from(format!("key_{}", i))), i);
             }
             black_box(map.len())
         });
@@ -200,11 +200,11 @@ fn bench_hashing(c: &mut Criterion) {
     group.bench_function("hashmap_lookup_varchar", |b| {
         let mut map = HashMap::new();
         for i in 0..1000 {
-            map.insert(SqlValue::Varchar(format!("key_{}", i)), i);
+            map.insert(SqlValue::Varchar(std::sync::Arc::from(format!("key_{}", i))), i);
         }
         let mut j = 0;
         b.iter(|| {
-            let key = SqlValue::Varchar(format!("key_{}", j % 1000));
+            let key = SqlValue::Varchar(std::sync::Arc::from(format!("key_{}", j % 1000)));
             black_box(map.get(&key));
             j += 1;
         });

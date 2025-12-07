@@ -786,12 +786,12 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "exchange",
             Row::new(vec![
-                SqlValue::Varchar(ex.ex_id),
-                SqlValue::Varchar(ex.ex_name),
+                SqlValue::Varchar(std::sync::Arc::from(ex.ex_id)),
+                SqlValue::Varchar(std::sync::Arc::from(ex.ex_name)),
                 SqlValue::Integer(ex.ex_num_symb as i64),
                 SqlValue::Integer(ex.ex_open as i64),
                 SqlValue::Integer(ex.ex_close as i64),
-                SqlValue::Varchar(ex.ex_desc),
+                SqlValue::Varchar(std::sync::Arc::from(ex.ex_desc)),
                 SqlValue::Bigint(ex.ex_ad_id),
             ]),
         )
@@ -802,7 +802,7 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
     for sc in data.gen_sectors() {
         db.insert_row(
             "sector",
-            Row::new(vec![SqlValue::Varchar(sc.sc_id), SqlValue::Varchar(sc.sc_name)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(sc.sc_id)), SqlValue::Varchar(std::sync::Arc::from(sc.sc_name))]),
         )
         .unwrap();
     }
@@ -812,9 +812,9 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "industry",
             Row::new(vec![
-                SqlValue::Varchar(ind.in_id),
-                SqlValue::Varchar(ind.in_name),
-                SqlValue::Varchar(ind.in_sc_id),
+                SqlValue::Varchar(std::sync::Arc::from(ind.in_id)),
+                SqlValue::Varchar(std::sync::Arc::from(ind.in_name)),
+                SqlValue::Varchar(std::sync::Arc::from(ind.in_sc_id)),
             ]),
         )
         .unwrap();
@@ -824,7 +824,7 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
     for st in data.gen_status_types() {
         db.insert_row(
             "status_type",
-            Row::new(vec![SqlValue::Varchar(st.st_id), SqlValue::Varchar(st.st_name)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(st.st_id)), SqlValue::Varchar(std::sync::Arc::from(st.st_name))]),
         )
         .unwrap();
     }
@@ -834,8 +834,8 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "trade_type",
             Row::new(vec![
-                SqlValue::Varchar(tt.tt_id),
-                SqlValue::Varchar(tt.tt_name),
+                SqlValue::Varchar(std::sync::Arc::from(tt.tt_id)),
+                SqlValue::Varchar(std::sync::Arc::from(tt.tt_name)),
                 SqlValue::Boolean(tt.tt_is_sell),
                 SqlValue::Boolean(tt.tt_is_mrkt),
             ]),
@@ -848,7 +848,7 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "charge",
             Row::new(vec![
-                SqlValue::Varchar(ch.ch_tt_id),
+                SqlValue::Varchar(std::sync::Arc::from(ch.ch_tt_id)),
                 SqlValue::Integer(ch.ch_c_tier as i64),
                 SqlValue::Numeric(ch.ch_chrg),
             ]),
@@ -861,8 +861,8 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "taxrate",
             Row::new(vec![
-                SqlValue::Varchar(tx.tx_id),
-                SqlValue::Varchar(tx.tx_name),
+                SqlValue::Varchar(std::sync::Arc::from(tx.tx_id)),
+                SqlValue::Varchar(std::sync::Arc::from(tx.tx_name)),
                 SqlValue::Numeric(tx.tx_rate),
             ]),
         )
@@ -874,9 +874,9 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "zip_code",
             Row::new(vec![
-                SqlValue::Varchar(zc.zc_code),
-                SqlValue::Varchar(zc.zc_town),
-                SqlValue::Varchar(zc.zc_div),
+                SqlValue::Varchar(std::sync::Arc::from(zc.zc_code)),
+                SqlValue::Varchar(std::sync::Arc::from(zc.zc_town)),
+                SqlValue::Varchar(std::sync::Arc::from(zc.zc_div)),
             ]),
         )
         .unwrap();
@@ -897,8 +897,8 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             "broker",
             Row::new(vec![
                 SqlValue::Bigint(broker.b_id),
-                SqlValue::Varchar(broker.b_st_id),
-                SqlValue::Varchar(broker.b_name),
+                SqlValue::Varchar(std::sync::Arc::from(broker.b_st_id)),
+                SqlValue::Varchar(std::sync::Arc::from(broker.b_name)),
                 SqlValue::Integer(broker.b_num_trades as i64),
                 SqlValue::Numeric(broker.b_comm_total),
             ]),
@@ -921,10 +921,10 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             "address",
             Row::new(vec![
                 SqlValue::Bigint(addr.ad_id),
-                SqlValue::Varchar(addr.ad_line1),
-                SqlValue::Varchar(addr.ad_line2),
-                SqlValue::Varchar(addr.ad_zc_code),
-                SqlValue::Varchar(addr.ad_ctry),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_line1)),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_line2)),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_zc_code)),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_ctry)),
             ]),
         )
         .unwrap();
@@ -935,29 +935,29 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             "customer",
             Row::new(vec![
                 SqlValue::Bigint(cust.c_id),
-                SqlValue::Varchar(cust.c_tax_id),
-                SqlValue::Varchar(cust.c_st_id),
-                SqlValue::Varchar(cust.c_l_name),
-                SqlValue::Varchar(cust.c_f_name),
-                SqlValue::Varchar(cust.c_m_name),
-                SqlValue::Varchar(cust.c_gndr),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_tax_id)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_st_id)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_l_name)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_f_name)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_m_name)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_gndr)),
                 SqlValue::Integer(cust.c_tier as i64),
-                SqlValue::Varchar(cust.c_dob),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_dob)),
                 SqlValue::Bigint(cust.c_ad_id),
-                SqlValue::Varchar(cust.c_ctry_1),
-                SqlValue::Varchar(cust.c_area_1),
-                SqlValue::Varchar(cust.c_local_1),
-                SqlValue::Varchar(cust.c_ext_1),
-                SqlValue::Varchar(cust.c_ctry_2),
-                SqlValue::Varchar(cust.c_area_2),
-                SqlValue::Varchar(cust.c_local_2),
-                SqlValue::Varchar(cust.c_ext_2),
-                SqlValue::Varchar(cust.c_ctry_3),
-                SqlValue::Varchar(cust.c_area_3),
-                SqlValue::Varchar(cust.c_local_3),
-                SqlValue::Varchar(cust.c_ext_3),
-                SqlValue::Varchar(cust.c_email_1),
-                SqlValue::Varchar(cust.c_email_2),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_ctry_1)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_area_1)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_local_1)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_ext_1)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_ctry_2)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_area_2)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_local_2)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_ext_2)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_ctry_3)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_area_3)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_local_3)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_ext_3)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_email_1)),
+                SqlValue::Varchar(std::sync::Arc::from(cust.c_email_2)),
             ]),
         )
         .unwrap();
@@ -972,7 +972,7 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                     SqlValue::Bigint(acct.ca_id),
                     SqlValue::Bigint(acct.ca_b_id),
                     SqlValue::Bigint(acct.ca_c_id),
-                    SqlValue::Varchar(acct.ca_name),
+                    SqlValue::Varchar(std::sync::Arc::from(acct.ca_name)),
                     SqlValue::Integer(acct.ca_tax_st as i64),
                     SqlValue::Numeric(acct.ca_bal),
                 ]),
@@ -994,7 +994,7 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         for symbol in symbols.iter().take(num_items) {
             db.insert_row(
                 "watch_item",
-                Row::new(vec![SqlValue::Bigint(watch_list_id), SqlValue::Varchar(symbol.clone())]),
+                Row::new(vec![SqlValue::Bigint(watch_list_id), SqlValue::Varchar(std::sync::Arc::from(symbol.clone()))]),
             )
             .unwrap();
         }
@@ -1017,10 +1017,10 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             "address",
             Row::new(vec![
                 SqlValue::Bigint(addr.ad_id),
-                SqlValue::Varchar(addr.ad_line1),
-                SqlValue::Varchar(addr.ad_line2),
-                SqlValue::Varchar(addr.ad_zc_code),
-                SqlValue::Varchar(addr.ad_ctry),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_line1)),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_line2)),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_zc_code)),
+                SqlValue::Varchar(std::sync::Arc::from(addr.ad_ctry)),
             ]),
         )
         .unwrap();
@@ -1030,14 +1030,14 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
             "company",
             Row::new(vec![
                 SqlValue::Bigint(company.co_id),
-                SqlValue::Varchar(company.co_st_id),
-                SqlValue::Varchar(company.co_name),
-                SqlValue::Varchar(company.co_in_id),
-                SqlValue::Varchar(company.co_sp_rate),
-                SqlValue::Varchar(company.co_ceo),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_st_id)),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_name)),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_in_id)),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_sp_rate)),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_ceo)),
                 SqlValue::Bigint(company.co_ad_id),
-                SqlValue::Varchar(company.co_desc),
-                SqlValue::Varchar(company.co_open_date),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_desc)),
+                SqlValue::Varchar(std::sync::Arc::from(company.co_open_date)),
             ]),
         )
         .unwrap();
@@ -1052,7 +1052,7 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                         SqlValue::Bigint(fin.fi_co_id),
                         SqlValue::Integer(fin.fi_year as i64),
                         SqlValue::Integer(fin.fi_qtr as i64),
-                        SqlValue::Varchar(fin.fi_qtr_start_date),
+                        SqlValue::Varchar(std::sync::Arc::from(fin.fi_qtr_start_date)),
                         SqlValue::Numeric(fin.fi_revenue),
                         SqlValue::Numeric(fin.fi_net_earn),
                         SqlValue::Numeric(fin.fi_basic_eps),
@@ -1079,20 +1079,20 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "security",
             Row::new(vec![
-                SqlValue::Varchar(sec.s_symb.clone()),
-                SqlValue::Varchar(sec.s_issue),
-                SqlValue::Varchar(sec.s_st_id),
-                SqlValue::Varchar(sec.s_name),
-                SqlValue::Varchar(sec.s_ex_id),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_symb.clone())),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_issue)),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_st_id)),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_name)),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_ex_id)),
                 SqlValue::Bigint(sec.s_co_id),
                 SqlValue::Bigint(sec.s_num_out),
-                SqlValue::Varchar(sec.s_start_date),
-                SqlValue::Varchar(sec.s_exch_date),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_start_date)),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_exch_date)),
                 SqlValue::Numeric(sec.s_pe),
                 SqlValue::Numeric(sec.s_52wk_high),
-                SqlValue::Varchar(sec.s_52wk_high_date),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_52wk_high_date)),
                 SqlValue::Numeric(sec.s_52wk_low),
-                SqlValue::Varchar(sec.s_52wk_low_date),
+                SqlValue::Varchar(std::sync::Arc::from(sec.s_52wk_low_date)),
                 SqlValue::Numeric(sec.s_dividend),
                 SqlValue::Numeric(sec.s_yield),
             ]),
@@ -1104,8 +1104,8 @@ fn load_market_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         db.insert_row(
             "last_trade",
             Row::new(vec![
-                SqlValue::Varchar(lt.lt_s_symb),
-                SqlValue::Varchar(lt.lt_dts),
+                SqlValue::Varchar(std::sync::Arc::from(lt.lt_s_symb)),
+                SqlValue::Varchar(std::sync::Arc::from(lt.lt_dts)),
                 SqlValue::Numeric(lt.lt_price),
                 SqlValue::Numeric(lt.lt_open_price),
                 SqlValue::Bigint(lt.lt_vol),
@@ -1137,8 +1137,8 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 Row::new(vec![
                     SqlValue::Bigint(holding.h_t_id),
                     SqlValue::Bigint(holding.h_ca_id),
-                    SqlValue::Varchar(holding.h_s_symb.clone()),
-                    SqlValue::Varchar(holding.h_dts),
+                    SqlValue::Varchar(std::sync::Arc::from(holding.h_s_symb.clone())),
+                    SqlValue::Varchar(std::sync::Arc::from(holding.h_dts)),
                     SqlValue::Numeric(holding.h_price),
                     SqlValue::Integer(holding.h_qty as i64),
                 ]),
@@ -1151,7 +1151,7 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 "holding_summary",
                 Row::new(vec![
                     SqlValue::Bigint(hs.hs_ca_id),
-                    SqlValue::Varchar(hs.hs_s_symb),
+                    SqlValue::Varchar(std::sync::Arc::from(hs.hs_s_symb)),
                     SqlValue::Integer(hs.hs_qty as i64),
                 ]),
             )
@@ -1168,15 +1168,15 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 "trade",
                 Row::new(vec![
                     SqlValue::Bigint(trade.t_id),
-                    SqlValue::Varchar(trade.t_dts.clone()),
-                    SqlValue::Varchar(trade.t_st_id.clone()),
-                    SqlValue::Varchar(trade.t_tt_id),
+                    SqlValue::Varchar(std::sync::Arc::from(trade.t_dts.clone())),
+                    SqlValue::Varchar(std::sync::Arc::from(trade.t_st_id.clone())),
+                    SqlValue::Varchar(std::sync::Arc::from(trade.t_tt_id)),
                     SqlValue::Boolean(trade.t_is_cash),
-                    SqlValue::Varchar(trade.t_s_symb),
+                    SqlValue::Varchar(std::sync::Arc::from(trade.t_s_symb)),
                     SqlValue::Integer(trade.t_qty as i64),
                     SqlValue::Numeric(trade.t_bid_price),
                     SqlValue::Bigint(trade.t_ca_id),
-                    SqlValue::Varchar(trade.t_exec_name),
+                    SqlValue::Varchar(std::sync::Arc::from(trade.t_exec_name)),
                     SqlValue::Numeric(trade.t_trade_price),
                     SqlValue::Numeric(trade.t_chrg),
                     SqlValue::Numeric(trade.t_comm),
@@ -1192,8 +1192,8 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                 "trade_history",
                 Row::new(vec![
                     SqlValue::Bigint(th.th_t_id),
-                    SqlValue::Varchar(th.th_dts),
-                    SqlValue::Varchar(th.th_st_id),
+                    SqlValue::Varchar(std::sync::Arc::from(th.th_dts)),
+                    SqlValue::Varchar(std::sync::Arc::from(th.th_st_id)),
                 ]),
             )
             .unwrap();
@@ -1206,8 +1206,8 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                     "settlement",
                     Row::new(vec![
                         SqlValue::Bigint(se.se_t_id),
-                        SqlValue::Varchar(se.se_cash_type),
-                        SqlValue::Varchar(se.se_cash_due_date),
+                        SqlValue::Varchar(std::sync::Arc::from(se.se_cash_type)),
+                        SqlValue::Varchar(std::sync::Arc::from(se.se_cash_due_date)),
                         SqlValue::Numeric(se.se_amt),
                     ]),
                 )
@@ -1220,9 +1220,9 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
                         "cash_transaction",
                         Row::new(vec![
                             SqlValue::Bigint(ct.ct_t_id),
-                            SqlValue::Varchar(ct.ct_dts),
+                            SqlValue::Varchar(std::sync::Arc::from(ct.ct_dts)),
                             SqlValue::Numeric(ct.ct_amt),
-                            SqlValue::Varchar(ct.ct_name),
+                            SqlValue::Varchar(std::sync::Arc::from(ct.ct_name)),
                         ]),
                     )
                     .unwrap();

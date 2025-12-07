@@ -3803,7 +3803,7 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(d_date_sk as i64),
-            SqlValue::Varchar(d_date_id),
+            SqlValue::Varchar(std::sync::Arc::from(d_date_id)),
             SqlValue::Date(
                 Date::from_str(&date_str).unwrap_or_else(|_| Date::from_str("1998-01-01").unwrap()),
             ),
@@ -3819,7 +3819,7 @@ fn load_date_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(d_quarter_seq as i64), // d_fy_quarter_seq
             SqlValue::Integer(d_week_seq as i64),    // d_fy_week_seq
             SqlValue::Varchar(std::sync::Arc::from(day_names[d_dow as usize])),
-            SqlValue::Varchar(quarter_name),
+            SqlValue::Varchar(std::sync::Arc::from(quarter_name)),
             SqlValue::Varchar(std::sync::Arc::from("N")), // d_holiday
             SqlValue::Varchar(std::sync::Arc::from(if is_weekend { "Y" } else { "N" })),
             SqlValue::Varchar(std::sync::Arc::from("N")), // d_following_holiday
@@ -3888,7 +3888,7 @@ fn load_time_dim_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(t_time_sk as i64),
-            SqlValue::Varchar(t_time_id),
+            SqlValue::Varchar(std::sync::Arc::from(t_time_id)),
             SqlValue::Integer(t_time_sk as i64),
             SqlValue::Integer(hour as i64),
             SqlValue::Integer(minute as i64),
@@ -3929,7 +3929,7 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(i_item_id),
+            SqlValue::Varchar(std::sync::Arc::from(i_item_id)),
             SqlValue::Date(Date::from_str("1998-01-01").unwrap()), // i_rec_start_date
             SqlValue::Null,                                        // i_rec_end_date
             SqlValue::Varchar(std::sync::Arc::from(format!("{} {} item", CATEGORIES[category_idx], CLASSES[class_idx]))),
@@ -3942,7 +3942,7 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer((category_idx + 1) as i64),
             SqlValue::Varchar(std::sync::Arc::from(CATEGORIES[category_idx])),
             SqlValue::Integer(((i % 10) + 1) as i64),
-            SqlValue::Varchar(format!("Manufacturer#{}", (i % 10) + 1)),
+            SqlValue::Varchar(std::sync::Arc::from(format!("Manufacturer#{}", (i % 10) + 1))),
             SqlValue::Varchar(std::sync::Arc::from(ITEM_SIZES[size_idx])),
             SqlValue::Varchar(std::sync::Arc::from(format!("formula{}", i % 20))),
             SqlValue::Varchar(std::sync::Arc::from(ITEM_COLORS[color_idx])),
@@ -3980,15 +3980,15 @@ fn load_customer_address_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(ca_address_id),
+            SqlValue::Varchar(std::sync::Arc::from(ca_address_id)),
             SqlValue::Varchar(std::sync::Arc::from(format!("{}", data.random_i32(1, 999)))),
             SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(30))),
             SqlValue::Varchar(std::sync::Arc::from("Street")),
             SqlValue::Varchar(std::sync::Arc::from(format!("Suite {}", data.random_i32(100, 999)))),
-            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_city())),
             SqlValue::Varchar(std::sync::Arc::from(format!("{} County", STATES[state_idx]))),
             SqlValue::Varchar(std::sync::Arc::from(STATES[state_idx])),
-            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_zip())),
             SqlValue::Varchar(std::sync::Arc::from("United States")),
             SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)), // ca_gmt_offset
             SqlValue::Varchar(std::sync::Arc::from("residential")),
@@ -4032,7 +4032,7 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(c_customer_id),
+            SqlValue::Varchar(std::sync::Arc::from(c_customer_id)),
             SqlValue::Integer((i % 1920 + 1) as i64), // c_current_cdemo_sk
             SqlValue::Integer((i % 7200 + 1) as i64), // c_current_hdemo_sk
             SqlValue::Integer(addr_sk as i64),
@@ -4047,7 +4047,7 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(birth_year as i64),
             SqlValue::Varchar(std::sync::Arc::from("UNITED STATES")),
             SqlValue::Varchar(std::sync::Arc::from(format!("user{}", i))),
-            SqlValue::Varchar(data.random_email()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_email())),
             SqlValue::Integer(data.random_i32(1, 2191) as i64),
         ]);
         rows.push(row);
@@ -4079,7 +4079,7 @@ fn load_store_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(s_store_id),
+            SqlValue::Varchar(std::sync::Arc::from(s_store_id)),
             SqlValue::Date(Date::from_str("1998-01-01").unwrap()),
             SqlValue::Null, // s_rec_end_date
             SqlValue::Null, // s_closed_date_sk
@@ -4100,10 +4100,10 @@ fn load_store_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(30))),
             SqlValue::Varchar(std::sync::Arc::from("Avenue")),
             SqlValue::Varchar(std::sync::Arc::from(format!("Suite {}", data.random_i32(100, 999)))),
-            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_city())),
             SqlValue::Varchar(std::sync::Arc::from(format!("{} County", STATES[state_idx]))),
             SqlValue::Varchar(std::sync::Arc::from(STATES[state_idx])),
-            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_zip())),
             SqlValue::Varchar(std::sync::Arc::from("United States")),
             SqlValue::Numeric(-5.0 + (state_idx as f64 * 0.1)),
             SqlValue::Numeric(data.random_f64(0.0, 0.11)),
@@ -4207,7 +4207,7 @@ fn load_promotion_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(p_promo_id),
+            SqlValue::Varchar(std::sync::Arc::from(p_promo_id)),
             SqlValue::Integer(start_date_sk as i64),
             SqlValue::Integer(end_date_sk as i64),
             SqlValue::Integer(((i % data.item_count) + 1) as i64),
@@ -4248,17 +4248,17 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         // Match DuckDB's random parameters exactly for deterministic data generation
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(w_warehouse_id),
+            SqlValue::Varchar(std::sync::Arc::from(w_warehouse_id)),
             SqlValue::Varchar(std::sync::Arc::from(format!("Warehouse {}", i))),
             SqlValue::Integer(data.random_i32(50000, 500000) as i64), // sq_ft
             SqlValue::Varchar(std::sync::Arc::from(format!("{}", data.random_i32(1, 9999)))), // Match DuckDB: 1-9999
             SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(40))),                 // Match DuckDB: max 40
             SqlValue::Varchar(std::sync::Arc::from("Street")),
             SqlValue::Varchar(std::sync::Arc::from(format!("Suite {}", data.random_i32(100, 999)))),
-            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_city())),
             SqlValue::Varchar(std::sync::Arc::from(format!("{} County", STATES[state_idx]))),
             SqlValue::Varchar(std::sync::Arc::from(STATES[state_idx])),
-            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_zip())),
             SqlValue::Varchar(std::sync::Arc::from("United States")),
             SqlValue::Numeric(-5.0 - (state_idx % 4) as f64), // Match DuckDB's formula
         ]);
@@ -4288,7 +4288,7 @@ fn load_ship_mode_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(sm_ship_mode_id),
+            SqlValue::Varchar(std::sync::Arc::from(sm_ship_mode_id)),
             SqlValue::Varchar(std::sync::Arc::from(types[type_idx])),
             SqlValue::Varchar(std::sync::Arc::from(SHIP_MODES[mode_idx])),
             SqlValue::Varchar(std::sync::Arc::from(carriers[carrier_idx])),
@@ -4315,7 +4315,7 @@ fn load_reason_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(r_reason_id),
+            SqlValue::Varchar(std::sync::Arc::from(r_reason_id)),
             SqlValue::Varchar(std::sync::Arc::from(REASONS[i - 1])),
         ]);
         rows.push(row);
@@ -4413,7 +4413,7 @@ fn load_catalog_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(cp_catalog_page_id),
+            SqlValue::Varchar(std::sync::Arc::from(cp_catalog_page_id)),
             SqlValue::Integer(start_date_sk as i64),
             SqlValue::Integer(end_date_sk as i64),
             SqlValue::Varchar(std::sync::Arc::from(departments[dept_idx])),
@@ -4460,7 +4460,7 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(wp_web_page_id),
+            SqlValue::Varchar(std::sync::Arc::from(wp_web_page_id)),
             SqlValue::Null,       // wp_rec_start_date_sk
             SqlValue::Null,       // wp_rec_end_date_sk
             SqlValue::Integer(creation_date_sk as i64),
@@ -4508,28 +4508,28 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(web_site_id),
+            SqlValue::Varchar(std::sync::Arc::from(web_site_id)),
             SqlValue::Null,       // web_rec_start_date_sk
             SqlValue::Null,       // web_rec_end_date_sk
             SqlValue::Varchar(std::sync::Arc::from(format!("Site {}", i))), // web_name
             SqlValue::Integer(open_date_sk as i64),
             SqlValue::Null,       // web_close_date_sk
             SqlValue::Varchar(std::sync::Arc::from("medium")), // web_class
-            SqlValue::Varchar(manager),
+            SqlValue::Varchar(std::sync::Arc::from(manager)),
             SqlValue::Integer(((i % 6) + 1) as i64), // web_mkt_id
             SqlValue::Varchar(std::sync::Arc::from(format!("Market Class {}", i % 10))), // web_mkt_class
             SqlValue::Varchar(std::sync::Arc::from(format!("Market description for site {}", i))), // web_mkt_desc
-            SqlValue::Varchar(market_manager),
+            SqlValue::Varchar(std::sync::Arc::from(market_manager)),
             SqlValue::Integer(((i % 3) + 1) as i64), // web_company_id
-            SqlValue::Varchar(format!("Company {}", (i % 3) + 1)),
+            SqlValue::Varchar(std::sync::Arc::from(format!("Company {}", (i % 3) + 1))),
             SqlValue::Varchar(std::sync::Arc::from(format!("{}", street_number))), // web_street_number
-            SqlValue::Varchar(street_name),
+            SqlValue::Varchar(std::sync::Arc::from(street_name)),
             SqlValue::Varchar(std::sync::Arc::from("Street")),
             SqlValue::Varchar(std::sync::Arc::from(format!("Suite {}", suite_number))),
-            SqlValue::Varchar(city),
+            SqlValue::Varchar(std::sync::Arc::from(city)),
             SqlValue::Varchar(std::sync::Arc::from(format!("{} County", STATES[state_idx]))),
             SqlValue::Varchar(std::sync::Arc::from(STATES[state_idx])),
-            SqlValue::Varchar(zip),
+            SqlValue::Varchar(std::sync::Arc::from(zip)),
             SqlValue::Varchar(std::sync::Arc::from("United States")),
             SqlValue::Numeric(-5.0 - (state_idx % 4) as f64), // web_gmt_offset
             SqlValue::Numeric(tax_percentage),
@@ -4892,9 +4892,9 @@ fn load_customer_demographics_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
                         let row = Row::new(vec![
                             SqlValue::Integer(sk as i64),
-                            SqlValue::Varchar(std::sync::Arc::from(gender)),
-                            SqlValue::Varchar(std::sync::Arc::from(marital)),
-                            SqlValue::Varchar(std::sync::Arc::from(education)),
+                            SqlValue::Varchar(std::sync::Arc::from(*gender)),
+                            SqlValue::Varchar(std::sync::Arc::from(*marital)),
+                            SqlValue::Varchar(std::sync::Arc::from(*education)),
                             SqlValue::Integer(purchase_estimate as i64),
                             SqlValue::Varchar(std::sync::Arc::from(credit)),
                             SqlValue::Integer(dep_count as i64),
@@ -5009,7 +5009,7 @@ fn load_call_center_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(cc_call_center_id),
+            SqlValue::Varchar(std::sync::Arc::from(cc_call_center_id)),
             SqlValue::Null, // cc_rec_start_date
             SqlValue::Null, // cc_rec_end_date
             SqlValue::Null, // cc_closed_date_sk
@@ -5032,10 +5032,10 @@ fn load_call_center_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(40))),
             SqlValue::Varchar(std::sync::Arc::from("Street")),
             SqlValue::Varchar(std::sync::Arc::from(format!("Suite {}", data.random_i32(100, 999)))),
-            SqlValue::Varchar(data.random_city()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_city())),
             SqlValue::Varchar(std::sync::Arc::from(format!("{} County", STATES[state_idx]))),
             SqlValue::Varchar(std::sync::Arc::from(STATES[state_idx])),
-            SqlValue::Varchar(data.random_zip()),
+            SqlValue::Varchar(std::sync::Arc::from(data.random_zip())),
             SqlValue::Varchar(std::sync::Arc::from("United States")),
             SqlValue::Numeric(gmt_offset),
             SqlValue::Numeric(data.random_f64(0.0, 0.11)),

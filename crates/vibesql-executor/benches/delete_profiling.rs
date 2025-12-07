@@ -125,8 +125,8 @@ fn main() {
                     &[
                         SqlValue::Integer(next_id),
                         SqlValue::Integer(k),
-                        SqlValue::Varchar(c),
-                        SqlValue::Varchar(pad),
+                        SqlValue::Varchar(std::sync::Arc::from(c)),
+                        SqlValue::Varchar(std::sync::Arc::from(pad)),
                     ],
                 )
                 .unwrap();
@@ -162,8 +162,8 @@ fn main() {
                     &[
                         SqlValue::Integer(next_id),
                         SqlValue::Integer(k),
-                        SqlValue::Varchar(c),
-                        SqlValue::Varchar(pad),
+                        SqlValue::Varchar(std::sync::Arc::from(c)),
+                        SqlValue::Varchar(std::sync::Arc::from(pad)),
                     ],
                 )
                 .unwrap();

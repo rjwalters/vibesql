@@ -46,7 +46,7 @@ impl TestDB {
                     i.to_string()
                 }
             }
-            SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
             SqlValue::Null => "NULL".to_string(),
             _ => format!("{:?}", value),
         }

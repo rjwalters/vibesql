@@ -801,8 +801,8 @@ pub fn create_university_db() -> Database {
         students_table
             .insert(Row::new(vec![
                 SqlValue::Integer(i),
-                SqlValue::Varchar(name.to_string()),
-                SqlValue::Varchar(major.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
+                SqlValue::Varchar(std::sync::Arc::from(major)),
                 SqlValue::Float(gpa),
             ]))
             .unwrap();
@@ -826,8 +826,8 @@ pub fn create_university_db() -> Database {
         courses_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(name.to_string()),
-                SqlValue::Varchar(dept.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
+                SqlValue::Varchar(std::sync::Arc::from(dept)),
                 SqlValue::Integer(credits),
             ]))
             .unwrap();
@@ -859,7 +859,7 @@ pub fn create_university_db() -> Database {
                 .insert(Row::new(vec![
                     SqlValue::Integer(student_id),
                     SqlValue::Integer(course_id),
-                    SqlValue::Varchar(grade.to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from(grade)),
                     SqlValue::Varchar(std::sync::Arc::from("Fall 2024")),
                 ]))
                 .unwrap();

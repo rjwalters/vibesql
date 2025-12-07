@@ -21,7 +21,7 @@ use vibesql_types::{DataType, SqlValue};
 fn make_row(id: i64) -> Row {
     Row::new(vec![
         SqlValue::Integer(id),
-        SqlValue::Varchar(format!("name_{}", id)),
+        SqlValue::Varchar(std::sync::Arc::from(format!("name_{}", id))),
         SqlValue::Double((id as f64) * 100.0),
     ])
 }
@@ -140,7 +140,7 @@ fn bench_table_update(c: &mut Criterion) {
                 for i in 0..size {
                     let new_row = Row::new(vec![
                         SqlValue::Integer(i as i64),
-                        SqlValue::Varchar(format!("updated_{}", i)),
+                        SqlValue::Varchar(std::sync::Arc::from(format!("updated_{}", i))),
                         SqlValue::Double((i as f64) * 200.0),
                     ]);
                     table_copy.update_row(i, new_row).unwrap();

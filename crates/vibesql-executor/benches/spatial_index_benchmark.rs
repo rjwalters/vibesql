@@ -74,7 +74,7 @@ fn create_test_db_with_10k_polygons() -> Database {
 
             let row = vibesql_storage::Row::new(vec![
                 SqlValue::Integer(id as i64),
-                SqlValue::Varchar(wkt),
+                SqlValue::Varchar(std::sync::Arc::from(wkt)),
             ]);
             db.insert_row("PARCELS", row).unwrap();
         }
@@ -124,7 +124,7 @@ fn create_test_db_with_100k_polygons() -> Database {
 
             let row = vibesql_storage::Row::new(vec![
                 SqlValue::Integer(id as i64),
-                SqlValue::Varchar(wkt),
+                SqlValue::Varchar(std::sync::Arc::from(wkt)),
             ]);
             db.insert_row("LARGE_PARCELS", row).unwrap();
         }
@@ -166,7 +166,7 @@ fn create_test_db_with_10k_points() -> Database {
         let wkt = format!("POINT({} {})", x, y);
 
         let row =
-            vibesql_storage::Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Varchar(wkt)]);
+            vibesql_storage::Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Varchar(std::sync::Arc::from(wkt))]);
         db.insert_row("POINTS_OF_INTEREST", row).unwrap();
     }
 

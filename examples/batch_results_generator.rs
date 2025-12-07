@@ -81,8 +81,8 @@ mod db_setup {
             categories_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(id),
-                    SqlValue::Varchar(name.to_string()),
-                    SqlValue::Varchar(desc.to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from(name)),
+                    SqlValue::Varchar(std::sync::Arc::from(desc)),
                 ]))
                 .unwrap();
         }
@@ -116,7 +116,7 @@ mod db_setup {
             products_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(id),
-                    SqlValue::Varchar(name.to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from(name)),
                     SqlValue::Integer(cat_id),
                     SqlValue::Float(price),
                     SqlValue::Integer(stock),
@@ -242,8 +242,8 @@ mod db_setup {
             students_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(i),
-                    SqlValue::Varchar(name.to_string()),
-                    SqlValue::Varchar(major.to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from(name)),
+                    SqlValue::Varchar(std::sync::Arc::from(major)),
                     SqlValue::Float(gpa),
                 ]))
                 .unwrap();
@@ -267,8 +267,8 @@ mod db_setup {
             courses_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(id),
-                    SqlValue::Varchar(name.to_string()),
-                    SqlValue::Varchar(dept.to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from(name)),
+                    SqlValue::Varchar(std::sync::Arc::from(dept)),
                     SqlValue::Integer(credits),
                 ]))
                 .unwrap();
@@ -298,8 +298,8 @@ mod db_setup {
                     .insert(Row::new(vec![
                         SqlValue::Integer(student_id),
                         SqlValue::Integer(course_id),
-                        SqlValue::Varchar(grade.to_string()),
-                        SqlValue::Varchar("Fall 2024".to_string()),
+                        SqlValue::Varchar(std::sync::Arc::from(grade)),
+                        SqlValue::Varchar(std::sync::Arc::from("Fall 2024")),
                     ]))
                     .unwrap();
 
@@ -316,7 +316,7 @@ mod db_setup {
                     SqlValue::Integer(student_id),
                     SqlValue::Integer(course_id),
                     SqlValue::Null,
-                    SqlValue::Varchar("Spring 2025".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("Spring 2025")),
                 ]))
                 .unwrap();
         }
@@ -387,7 +387,7 @@ fn format_value(value: &SqlValue) -> String {
                 f.to_string()
             }
         }
-        SqlValue::Varchar(s) => s.clone(),
+        SqlValue::Varchar(s) => s.to_string(),
         SqlValue::Boolean(b) => b.to_string(),
         SqlValue::Null => "NULL".to_string(),
         _ => format!("{:?}", value),

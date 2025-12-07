@@ -141,7 +141,7 @@ fn test_inner_join_products_categories() {
         // Verify first row (ordered by category_name, product_name)
         // Should be Beverages category with Chai or Chang
         if let SqlValue::Varchar(cat_name) = &result[0].values[1] {
-            assert_eq!(cat_name, "Beverages");
+            assert_eq!(cat_name.as_ref(), "Beverages");
         } else {
             panic!("Expected Varchar for category_name");
         }
@@ -213,7 +213,7 @@ fn test_products_by_category_aggregate() {
             .iter()
             .find(|row| {
                 if let SqlValue::Varchar(name) = &row.values[0] {
-                    name == "Beverages"
+                    name.as_ref() == "Beverages"
                 } else {
                     false
                 }
