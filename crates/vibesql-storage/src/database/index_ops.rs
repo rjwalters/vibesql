@@ -7,6 +7,110 @@ use super::operations::SpatialIndexMetadata;
 use crate::{Row, StorageError};
 use vibesql_ast::IndexColumn;
 
+// ============================================================================
+// DELETE Profiling Statistics (thread-local aggregates)
+// ============================================================================
+
+/// Aggregate statistics for DELETE profiling.
+/// Use `DELETE_PROFILE=1` to enable per-delete output.
+/// Use `DELETE_PROFILE_SUMMARY=1` to print aggregate summary on drop.
+#[derive(Default)]
+pub struct DeleteProfileStats {
+    pub count: u64,
+    pub total_ns: u128,
+    pub pk_lookup_ns: u128,
+    pub row_clone_ns: u128,
+    pub wal_ns: u128,
+    pub index_update_ns: u128,
+    pub row_remove_ns: u128,
+    pub cache_ns: u128,
+}
+
+impl DeleteProfileStats {
+    /// Add timing data from a single delete operation
+    pub fn record(&mut self, phase_times: &[u128; 6], total_ns: u128) {
+        self.count += 1;
+        self.total_ns += total_ns;
+        self.pk_lookup_ns += phase_times[0];
+        self.row_clone_ns += phase_times[1];
+        self.wal_ns += phase_times[2];
+        self.index_update_ns += phase_times[3];
+        self.row_remove_ns += phase_times[4];
+        self.cache_ns += phase_times[5];
+    }
+
+    /// Print a summary of the aggregate statistics
+    pub fn print_summary(&self) {
+        if self.count == 0 {
+            return;
+        }
+        let total = self.total_ns;
+        let avg_us = (total as f64 / self.count as f64) / 1000.0;
+        eprintln!("\n=== DELETE PROFILE SUMMARY ({} deletes) ===", self.count);
+        eprintln!("Average DELETE time: {:.1}µs", avg_us);
+        eprintln!(
+            "  pk_lookup:    {:>8.1}µs ({:>5.1}%)",
+            (self.pk_lookup_ns as f64 / self.count as f64) / 1000.0,
+            if total > 0 { self.pk_lookup_ns as f64 / total as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!(
+            "  value_clone:  {:>8.1}µs ({:>5.1}%)",
+            (self.row_clone_ns as f64 / self.count as f64) / 1000.0,
+            if total > 0 { self.row_clone_ns as f64 / total as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!(
+            "  wal:          {:>8.1}µs ({:>5.1}%)",
+            (self.wal_ns as f64 / self.count as f64) / 1000.0,
+            if total > 0 { self.wal_ns as f64 / total as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!(
+            "  index_update: {:>8.1}µs ({:>5.1}%)",
+            (self.index_update_ns as f64 / self.count as f64) / 1000.0,
+            if total > 0 { self.index_update_ns as f64 / total as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!(
+            "  row_remove:   {:>8.1}µs ({:>5.1}%)",
+            (self.row_remove_ns as f64 / self.count as f64) / 1000.0,
+            if total > 0 { self.row_remove_ns as f64 / total as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!(
+            "  cache:        {:>8.1}µs ({:>5.1}%)",
+            (self.cache_ns as f64 / self.count as f64) / 1000.0,
+            if total > 0 { self.cache_ns as f64 / total as f64 * 100.0 } else { 0.0 }
+        );
+        eprintln!("==========================================\n");
+    }
+}
+
+impl Drop for DeleteProfileStats {
+    fn drop(&mut self) {
+        if std::env::var("DELETE_PROFILE_SUMMARY").is_ok() && self.count > 0 {
+            self.print_summary();
+        }
+    }
+}
+
+thread_local! {
+    /// Thread-local aggregate statistics for DELETE profiling
+    pub static DELETE_PROFILE_STATS: std::cell::RefCell<DeleteProfileStats> =
+        std::cell::RefCell::new(DeleteProfileStats::default());
+}
+
+/// Print the DELETE profile summary for the current thread.
+/// Call this at the end of a benchmark to see aggregate statistics.
+pub fn print_delete_profile_summary() {
+    DELETE_PROFILE_STATS.with(|stats| {
+        stats.borrow().print_summary();
+    });
+}
+
+/// Reset the DELETE profile statistics for the current thread.
+pub fn reset_delete_profile_stats() {
+    DELETE_PROFILE_STATS.with(|stats| {
+        *stats.borrow_mut() = DeleteProfileStats::default();
+    });
+}
+
 impl Database {
     // ============================================================================
     // Index Management
@@ -743,6 +847,15 @@ impl Database {
     /// - Skips ExpressionEvaluator creation
     /// - Performs minimal index maintenance
     ///
+    /// # Profiling
+    /// Set environment variables to enable profiling:
+    /// - `DELETE_PROFILE=1` - Collect timing statistics (aggregated per-thread)
+    /// - `DELETE_PROFILE_VERBOSE=1` - Print per-delete breakdown to stderr
+    /// - `DELETE_PROFILE_SUMMARY=1` - Print aggregate summary on thread exit
+    ///
+    /// Use `print_delete_profile_summary()` to manually print aggregate stats.
+    /// Use `reset_delete_profile_stats()` to reset the stats before a benchmark.
+    ///
     /// # Safety
     /// Caller must ensure:
     /// - No triggers exist on this table for DELETE
@@ -763,10 +876,18 @@ impl Database {
         table_name: &str,
         pk_values: &[vibesql_types::SqlValue],
     ) -> Result<bool, StorageError> {
+        use std::time::Instant;
+
+        // Check if profiling is enabled
+        let profile = std::env::var("DELETE_PROFILE").is_ok();
+        let start = if profile { Some(Instant::now()) } else { None };
+        let mut phase_times: [u128; 6] = [0; 6]; // pk_lookup, value_clone, wal, index_update, row_remove, cache
+
         // First, find the row index and clone only the values (not the full Row struct)
         // This avoids double-cloning: previously we cloned the Row, then cloned its values for WAL.
         // Now we clone values only once and use a reference for index updates.
         let (row_index, values) = {
+            let phase_start = start.map(|_| Instant::now());
             let table = self
                 .get_table(table_name)
                 .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
@@ -778,29 +899,45 @@ impl Database {
                 },
                 None => return Err(StorageError::Other("Table has no primary key".to_string())),
             };
+            if let Some(ps) = phase_start {
+                phase_times[0] = ps.elapsed().as_nanos(); // pk_lookup
+            }
 
             // Get the row values - clone once for both WAL and index updates
+            let phase_start = start.map(|_| Instant::now());
             let values = match table.get_row(row_index) {
                 Some(r) => r.values.clone(),
                 None => return Ok(false), // Row already deleted
             };
+            if let Some(ps) = phase_start {
+                phase_times[1] = ps.elapsed().as_nanos(); // value_clone
+            }
 
             (row_index, values)
         };
 
         // Update user-defined indexes first (using reference to values)
         // This must happen before we move ownership of values to WAL
+        let phase_start = start.map(|_| Instant::now());
         self.operations
             .update_indexes_for_delete_with_values(&self.catalog, table_name, &values, row_index);
+        if let Some(ps) = phase_start {
+            phase_times[3] = ps.elapsed().as_nanos(); // index_update
+        }
 
         // Emit WAL entry before deleting (needed for crash recovery)
         // Only emit if persistence is enabled to avoid unnecessary work
         // Move ownership of values to avoid a second clone
+        let phase_start = start.map(|_| Instant::now());
         if self.persistence_enabled() {
             self.emit_wal_delete(table_name, row_index as u64, values);
         }
+        if let Some(ps) = phase_start {
+            phase_times[2] = ps.elapsed().as_nanos(); // wal
+        }
 
         // Now delete the row (this updates the internal PK hash index)
+        let phase_start = start.map(|_| Instant::now());
         let table_mut = self
             .get_table_mut(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
@@ -811,10 +948,48 @@ impl Database {
         if delete_result.compacted {
             self.rebuild_indexes(table_name);
         }
+        if let Some(ps) = phase_start {
+            phase_times[4] = ps.elapsed().as_nanos(); // row_remove
+        }
 
-        // Invalidate columnar cache
+        // Phase 5: Invalidate columnar cache
+        let phase_start = start.map(|_| Instant::now());
         if delete_result.deleted_count > 0 {
             self.invalidate_columnar_cache(table_name);
+        }
+        if let Some(ps) = phase_start {
+            phase_times[5] = ps.elapsed().as_nanos(); // cache
+        }
+
+        // Record and optionally print profile summary
+        if let Some(s) = start {
+            let total = s.elapsed().as_nanos();
+
+            // Record to thread-local aggregate stats
+            DELETE_PROFILE_STATS.with(|stats| {
+                stats.borrow_mut().record(&phase_times, total);
+            });
+
+            // Print per-delete output only if DELETE_PROFILE_VERBOSE is set
+            if std::env::var("DELETE_PROFILE_VERBOSE").is_ok() {
+                let total_us = total as f64 / 1000.0;
+                eprintln!(
+                    "DELETE_PROFILE: total={:.1}µs | pk_lookup={:.1}µs ({:.0}%) | value_clone={:.1}µs ({:.0}%) | wal={:.1}µs ({:.0}%) | index_update={:.1}µs ({:.0}%) | row_remove={:.1}µs ({:.0}%) | cache={:.1}µs ({:.0}%)",
+                    total_us,
+                    phase_times[0] as f64 / 1000.0,
+                    if total > 0 { phase_times[0] as f64 / total as f64 * 100.0 } else { 0.0 },
+                    phase_times[1] as f64 / 1000.0,
+                    if total > 0 { phase_times[1] as f64 / total as f64 * 100.0 } else { 0.0 },
+                    phase_times[2] as f64 / 1000.0,
+                    if total > 0 { phase_times[2] as f64 / total as f64 * 100.0 } else { 0.0 },
+                    phase_times[3] as f64 / 1000.0,
+                    if total > 0 { phase_times[3] as f64 / total as f64 * 100.0 } else { 0.0 },
+                    phase_times[4] as f64 / 1000.0,
+                    if total > 0 { phase_times[4] as f64 / total as f64 * 100.0 } else { 0.0 },
+                    phase_times[5] as f64 / 1000.0,
+                    if total > 0 { phase_times[5] as f64 / total as f64 * 100.0 } else { 0.0 },
+                );
+            }
         }
 
         Ok(delete_result.deleted_count > 0)
