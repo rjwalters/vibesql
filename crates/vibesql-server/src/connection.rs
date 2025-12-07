@@ -1272,6 +1272,18 @@ impl ConnectionHandler {
         update_type: SubscriptionUpdateType,
         rows: Vec<Vec<Option<Vec<u8>>>>,
     ) -> Result<()> {
+        // Record subscription update metrics
+        if let Some(metrics) = self.observability.metrics() {
+            let type_str = match update_type {
+                SubscriptionUpdateType::Full => "full",
+                SubscriptionUpdateType::DeltaInsert => "delta_insert",
+                SubscriptionUpdateType::DeltaUpdate => "delta_update",
+                SubscriptionUpdateType::DeltaDelete => "delta_delete",
+                SubscriptionUpdateType::SelectiveUpdate => "selective",
+            };
+            metrics.record_subscription_update(type_str, rows.len() as u64);
+        }
+
         BackendMessage::SubscriptionData { subscription_id: *subscription_id, update_type, rows }
             .encode(&mut self.write_buf);
         self.flush_write_buffer().await
