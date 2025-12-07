@@ -7,9 +7,9 @@ use crate::protocol::{
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta_with_pk, detect_pk_columns_from_stmt, extract_table_refs,
-    filter::SubscriptionFilter, hash_rows, SubscriptionId, SubscriptionManager,
-    SubscriptionUpdate,
+    compute_delta_with_pk, create_partial_row_update, detect_pk_columns_from_stmt,
+    extract_table_refs, filter::SubscriptionFilter, hash_rows, SelectiveColumnConfig,
+    SubscriptionId, SubscriptionManager, SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -498,11 +498,30 @@ impl ConnectionHandler {
 
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // We have previous results - try to compute delta using PK columns
-                            // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
+                            // First, try selective column updates (0xF7) if PK columns are known
                             let pk_columns = self
                                 .subscription_manager
                                 .get_pk_columns_by_wire_id(&subscription_id);
+                            if !pk_columns.is_empty()
+                                && self
+                                    .try_send_selective_updates(
+                                        &subscription_id,
+                                        old_rows,
+                                        &new_rows,
+                                        &pk_columns,
+                                    )
+                                    .await
+                            {
+                                // Selective updates sent successfully - update stored result
+                                self.subscription_manager.update_result_by_wire_id(
+                                    &subscription_id,
+                                    new_hash,
+                                    new_rows,
+                                );
+                                continue;
+                            }
+
+                            // Fall back to delta updates using PK columns
                             if let Some(delta) = compute_delta_with_pk(
                                 SubscriptionId::default(),
                                 old_rows,
@@ -658,6 +677,104 @@ impl ConnectionHandler {
                 row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
             })
             .collect()
+    }
+
+    /// Try to send selective column updates (0xF7) for row updates
+    ///
+    /// Returns `true` if selective updates were sent, `false` if caller should
+    /// fall back to regular updates.
+    ///
+    /// Selective updates are used when:
+    /// - Config has selective updates enabled
+    /// - Row counts match (updates only, not inserts/deletes)
+    /// - Rows can be matched by primary key
+    /// - Changed columns ratio is within threshold
+    async fn try_send_selective_updates(
+        &mut self,
+        subscription_id: &[u8; 16],
+        old_rows: &[Row],
+        new_rows: &[Row],
+        pk_columns: &[usize],
+    ) -> bool {
+        // Check if selective updates are enabled in config
+        let config = &self.config.subscriptions.selective_updates;
+        if !config.enabled {
+            return false;
+        }
+
+        // Row counts must match for selective updates (no inserts/deletes)
+        if old_rows.len() != new_rows.len() {
+            return false;
+        }
+
+        if old_rows.is_empty() {
+            return false;
+        }
+
+        // Convert rows to wire format for comparison
+        let old_wire: Vec<Vec<Option<Vec<u8>>>> = Self::rows_to_wire_format(old_rows);
+        let new_wire: Vec<Vec<Option<Vec<u8>>>> = Self::rows_to_wire_format(new_rows);
+
+        // Build a map from PK values to row index for old rows
+        let mut pk_to_old_idx: HashMap<Vec<Option<Vec<u8>>>, usize> = HashMap::new();
+        for (idx, row) in old_wire.iter().enumerate() {
+            let pk_values: Vec<Option<Vec<u8>>> =
+                pk_columns.iter().filter_map(|&col| row.get(col).cloned()).collect();
+            pk_to_old_idx.insert(pk_values, idx);
+        }
+
+        // Create SelectiveColumnConfig from server config
+        let selective_config = SelectiveColumnConfig {
+            enabled: config.enabled,
+            pk_columns: pk_columns.to_vec(),
+            min_changed_columns: config.min_changed_columns,
+            max_changed_columns_ratio: config.max_changed_columns_ratio,
+        };
+
+        // Try to create partial row updates for each new row
+        let mut partial_updates = Vec::new();
+        for new_row in &new_wire {
+            // Extract PK from new row
+            let pk_values: Vec<Option<Vec<u8>>> =
+                pk_columns.iter().filter_map(|&col| new_row.get(col).cloned()).collect();
+
+            // Find matching old row by PK
+            if let Some(&old_idx) = pk_to_old_idx.get(&pk_values) {
+                let old_row = &old_wire[old_idx];
+
+                // Try to create a partial row update
+                if let Some(partial) =
+                    create_partial_row_update(old_row, new_row, pk_columns, &selective_config)
+                {
+                    partial_updates.push(partial);
+                } else {
+                    // No changes for this row, skip it
+                    continue;
+                }
+            } else {
+                // Can't find matching old row - this is an insert, not an update
+                // Fall back to regular updates
+                return false;
+            }
+        }
+
+        // If no partial updates were generated, nothing changed
+        if partial_updates.is_empty() {
+            return false;
+        }
+
+        // Send the partial updates
+        if let Err(e) = self.send_subscription_partial_data(subscription_id, partial_updates).await
+        {
+            warn!("Failed to send selective updates: {}", e);
+            return false;
+        }
+
+        debug!(
+            "Sent selective column update (0xF7) for subscription {:?}",
+            subscription_id
+        );
+        true
     }
 
     /// Execute a SQL query
@@ -988,11 +1105,30 @@ impl ConnectionHandler {
 
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
-                            // We have previous results - try to compute delta using PK columns
-                            // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
+                            // First, try selective column updates (0xF7) if PK columns are known
                             let pk_columns = self
                                 .subscription_manager
                                 .get_pk_columns_by_wire_id(&subscription_id);
+                            if !pk_columns.is_empty()
+                                && self
+                                    .try_send_selective_updates(
+                                        &subscription_id,
+                                        old_rows,
+                                        &new_rows,
+                                        &pk_columns,
+                                    )
+                                    .await
+                            {
+                                // Selective updates sent successfully - update stored result
+                                self.subscription_manager.update_result_by_wire_id(
+                                    &subscription_id,
+                                    new_hash,
+                                    new_rows,
+                                );
+                                continue;
+                            }
+
+                            // Fall back to delta updates using PK columns
                             if let Some(delta) = compute_delta_with_pk(
                                 SubscriptionId::default(),
                                 old_rows,
@@ -1349,6 +1485,20 @@ impl ConnectionHandler {
             message: message.to_string(),
         }
         .encode(&mut self.write_buf);
+        self.flush_write_buffer().await
+    }
+
+    /// Send subscription partial data (0xF7) for selective column updates
+    ///
+    /// This is more bandwidth-efficient than sending full rows when only
+    /// a few columns have changed.
+    async fn send_subscription_partial_data(
+        &mut self,
+        subscription_id: &[u8; 16],
+        rows: Vec<crate::protocol::messages::PartialRowUpdate>,
+    ) -> Result<()> {
+        BackendMessage::SubscriptionPartialData { subscription_id: *subscription_id, rows }
+            .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
 
