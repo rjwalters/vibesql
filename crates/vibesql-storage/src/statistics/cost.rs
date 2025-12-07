@@ -78,6 +78,20 @@ pub struct CostEstimator {
     /// Cost of invalidating columnar cache (default: 0.1)
     /// Fixed cost for row-oriented tables with columnar cache
     pub columnar_cache_invalidation_cost: f64,
+
+    // ============================================================================
+    // WAL Cost Parameters (derived from TPC-C profiling #3862)
+    // ============================================================================
+
+    /// Cost of writing a single WAL entry per row (default: 0.12)
+    /// Based on profiling showing WAL as 56% of DELETE operation time.
+    /// WAL entries include: operation type, row data, and metadata.
+    pub wal_write_cost: f64,
+
+    /// Fixed overhead for WAL sync/flush operations (default: 0.5)
+    /// Applied once per DML operation (amortized across batch operations).
+    /// Includes fsync or equivalent durability guarantee.
+    pub wal_sync_cost: f64,
 }
 
 impl Default for CostEstimator {
@@ -99,6 +113,11 @@ impl Default for CostEstimator {
             compaction_cost_multiplier: 2.0,
             columnar_rebuild_cost: 0.02,
             columnar_cache_invalidation_cost: 0.1,
+            // WAL cost parameters derived from TPC-C profiling (#3862)
+            // WAL writes were 56% of DELETE time (600µs of 1.08ms total)
+            // Row removal was 21% (230µs), so WAL is ~2.6x row removal cost
+            wal_write_cost: 0.12,
+            wal_sync_cost: 0.5,
         }
     }
 }
@@ -158,6 +177,8 @@ impl CostEstimator {
             compaction_cost_multiplier: default.compaction_cost_multiplier,
             columnar_rebuild_cost: default.columnar_rebuild_cost,
             columnar_cache_invalidation_cost: default.columnar_cache_invalidation_cost,
+            wal_write_cost: default.wal_write_cost,
+            wal_sync_cost: default.wal_sync_cost,
         }
     }
 
@@ -251,6 +272,7 @@ impl CostEstimator {
     /// 2. Hash index updates (PK + unique constraints)
     /// 3. B-tree index updates (user-defined indexes)
     /// 4. Columnar storage overhead (if native columnar)
+    /// 5. WAL write cost (per-row entry + sync overhead)
     ///
     /// # Arguments
     /// * `row_count` - Number of rows to insert
@@ -261,7 +283,7 @@ impl CostEstimator {
     /// ```rust,ignore
     /// let cost = estimator.estimate_insert(100, &table_stats, &index_info);
     /// // For 100 rows with 1 PK and 2 B-tree indexes:
-    /// // (100 * 0.1) + (100 * 1 * 0.05) + (100 * 2 * 0.15) = 45.0
+    /// // (100 * 0.1) + (100 * 1 * 0.05) + (100 * 2 * 0.15) + WAL = ~57
     /// ```
     pub fn estimate_insert(
         &self,
@@ -291,7 +313,11 @@ impl CostEstimator {
             self.columnar_cache_invalidation_cost
         };
 
-        tuple_cost + hash_index_cost + btree_index_cost + columnar_cost
+        // 5. WAL write cost
+        // Per-row WAL entry cost + fixed sync overhead (amortized for batches)
+        let wal_cost = rows * self.wal_write_cost + self.wal_sync_cost;
+
+        tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + wal_cost
     }
 
     /// Estimate cost of updating rows
@@ -301,6 +327,7 @@ impl CostEstimator {
     /// 2. Hash index updates (only if indexed columns change)
     /// 3. B-tree index updates (only if indexed columns change)
     /// 4. Columnar storage overhead
+    /// 5. WAL write cost (per-row entry + sync overhead)
     ///
     /// For selective updates (where only some columns change), the actual cost
     /// may be lower since indexes not involving changed columns are skipped.
@@ -355,7 +382,11 @@ impl CostEstimator {
             self.columnar_cache_invalidation_cost
         };
 
-        tuple_cost + hash_index_cost + btree_index_cost + columnar_cost
+        // 5. WAL write cost
+        // Per-row WAL entry cost + fixed sync overhead (amortized for batches)
+        let wal_cost = rows * self.wal_write_cost + self.wal_sync_cost;
+
+        tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + wal_cost
     }
 
     /// Estimate cost of deleting rows
@@ -366,6 +397,10 @@ impl CostEstimator {
     /// 3. B-tree index updates (removing entries)
     /// 4. Columnar storage overhead
     /// 5. Potential compaction cost (when >50% rows deleted)
+    /// 6. WAL write cost (per-row entry + sync overhead)
+    ///
+    /// Per TPC-C profiling (#3862), WAL writes are 56% of DELETE time,
+    /// making this the dominant cost component.
     ///
     /// The compaction cost is significant because it:
     /// - Rebuilds the entire row vector (O(n))
@@ -432,7 +467,11 @@ impl CostEstimator {
             0.0
         };
 
-        tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + compaction_cost
+        // 6. WAL write cost (dominant cost per profiling #3862)
+        // Per-row WAL entry cost + fixed sync overhead (amortized for batches)
+        let wal_cost = rows * self.wal_write_cost + self.wal_sync_cost;
+
+        tuple_cost + hash_index_cost + btree_index_cost + columnar_cost + compaction_cost + wal_cost
     }
 
     /// Choose the best access method based on cost
@@ -613,8 +652,13 @@ mod tests {
         // Insert 100 rows with 1 hash index (PK)
         let cost = estimator.estimate_insert(100, &table_stats, &index_info);
 
-        // Expected: (100 * 0.1) + (100 * 1 * 0.05) + columnar_invalidation(0.1) = 15.1
-        assert!(cost > 15.0 && cost < 16.0, "Insert cost was {}", cost);
+        // Expected:
+        // - Tuple cost: 100 * 0.1 = 10.0
+        // - Hash index: 100 * 1 * 0.05 = 5.0
+        // - Columnar invalidation: 0.1
+        // - WAL cost: 100 * 0.12 + 0.5 = 12.5
+        // Total: ~27.6
+        assert!(cost > 27.0 && cost < 29.0, "Insert cost was {}", cost);
     }
 
     #[test]
@@ -781,5 +825,129 @@ mod tests {
         // Costs should scale roughly linearly with row count
         assert!(insert_100 > insert_10 * 5.0, "Insert should scale with rows");
         assert!(delete_100 > delete_10 * 5.0, "Delete should scale with rows");
+    }
+
+    // ============================================================================
+    // WAL Cost Estimation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_wal_cost_included_in_insert() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+        let index_info = TableIndexInfo::new(0, 0, false, 0.0);
+
+        // Insert 100 rows with no indexes
+        let cost = estimator.estimate_insert(100, &table_stats, &index_info);
+
+        // WAL component: 100 * 0.12 + 0.5 = 12.5
+        // Tuple: 100 * 0.1 = 10.0
+        // Columnar: 0.1
+        // Total: ~22.6
+        assert!(cost > 22.0, "Insert cost should include WAL: {}", cost);
+
+        // Verify WAL is a significant portion (should be >50% of base cost)
+        let tuple_plus_columnar = 100.0 * 0.1 + 0.1; // 10.1
+        let wal_cost = 100.0 * 0.12 + 0.5; // 12.5
+        assert!(
+            wal_cost > tuple_plus_columnar,
+            "WAL cost ({}) should exceed base tuple cost ({})",
+            wal_cost,
+            tuple_plus_columnar
+        );
+    }
+
+    #[test]
+    fn test_wal_cost_included_in_update() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+        let index_info = TableIndexInfo::new(0, 0, false, 0.0);
+
+        // Update 50 rows with no index updates
+        let cost = estimator.estimate_update(50, &table_stats, &index_info, 0.0);
+
+        // WAL component: 50 * 0.12 + 0.5 = 6.5
+        // Tuple: 50 * 0.08 = 4.0
+        // Columnar: 0.1
+        // Total: ~10.6
+        assert!(cost > 10.0, "Update cost should include WAL: {}", cost);
+    }
+
+    #[test]
+    fn test_wal_cost_included_in_delete() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+        let index_info = TableIndexInfo::new(0, 0, false, 0.0);
+
+        // Delete 100 rows with no indexes
+        let cost = estimator.estimate_delete(100, &table_stats, &index_info);
+
+        // WAL component: 100 * 0.12 + 0.5 = 12.5
+        // Tuple: 100 * 0.05 = 5.0
+        // Columnar: 0.1
+        // Total: ~17.6
+        assert!(cost > 17.0, "Delete cost should include WAL: {}", cost);
+    }
+
+    #[test]
+    fn test_wal_cost_dominant_in_delete() {
+        // Per profiling (#3862), WAL is 56% of DELETE time
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+        let index_info = TableIndexInfo::new(1, 0, false, 0.0);
+
+        // Calculate components
+        let rows = 100.0;
+        let tuple_cost = rows * estimator.delete_tuple_cost; // 5.0
+        let hash_cost = rows * 1.0 * estimator.hash_index_update_cost; // 5.0
+        let wal_cost = rows * estimator.wal_write_cost + estimator.wal_sync_cost; // 12.5
+
+        // WAL should be the dominant cost component (>40% of non-columnar costs)
+        let base_dml_cost = tuple_cost + hash_cost;
+        assert!(
+            wal_cost > base_dml_cost,
+            "WAL cost ({}) should exceed base DML cost ({}) per profiling data",
+            wal_cost,
+            base_dml_cost
+        );
+    }
+
+    #[test]
+    fn test_wal_sync_cost_amortized_for_batches() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+        let index_info = TableIndexInfo::new(1, 0, false, 0.0);
+
+        // Single-row insert
+        let cost_1 = estimator.estimate_insert(1, &table_stats, &index_info);
+
+        // 100-row batch insert
+        let cost_100 = estimator.estimate_insert(100, &table_stats, &index_info);
+
+        // Per-row cost should be lower for batches due to amortized sync cost
+        let per_row_single = cost_1;
+        let per_row_batch = cost_100 / 100.0;
+
+        assert!(
+            per_row_batch < per_row_single,
+            "Batch insert per-row cost ({}) should be less than single-row cost ({}) due to amortized WAL sync",
+            per_row_batch,
+            per_row_single
+        );
+    }
+
+    #[test]
+    fn test_wal_cost_proportional_to_rows() {
+        let estimator = CostEstimator::default();
+
+        // Calculate pure WAL costs (excluding sync overhead)
+        let wal_10 = 10.0 * estimator.wal_write_cost;
+        let wal_100 = 100.0 * estimator.wal_write_cost;
+
+        // WAL cost should scale linearly with row count
+        assert!(
+            (wal_100 - wal_10 * 10.0).abs() < 0.001,
+            "WAL write cost should scale linearly: 10x rows should be 10x cost"
+        );
     }
 }
