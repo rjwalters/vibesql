@@ -652,23 +652,37 @@ When data changes and the server needs to notify subscribers, it follows this de
 
 ### Configuration
 
-The selective update behavior can be configured on the server:
+The selective update behavior can be configured in the server configuration file (`vibesql-server.toml`):
 
-```rust
-SelectiveColumnConfig {
-    // Enable/disable selective column updates
-    enabled: true,  // default: true
+```toml
+[subscriptions.selective_updates]
+# Enable/disable selective column updates (default: true)
+enabled = true
 
-    // Primary key column indices (always included in partial updates)
-    pk_columns: vec![0],  // default: [0] (first column)
+# Minimum columns that must change to use selective update (default: 1)
+# If fewer columns change, send full row instead
+min_changed_columns = 1
 
-    // Maximum ratio of changed columns before falling back to full row
-    // If more than this ratio changes, send full row instead
-    max_changed_columns_ratio: 0.5,  // default: 50%
-}
+# Maximum ratio of changed columns before falling back to full row (default: 0.5)
+# E.g., 0.5 means if >50% of columns changed, send full row instead
+max_changed_columns_ratio = 0.5
 ```
 
-When `enabled: false`, the server never sends 0xF7 messages and always uses 0xF2.
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable selective column updates |
+| `min_changed_columns` | integer | `1` | Minimum columns that must change to use selective update |
+| `max_changed_columns_ratio` | float | `0.5` | Maximum ratio of changed columns before falling back to full row |
+
+**Use cases:**
+
+- **Disable for debugging**: Set `enabled = false` to always use full row updates, making it easier to debug subscription behavior
+- **Wide tables**: Lower `max_changed_columns_ratio` (e.g., `0.3`) for tables with many columns to be more aggressive about using selective updates
+- **Narrow tables**: Higher ratio or disable if partial updates add overhead without significant bandwidth savings
+
+When `enabled = false`, the server never sends 0xF7 messages and always uses 0xF2.
+
+For complete server configuration documentation, see [Server Configuration](../../docs/server-config.md).
 
 ## Client Requirements for Selective Updates
 
