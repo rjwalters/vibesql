@@ -646,6 +646,22 @@ impl SubscriptionManager {
         vec![0] // default
     }
 
+    /// Set per-subscription selective updates configuration override by wire ID
+    ///
+    /// Allows clients to override server-level selective update thresholds
+    /// on a per-subscription basis via the wire protocol.
+    pub fn set_selective_updates_override_by_wire_id(
+        &self,
+        wire_id: &[u8; 16],
+        config: super::SelectiveColumnConfig,
+    ) {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                sub.set_selective_updates_override(config);
+            }
+        }
+    }
+
     /// Get the number of active subscriptions
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()

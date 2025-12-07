@@ -338,9 +338,9 @@ pub struct Subscription {
     /// Whether this subscription is eligible for selective column updates
     /// True when PK columns were confidently detected
     pub selective_eligible: bool,
-    /// Configuration for selective column updates
-    /// Per-subscription overrides for server-level config
-    pub selective_updates: SelectiveColumnConfig,
+    /// Per-subscription override for selective column update configuration
+    /// If set, this overrides the server-level selective_updates config for this subscription
+    pub selective_updates_override: Option<SelectiveColumnConfig>,
 }
 
 impl Subscription {
@@ -378,7 +378,7 @@ impl Subscription {
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
-            selective_updates: SelectiveColumnConfig::default(),
+            selective_updates_override: None,
         }
     }
 
@@ -407,7 +407,7 @@ impl Subscription {
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
-            selective_updates: SelectiveColumnConfig::default(),
+            selective_updates_override: None,
         }
     }
 
@@ -469,7 +469,7 @@ impl Subscription {
             filter,
             pk_columns,
             selective_eligible: false,
-            selective_updates: SelectiveColumnConfig::default(),
+            selective_updates_override: None,
         }
     }
 
@@ -494,6 +494,19 @@ impl Subscription {
         self.selective_eligible = confident;
         // Return true if newly eligible (wasn't before, is now)
         !was_eligible && confident
+    }
+
+    /// Set per-subscription selective updates override
+    ///
+    /// Allows clients to override server-level selective update thresholds
+    /// on a per-subscription basis.
+    pub fn set_selective_updates_override(&mut self, config: SelectiveColumnConfig) {
+        self.selective_updates_override = Some(config);
+    }
+
+    /// Clear the selective updates override (use server defaults)
+    pub fn clear_selective_updates_override(&mut self) {
+        self.selective_updates_override = None;
     }
 }
 
