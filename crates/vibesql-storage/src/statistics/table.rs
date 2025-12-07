@@ -27,6 +27,106 @@ pub struct TableStatistics {
 }
 
 impl TableStatistics {
+    /// Create estimated statistics with basic column estimates
+    ///
+    /// This method provides reasonable defaults for column statistics without
+    /// requiring a full ANALYZE scan. It uses data type information to generate
+    /// basic statistics using conservative heuristics.
+    ///
+    /// # Heuristics Used
+    /// - **Boolean columns**: n_distinct = 2
+    /// - **Integer/Smallint/Bigint/Unsigned columns**: n_distinct = sqrt(row_count) (conservative)
+    /// - **Float/Real/DoublePrecision columns**: n_distinct = sqrt(row_count) to 100 (high cardinality)
+    /// - **Varchar/Character/Name columns**: n_distinct = row_count * 0.5 (assume moderate uniqueness)
+    /// - **Date/Timestamp/Time columns**: n_distinct = row_count * 0.8 (high cardinality)
+    /// - **Numeric/Decimal columns**: n_distinct = sqrt(row_count) (moderate)
+    /// - **Nullable columns**: null_count ≈ row_count * 0.01 (1% estimated nulls)
+    /// - **Non-nullable columns**: null_count = 0
+    /// - **All columns**: is_stale = true (clearly marked as estimates)
+    ///
+    /// # Arguments
+    /// * `row_count` - Total number of rows in the table
+    /// * `schema` - Table schema with column definitions
+    ///
+    /// # Example
+    /// ```no_run
+    /// let stats = TableStatistics::estimate_from_schema(5000, &schema);
+    /// // Boolean col: n_distinct = 2
+    /// // Integer col: n_distinct = sqrt(5000) ≈ 70
+    /// // Varchar col: n_distinct = 2500
+    /// // All columns: is_stale = true
+    /// ```
+    pub fn estimate_from_schema(
+        row_count: usize,
+        schema: &vibesql_catalog::TableSchema,
+    ) -> Self {
+        use vibesql_types::DataType;
+
+        let mut columns = std::collections::HashMap::new();
+
+        for col in &schema.columns {
+            let n_distinct = match &col.data_type {
+                DataType::Boolean => 2,
+                DataType::Integer | DataType::Smallint | DataType::Bigint | DataType::Unsigned => {
+                    // Conservative: sqrt(row_count) - typically much less than actual cardinality
+                    ((row_count as f64).sqrt() as usize).max(1)
+                }
+                DataType::Float { .. } | DataType::Real | DataType::DoublePrecision => {
+                    // Floating point often has high cardinality
+                    // Use sqrt but ensure at least 100 and at most row_count
+                    let sqrt_count = (row_count as f64).sqrt() as usize;
+                    sqrt_count.max(100).min(row_count)
+                }
+                DataType::Numeric { .. } | DataType::Decimal { .. } => {
+                    // Numeric with precision/scale: moderate cardinality
+                    ((row_count as f64).sqrt() as usize).max(1)
+                }
+                DataType::Varchar { .. }
+                | DataType::Character { .. }
+                | DataType::Name
+                | DataType::CharacterLargeObject => {
+                    // String columns: assume moderate uniqueness (50%)
+                    ((row_count as f64 * 0.5) as usize).max(1)
+                }
+                DataType::Date | DataType::Timestamp { .. } | DataType::Time { .. } => {
+                    // Temporal types: high cardinality
+                    ((row_count as f64 * 0.8) as usize).max(1)
+                }
+                _ => {
+                    // Other types: conservative estimate
+                    ((row_count as f64).sqrt() as usize).max(1)
+                }
+            };
+
+            // Estimate null fraction based on nullability
+            let null_count = if col.nullable {
+                // Estimate 1% nulls for nullable columns
+                ((row_count as f64 * 0.01) as usize).max(0)
+            } else {
+                0
+            };
+
+            let col_stats = ColumnStatistics {
+                n_distinct: n_distinct.max(1), // At least 1 distinct value
+                null_count,
+                min_value: None,    // No range info without scanning
+                max_value: None,
+                most_common_values: Vec::new(), // No MCVs without scanning
+                histogram: None,    // No histogram without scanning
+            };
+
+            columns.insert(col.name.clone(), col_stats);
+        }
+
+        TableStatistics {
+            row_count,
+            columns,
+            last_updated: SystemTime::now(),
+            is_stale: true, // Clearly marked as estimates
+            sample_metadata: None,
+        }
+    }
+
     /// Compute statistics by scanning the table
     pub fn compute(rows: &[crate::Row], schema: &vibesql_catalog::TableSchema) -> Self {
         Self::compute_with_config(rows, schema, None, false, 100, BucketStrategy::EqualDepth)
@@ -187,5 +287,96 @@ mod tests {
         stats.mark_stale();
         assert!(stats.is_stale);
         assert!(stats.needs_refresh());
+    }
+
+    #[test]
+    fn test_estimate_from_schema_basic() {
+        let schema = TableSchema::new(
+            "test_table".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    true,
+                ),
+                ColumnSchema::new("active".to_string(), DataType::Boolean, false),
+            ],
+        );
+
+        let stats = TableStatistics::estimate_from_schema(1000, &schema);
+
+        assert_eq!(stats.row_count, 1000);
+        assert!(stats.is_stale); // Should be marked as estimates
+        assert_eq!(stats.columns.len(), 3);
+
+        // Check Integer column: n_distinct = sqrt(1000) ≈ 31
+        let id_stats = stats.columns.get("id").unwrap();
+        assert_eq!(id_stats.n_distinct, 31); // sqrt(1000) ≈ 31
+        assert_eq!(id_stats.null_count, 0); // Non-nullable
+
+        // Check Varchar column: n_distinct = 1000 * 0.5 = 500
+        let name_stats = stats.columns.get("name").unwrap();
+        assert_eq!(name_stats.n_distinct, 500); // Moderate uniqueness
+        assert!(name_stats.null_count > 0); // Nullable, so ~1% nulls = ~10
+
+        // Check Boolean column: n_distinct = 2
+        let active_stats = stats.columns.get("active").unwrap();
+        assert_eq!(active_stats.n_distinct, 2);
+        assert_eq!(active_stats.null_count, 0); // Non-nullable
+    }
+
+    #[test]
+    fn test_estimate_from_schema_various_types() {
+        let schema = TableSchema::new(
+            "test_table".to_string(),
+            vec![
+                ColumnSchema::new("bool_col".to_string(), DataType::Boolean, false),
+                ColumnSchema::new("int_col".to_string(), DataType::Integer, false),
+                ColumnSchema::new("float_col".to_string(), DataType::Float { precision: 24 }, false),
+                ColumnSchema::new("date_col".to_string(), DataType::Date, false),
+                ColumnSchema::new(
+                    "nullable_col".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    true,
+                ),
+            ],
+        );
+
+        let stats = TableStatistics::estimate_from_schema(10000, &schema);
+
+        // Boolean: 2 distinct
+        assert_eq!(stats.columns.get("bool_col").unwrap().n_distinct, 2);
+
+        // Integer: sqrt(10000) = 100
+        assert_eq!(stats.columns.get("int_col").unwrap().n_distinct, 100);
+
+        // Float: high cardinality (at least 100)
+        let float_ndv = stats.columns.get("float_col").unwrap().n_distinct;
+        assert!(float_ndv >= 100);
+
+        // Date: high cardinality (80%)
+        let date_ndv = stats.columns.get("date_col").unwrap().n_distinct;
+        assert!(date_ndv > 5000);
+
+        // Nullable: should have some null_count
+        let nullable_stats = stats.columns.get("nullable_col").unwrap();
+        assert!(nullable_stats.null_count > 0);
+    }
+
+    #[test]
+    fn test_estimate_from_schema_empty_table() {
+        let schema = TableSchema::new(
+            "empty_table".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+
+        let stats = TableStatistics::estimate_from_schema(0, &schema);
+        assert_eq!(stats.row_count, 0);
+        assert!(stats.is_stale);
+
+        // Even with 0 rows, should have at least 1 distinct value estimate
+        let id_stats = stats.columns.get("id").unwrap();
+        assert!(id_stats.n_distinct >= 1);
     }
 }
