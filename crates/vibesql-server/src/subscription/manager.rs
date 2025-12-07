@@ -15,8 +15,8 @@ use vibesql_storage::change_events::RecvError;
 use vibesql_storage::Database;
 
 use super::{
-    classify_error_str, compute_delta_with_pk, extract_table_refs, hash_rows, Subscription,
-    SubscriptionConfig, SubscriptionError, SubscriptionErrorKind, SubscriptionId,
+    classify_error_str, compute_delta_with_pk, extract_table_refs, hash_rows, PartialRowDelta,
+    Subscription, SubscriptionConfig, SubscriptionError, SubscriptionErrorKind, SubscriptionId,
     SubscriptionUpdate,
 };
 
@@ -746,7 +746,7 @@ impl SubscriptionManager {
                             "Results changed, notifying subscriber"
                         );
 
-                        // Determine whether to send Delta or Full update
+                        // Determine whether to send Delta, Partial, or Full update
                         let update = if let Some(ref old_rows) = subscription.last_result {
                             // We have previous results - compute delta using PK columns
                             if let Some(delta) = compute_delta_with_pk(
@@ -755,7 +755,11 @@ impl SubscriptionManager {
                                 &result_rows,
                                 &subscription.pk_columns,
                             ) {
-                                // Log delta statistics
+                                // Check if we can use Partial updates (selective column updates)
+                                // Conditions:
+                                // 1. Subscription is selective_eligible (confident PK detection)
+                                // 2. Delta has only updates (no inserts or deletes)
+                                // 3. Updates exist
                                 if let SubscriptionUpdate::Delta {
                                     ref inserts,
                                     ref updates,
@@ -763,15 +767,57 @@ impl SubscriptionManager {
                                     ..
                                 } = delta
                                 {
-                                    debug!(
-                                        subscription_id = %id,
-                                        inserts = inserts.len(),
-                                        updates = updates.len(),
-                                        deletes = deletes.len(),
-                                        "Sending delta update"
-                                    );
+                                    if subscription.selective_eligible
+                                        && inserts.is_empty()
+                                        && deletes.is_empty()
+                                        && !updates.is_empty()
+                                    {
+                                        // Convert to Partial updates
+                                        let partial_updates: Vec<PartialRowDelta> = updates
+                                            .iter()
+                                            .filter_map(|(old_row, new_row)| {
+                                                PartialRowDelta::from_rows(
+                                                    old_row,
+                                                    new_row,
+                                                    &subscription.pk_columns,
+                                                )
+                                            })
+                                            .collect();
+
+                                        if !partial_updates.is_empty() {
+                                            debug!(
+                                                subscription_id = %id,
+                                                partial_updates = partial_updates.len(),
+                                                "Sending partial update (selective columns)"
+                                            );
+                                            SubscriptionUpdate::Partial {
+                                                subscription_id: id,
+                                                updates: partial_updates,
+                                            }
+                                        } else {
+                                            // Fall back to delta if partial conversion failed
+                                            debug!(
+                                                subscription_id = %id,
+                                                updates = updates.len(),
+                                                "Sending delta update (partial conversion failed)"
+                                            );
+                                            delta
+                                        }
+                                    } else {
+                                        // Log delta statistics and send as-is
+                                        debug!(
+                                            subscription_id = %id,
+                                            inserts = inserts.len(),
+                                            updates = updates.len(),
+                                            deletes = deletes.len(),
+                                            selective_eligible = subscription.selective_eligible,
+                                            "Sending delta update"
+                                        );
+                                        delta
+                                    }
+                                } else {
+                                    delta
                                 }
-                                delta
                             } else {
                                 // No delta (shouldn't happen if hash changed, but be safe)
                                 SubscriptionUpdate::Full { subscription_id: id, rows: result_rows.clone() }

@@ -492,6 +492,79 @@ impl Subscription {
 }
 
 // ============================================================================
+// Partial Row Delta (for selective column updates)
+// ============================================================================
+
+/// A partial row update containing only changed columns plus primary key columns
+///
+/// Used for efficient updates when only a subset of columns have changed.
+/// The `column_indices` field indicates which columns are present in `values`.
+#[derive(Debug, Clone)]
+pub struct PartialRowDelta {
+    /// Indices of columns that are included in this partial update
+    /// (primary key columns + changed columns, sorted)
+    pub column_indices: Vec<usize>,
+    /// Old values for the included columns
+    pub old_values: Vec<vibesql_types::SqlValue>,
+    /// New values for the included columns
+    pub new_values: Vec<vibesql_types::SqlValue>,
+}
+
+impl PartialRowDelta {
+    /// Create a new partial row delta from old and new rows
+    ///
+    /// # Arguments
+    /// * `old_row` - The previous row values
+    /// * `new_row` - The current row values
+    /// * `pk_columns` - Primary key column indices (always included)
+    ///
+    /// # Returns
+    /// * `Some(PartialRowDelta)` if the rows differ
+    /// * `None` if the rows are identical
+    pub fn from_rows(
+        old_row: &crate::Row,
+        new_row: &crate::Row,
+        pk_columns: &[usize],
+    ) -> Option<Self> {
+        if old_row.values.len() != new_row.values.len() {
+            return None;
+        }
+
+        // Find changed columns
+        let mut changed_columns = Vec::new();
+        for (idx, (old_val, new_val)) in
+            old_row.values.iter().zip(new_row.values.iter()).enumerate()
+        {
+            if old_val != new_val {
+                changed_columns.push(idx);
+            }
+        }
+
+        // If no columns changed, return None
+        if changed_columns.is_empty() {
+            return None;
+        }
+
+        // Build included columns: PK columns + changed columns, sorted
+        let mut column_indices: Vec<usize> = pk_columns.to_vec();
+        for &idx in &changed_columns {
+            if !column_indices.contains(&idx) {
+                column_indices.push(idx);
+            }
+        }
+        column_indices.sort_unstable();
+
+        // Extract values for included columns
+        let old_values: Vec<vibesql_types::SqlValue> =
+            column_indices.iter().map(|&idx| old_row.values[idx].clone()).collect();
+        let new_values: Vec<vibesql_types::SqlValue> =
+            column_indices.iter().map(|&idx| new_row.values[idx].clone()).collect();
+
+        Some(Self { column_indices, old_values, new_values })
+    }
+}
+
+// ============================================================================
 // Subscription Update
 // ============================================================================
 
@@ -539,6 +612,21 @@ pub enum SubscriptionUpdate {
         /// Error message describing what went wrong
         message: String,
     },
+
+    /// Partial row updates (selective column updates)
+    ///
+    /// Sent when a subscription is eligible for selective column updates and
+    /// only a subset of columns have changed. Contains only the changed columns
+    /// plus the primary key columns, reducing bandwidth for wide tables.
+    ///
+    /// This is more efficient than Delta for tables with many columns where
+    /// only a few columns change at a time.
+    Partial {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
+        /// Partial row updates, each containing only changed columns + PK columns
+        updates: Vec<PartialRowDelta>,
+    },
 }
 
 impl SubscriptionUpdate {
@@ -548,6 +636,7 @@ impl SubscriptionUpdate {
             SubscriptionUpdate::Full { subscription_id, .. } => *subscription_id,
             SubscriptionUpdate::Delta { subscription_id, .. } => *subscription_id,
             SubscriptionUpdate::Error { subscription_id, .. } => *subscription_id,
+            SubscriptionUpdate::Partial { subscription_id, .. } => *subscription_id,
         }
     }
 }
@@ -2222,5 +2311,218 @@ mod tests {
         assert_eq!(partial.values.len(), 2);
         assert_eq!(partial.values[0], Some(b"1".to_vec()));
         assert_eq!(partial.values[1], Some(b"Alice".to_vec())); // Changed from NULL
+    }
+
+    // ========================================================================
+    // Tests for PartialRowDelta
+    // ========================================================================
+
+    #[test]
+    fn test_partial_row_delta_from_rows_single_column_change() {
+        use vibesql_types::SqlValue;
+
+        let old_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(100),
+            ],
+        };
+        let new_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(150),
+            ],
+        };
+
+        let pk_columns = vec![0];
+        let delta = PartialRowDelta::from_rows(&old_row, &new_row, &pk_columns);
+
+        assert!(delta.is_some());
+        let delta = delta.unwrap();
+
+        // Should include PK (0) + changed column (2)
+        assert_eq!(delta.column_indices, vec![0, 2]);
+        assert_eq!(delta.old_values, vec![SqlValue::Integer(1), SqlValue::Integer(100)]);
+        assert_eq!(delta.new_values, vec![SqlValue::Integer(1), SqlValue::Integer(150)]);
+    }
+
+    #[test]
+    fn test_partial_row_delta_from_rows_multiple_column_changes() {
+        use vibesql_types::SqlValue;
+
+        let old_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("active".to_string()),
+            ],
+        };
+        let new_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("inactive".to_string()),
+            ],
+        };
+
+        let pk_columns = vec![0];
+        let delta = PartialRowDelta::from_rows(&old_row, &new_row, &pk_columns);
+
+        assert!(delta.is_some());
+        let delta = delta.unwrap();
+
+        // Should include PK (0) + changed columns (1, 3)
+        assert_eq!(delta.column_indices, vec![0, 1, 3]);
+        assert_eq!(
+            delta.old_values,
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar("active".to_string())
+            ]
+        );
+        assert_eq!(
+            delta.new_values,
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar("inactive".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_partial_row_delta_from_rows_no_changes() {
+        use vibesql_types::SqlValue;
+
+        let row = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+
+        let pk_columns = vec![0];
+        let delta = PartialRowDelta::from_rows(&row, &row, &pk_columns);
+
+        assert!(delta.is_none(), "Should return None when rows are identical");
+    }
+
+    #[test]
+    fn test_partial_row_delta_from_rows_pk_column_changed() {
+        use vibesql_types::SqlValue;
+
+        let old_row = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new_row = crate::Row {
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Alice".to_string())],
+        };
+
+        let pk_columns = vec![0];
+        let delta = PartialRowDelta::from_rows(&old_row, &new_row, &pk_columns);
+
+        assert!(delta.is_some());
+        let delta = delta.unwrap();
+
+        // PK column changed, should only include column 0
+        assert_eq!(delta.column_indices, vec![0]);
+        assert_eq!(delta.old_values, vec![SqlValue::Integer(1)]);
+        assert_eq!(delta.new_values, vec![SqlValue::Integer(2)]);
+    }
+
+    #[test]
+    fn test_partial_row_delta_from_rows_null_handling() {
+        use vibesql_types::SqlValue;
+
+        let old_row = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new_row = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
+
+        let pk_columns = vec![0];
+        let delta = PartialRowDelta::from_rows(&old_row, &new_row, &pk_columns);
+
+        assert!(delta.is_some());
+        let delta = delta.unwrap();
+
+        // Should include PK (0) + changed column (1)
+        assert_eq!(delta.column_indices, vec![0, 1]);
+        assert_eq!(delta.new_values, vec![SqlValue::Integer(1), SqlValue::Null]);
+    }
+
+    #[test]
+    fn test_partial_row_delta_from_rows_composite_pk() {
+        use vibesql_types::SqlValue;
+
+        let old_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("old".to_string()),
+            ],
+        };
+        let new_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("new".to_string()),
+            ],
+        };
+
+        let pk_columns = vec![0, 1]; // Composite PK
+        let delta = PartialRowDelta::from_rows(&old_row, &new_row, &pk_columns);
+
+        assert!(delta.is_some());
+        let delta = delta.unwrap();
+
+        // Should include PK columns (0, 1) + changed column (2)
+        assert_eq!(delta.column_indices, vec![0, 1, 2]);
+        assert_eq!(
+            delta.old_values,
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("old".to_string())
+            ]
+        );
+        assert_eq!(
+            delta.new_values,
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("new".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_partial_row_delta_from_rows_different_column_count() {
+        use vibesql_types::SqlValue;
+
+        let old_row = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new_row = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(100),
+            ],
+        };
+
+        let pk_columns = vec![0];
+        let delta = PartialRowDelta::from_rows(&old_row, &new_row, &pk_columns);
+
+        assert!(delta.is_none(), "Should return None when column counts differ");
+    }
+
+    #[test]
+    fn test_subscription_update_partial_subscription_id() {
+        let test_id = SubscriptionId::new();
+        let update = SubscriptionUpdate::Partial { subscription_id: test_id, updates: vec![] };
+
+        assert_eq!(update.subscription_id(), test_id);
     }
 }
