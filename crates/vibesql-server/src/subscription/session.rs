@@ -12,7 +12,6 @@
 //! this is used to track which queries a specific client is subscribed to.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 

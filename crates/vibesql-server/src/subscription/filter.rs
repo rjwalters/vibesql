@@ -5,7 +5,6 @@
 //! are applied to subscription updates before sending to clients.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
 
