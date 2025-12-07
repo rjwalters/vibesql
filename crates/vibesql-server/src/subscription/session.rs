@@ -30,6 +30,8 @@ pub struct SessionSubscription {
     /// Last result set (for delta computation)
     /// This stores the previous result to enable computing deltas on change.
     pub last_result: Option<Vec<Row>>,
+    /// Whether updates are currently paused for this subscription
+    pub paused: bool,
 }
 
 /// Manages subscriptions for a single connection/session
@@ -97,6 +99,7 @@ impl SessionSubscriptionManager {
             table_dependencies: table_dependencies.clone(),
             last_result_hash: 0,
             last_result: None,
+            paused: false,
         };
 
         // Update table -> subscription index (normalize to lowercase for case-insensitive matching)
@@ -217,6 +220,37 @@ impl SessionSubscriptionManager {
             sub.last_result_hash = result_hash;
             sub.last_result = Some(result);
         }
+    }
+
+    /// Pause a subscription - it will stop receiving updates until resumed
+    ///
+    /// Returns true if the subscription was found and paused, false if not found
+    pub fn pause(&mut self, subscription_id: &SessionSubscriptionId) -> bool {
+        if let Some(subscription) = self.subscriptions.get_mut(subscription_id) {
+            subscription.paused = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Resume a paused subscription - it will start receiving updates again
+    ///
+    /// Returns true if the subscription was found and resumed, false if not found
+    pub fn resume(&mut self, subscription_id: &SessionSubscriptionId) -> bool {
+        if let Some(subscription) = self.subscriptions.get_mut(subscription_id) {
+            subscription.paused = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a subscription is paused
+    ///
+    /// Returns None if subscription not found, Some(paused) otherwise
+    pub fn is_paused(&self, subscription_id: &SessionSubscriptionId) -> Option<bool> {
+        self.subscriptions.get(subscription_id).map(|s| s.paused)
     }
 
     /// Get the number of active subscriptions
@@ -510,5 +544,40 @@ mod tests {
         let sub = manager.get(&id).unwrap();
         assert_eq!(sub.last_result_hash, 22222);
         assert_eq!(sub.last_result.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_pause_resume() {
+        let mut manager = SessionSubscriptionManager::new();
+
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Initially not paused
+        assert_eq!(manager.is_paused(&id), Some(false));
+        assert!(!manager.get(&id).unwrap().paused);
+
+        // Pause the subscription
+        assert!(manager.pause(&id));
+        assert_eq!(manager.is_paused(&id), Some(true));
+        assert!(manager.get(&id).unwrap().paused);
+
+        // Resume the subscription
+        assert!(manager.resume(&id));
+        assert_eq!(manager.is_paused(&id), Some(false));
+        assert!(!manager.get(&id).unwrap().paused);
+    }
+
+    #[test]
+    fn test_pause_resume_nonexistent() {
+        let mut manager = SessionSubscriptionManager::new();
+        let fake_id = [0u8; 16];
+
+        // Pause/resume of nonexistent subscription returns false
+        assert!(!manager.pause(&fake_id));
+        assert!(!manager.resume(&fake_id));
+        assert_eq!(manager.is_paused(&fake_id), None);
     }
 }

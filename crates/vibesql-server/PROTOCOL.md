@@ -22,7 +22,7 @@ Standard PostgreSQL clients (psql, libpq, etc.) work normally with VibeSQL serve
 
 ## Message Overview
 
-VibeSQL adds four new message types in the custom range (0xF0-0xF3), chosen to avoid collision with PostgreSQL protocol messages (which use ASCII letters):
+VibeSQL adds subscription message types in the custom range (0xF0-0xF6), chosen to avoid collision with PostgreSQL protocol messages (which use ASCII letters):
 
 | Code | Direction | Name | Description |
 |------|-----------|------|-------------|
@@ -30,6 +30,9 @@ VibeSQL adds four new message types in the custom range (0xF0-0xF3), chosen to a
 | `0xF1` (241) | Frontend | Unsubscribe | Cancel subscription |
 | `0xF2` (242) | Backend | SubscriptionData | Query result update |
 | `0xF3` (243) | Backend | SubscriptionError | Subscription error |
+| `0xF4` (244) | Backend | SubscriptionAck | Acknowledge subscription creation |
+| `0xF5` (245) | Frontend | SubscriptionPause | Temporarily pause updates |
+| `0xF6` (246) | Frontend | SubscriptionResume | Resume paused subscription |
 
 ## Protocol Messages
 
@@ -315,6 +318,120 @@ Breakdown:
   50 61 72 73 65 20 65 72 72 6F 72 00    - "Parse error\0"
 ```
 
+### SubscriptionAck (0xF4) - Backend Message
+
+Acknowledges successful subscription registration. Sent immediately after a subscription is registered but before the initial data is sent. This allows clients to:
+- Know the subscription was accepted before potentially slow query execution
+- Correlate the subscription ID with their request
+- Handle registration failures separately from query execution failures
+
+**Byte-Level Format:**
+```
+┌──────────┬──────────────┬─────────────────┬─────────────────────┐
+│  Type    │   Length     │ Subscription ID │   Table Count       │
+│   1B     │   4B (BE)    │    16B (UUID)   │     2B (BE)         │
+└──────────┴──────────────┴─────────────────┴─────────────────────┘
+     ↓            ↓               ↓                   ↓
+   0xF4       Always 22      UUID assigned       Number of tables
+                             to subscription     being monitored
+```
+
+**Field Details:**
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | Message Type | `u8` | `0xF4` (SubscriptionAck) |
+| 1-4 | Length | `i32` BE | Always `22` (4 + 16 + 2) |
+| 5-20 | Subscription ID | `[u8; 16]` | UUID assigned to this subscription |
+| 21-22 | Table Count | `u16` BE | Number of tables being monitored |
+
+**Example** - Subscription acknowledged with 2 table dependencies:
+```
+Hex:   F4 00 00 00 16 a1 b2 c3 d4 e5 f6 07 18 29 3a 4b 5c 6d 7e 8f 90 00 02
+
+Breakdown:
+  F4                                     - Message type: SubscriptionAck
+  00 00 00 16                            - Length: 22 bytes
+  a1 b2 c3 d4 e5 f6 07 18                - Subscription ID bytes 0-7
+  29 3a 4b 5c 6d 7e 8f 90                - Subscription ID bytes 8-15
+  00 02                                  - Table count: 2
+```
+
+### SubscriptionPause (0xF5) - Frontend Message
+
+Temporarily pause updates for a subscription. While paused, the subscription remains registered but no SubscriptionData messages are sent when underlying data changes. This is useful for:
+- Clients processing a backlog of updates
+- Mobile apps going to background
+- Reducing server load during periods of disinterest
+
+**Byte-Level Format:**
+```
+┌──────────┬──────────────┬──────────────────────────────────────┐
+│  Type    │   Length     │         Subscription ID              │
+│   1B     │   4B (BE)    │            16B (UUID)                │
+└──────────┴──────────────┴──────────────────────────────────────┘
+     ↓            ↓                       ↓
+   0xF5       Always 20            UUID of subscription
+                                   to pause
+```
+
+**Field Details:**
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | Message Type | `u8` | `0xF5` (SubscriptionPause) |
+| 1-4 | Length | `i32` BE | Always `20` (4 + 16) |
+| 5-20 | Subscription ID | `[u8; 16]` | UUID of the subscription to pause |
+
+**Response**: No response message is sent. The server silently pauses the subscription.
+
+**Example** - Pause a subscription:
+```
+Hex:   F5 00 00 00 14 a1 b2 c3 d4 e5 f6 07 18 29 3a 4b 5c 6d 7e 8f 90
+
+Breakdown:
+  F5                                     - Message type: SubscriptionPause
+  00 00 00 14                            - Length: 20 bytes
+  a1 b2 c3 d4 e5 f6 07 18                - Subscription ID bytes 0-7
+  29 3a 4b 5c 6d 7e 8f 90                - Subscription ID bytes 8-15
+```
+
+### SubscriptionResume (0xF6) - Frontend Message
+
+Resume a previously paused subscription. After resuming, the client will again receive SubscriptionData messages when underlying data changes. Note: The client does NOT automatically receive the current state upon resume; it only receives updates going forward.
+
+**Byte-Level Format:**
+```
+┌──────────┬──────────────┬──────────────────────────────────────┐
+│  Type    │   Length     │         Subscription ID              │
+│   1B     │   4B (BE)    │            16B (UUID)                │
+└──────────┴──────────────┴──────────────────────────────────────┘
+     ↓            ↓                       ↓
+   0xF6       Always 20            UUID of subscription
+                                   to resume
+```
+
+**Field Details:**
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | Message Type | `u8` | `0xF6` (SubscriptionResume) |
+| 1-4 | Length | `i32` BE | Always `20` (4 + 16) |
+| 5-20 | Subscription ID | `[u8; 16]` | UUID of the subscription to resume |
+
+**Response**: No response message is sent. The server silently resumes the subscription.
+
+**Example** - Resume a subscription:
+```
+Hex:   F6 00 00 00 14 a1 b2 c3 d4 e5 f6 07 18 29 3a 4b 5c 6d 7e 8f 90
+
+Breakdown:
+  F6                                     - Message type: SubscriptionResume
+  00 00 00 14                            - Length: 20 bytes
+  a1 b2 c3 d4 e5 f6 07 18                - Subscription ID bytes 0-7
+  29 3a 4b 5c 6d 7e 8f 90                - Subscription ID bytes 8-15
+```
+
 ## Subscription Lifecycle
 
 ### Successful Subscription Flow
@@ -331,9 +448,15 @@ Breakdown:
 │    │                                            │ 1. Parse query      │    │
 │    │                                            │ 2. Extract tables   │    │
 │    │                                            │ 3. Generate UUID    │    │
-│    │                                            │ 4. Execute query    │    │
-│    │                                            │ 5. Register for     │    │
+│    │                                            │ 4. Register for     │    │
 │    │                                            │    table changes    │    │
+│    │                                            └─────────────────┬───┘    │
+│    │                                                              │        │
+│    │  ◄───────── SubscriptionAck (0xF4) ──────────────────────── │        │
+│    │              ID: <uuid>, Tables: 1                           │        │
+│    │                                                              │        │
+│    │                                            ┌─────────────────┴───┐    │
+│    │                                            │ 5. Execute query    │    │
 │    │                                            └─────────────────┬───┘    │
 │    │                                                              │        │
 │    │  ◄───────── SubscriptionData (0xF2) ─────────────────────── │        │
@@ -354,6 +477,14 @@ Breakdown:
 │    │              ID: <uuid>, Type: Full                          │        │
 │    │              Rows: [updated result set]                      │        │
 │    │                                                              │        │
+│    │  ────────── SubscriptionPause (0xF5) ────────────────────── │        │
+│    │              ID: <uuid>                                      │        │
+│    │                              (no response, updates paused)   │        │
+│    │                                                              │        │
+│    │  ────────── SubscriptionResume (0xF6) ───────────────────── │        │
+│    │              ID: <uuid>                                      │        │
+│    │                              (no response, updates resumed)  │        │
+│    │                                                              │        │
 │    │  ────────── Unsubscribe (0xF1) ────────────────────────────► │        │
 │    │              ID: <uuid>                                      │        │
 │    │                                                              │        │
@@ -369,8 +500,9 @@ Breakdown:
    - Server parses and validates the SQL query
    - Server extracts table dependencies from AST
    - Server generates a unique subscription ID (UUID v4)
-   - Server executes query to get initial results
    - Server registers subscription for change notifications
+   - Server sends **SubscriptionAck** with ID and table count
+   - Server executes query to get initial results
    - Server sends SubscriptionData with initial results
 
 2. **Listen**: Client receives SubscriptionData messages when results change
@@ -379,13 +511,21 @@ Breakdown:
    - Server compares results to last sent results (via hash)
    - If results differ, server sends SubscriptionData update
    - Currently uses Full update type; delta types reserved for future
+   - Paused subscriptions do not receive updates
 
-3. **Unsubscribe**: Client sends Unsubscribe message
+3. **Pause/Resume** (Optional): Client can pause and resume updates
+   - Client sends **SubscriptionPause** to temporarily stop updates
+   - While paused, subscription remains registered but no updates sent
+   - Client sends **SubscriptionResume** to restart receiving updates
+   - On resume, client does NOT receive missed updates (only future changes)
+   - Useful for background apps, rate limiting, or processing backlogs
+
+4. **Unsubscribe**: Client sends Unsubscribe message
    - Server removes subscription from internal tracking
    - Server stops monitoring dependent tables for this subscription
    - No response message is sent
 
-4. **Connection Close**: Implicit unsubscribe
+5. **Connection Close**: Implicit unsubscribe
    - When connection terminates, all subscriptions are automatically cleaned up
    - No explicit Unsubscribe needed for each subscription
 
@@ -563,16 +703,20 @@ The subscription message types (`0xF0-0xF3`) are chosen specifically because:
 
 To use subscriptions, a client must:
 
-1. **Understand message types `0xF0-0xF3`** in addition to standard PostgreSQL messages
+1. **Understand message types `0xF0-0xF6`** in addition to standard PostgreSQL messages
 2. **Handle asynchronous SubscriptionData** - these can arrive at any time, not just after requests
 3. **Track subscription IDs** returned in SubscriptionData to correlate updates
-4. **Implement Unsubscribe** to clean up subscriptions
+4. **Handle SubscriptionAck** - confirms subscription registration before data arrives
+5. **Implement Unsubscribe** to clean up subscriptions
+6. **Optionally implement Pause/Resume** - for flow control of subscription updates
 
 **Minimal Client Requirements:**
 ```
 - Parse message type byte
-- If type in [0xF0, 0xF1, 0xF2, 0xF3]:
+- If type in [0xF0, 0xF1, 0xF2, 0xF3, 0xF4]:
     Handle subscription message
+- If type in [0xF5, 0xF6]:
+    Send subscription control message (pause/resume)
 - Else:
     Handle as standard PostgreSQL message
 ```
@@ -591,8 +735,7 @@ To use subscriptions, a client must:
 ## Future Extensions
 
 Potential future enhancements:
-- `SubscriptionAck` (0xF4): Acknowledge subscription creation
-- `SubscriptionPause` (0xF5): Temporarily pause updates
-- `SubscriptionResume` (0xF6): Resume paused subscription
-- Filtering expressions for deltas
-- Selective column updates (don't send unchanged columns)
+- Filtering expressions for deltas (client-side filters to reduce network traffic)
+- Selective column updates (don't send unchanged columns in SubscriptionData)
+- Delta compression (send only changed rows instead of full result set)
+- Subscription batching (combine multiple subscriptions into single updates)
