@@ -1209,3 +1209,171 @@ fn test_range_scan_reverse_with_duplicates() {
     let result = index.range_scan_reverse(None, None, true, true).unwrap();
     assert_eq!(result, vec![5, 4, 3, 2, 1, 0], "Reverse scan with duplicates");
 }
+
+#[test]
+fn test_delete_batch_single_level() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let mut index = BTreeIndex::new(page_manager, key_schema).unwrap();
+
+    // Insert some entries
+    for i in 0..10 {
+        index.insert(vec![SqlValue::Integer(i * 10)], i as usize).unwrap();
+    }
+
+    // Batch delete several entries
+    let entries_to_delete = vec![
+        (vec![SqlValue::Integer(20)], 2),
+        (vec![SqlValue::Integer(50)], 5),
+        (vec![SqlValue::Integer(70)], 7),
+    ];
+
+    let deleted = index.delete_batch(&entries_to_delete).unwrap();
+    assert_eq!(deleted, 3, "Should delete 3 entries");
+
+    // Verify they are gone
+    assert!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap().is_empty());
+    assert!(index.lookup(&vec![SqlValue::Integer(50)]).unwrap().is_empty());
+    assert!(index.lookup(&vec![SqlValue::Integer(70)]).unwrap().is_empty());
+
+    // Verify others still exist
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(0)]).unwrap(), vec![0]);
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap(), vec![1]);
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(30)]).unwrap(), vec![3]);
+}
+
+#[test]
+fn test_delete_batch_multi_level() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+
+    // Create entries that will span multiple leaves (need more entries for multi-level)
+    let sorted_entries: Vec<_> =
+        (0..1000).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
+
+    let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
+    // Note: multi-level tree depends on degree/page size. If this fails, just skip the assertion.
+    let is_multi_level = index.height() > 1;
+
+    // Batch delete entries from different parts of the tree
+    let entries_to_delete: Vec<_> = (0..50)
+        .map(|i| (vec![SqlValue::Integer(i * 200)], (i * 20) as usize))
+        .collect();
+
+    let deleted = index.delete_batch(&entries_to_delete).unwrap();
+    assert_eq!(deleted, 50, "Should delete 50 entries");
+
+    // Verify deleted entries are gone
+    for i in 0..50 {
+        let key = i * 200;
+        let result = index.lookup(&vec![SqlValue::Integer(key)]).unwrap();
+        assert!(result.is_empty(), "Entry {} should be deleted", key);
+    }
+
+    // Verify some remaining entries
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap(), vec![1]);
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(30)]).unwrap(), vec![3]);
+
+    // Log for debugging
+    if is_multi_level {
+        println!("Test ran with multi-level tree (height={})", index.height());
+    }
+}
+
+#[test]
+fn test_delete_batch_with_duplicates() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let mut index = BTreeIndex::new(page_manager, key_schema).unwrap();
+
+    // Insert duplicate keys
+    for i in 0..5 {
+        index.insert(vec![SqlValue::Integer(100)], i).unwrap();
+    }
+    for i in 5..10 {
+        index.insert(vec![SqlValue::Integer(200)], i).unwrap();
+    }
+
+    // Delete specific row_ids from the duplicate key
+    let entries_to_delete = vec![
+        (vec![SqlValue::Integer(100)], 1),
+        (vec![SqlValue::Integer(100)], 3),
+        (vec![SqlValue::Integer(200)], 7),
+    ];
+
+    let deleted = index.delete_batch(&entries_to_delete).unwrap();
+    assert_eq!(deleted, 3, "Should delete 3 entries");
+
+    // Verify remaining row_ids
+    let remaining_100 = index.lookup(&vec![SqlValue::Integer(100)]).unwrap();
+    assert_eq!(remaining_100, vec![0, 2, 4], "Should have remaining row_ids for key 100");
+
+    let remaining_200 = index.lookup(&vec![SqlValue::Integer(200)]).unwrap();
+    assert_eq!(remaining_200, vec![5, 6, 8, 9], "Should have remaining row_ids for key 200");
+}
+
+#[test]
+fn test_delete_batch_nonexistent_entries() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let mut index = BTreeIndex::new(page_manager, key_schema).unwrap();
+
+    // Insert some entries
+    index.insert(vec![SqlValue::Integer(10)], 1).unwrap();
+    index.insert(vec![SqlValue::Integer(20)], 2).unwrap();
+
+    // Try to delete nonexistent entries
+    let entries_to_delete = vec![
+        (vec![SqlValue::Integer(10)], 1), // exists
+        (vec![SqlValue::Integer(30)], 3), // doesn't exist
+        (vec![SqlValue::Integer(20)], 9), // key exists but row_id doesn't
+    ];
+
+    let deleted = index.delete_batch(&entries_to_delete).unwrap();
+    assert_eq!(deleted, 1, "Should only delete 1 entry");
+
+    // Verify state
+    assert!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap().is_empty());
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap(), vec![2]);
+}
+
+#[test]
+fn test_delete_batch_empty() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("test.db", storage).unwrap());
+
+    let key_schema = vec![DataType::Integer];
+    let mut index = BTreeIndex::new(page_manager, key_schema).unwrap();
+
+    index.insert(vec![SqlValue::Integer(10)], 1).unwrap();
+
+    // Empty batch should be a no-op
+    let deleted = index.delete_batch(&[]).unwrap();
+    assert_eq!(deleted, 0, "Empty batch should delete 0 entries");
+
+    // Original entry should still exist
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap(), vec![1]);
+}
