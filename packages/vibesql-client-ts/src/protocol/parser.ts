@@ -435,5 +435,4 @@ export class MessageParser {
     }
     return data.slice(offset, end).toString('utf8');
   }
-
 }

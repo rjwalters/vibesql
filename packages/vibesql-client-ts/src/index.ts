@@ -46,3 +46,13 @@ export type {
   SubscriptionDataMessage,
   SubscriptionErrorMessage,
 } from './protocol/messages';
+
+// Type conversion utilities (for advanced users)
+export {
+  parseColumnValue,
+  PgTypeOid,
+  isNumericType,
+  isArrayType,
+  getArrayElementType,
+} from './protocol/typeConversion';
+export type { PgInterval } from './protocol/typeConversion';
