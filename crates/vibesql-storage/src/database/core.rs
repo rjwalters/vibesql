@@ -294,6 +294,51 @@ impl Database {
         None
     }
 
+    /// Get index information for a table, used for DML cost estimation
+    ///
+    /// Returns `TableIndexInfo` containing:
+    /// - `hash_index_count`: Number of hash indexes (PK + unique constraints)
+    /// - `btree_index_count`: Number of user-defined B-tree indexes
+    /// - `is_native_columnar`: Whether the table uses native columnar storage
+    /// - `deleted_ratio`: Current ratio of deleted rows (0.0 to 1.0)
+    ///
+    /// # Arguments
+    /// * `table_name` - Name of the table to get index info for
+    ///
+    /// # Returns
+    /// * `Some(TableIndexInfo)` - Index information for cost estimation
+    /// * `None` - Table not found
+    pub fn get_table_index_info(&self, table_name: &str) -> Option<crate::statistics::TableIndexInfo> {
+        let table = self.get_table(table_name)?;
+        let schema = self.catalog.get_table(table_name)?;
+
+        // Count hash indexes: 1 if PK exists + number of unique constraints
+        let has_pk = schema.primary_key.is_some();
+        let hash_index_count = if has_pk { 1 } else { 0 } + schema.unique_constraints.len();
+
+        // Count user-defined B-tree indexes
+        let btree_index_count = self.list_indexes_for_table(table_name).len();
+
+        // Check if table uses native columnar storage
+        let is_native_columnar = table.is_native_columnar();
+
+        // Calculate deleted ratio
+        let physical_count = table.physical_row_count();
+        let live_count = table.row_count();
+        let deleted_ratio = if physical_count > 0 {
+            (physical_count - live_count) as f64 / physical_count as f64
+        } else {
+            0.0
+        };
+
+        Some(crate::statistics::TableIndexInfo::new(
+            hash_index_count,
+            btree_index_count,
+            is_native_columnar,
+            deleted_ratio,
+        ))
+    }
+
     /// Drop a table
     pub fn drop_table(&mut self, name: &str) -> Result<(), StorageError> {
         // Emit WAL entry for persistence before dropping
