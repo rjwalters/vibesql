@@ -572,6 +572,278 @@ Hex:   ... 00 03 05 00 00 00 01 31 FF FF FF FF
                 (cols 0,2)
 ```
 
+## Selective Update Flow
+
+This section documents when the server sends `SubscriptionPartialData` (0xF7) versus `SubscriptionData` (0xF2), and the decision logic involved.
+
+### Server Decision Process
+
+When data changes and the server needs to notify subscribers, it follows this decision tree:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        Data Change Detected                                   │
+└───────────────────────────────────┬──────────────────────────────────────────┘
+                                    │
+                                    ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  1. Re-execute subscription query to get new results      │
+        └───────────────────────────────────┬───────────────────────┘
+                                            │
+                                            ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  2. Compare new result hash with cached result hash       │
+        │     (Skip notification if hash unchanged)                 │
+        └───────────────────────────────────┬───────────────────────┘
+                                            │
+                                            ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  3. Check if previous result exists in cache              │
+        │                                                           │
+        │     NO  ──────────────────────────────────────────────────┼──► Send Full (0xF2)
+        │                                                           │
+        └───────────────────────────────────┬───────────────────────┘
+                                            │ YES
+                                            ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  4. Compare row counts                                    │
+        │                                                           │
+        │     Different counts ─────────────────────────────────────┼──► Compute Delta (0xF2)
+        │                                                           │       (Insert/Update/Delete)
+        └───────────────────────────────────┬───────────────────────┘
+                                            │ Same count
+                                            ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  5. Can rows be matched by primary key?                   │
+        │                                                           │
+        │     NO  ──────────────────────────────────────────────────┼──► Compute Delta (0xF2)
+        │                                                           │
+        └───────────────────────────────────┬───────────────────────┘
+                                            │ YES
+                                            ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  6. For each matched row, compute column-level diff       │
+        │     Count changed columns vs total columns                │
+        │                                                           │
+        │     changed_ratio = changed_columns / total_columns       │
+        └───────────────────────────────────┬───────────────────────┘
+                                            │
+                                            ▼
+        ┌───────────────────────────────────────────────────────────┐
+        │  7. Check selective update threshold                      │
+        │     (default: max 50% of columns changed)                 │
+        │                                                           │
+        │     changed_ratio > threshold ────────────────────────────┼──► Send Delta (0xF2)
+        │                                                           │
+        │     changed_ratio <= threshold ───────────────────────────┼──► Send Partial (0xF7)
+        └───────────────────────────────────────────────────────────┘
+```
+
+### Decision Criteria Summary
+
+| Condition | Message Sent |
+|-----------|--------------|
+| No previous result cached | Full (0xF2, type 0) |
+| Row count changed | Delta (0xF2, types 1-3) |
+| Cannot match rows by PK | Delta (0xF2, types 1-3) |
+| Changed ratio > 50% | Delta Update (0xF2, type 2) |
+| Changed ratio ≤ 50% | Partial (0xF7, type 4) |
+| Selective updates disabled | Delta or Full (0xF2) |
+
+### Configuration
+
+The selective update behavior can be configured on the server:
+
+```rust
+SelectiveColumnConfig {
+    // Enable/disable selective column updates
+    enabled: true,  // default: true
+
+    // Primary key column indices (always included in partial updates)
+    pk_columns: vec![0],  // default: [0] (first column)
+
+    // Maximum ratio of changed columns before falling back to full row
+    // If more than this ratio changes, send full row instead
+    max_changed_columns_ratio: 0.5,  // default: 50%
+}
+```
+
+When `enabled: false`, the server never sends 0xF7 messages and always uses 0xF2.
+
+## Client Requirements for Selective Updates
+
+Clients that wish to receive and process `SubscriptionPartialData` (0xF7) messages must implement specific handling logic.
+
+### Required Client Capabilities
+
+1. **Result Caching**: Cache the last complete row state for each subscription
+2. **Bitmap Parsing**: Parse column presence bitmaps to identify which columns are present
+3. **Row Merging**: Merge partial updates with cached state to reconstruct full rows
+4. **Fallback Handling**: Still support 0xF2 messages for full/delta updates
+
+### Client State Management
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         Per-Subscription State                             │
+├───────────────────────────────────────────────────────────────────────────┤
+│  subscription_id: [u8; 16]                                                │
+│  last_rows: HashMap<PrimaryKey, Vec<SqlValue>>  // Cached row state       │
+│  column_names: Vec<String>                       // Column schema          │
+│  pk_columns: Vec<usize>                          // Primary key indices    │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Processing Flow for 0xF7 Messages
+
+```
+1. Parse message header
+   - Read subscription_id (16 bytes)
+   - Read update_type (1 byte) - always 4 (SelectiveUpdate)
+   - Read row_count (4 bytes)
+
+2. For each partial row:
+   a. Read total_columns (2 bytes)
+   b. Read column_bitmap (ceil(total_columns/8) bytes)
+   c. For each bit set in bitmap:
+      - Read value_length (4 bytes)
+      - If length == -1: value is NULL
+      - Else: read value_length bytes as value
+   d. Extract PK values from partial row
+   e. Look up existing row by PK in cache
+   f. Merge partial values into cached row:
+      - For each present column (bit=1): update with new value
+      - For each absent column (bit=0): keep cached value
+   g. Update cache with merged row
+   h. Emit complete row to application layer
+
+3. Signal update complete to application
+```
+
+### Example: Merging Partial Update
+
+```
+Cached row for PK=1:     [1, "Alice", "alice@example.com", 25, "active"]
+                          │     │              │            │      │
+Column indices:           0     1              2            3      4
+
+Partial update received:  bitmap=0b00101 (columns 0 and 2 present)
+                          values: [1, "alice.new@example.com"]
+
+Merge operation:
+  col 0: present in update → use new value: 1
+  col 1: NOT present       → keep cached: "Alice"
+  col 2: present in update → use new value: "alice.new@example.com"
+  col 3: NOT present       → keep cached: 25
+  col 4: NOT present       → keep cached: "active"
+
+Result row:              [1, "Alice", "alice.new@example.com", 25, "active"]
+```
+
+### Distinguishing Unchanged vs NULL
+
+The column bitmap and value encoding work together:
+
+| Bitmap Bit | Value Length | Meaning |
+|------------|--------------|---------|
+| 0 | (not sent) | Column unchanged - use cached value |
+| 1 | -1 | Column changed to NULL |
+| 1 | ≥ 0 | Column has new value |
+
+### Client Implementation Pseudocode
+
+```python
+def handle_subscription_partial_data(message):
+    subscription_id = message.read_bytes(16)
+    update_type = message.read_u8()  # Always 4
+    row_count = message.read_i32()
+
+    sub_state = get_subscription_state(subscription_id)
+    updated_rows = []
+
+    for _ in range(row_count):
+        total_columns = message.read_u16()
+        bitmap_size = (total_columns + 7) // 8
+        bitmap = message.read_bytes(bitmap_size)
+
+        # Read values for present columns
+        partial_values = {}
+        for col_idx in range(total_columns):
+            if bitmap_bit_set(bitmap, col_idx):
+                length = message.read_i32()
+                if length == -1:
+                    partial_values[col_idx] = NULL
+                else:
+                    partial_values[col_idx] = message.read_bytes(length)
+
+        # Extract PK and lookup cached row
+        pk = extract_pk(partial_values, sub_state.pk_columns)
+        cached_row = sub_state.last_rows.get(pk, empty_row(total_columns))
+
+        # Merge partial update with cached row
+        merged_row = []
+        for col_idx in range(total_columns):
+            if col_idx in partial_values:
+                merged_row.append(partial_values[col_idx])
+            else:
+                merged_row.append(cached_row[col_idx])
+
+        # Update cache and collect result
+        sub_state.last_rows[pk] = merged_row
+        updated_rows.append(merged_row)
+
+    # Emit complete rows to application
+    emit_subscription_update(subscription_id, updated_rows)
+```
+
+## Backward Compatibility
+
+### Client Compatibility Matrix
+
+| Client Type | 0xF2 Support | 0xF7 Support | Behavior |
+|-------------|--------------|--------------|----------|
+| Legacy (pre-0xF7) | Yes | No | Will fail on 0xF7 messages |
+| Current | Yes | Yes | Full support |
+| Future | Yes | Yes | Extended support |
+
+### Handling Legacy Clients
+
+**Important**: Clients that do not understand `SubscriptionPartialData` (0xF7) will fail when receiving these messages. There are several options:
+
+1. **Server-side disable**: Configure `SelectiveColumnConfig.enabled = false` to prevent 0xF7 messages entirely
+
+2. **Version negotiation** (future): Clients could indicate supported message types during connection setup
+
+3. **Client upgrade**: Update client to handle 0xF7 messages
+
+### Migration Path
+
+For deployments with mixed client versions:
+
+```
+Phase 1: Deploy server with selective updates DISABLED
+         enabled: false
+
+Phase 2: Update all clients to support 0xF7
+
+Phase 3: Enable selective updates on server
+         enabled: true
+```
+
+### Graceful Degradation
+
+If a client cannot be updated, the server can be configured to never send 0xF7:
+
+```rust
+// Server configuration to disable selective updates
+let config = SelectiveColumnConfig {
+    enabled: false,  // Always use 0xF2 messages
+    ..Default::default()
+};
+```
+
+This ensures the server only sends `SubscriptionData` (0xF2) messages with Full or Delta update types, which legacy clients can process.
+
 ## Subscription Lifecycle
 
 ### Successful Subscription Flow
