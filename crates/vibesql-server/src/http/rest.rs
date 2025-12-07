@@ -881,6 +881,34 @@ async fn subscribe_stream(
                         Event::default().event("delta").data(event_data)
                     );
                 }
+                SubscriptionUpdate::Partial { updates, .. } => {
+                    // Send partial updates (only changed columns + PK columns)
+                    let partial_updates: Vec<serde_json::Value> = updates
+                        .iter()
+                        .map(|partial| {
+                            json!({
+                                "columns": partial.column_indices,
+                                "old": partial.old_values.iter().map(super::types::sql_value_to_json).collect::<Vec<_>>(),
+                                "new": partial.new_values.iter().map(super::types::sql_value_to_json).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
+
+                    let event_data = match serde_json::to_string(&json!({
+                        "type": "partial",
+                        "updates": partial_updates,
+                    })) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to serialize partial event: {}", e);
+                            continue;
+                        }
+                    };
+
+                    yield Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                        Event::default().event("partial").data(event_data)
+                    );
+                }
                 SubscriptionUpdate::Error { message, .. } => {
                     let event_data = match serde_json::to_string(&SseEvent {
                         event_type: "error".to_string(),
