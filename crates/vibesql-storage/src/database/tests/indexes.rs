@@ -798,13 +798,13 @@ fn test_lookup_by_index_single_column() {
     // Insert rows
     let table = db.get_table_mut("users").unwrap();
     table
-        .insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".into())] })
+        .insert(Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))] })
         .unwrap();
     table
-        .insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".into())] })
+        .insert(Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] })
         .unwrap();
     table
-        .insert(Row { values: vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".into())] })
+        .insert(Row { values: vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))] })
         .unwrap();
 
     // Create index on id column
@@ -825,7 +825,7 @@ fn test_lookup_by_index_single_column() {
     assert!(result.is_some());
     let rows = result.unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].values[1], SqlValue::Varchar("Bob".into()));
+    assert_eq!(rows[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
 
     // Test lookup_by_index - non-existing key
     let result = db.lookup_by_index("idx_users_id", &[SqlValue::Integer(999)]).unwrap();
@@ -1015,7 +1015,7 @@ fn test_lookup_by_index_batch() {
     for i in 1..=10 {
         table
             .insert(Row {
-                values: vec![SqlValue::Integer(i), SqlValue::Varchar(format!("Product{}", i))],
+                values: vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("Product{}", i)))],
             })
             .unwrap();
     }
@@ -1049,9 +1049,9 @@ fn test_lookup_by_index_batch() {
     assert!(results[3].is_some()); // id=8
 
     // Verify values
-    assert_eq!(results[0].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product2".into()));
-    assert_eq!(results[1].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product5".into()));
-    assert_eq!(results[3].as_ref().unwrap()[0].values[1], SqlValue::Varchar("Product8".into()));
+    assert_eq!(results[0].as_ref().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Product2")));
+    assert_eq!(results[1].as_ref().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Product5")));
+    assert_eq!(results[3].as_ref().unwrap()[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Product8")));
 }
 
 #[test]

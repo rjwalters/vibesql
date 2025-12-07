@@ -451,10 +451,10 @@ mod tests {
         // Test simple GROUP BY with one group column
         // SELECT status, SUM(amount) FROM test GROUP BY status
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(100.0)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Double(200.0)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(150.0)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Double(50.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(100.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Double(200.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(150.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Double(50.0)]),
         ];
 
         let group_cols = vec![0]; // Group by status
@@ -474,13 +474,13 @@ mod tests {
         });
 
         // Check group A: SUM = 250.0
-        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar("A".to_string())));
+        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("A"))));
         assert!(
             matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
 
         // Check group B: SUM = 250.0
-        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar("B".to_string())));
+        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("B"))));
         assert!(
             matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
@@ -491,11 +491,11 @@ mod tests {
         // Test GROUP BY with multiple columns
         // SELECT status, category, COUNT(*) FROM test GROUP BY status, category
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Integer(2)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Integer(2)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Integer(2)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Integer(2)]),
         ];
 
         let group_cols = vec![0, 1]; // Group by status, category
@@ -513,16 +513,16 @@ mod tests {
             let count = row.get(2).unwrap();
 
             match (status, category) {
-                (SqlValue::Varchar(s), SqlValue::Integer(1)) if s == "A" => {
+                (SqlValue::Varchar(s), SqlValue::Integer(1)) if s.as_ref() == "A" => {
                     assert_eq!(count, &SqlValue::Integer(2)); // Two rows with A,1
                 }
-                (SqlValue::Varchar(s), SqlValue::Integer(2)) if s == "A" => {
+                (SqlValue::Varchar(s), SqlValue::Integer(2)) if s.as_ref() == "A" => {
                     assert_eq!(count, &SqlValue::Integer(1)); // One row with A,2
                 }
-                (SqlValue::Varchar(s), SqlValue::Integer(1)) if s == "B" => {
+                (SqlValue::Varchar(s), SqlValue::Integer(1)) if s.as_ref() == "B" => {
                     assert_eq!(count, &SqlValue::Integer(1)); // One row with B,1
                 }
-                (SqlValue::Varchar(s), SqlValue::Integer(2)) if s == "B" => {
+                (SqlValue::Varchar(s), SqlValue::Integer(2)) if s.as_ref() == "B" => {
                     assert_eq!(count, &SqlValue::Integer(1)); // One row with B,2
                 }
                 _ => panic!("Unexpected group key: {:?}, {:?}", status, category),
@@ -586,10 +586,10 @@ mod tests {
         // Test GROUP BY with pre-filtering
         // SELECT status, SUM(amount) FROM test WHERE amount > 100 GROUP BY status
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(100.0)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Double(200.0)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(150.0)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Double(50.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(100.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Double(200.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(150.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Double(50.0)]),
         ];
 
         // Filter: amount > 100 (rows 1 and 2)
@@ -612,13 +612,13 @@ mod tests {
         });
 
         // Check group A: only row 2 (150.0) passes filter
-        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar("A".to_string())));
+        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("A"))));
         assert!(
             matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 150.0).abs() < 0.001)
         );
 
         // Check group B: only row 1 (200.0) passes filter
-        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar("B".to_string())));
+        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("B"))));
         assert!(
             matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001)
         );
@@ -640,9 +640,9 @@ mod tests {
     fn test_columnar_group_by_null_in_group_key() {
         // Test that NULL values in group keys are handled correctly
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(100.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(100.0)]),
             Row::new(vec![SqlValue::Null, SqlValue::Double(200.0)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(150.0)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(150.0)]),
             Row::new(vec![SqlValue::Null, SqlValue::Double(50.0)]),
         ];
 
@@ -656,7 +656,7 @@ mod tests {
 
         // Find the groups
         let a_group =
-            result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Varchar(s)) if s == "A"));
+            result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Varchar(s)) if s.as_ref() == "A"));
         let null_group = result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Null)));
 
         assert!(a_group.is_some());

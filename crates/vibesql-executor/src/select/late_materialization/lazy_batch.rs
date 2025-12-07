@@ -480,11 +480,11 @@ mod lazy_batch_tests {
 
     fn sample_rows() -> Vec<Row> {
         vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".into())]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".into())]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Carol".into())]),
-            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("Dave".into())]),
-            Row::new(vec![SqlValue::Integer(5), SqlValue::Varchar("Eve".into())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Carol"))]),
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("Dave"))]),
+            Row::new(vec![SqlValue::Integer(5), SqlValue::Varchar(std::sync::Arc::from("Eve"))]),
         ]
     }
 
@@ -535,7 +535,7 @@ mod lazy_batch_tests {
         let names = batch.materialize_columns(&[1]).unwrap();
         assert_eq!(names.len(), 5);
         assert_eq!(names[0].len(), 1); // Only 1 column
-        assert_eq!(names[0].get(0), Some(&SqlValue::Varchar("Alice".into())));
+        assert_eq!(names[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("Alice"))));
     }
 
     #[test]
@@ -548,20 +548,20 @@ mod lazy_batch_tests {
         assert_eq!(batch.len(), 3);
 
         let materialized = batch.materialize().unwrap();
-        assert_eq!(materialized[0].get(1), Some(&SqlValue::Varchar("Alice".into())));
-        assert_eq!(materialized[1].get(1), Some(&SqlValue::Varchar("Carol".into())));
-        assert_eq!(materialized[2].get(1), Some(&SqlValue::Varchar("Eve".into())));
+        assert_eq!(materialized[0].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("Alice"))));
+        assert_eq!(materialized[1].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("Carol"))));
+        assert_eq!(materialized[2].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("Eve"))));
     }
 
     #[test]
     fn test_joined_batch_builder() {
         let left_rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("A".into())]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("B".into())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("A"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("B"))]),
         ];
         let right_rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("X".into())]),
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Y".into())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("X"))]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Y"))]),
         ];
 
         let mut builder = JoinedLazyBatchBuilder::new(
@@ -583,10 +583,10 @@ mod lazy_batch_tests {
         // First match: (1, A, 1, X)
         assert_eq!(rows[0].get(0), Some(&SqlValue::Integer(1)));
         assert_eq!(rows[0].get(2), Some(&SqlValue::Integer(1)));
-        assert_eq!(rows[0].get(3), Some(&SqlValue::Varchar("X".into())));
+        assert_eq!(rows[0].get(3), Some(&SqlValue::Varchar(std::sync::Arc::from("X"))));
 
         // Second match: (1, A, 1, Y)
-        assert_eq!(rows[1].get(3), Some(&SqlValue::Varchar("Y".into())));
+        assert_eq!(rows[1].get(3), Some(&SqlValue::Varchar(std::sync::Arc::from("Y"))));
 
         // Left-only: (2, B, NULL, NULL)
         assert_eq!(rows[2].get(0), Some(&SqlValue::Integer(2)));

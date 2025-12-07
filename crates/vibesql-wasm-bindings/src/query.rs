@@ -50,7 +50,7 @@ pub fn execute_query(db: &Database, sql: &str) -> Result<JsValue, JsValue> {
                         .map(serde_json::Value::Number)
                         .unwrap_or(serde_json::Value::Null),
                     vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                        serde_json::Value::String(s.clone())
+                        serde_json::Value::String(s.to_string())
                     }
                     vibesql_types::SqlValue::Boolean(b) => serde_json::Value::Bool(*b),
                     vibesql_types::SqlValue::Numeric(n) => serde_json::Number::from_f64(*n)

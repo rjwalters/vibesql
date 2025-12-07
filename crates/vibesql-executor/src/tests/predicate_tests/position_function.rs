@@ -21,10 +21,10 @@ fn test_position_found() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
                 substring: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("world".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("world")),
                 )),
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("hello world".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello world")),
                 )),
                 character_unit: None,
             },
@@ -59,10 +59,10 @@ fn test_position_not_found() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
                 substring: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("xyz".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("xyz")),
                 )),
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("hello world".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello world")),
                 )),
                 character_unit: None,
             },
@@ -100,7 +100,7 @@ fn test_position_null_substring() {
                     vibesql_types::SqlValue::Null,
                 )),
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("hello world".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello world")),
                 )),
                 character_unit: None,
             },
@@ -135,7 +135,7 @@ fn test_position_null_string() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Position {
                 substring: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("world".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("world")),
                 )),
                 string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
                 character_unit: None,

@@ -226,17 +226,17 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Double(10.5),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Double(20.5),
-                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Bob")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(3),
                 SqlValue::Double(30.5),
-                SqlValue::Varchar("Charlie".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             ]),
         ];
         let column_names = vec!["id".to_string(), "value".to_string(), "name".to_string()];
@@ -275,7 +275,8 @@ mod tests {
         // Verify String column
         let col2 = batch.column(2).unwrap();
         if let ColumnArray::String(values, nulls) = col2 {
-            assert_eq!(values.as_slice(), &["Alice", "Bob", "Charlie"]);
+            let str_refs: Vec<&str> = values.iter().map(|s| s.as_ref()).collect();
+            assert_eq!(str_refs, vec!["Alice", "Bob", "Charlie"]);
             assert!(nulls.is_none());
         } else {
             panic!("Expected String column");

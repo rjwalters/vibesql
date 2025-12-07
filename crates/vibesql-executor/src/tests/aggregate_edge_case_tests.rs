@@ -202,7 +202,7 @@ fn test_aggregate_with_case_expression() {
         "transactions",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("credit".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("credit")),
             vibesql_types::SqlValue::Integer(100),
         ]),
     )
@@ -211,7 +211,7 @@ fn test_aggregate_with_case_expression() {
         "transactions",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("debit".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("debit")),
             vibesql_types::SqlValue::Integer(50),
         ]),
     )
@@ -220,7 +220,7 @@ fn test_aggregate_with_case_expression() {
         "transactions",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("credit".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("credit")),
             vibesql_types::SqlValue::Integer(200),
         ]),
     )
@@ -247,7 +247,7 @@ fn test_aggregate_with_case_expression() {
                             }),
                             op: vibesql_ast::BinaryOperator::Equal,
                             right: Box::new(vibesql_ast::Expression::Literal(
-                                vibesql_types::SqlValue::Varchar("credit".to_string()),
+                                vibesql_types::SqlValue::Varchar(std::sync::Arc::from("credit")),
                             )),
                         }],
                         result: vibesql_ast::Expression::ColumnRef {

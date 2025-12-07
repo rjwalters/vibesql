@@ -75,7 +75,7 @@ fn setup_join_tables(db: &mut Database, left_rows: usize, right_rows: usize) {
     for i in 0..left_rows {
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(format!("customer_{}", i)),
+            SqlValue::Varchar(std::sync::Arc::from(format!("customer_{}", i))),
         ]);
         db.insert_row("customers", row).unwrap();
     }

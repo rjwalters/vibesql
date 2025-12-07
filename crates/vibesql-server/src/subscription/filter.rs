@@ -5,6 +5,7 @@
 //! are applied to subscription updates before sending to clients.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
 
@@ -360,7 +361,7 @@ impl SubscriptionFilter {
     /// Convert a value to string for LIKE matching.
     fn value_to_string(&self, val: &SqlValue) -> Result<String, String> {
         match val {
-            SqlValue::Character(s) | SqlValue::Varchar(s) => Ok(s.clone()),
+            SqlValue::Character(s) | SqlValue::Varchar(s) => Ok(s.to_string()),
             SqlValue::Integer(i) => Ok(i.to_string()),
             SqlValue::Bigint(i) => Ok(i.to_string()),
             _ => Err(format!("Cannot convert {:?} to string for LIKE", val)),
@@ -431,16 +432,16 @@ mod tests {
         // Row that matches
         let row1 = vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
-            SqlValue::Varchar("active".to_string()),
+            SqlValue::Varchar(Arc::from("Alice")),
+            SqlValue::Varchar(Arc::from("active")),
         ];
         assert!(filter.matches(&row1));
 
         // Row that doesn't match
         let row2 = vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
-            SqlValue::Varchar("inactive".to_string()),
+            SqlValue::Varchar(Arc::from("Bob")),
+            SqlValue::Varchar(Arc::from("inactive")),
         ];
         assert!(!filter.matches(&row2));
     }
@@ -463,13 +464,13 @@ mod tests {
         let filter =
             SubscriptionFilter::new("status = 'active' AND amount > 50", &columns).unwrap();
 
-        let row1 = vec![SqlValue::Varchar("active".to_string()), SqlValue::Integer(100)];
+        let row1 = vec![SqlValue::Varchar(Arc::from("active")), SqlValue::Integer(100)];
         assert!(filter.matches(&row1));
 
-        let row2 = vec![SqlValue::Varchar("active".to_string()), SqlValue::Integer(30)];
+        let row2 = vec![SqlValue::Varchar(Arc::from("active")), SqlValue::Integer(30)];
         assert!(!filter.matches(&row2));
 
-        let row3 = vec![SqlValue::Varchar("inactive".to_string()), SqlValue::Integer(100)];
+        let row3 = vec![SqlValue::Varchar(Arc::from("inactive")), SqlValue::Integer(100)];
         assert!(!filter.matches(&row3));
     }
 
@@ -479,13 +480,13 @@ mod tests {
         let filter =
             SubscriptionFilter::new("status = 'active' OR status = 'pending'", &columns).unwrap();
 
-        let row1 = vec![SqlValue::Varchar("active".to_string())];
+        let row1 = vec![SqlValue::Varchar(Arc::from("active"))];
         assert!(filter.matches(&row1));
 
-        let row2 = vec![SqlValue::Varchar("pending".to_string())];
+        let row2 = vec![SqlValue::Varchar(Arc::from("pending"))];
         assert!(filter.matches(&row2));
 
-        let row3 = vec![SqlValue::Varchar("inactive".to_string())];
+        let row3 = vec![SqlValue::Varchar(Arc::from("inactive"))];
         assert!(!filter.matches(&row3));
     }
 
@@ -519,13 +520,13 @@ mod tests {
         let filter =
             SubscriptionFilter::new("status IN ('active', 'pending')", &columns).unwrap();
 
-        let row1 = vec![SqlValue::Varchar("active".to_string())];
+        let row1 = vec![SqlValue::Varchar(Arc::from("active"))];
         assert!(filter.matches(&row1));
 
-        let row2 = vec![SqlValue::Varchar("pending".to_string())];
+        let row2 = vec![SqlValue::Varchar(Arc::from("pending"))];
         assert!(filter.matches(&row2));
 
-        let row3 = vec![SqlValue::Varchar("inactive".to_string())];
+        let row3 = vec![SqlValue::Varchar(Arc::from("inactive"))];
         assert!(!filter.matches(&row3));
     }
 
@@ -555,10 +556,10 @@ mod tests {
         let columns = vec!["name".to_string()];
         let filter = SubscriptionFilter::new("name LIKE 'A%'", &columns).unwrap();
 
-        let row1 = vec![SqlValue::Varchar("Alice".to_string())];
+        let row1 = vec![SqlValue::Varchar(Arc::from("Alice"))];
         assert!(filter.matches(&row1));
 
-        let row2 = vec![SqlValue::Varchar("Bob".to_string())];
+        let row2 = vec![SqlValue::Varchar(Arc::from("Bob"))];
         assert!(!filter.matches(&row2));
     }
 
@@ -567,7 +568,7 @@ mod tests {
         let columns = vec!["STATUS".to_string()];
         let filter = SubscriptionFilter::new("status = 'active'", &columns).unwrap();
 
-        let row = vec![SqlValue::Varchar("active".to_string())];
+        let row = vec![SqlValue::Varchar(Arc::from("active"))];
         assert!(filter.matches(&row));
     }
 

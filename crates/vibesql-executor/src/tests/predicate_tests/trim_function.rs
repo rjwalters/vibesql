@@ -24,7 +24,7 @@ fn test_trim_both_default() {
                 position: None,     // Defaults to Both
                 removal_char: None, // Defaults to space
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("  hello  ".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("  hello  ")),
                 )),
             },
             alias: Some("result".to_string()),
@@ -42,7 +42,7 @@ fn test_trim_both_default() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_trim_leading() {
                 position: Some(vibesql_ast::TrimPosition::Leading),
                 removal_char: None,
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("  hello  ".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("  hello  ")),
                 )),
             },
             alias: Some("result".to_string()),
@@ -78,7 +78,7 @@ fn test_trim_leading() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("hello  ".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello  ")));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_trim_trailing() {
                 position: Some(vibesql_ast::TrimPosition::Trailing),
                 removal_char: None,
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("  hello  ".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("  hello  ")),
                 )),
             },
             alias: Some("result".to_string()),
@@ -114,7 +114,7 @@ fn test_trim_trailing() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("  hello".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("  hello")));
 }
 
 #[test]
@@ -131,10 +131,10 @@ fn test_trim_custom_char() {
             expr: vibesql_ast::Expression::Trim {
                 position: None,
                 removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("x".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("x")),
                 ))),
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("xxxhelloxxx".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("xxxhelloxxx")),
                 )),
             },
             alias: Some("result".to_string()),
@@ -152,7 +152,7 @@ fn test_trim_custom_char() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn test_trim_null_removal_char() {
                     vibesql_types::SqlValue::Null,
                 ))),
                 string: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("hello".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")),
                 )),
             },
             alias: Some("result".to_string()),

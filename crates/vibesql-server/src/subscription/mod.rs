@@ -53,6 +53,7 @@ mod table_extract;
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -1094,11 +1095,11 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let rows1 = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("hello".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("hello"))],
         }];
 
         let rows2 = vec![crate::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("hello".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("hello"))],
         }];
 
         let hash1 = hash_rows(&rows1);
@@ -1113,11 +1114,11 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let rows1 = vec![crate::Row {
-            values: vec![SqlValue::Integer(42), SqlValue::Varchar("test".to_string())],
+            values: vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("test"))],
         }];
 
         let rows2 = vec![crate::Row {
-            values: vec![SqlValue::Integer(42), SqlValue::Varchar("test".to_string())],
+            values: vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("test"))],
         }];
 
         let hash1 = hash_rows(&rows1);
@@ -1137,9 +1138,9 @@ mod tests {
 
         let rows = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] },
         ];
 
         // Same old and new should return None
@@ -1153,14 +1154,14 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
         }];
 
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] },
         ];
 
         let test_id = SubscriptionId::new();
@@ -1171,7 +1172,7 @@ mod tests {
             SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
-                assert_eq!(inserts[0].values[1], SqlValue::Varchar("Bob".to_string()));
+                assert_eq!(inserts[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
                 assert!(updates.is_empty());
                 assert!(deletes.is_empty());
             }
@@ -1185,13 +1186,13 @@ mod tests {
 
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] },
         ];
 
         let new = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
         }];
 
         let test_id = SubscriptionId::new();
@@ -1214,11 +1215,11 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
         }];
 
         let new = vec![crate::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
         }];
 
         let test_id = SubscriptionId::new();
@@ -1245,9 +1246,9 @@ mod tests {
         let old: Vec<crate::Row> = vec![];
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] },
         ];
 
         let test_id = SubscriptionId::new();
@@ -1270,9 +1271,9 @@ mod tests {
 
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))] },
         ];
         let new: Vec<crate::Row> = vec![];
 
@@ -1331,11 +1332,11 @@ mod tests {
 
         // Same PK (1), different name value - should be detected as UPDATE
         let old = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         }];
 
         let new = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Bob"))],
         }];
 
         let test_id = SubscriptionId::new();
@@ -1353,9 +1354,9 @@ mod tests {
                 // Verify the update contains old and new row
                 let (old_row, new_row) = &updates[0];
                 assert_eq!(old_row.values[0], SqlValue::Integer(1));
-                assert_eq!(old_row.values[1], SqlValue::Varchar("Alice".to_string()));
+                assert_eq!(old_row.values[1], SqlValue::Varchar(Arc::from("Alice")));
                 assert_eq!(new_row.values[0], SqlValue::Integer(1));
-                assert_eq!(new_row.values[1], SqlValue::Varchar("Bob".to_string()));
+                assert_eq!(new_row.values[1], SqlValue::Varchar(Arc::from("Bob")));
             }
             _ => panic!("Expected Delta update"),
         }
@@ -1367,11 +1368,11 @@ mod tests {
 
         // Different PKs - should be insert + delete
         let old = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         }];
 
         let new = vec![crate::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Bob"))],
         }];
 
         let test_id = SubscriptionId::new();
@@ -1397,9 +1398,9 @@ mod tests {
 
         let rows = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Bob"))] },
         ];
 
         let test_id = SubscriptionId::new();
@@ -1415,16 +1416,16 @@ mod tests {
         // Multiple rows with updates
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Bob"))] },
         ];
 
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("ALICE".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("ALICE"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("BOB".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("BOB"))] },
         ];
 
         let test_id = SubscriptionId::new();
@@ -1451,7 +1452,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("pending".to_string()),
+                SqlValue::Varchar(Arc::from("pending")),
             ],
         }];
 
@@ -1459,7 +1460,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("shipped".to_string()),
+                SqlValue::Varchar(Arc::from("shipped")),
             ],
         }];
 
@@ -1475,7 +1476,7 @@ mod tests {
                 assert!(deletes.is_empty());
 
                 let (_, new_row) = &updates[0];
-                assert_eq!(new_row.values[2], SqlValue::Varchar("shipped".to_string()));
+                assert_eq!(new_row.values[2], SqlValue::Varchar(Arc::from("shipped")));
             }
             _ => panic!("Expected Delta update"),
         }
@@ -1487,11 +1488,11 @@ mod tests {
 
         // With empty pk_columns, should fall back to hash-based and detect as insert+delete
         let old = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         }];
 
         let new = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Bob"))],
         }];
 
         let test_id = SubscriptionId::new();
@@ -1516,24 +1517,24 @@ mod tests {
         // Mix of insert, update, and delete
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
+            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Bob"))] },
             crate::Row {
-                values: vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+                values: vec![SqlValue::Integer(3), SqlValue::Varchar(Arc::from("Charlie"))],
             },
         ];
 
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("ALICE".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("ALICE"))],
             }, // Update
             // Row 2 deleted
             crate::Row {
-                values: vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())],
+                values: vec![SqlValue::Integer(3), SqlValue::Varchar(Arc::from("Charlie"))],
             }, // Unchanged
             crate::Row {
-                values: vec![SqlValue::Integer(4), SqlValue::Varchar("Diana".to_string())],
+                values: vec![SqlValue::Integer(4), SqlValue::Varchar(Arc::from("Diana"))],
             }, // Insert
         ];
 
@@ -1553,8 +1554,8 @@ mod tests {
 
                 // Verify update
                 let (old_row, new_row) = &updates[0];
-                assert_eq!(old_row.values[1], SqlValue::Varchar("Alice".to_string()));
-                assert_eq!(new_row.values[1], SqlValue::Varchar("ALICE".to_string()));
+                assert_eq!(old_row.values[1], SqlValue::Varchar(Arc::from("Alice")));
+                assert_eq!(new_row.values[1], SqlValue::Varchar(Arc::from("ALICE")));
 
                 // Verify delete
                 assert_eq!(deletes[0].values[0], SqlValue::Integer(2));
@@ -1569,11 +1570,11 @@ mod tests {
 
         // PK column index out of bounds - should fall back to hash-based
         let old = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         }];
 
         let new = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Bob"))],
         }];
 
         let test_id = SubscriptionId::new();
@@ -1601,10 +1602,10 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let diff = compute_column_diff(&old, &new, &[0]);
@@ -1616,10 +1617,10 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Bob"))],
         };
 
         let diff = compute_column_diff(&old, &new, &[0]).unwrap();
@@ -1635,17 +1636,17 @@ mod tests {
         let old = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("active".to_string()),
+                SqlValue::Varchar(Arc::from("active")),
             ],
         };
         let new = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar(Arc::from("Bob")),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("inactive".to_string()),
+                SqlValue::Varchar(Arc::from("inactive")),
             ],
         };
 
@@ -1660,10 +1661,10 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new = crate::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let diff = compute_column_diff(&old, &new, &[0]).unwrap();
@@ -1677,7 +1678,7 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
 
@@ -1827,14 +1828,14 @@ mod tests {
         let old = vec![crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
             ],
         }];
         let new = vec![crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(150),
             ],
         }];
@@ -1895,15 +1896,15 @@ mod tests {
         let old = vec![crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Varchar("alice@old.com".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
+                SqlValue::Varchar(Arc::from("alice@old.com")),
             ],
         }];
         let new = vec![crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Bob".to_string()),
-                SqlValue::Varchar("bob@new.com".to_string()),
+                SqlValue::Varchar(Arc::from("Bob")),
+                SqlValue::Varchar(Arc::from("bob@new.com")),
             ],
         }];
 
@@ -2071,11 +2072,11 @@ mod tests {
     fn test_compute_column_diff_different_row_lengths() {
         use vibesql_types::SqlValue;
 
-        let old = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())] };
+        let old = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))] };
         let new = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
             ],
         };
@@ -2093,7 +2094,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(1),   // PK col 0
                 SqlValue::Integer(100), // PK col 1
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(50),
             ],
         };
@@ -2101,7 +2102,7 @@ mod tests {
             values: vec![
                 SqlValue::Integer(1),   // PK col 0 unchanged
                 SqlValue::Integer(100), // PK col 1 unchanged
-                SqlValue::Varchar("Bob".to_string()), // Changed
+                SqlValue::Varchar(Arc::from("Bob")), // Changed
                 SqlValue::Integer(50), // Unchanged
             ],
         };
@@ -2183,7 +2184,7 @@ mod tests {
         // Test NULL -> value transition
         let old = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
         let new = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let diff = compute_column_diff(&old, &new, &[0]).unwrap();
@@ -2197,7 +2198,7 @@ mod tests {
 
         // Test value -> NULL transition
         let old = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
 

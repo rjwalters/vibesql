@@ -30,9 +30,7 @@ fn test_character_varying_column_with_length() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Test description".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Test description"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -74,9 +72,7 @@ fn test_character_varying_column_without_length() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                "Unlimited length text".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Unlimited length text"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -122,7 +118,7 @@ fn test_insert_with_default_value() {
         columns: vec!["id".to_string(), "name".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Default,
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -135,7 +131,7 @@ fn test_insert_with_default_value() {
     let table = db.get_table("users").unwrap();
     let row = &table.scan()[0];
     assert_eq!(row.get(0), Some(&vibesql_types::SqlValue::Integer(999)));
-    assert_eq!(row.get(1), Some(&vibesql_types::SqlValue::Varchar("Alice".to_string())));
+    assert_eq!(row.get(1), Some(&vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))));
 }
 
 #[test]
@@ -166,7 +162,7 @@ fn test_insert_default_no_default_value_defined() {
         columns: vec!["id".to_string(), "name".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Default,
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("Alice".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -179,5 +175,5 @@ fn test_insert_default_no_default_value_defined() {
     let table = db.get_table("users").unwrap();
     let row = &table.scan()[0];
     assert_eq!(row.get(0), Some(&vibesql_types::SqlValue::Null));
-    assert_eq!(row.get(1), Some(&vibesql_types::SqlValue::Varchar("Alice".to_string())));
+    assert_eq!(row.get(1), Some(&vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))));
 }

@@ -131,7 +131,7 @@ fn filter_column(column: &ColumnArray, mask: &[bool]) -> Result<ColumnArray, Exe
         }
 
         ColumnArray::String(values, nulls) => {
-            let new_values: Vec<String> = values
+            let new_values: Vec<Arc<str>> = values
                 .iter()
                 .zip(mask.iter())
                 .filter_map(|(v, &keep)| if keep { Some(v.clone()) } else { None })
@@ -151,7 +151,7 @@ fn filter_column(column: &ColumnArray, mask: &[bool]) -> Result<ColumnArray, Exe
         }
 
         ColumnArray::FixedString(values, nulls) => {
-            let new_values: Vec<String> = values
+            let new_values: Vec<Arc<str>> = values
                 .iter()
                 .zip(mask.iter())
                 .filter_map(|(v, &keep)| if keep { Some(v.clone()) } else { None })

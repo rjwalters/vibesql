@@ -364,7 +364,7 @@ mod tests {
         let rows = result.to_rows().unwrap();
         let bob_row = rows
             .iter()
-            .find(|r| matches!(r.get(1), Some(vibesql_types::SqlValue::Varchar(s)) if s == "Bob"));
+            .find(|r| matches!(r.get(1), Some(vibesql_types::SqlValue::Varchar(s)) if s.as_ref() == "Bob"));
 
         assert!(bob_row.is_some());
         let bob = bob_row.unwrap();

@@ -56,9 +56,9 @@ fn test_window_function_in_case_expression() {
     );
     assert_eq!(rows.len(), 3);
     // First row should have 'first', others should have 'not_first'
-    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar("first".to_string()));
-    assert_eq!(rows[1].values[1], vibesql_types::SqlValue::Varchar("not_first".to_string()));
-    assert_eq!(rows[2].values[1], vibesql_types::SqlValue::Varchar("not_first".to_string()));
+    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("first")));
+    assert_eq!(rows[1].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("not_first")));
+    assert_eq!(rows[2].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("not_first")));
 
     // Test 3: Window function in CASE THEN/ELSE result expressions
     let rows = select_rows(

@@ -29,9 +29,9 @@ fn create_populated_table(db: &mut Database) {
     let row1 = Row {
         values: vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(30),
-            SqlValue::Varchar("alice@example.com".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
         ],
     };
     table.insert(row1).expect("Failed to insert row");
@@ -39,9 +39,9 @@ fn create_populated_table(db: &mut Database) {
     let row2 = Row {
         values: vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(25),
-            SqlValue::Varchar("bob@example.com".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
         ],
     };
     table.insert(row2).expect("Failed to insert row");
@@ -282,7 +282,7 @@ fn test_set_not_null_with_nulls_error() {
     let row = Row {
         values: vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(30),
             SqlValue::Null, // NULL email
         ],
@@ -555,7 +555,7 @@ fn test_add_column_with_default() {
 
         // Check existing rows got the default value
         for row in table.scan() {
-            assert_eq!(row.values[status_idx], SqlValue::Varchar("active".to_string()));
+            assert_eq!(row.values[status_idx], SqlValue::Varchar(std::sync::Arc::from("active")));
         }
     }
 }

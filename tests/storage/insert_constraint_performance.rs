@@ -45,8 +45,8 @@ fn test_insert_with_merged_constraint_validation() {
             columns: vec![],
             source: InsertSource::Values(vec![vec![
                 Expression::Literal(SqlValue::Integer(i)),
-                Expression::Literal(SqlValue::Varchar(format!("User{}", i))),
-                Expression::Literal(SqlValue::Varchar(format!("user{}@example.com", i))),
+                Expression::Literal(SqlValue::Varchar(format!("User{}", i).into())),
+                Expression::Literal(SqlValue::Varchar(format!("user{}@example.com", i).into())),
             ]]),
             conflict_clause: None,
             on_duplicate_key_update: None,
@@ -100,7 +100,7 @@ fn test_insert_multi_row_with_constraints() {
     for i in 0..num_rows {
         rows.push(vec![
             Expression::Literal(SqlValue::Integer(i)),
-            Expression::Literal(SqlValue::Varchar(format!("user{}@example.com", i))),
+            Expression::Literal(SqlValue::Varchar(format!("user{}@example.com", i).into())),
         ]);
     }
 

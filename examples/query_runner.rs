@@ -60,59 +60,59 @@ fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Beverages".to_string()),
-            SqlValue::Varchar("Soft drinks, coffees, teas, beers, and ales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Beverages")),
+            SqlValue::Varchar(std::sync::Arc::from("Soft drinks, coffees, teas, beers, and ales")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Condiments".to_string()),
-            SqlValue::Varchar(
-                "Sweet and savory sauces, relishes, spreads, and seasonings".to_string(),
-            ),
+            SqlValue::Varchar(std::sync::Arc::from("Condiments")),
+            SqlValue::Varchar(std::sync::Arc::from(
+                "Sweet and savory sauces, relishes, spreads, and seasonings",
+            )),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Confections".to_string()),
-            SqlValue::Varchar("Desserts, candies, and sweet breads".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Confections")),
+            SqlValue::Varchar(std::sync::Arc::from("Desserts, candies, and sweet breads")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Dairy Products".to_string()),
-            SqlValue::Varchar("Cheeses".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Dairy Products")),
+            SqlValue::Varchar(std::sync::Arc::from("Cheeses")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Grains/Cereals".to_string()),
-            SqlValue::Varchar("Breads, crackers, pasta, and cereal".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Grains/Cereals")),
+            SqlValue::Varchar(std::sync::Arc::from("Breads, crackers, pasta, and cereal")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar("Meat/Poultry".to_string()),
-            SqlValue::Varchar("Prepared meats".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Meat/Poultry")),
+            SqlValue::Varchar(std::sync::Arc::from("Prepared meats")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar("Produce".to_string()),
-            SqlValue::Varchar("Dried fruit and bean curd".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Produce")),
+            SqlValue::Varchar(std::sync::Arc::from("Dried fruit and bean curd")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar("Seafood".to_string()),
-            SqlValue::Varchar("Seaweed and fish".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Seafood")),
+            SqlValue::Varchar(std::sync::Arc::from("Seaweed and fish")),
         ]))
         .unwrap();
 
@@ -145,7 +145,7 @@ fn create_northwind_db() -> Database {
         products_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(name.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
                 SqlValue::Integer(cat_id),
                 SqlValue::Float(price),
                 SqlValue::Integer(stock),
@@ -168,7 +168,7 @@ fn format_value(value: &SqlValue) -> String {
                 f.to_string()
             }
         }
-        SqlValue::Varchar(s) => s.clone(),
+        SqlValue::Varchar(s) => s.to_string(),
         SqlValue::Boolean(b) => b.to_string(),
         SqlValue::Null => "NULL".to_string(),
         _ => format!("{:?}", value),

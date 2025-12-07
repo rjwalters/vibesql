@@ -407,14 +407,14 @@ impl CombinedExpressionEvaluator<'_> {
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         // Evaluate the search string
         let search_value = self.eval(search_modifier, row)?;
-        let search_string = match search_value {
+        let search_string: std::sync::Arc<str> = match search_value {
             vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => s,
             vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Boolean(false)),
-            other => other.to_string(),
+            other => std::sync::Arc::from(other.to_string()),
         };
 
         // Collect text values from the specified columns
-        let mut text_values = Vec::new();
+        let mut text_values: Vec<std::sync::Arc<str>> = Vec::new();
         for column_name in columns {
             // Try to resolve column in inner schema
             let col_value = if let Some(col_index) = self.get_column_index_cached(None, column_name)
@@ -438,9 +438,9 @@ impl CombinedExpressionEvaluator<'_> {
                 | Some(vibesql_types::SqlValue::Character(s)) => text_values.push(s),
                 Some(vibesql_types::SqlValue::Null) => {
                     // NULL values are treated as empty strings in MATCH
-                    text_values.push(String::new());
+                    text_values.push(std::sync::Arc::from(""));
                 }
-                Some(other) => text_values.push(other.to_string()),
+                Some(other) => text_values.push(std::sync::Arc::from(other.to_string())),
                 None => {
                     // Column not found - return false for this match
                     return Ok(vibesql_types::SqlValue::Boolean(false));

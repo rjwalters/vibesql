@@ -319,21 +319,21 @@ fn test_order_by_with_window_function() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(50000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(60000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             SqlValue::Integer(70000),
         ]))
         .unwrap();
@@ -351,13 +351,13 @@ fn test_order_by_with_window_function() {
 
         // Results should be ordered by ROW_NUMBER (which is 1, 2, 3)
         // Since ROW_NUMBER is ordered by salary ASC, Alice (50000) should be first
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Alice".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
         assert_eq!(result[0].values[1], SqlValue::Integer(1));
 
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Bob".to_string()));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
         assert_eq!(result[1].values[1], SqlValue::Integer(2));
 
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Charlie".to_string()));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
         assert_eq!(result[2].values[1], SqlValue::Integer(3));
     } else {
         panic!("Expected SELECT statement");
@@ -389,21 +389,21 @@ fn test_order_by_with_window_function_not_in_select() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(50000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(60000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             SqlValue::Integer(70000),
         ]))
         .unwrap();
@@ -421,9 +421,9 @@ fn test_order_by_with_window_function_not_in_select() {
 
         // Results should be ordered by ROW_NUMBER with salary DESC
         // Charlie (70000) gets ROW_NUMBER=1, Bob (60000) gets 2, Alice (50000) gets 3
-        assert_eq!(result[0].values[0], SqlValue::Varchar("Charlie".to_string()));
-        assert_eq!(result[1].values[0], SqlValue::Varchar("Bob".to_string()));
-        assert_eq!(result[2].values[0], SqlValue::Varchar("Alice".to_string()));
+        assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
+        assert_eq!(result[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+        assert_eq!(result[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -455,21 +455,21 @@ fn test_window_function_with_group_by_aggregate() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(100),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(200),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(300),
         ]))
         .unwrap();
@@ -477,14 +477,14 @@ fn test_window_function_with_group_by_aggregate() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("B".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("B")),
             SqlValue::Integer(400),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("B".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("B")),
             SqlValue::Integer(500),
         ]))
         .unwrap();
@@ -564,23 +564,23 @@ fn test_tpcds_q12_revenue_ratio_pattern() {
     item_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("ITEM001".to_string()),
-            SqlValue::Varchar("electronics".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("ITEM001")),
+            SqlValue::Varchar(std::sync::Arc::from("electronics")),
         ]))
         .unwrap();
     item_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("ITEM002".to_string()),
-            SqlValue::Varchar("electronics".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("ITEM002")),
+            SqlValue::Varchar(std::sync::Arc::from("electronics")),
         ]))
         .unwrap();
     // Class "sports" - item 3
     item_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("ITEM003".to_string()),
-            SqlValue::Varchar("sports".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("ITEM003")),
+            SqlValue::Varchar(std::sync::Arc::from("sports")),
         ]))
         .unwrap();
 
@@ -659,7 +659,7 @@ fn test_window_function_avg_sum_nested() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(1),
             SqlValue::Integer(100),
         ]))
@@ -667,7 +667,7 @@ fn test_window_function_avg_sum_nested() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(1),
             SqlValue::Integer(200),
         ]))
@@ -676,7 +676,7 @@ fn test_window_function_avg_sum_nested() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(2),
             SqlValue::Integer(300),
         ]))
@@ -685,7 +685,7 @@ fn test_window_function_avg_sum_nested() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("A".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("A")),
             SqlValue::Integer(3),
             SqlValue::Integer(400),
         ]))
@@ -770,7 +770,7 @@ fn test_window_function_avg_sum_with_frame() {
         table
             .insert(Row::new(vec![
                 SqlValue::Integer(month),
-                SqlValue::Varchar("A".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("A")),
                 SqlValue::Integer(month),
                 SqlValue::Integer(month * 100), // 100, 200, 300, 400, 500
             ]))

@@ -1254,12 +1254,12 @@ mod tests {
     #[test]
     fn test_prefix_scan_with_string_keys() {
         let index = create_test_index_data(vec![
-            (vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(1)], vec![0]),
-            (vec![SqlValue::Varchar("a".to_string()), SqlValue::Integer(2)], vec![1]),
-            (vec![SqlValue::Varchar("b".to_string()), SqlValue::Integer(1)], vec![2]),
+            (vec![SqlValue::Varchar(std::sync::Arc::from("a")), SqlValue::Integer(1)], vec![0]),
+            (vec![SqlValue::Varchar(std::sync::Arc::from("a")), SqlValue::Integer(2)], vec![1]),
+            (vec![SqlValue::Varchar(std::sync::Arc::from("b")), SqlValue::Integer(1)], vec![2]),
         ]);
 
-        let results = index.prefix_scan(&[SqlValue::Varchar("a".to_string())]);
+        let results = index.prefix_scan(&[SqlValue::Varchar(std::sync::Arc::from("a"))]);
         assert_eq!(results, vec![0, 1]);
     }
 
@@ -1270,7 +1270,7 @@ mod tests {
             (
                 vec![
                     SqlValue::Integer(1),
-                    SqlValue::Varchar("x".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("x")),
                     SqlValue::Boolean(true),
                 ],
                 vec![0],
@@ -1278,7 +1278,7 @@ mod tests {
             (
                 vec![
                     SqlValue::Integer(1),
-                    SqlValue::Varchar("x".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("x")),
                     SqlValue::Boolean(false),
                 ],
                 vec![1],
@@ -1286,7 +1286,7 @@ mod tests {
             (
                 vec![
                     SqlValue::Integer(1),
-                    SqlValue::Varchar("y".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("y")),
                     SqlValue::Boolean(true),
                 ],
                 vec![2],
@@ -1295,7 +1295,7 @@ mod tests {
 
         // Match on [1, "x"] - order depends on BTreeMap key ordering (false < true)
         let results =
-            index.prefix_scan(&[SqlValue::Integer(1), SqlValue::Varchar("x".to_string())]);
+            index.prefix_scan(&[SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("x"))]);
         assert_eq!(results.len(), 2);
         assert!(results.contains(&0));
         assert!(results.contains(&1));

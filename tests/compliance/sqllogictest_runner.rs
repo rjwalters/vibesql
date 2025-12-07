@@ -456,7 +456,7 @@ impl VibeSqlDB {
             SqlValue::Numeric(_) | SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_) => {
                 value.to_string()
             }
-            SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
             SqlValue::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
             SqlValue::Null => "NULL".to_string(),
             SqlValue::Date(d) => d.to_string(),

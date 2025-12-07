@@ -21,7 +21,7 @@ use vibesql_types::{DataType, SqlValue};
 fn make_row(id: i64) -> Row {
     Row::new(vec![
         SqlValue::Integer(id),
-        SqlValue::Varchar(format!("name_{}", id)),
+        SqlValue::Varchar(std::sync::Arc::from(format!("name_{}", id))),
         SqlValue::Double((id as f64) * 100.0),
     ])
 }
@@ -140,7 +140,7 @@ fn bench_table_update(c: &mut Criterion) {
                 for i in 0..size {
                     let new_row = Row::new(vec![
                         SqlValue::Integer(i as i64),
-                        SqlValue::Varchar(format!("updated_{}", i)),
+                        SqlValue::Varchar(std::sync::Arc::from(format!("updated_{}", i))),
                         SqlValue::Double((i as f64) * 200.0),
                     ]);
                     table_copy.update_row(i, new_row).unwrap();
@@ -162,7 +162,7 @@ fn bench_row_ops(c: &mut Criterion) {
         b.iter(|| {
             black_box(Row::new(vec![
                 SqlValue::Integer(42),
-                SqlValue::Varchar("hello world".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("hello world")),
                 SqlValue::Double(123.45),
             ]))
         });
@@ -171,7 +171,7 @@ fn bench_row_ops(c: &mut Criterion) {
     // Benchmark row field access
     let row = Row::new(vec![
         SqlValue::Integer(42),
-        SqlValue::Varchar("hello world".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("hello world")),
         SqlValue::Double(123.45),
     ]);
 
@@ -191,7 +191,7 @@ fn bench_sql_value_ops(c: &mut Criterion) {
     let mut group = c.benchmark_group("sql_value_ops");
 
     let int_val = SqlValue::Integer(42);
-    let varchar_val = SqlValue::Varchar("hello world benchmark string".to_string());
+    let varchar_val = SqlValue::Varchar(std::sync::Arc::from("hello world benchmark string"));
     let double_val = SqlValue::Double(12345.6789);
 
     group.bench_function("clone_integer", |b| {
@@ -208,7 +208,7 @@ fn bench_sql_value_ops(c: &mut Criterion) {
 
     // Comparison benchmarks
     let int_val2 = SqlValue::Integer(43);
-    let varchar_val2 = SqlValue::Varchar("hello world benchmark string!".to_string());
+    let varchar_val2 = SqlValue::Varchar(std::sync::Arc::from("hello world benchmark string!"));
 
     group.bench_function("compare_integer", |b| {
         b.iter(|| black_box(int_val.partial_cmp(&int_val2)));

@@ -51,12 +51,12 @@ fn test_reset_clears_catalog_and_indexes() {
     // Insert some data
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
     )
     .unwrap();
 
@@ -101,12 +101,12 @@ fn test_reset_clears_catalog_and_indexes() {
     // Insert different data
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(10), SqlValue::Varchar("Charlie".to_string())]),
+        Row::new(vec![SqlValue::Integer(10), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(20), SqlValue::Varchar("Diana".to_string())]),
+        Row::new(vec![SqlValue::Integer(20), SqlValue::Varchar(std::sync::Arc::from("Diana"))]),
     )
     .unwrap();
 
@@ -281,7 +281,7 @@ fn test_reset_multiple_tables_and_indexes() {
         // Insert data
         db.insert_row(
             &table_name,
-            Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Varchar(format!("value{}", i))]),
+            Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Varchar(std::sync::Arc::from(format!("value{}", i)))]),
         )
         .unwrap();
     }

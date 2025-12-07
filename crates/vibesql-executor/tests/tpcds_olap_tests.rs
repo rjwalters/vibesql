@@ -304,8 +304,8 @@ fn is_null(val: &SqlValue) -> bool {
 #[allow(dead_code)]
 fn get_str(val: &SqlValue) -> &str {
     match val {
-        SqlValue::Varchar(s) => s.as_str(),
-        SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) => &**s,
+        SqlValue::Character(s) => &**s,
         SqlValue::Null => "<NULL>",
         _ => panic!("Expected string, got {:?}", val),
     }

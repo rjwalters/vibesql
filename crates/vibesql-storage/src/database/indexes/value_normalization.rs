@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn test_normalize_for_comparison_non_numeric() {
         // Non-numeric types should be returned as-is
-        let text_val = SqlValue::Varchar("test".to_string());
+        let text_val = SqlValue::Varchar(std::sync::Arc::from("test"));
         assert_eq!(normalize_for_comparison(&text_val), text_val);
 
         let null_val = SqlValue::Null;

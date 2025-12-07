@@ -207,7 +207,7 @@ fn test_select_with_or_condition() {
         "items",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("electronics".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("electronics")),
         ]),
     )
     .unwrap();
@@ -215,7 +215,7 @@ fn test_select_with_or_condition() {
         "items",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("food".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("food")),
         ]),
     )
     .unwrap();
@@ -223,7 +223,7 @@ fn test_select_with_or_condition() {
         "items",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("books".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("books")),
         ]),
     )
     .unwrap();
@@ -250,7 +250,7 @@ fn test_select_with_or_condition() {
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("electronics".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("electronics")),
                 )),
             }),
             op: vibesql_ast::BinaryOperator::Or,
@@ -261,7 +261,7 @@ fn test_select_with_or_condition() {
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar("books".to_string()),
+                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("books")),
                 )),
             }),
         }),

@@ -157,9 +157,9 @@ mod tests {
         );
 
         let rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Alice".to_string())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
         ];
 
         let stats = TableStatistics::compute(&rows, &schema);

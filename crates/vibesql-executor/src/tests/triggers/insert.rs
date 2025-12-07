@@ -34,7 +34,7 @@ fn test_after_insert_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -73,21 +73,15 @@ fn test_after_insert_trigger_fires_for_each_row() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "alice".to_string(),
-                )),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice"))),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "bob".to_string(),
-                )),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("bob"))),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "charlie".to_string(),
-                )),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("charlie"))),
             ],
         ]),
         conflict_clause: None,
@@ -126,7 +120,7 @@ fn test_before_insert_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("alice".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

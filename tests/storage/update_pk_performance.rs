@@ -33,7 +33,7 @@ fn test_update_with_pk_index_performance() {
             "test_table",
             Row::new(vec![
                 SqlValue::Integer(i),
-                SqlValue::Varchar(format!("name_{}", i % 100)),
+                SqlValue::Varchar(format!("name_{}", i % 100).into()),
                 SqlValue::Integer(i * 10),
             ]),
         )

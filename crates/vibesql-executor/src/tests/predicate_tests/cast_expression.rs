@@ -40,7 +40,7 @@ fn test_cast_integer_to_varchar() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("123".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("123")));
 }
 
 #[test]
@@ -55,9 +55,7 @@ fn test_cast_varchar_to_integer() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "456".to_string(),
-                ))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("456")))),
                 data_type: vibesql_types::DataType::Integer,
             },
             alias: Some("result".to_string()),
@@ -194,9 +192,7 @@ fn test_cast_varchar_to_unsigned() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                    "123".to_string(),
-                ))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("123")))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
             alias: Some("result".to_string()),

@@ -110,7 +110,7 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
         ColumnPredicate::Like { pattern, negated, .. } => {
             // Extract string value
             let text = match value {
-                SqlValue::Character(s) | SqlValue::Varchar(s) => s.as_str(),
+                SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
                 SqlValue::Null => return false,
                 _ => return false, // Non-string types don't match LIKE patterns
             };

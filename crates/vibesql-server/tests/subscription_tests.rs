@@ -2,6 +2,7 @@
 //!
 //! Tests the SessionSubscriptionManager for per-connection subscription tracking.
 
+use std::sync::Arc;
 use std::collections::HashSet;
 use vibesql_server::subscription::{
     SessionSubscriptionManager, SubscriptionConfig, TablePkInfo,

@@ -123,6 +123,10 @@ async fn start_vibesql_server(
             .expect("Disabled observability config should not fail"),
     );
 
+    // Create mutation broadcast channel for cross-connection subscription notifications
+    let (mutation_broadcast_tx, _mutation_broadcast_rx) =
+        tokio::sync::broadcast::channel::<vibesql_server::TableMutationNotification>(1024);
+
     // Spawn accept loop
     tokio::spawn(async move {
         let mut shutdown = shutdown_signal;
@@ -140,6 +144,7 @@ async fn start_vibesql_server(
                             let subscription_manager = Arc::clone(&subscription_manager);
                             let database_registry = database_registry.clone();
                             let observability = Arc::clone(&observability);
+                            let mutation_broadcast_tx = mutation_broadcast_tx.clone();
 
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -151,6 +156,7 @@ async fn start_vibesql_server(
                                     active_connections,
                                     database_registry,
                                     subscription_manager,
+                                    mutation_broadcast_tx,
                                 );
                                 let _ = handler.handle().await;
                             });

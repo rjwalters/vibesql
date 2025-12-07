@@ -35,7 +35,7 @@ fn test_substring_null_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
         ],
         character_unit: None,
@@ -50,7 +50,7 @@ fn test_substring_null_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
         ],
@@ -66,14 +66,14 @@ fn test_substring_negative_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-5)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // SQL:1999 treats negative/zero start as position 1
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -82,13 +82,13 @@ fn test_substring_zero_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -97,13 +97,13 @@ fn test_substring_start_beyond_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -112,14 +112,14 @@ fn test_substring_zero_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -128,14 +128,14 @@ fn test_substring_negative_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-3)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -145,14 +145,14 @@ fn test_substring_multibyte_characters() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("café".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("café"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("caf".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("caf")));
 }
 
 #[test]
@@ -161,13 +161,13 @@ fn test_substring_empty_string() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(""))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -175,9 +175,7 @@ fn test_substring_wrong_arg_count_too_few() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "hello".to_string(),
-        ))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -190,7 +188,7 @@ fn test_substring_wrong_arg_count_too_many() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -222,8 +220,8 @@ fn test_substring_wrong_type_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("one".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("one"))),
         ],
         character_unit: None,
     };
@@ -237,9 +235,9 @@ fn test_substring_wrong_type_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("two".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("two"))),
         ],
         character_unit: None,
     };
@@ -272,13 +270,13 @@ fn test_left_negative_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-5)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -287,13 +285,13 @@ fn test_left_zero_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -302,13 +300,13 @@ fn test_left_length_exceeds_string() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -317,13 +315,13 @@ fn test_left_multibyte() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("café".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("café"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("caf".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("caf")));
 }
 
 #[test]
@@ -331,9 +329,7 @@ fn test_left_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "hello".to_string(),
-        ))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -361,8 +357,8 @@ fn test_left_wrong_type_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("three".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("three"))),
         ],
         character_unit: None,
     };
@@ -376,15 +372,13 @@ fn test_left_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-                "hello".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("hel".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hel")));
 }
 
 // ============================================================================
@@ -412,13 +406,13 @@ fn test_right_negative_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-5)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -427,13 +421,13 @@ fn test_right_zero_length() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -442,13 +436,13 @@ fn test_right_length_exceeds_string() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("hello".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("hello".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -457,13 +451,13 @@ fn test_right_multibyte() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar("café".to_string())),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("café"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("afé".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("afé")));
 }
 
 #[test]
@@ -471,9 +465,7 @@ fn test_right_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "hello".to_string(),
-        ))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("hello")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row);
@@ -501,15 +493,13 @@ fn test_right_character_type() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
-                "hello".to_string(),
-            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("hello"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("llo".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("llo")));
 }
 
 // ============================================================================
@@ -532,7 +522,7 @@ fn test_substring_date_extract_year() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("1995".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("1995")));
 }
 
 #[test]
@@ -551,7 +541,7 @@ fn test_substring_date_extract_month() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("06".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("06")));
 }
 
 #[test]
@@ -570,7 +560,7 @@ fn test_substring_date_extract_day() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("15".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("15")));
 }
 
 #[test]
@@ -589,7 +579,7 @@ fn test_substring_timestamp_extract_year() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("1996".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("1996")));
 }
 
 #[test]
@@ -608,7 +598,7 @@ fn test_substring_timestamp_extract_time() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("14:30:45".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("14:30:45")));
 }
 
 #[test]
@@ -627,7 +617,7 @@ fn test_substr_alias_with_date() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("1995".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("1995")));
 }
 
 #[test]
@@ -646,5 +636,5 @@ fn test_substring_date_without_length() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     // From position 6 to end: "06-15"
-    assert_eq!(result, vibesql_types::SqlValue::Varchar("06-15".to_string()));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("06-15")));
 }

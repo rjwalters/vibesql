@@ -228,7 +228,7 @@ fn test_columnar_table_with_multiple_types() {
         "typed_data",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Test Product".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Test Product")),
             vibesql_types::SqlValue::Double(19.99),
             vibesql_types::SqlValue::Bigint(100),
             vibesql_types::SqlValue::Double(0.15),

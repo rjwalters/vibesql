@@ -38,7 +38,7 @@ fn create_test_database() -> Database {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(30),
         ]),
     )
@@ -47,7 +47,7 @@ fn create_test_database() -> Database {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(25),
         ]),
     )
@@ -56,7 +56,7 @@ fn create_test_database() -> Database {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             SqlValue::Integer(35),
         ]),
     )
@@ -105,7 +105,7 @@ fn test_cte_basic() {
 
     assert_eq!(results.len(), 1); // Only Bob is under 30
     assert_eq!(results[0].values[0], SqlValue::Integer(2));
-    assert_eq!(results[0].values[1], SqlValue::Varchar("Bob".to_string()));
+    assert_eq!(results[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn test_cte_with_column_aliases() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].values[0], SqlValue::Integer(1));
-    assert_eq!(results[0].values[1], SqlValue::Varchar("Alice".to_string()));
+    assert_eq!(results[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
 }
 
 #[test]

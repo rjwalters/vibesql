@@ -327,20 +327,20 @@ pub(crate) fn cast_value(
 
         // Cast to VARCHAR
         Varchar { max_length } => {
-            let string_val = match value {
+            let string_val: std::sync::Arc<str> = match value {
                 SqlValue::Varchar(s) => s.clone(),
-                SqlValue::Integer(n) => n.to_string(),
-                SqlValue::Smallint(n) => n.to_string(),
-                SqlValue::Bigint(n) => n.to_string(),
-                SqlValue::Unsigned(n) => n.to_string(),
-                SqlValue::Float(n) => n.to_string(),
-                SqlValue::Real(n) => n.to_string(),
-                SqlValue::Double(n) => n.to_string(),
-                SqlValue::Numeric(n) => n.to_string(),
-                SqlValue::Boolean(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
-                SqlValue::Date(s) => s.to_string(),
-                SqlValue::Time(s) => s.to_string(),
-                SqlValue::Timestamp(s) => s.to_string(),
+                SqlValue::Integer(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Smallint(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Bigint(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Unsigned(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Float(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Real(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Double(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Numeric(n) => std::sync::Arc::from(n.to_string()),
+                SqlValue::Boolean(b) => std::sync::Arc::from(if *b { "TRUE" } else { "FALSE" }),
+                SqlValue::Date(s) => std::sync::Arc::from(s.to_string()),
+                SqlValue::Time(s) => std::sync::Arc::from(s.to_string()),
+                SqlValue::Timestamp(s) => std::sync::Arc::from(s.to_string()),
                 _ => {
                     return Err(ExecutorError::CastError {
                         from_type: format!("{:?}", value),
@@ -355,7 +355,7 @@ pub(crate) fn cast_value(
             // Truncate if exceeds max_length (when specified)
             match max_length {
                 Some(len) if string_val.len() > *len => {
-                    Ok(SqlValue::Varchar(string_val[..*len].to_string()))
+                    Ok(SqlValue::Varchar(std::sync::Arc::from(&string_val[..*len])))
                 }
                 _ => Ok(SqlValue::Varchar(string_val)),
             }

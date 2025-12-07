@@ -300,7 +300,7 @@ fn test_function_varchar_return_type() {
                 value: Box::new(Expression::Function {
                     name: "CONCAT".to_string(),
                     args: vec![
-                        Expression::Literal(SqlValue::Varchar("Hello, ".to_string())),
+                        Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Hello, "))),
                         Expression::ColumnRef { table: None, column: "name".to_string() },
                     ],
                     character_unit: None,

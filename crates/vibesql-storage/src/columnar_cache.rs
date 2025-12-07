@@ -383,7 +383,7 @@ mod tests {
             .map(|i| {
                 Row::new(vec![
                     SqlValue::Integer(i as i64),
-                    SqlValue::Varchar(format!("name_{}", i)),
+                    SqlValue::Varchar(std::sync::Arc::from(format!("name_{}", i))),
                 ])
             })
             .collect();

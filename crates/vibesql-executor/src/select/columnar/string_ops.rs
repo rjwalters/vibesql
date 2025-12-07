@@ -28,7 +28,7 @@
 /// # Returns
 ///
 /// Boolean mask where true means the string equals the target
-pub fn batch_string_eq(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
+pub fn batch_string_eq(values: &[std::sync::Arc<str>], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let target_len = target.len();
     let mut result = Vec::with_capacity(values.len());
 
@@ -45,7 +45,7 @@ pub fn batch_string_eq(values: &[String], nulls: Option<&[bool]>, target: &str) 
         if value.len() != target_len {
             result.push(false);
         } else {
-            result.push(value == target);
+            result.push(&**value == target);
         }
     }
 
@@ -63,7 +63,7 @@ pub fn batch_string_eq(values: &[String], nulls: Option<&[bool]>, target: &str) 
 /// # Returns
 ///
 /// Boolean mask where true means the string does not equal the target
-pub fn batch_string_ne(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
+pub fn batch_string_ne(values: &[std::sync::Arc<str>], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let target_len = target.len();
     let mut result = Vec::with_capacity(values.len());
 
@@ -80,7 +80,7 @@ pub fn batch_string_ne(values: &[String], nulls: Option<&[bool]>, target: &str) 
         if value.len() != target_len {
             result.push(true);
         } else {
-            result.push(value != target);
+            result.push(&**value != target);
         }
     }
 
@@ -101,7 +101,7 @@ pub fn batch_string_ne(values: &[String], nulls: Option<&[bool]>, target: &str) 
 ///
 /// Boolean mask where true means the string starts with the prefix
 pub fn batch_string_starts_with(
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
     prefix: &str,
 ) -> Vec<bool> {
@@ -142,7 +142,7 @@ pub fn batch_string_starts_with(
 ///
 /// Boolean mask where true means the string ends with the suffix
 pub fn batch_string_ends_with(
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
     suffix: &str,
 ) -> Vec<bool> {
@@ -183,7 +183,7 @@ pub fn batch_string_ends_with(
 ///
 /// Boolean mask where true means the string contains the substring
 pub fn batch_string_contains(
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
     substring: &str,
 ) -> Vec<bool> {
@@ -335,7 +335,7 @@ impl LikePattern {
 ///
 /// Boolean mask where true means the string matches the pattern
 pub fn batch_string_like(
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
     pattern: &LikePattern,
 ) -> Vec<bool> {
@@ -353,7 +353,7 @@ pub fn batch_string_like(
 
 /// Batch prefix and suffix match (for 'prefix%suffix' patterns)
 fn batch_string_prefix_suffix(
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
     prefix: &str,
     suffix: &str,
@@ -385,7 +385,7 @@ fn batch_string_prefix_suffix(
 ///
 /// Handles patterns with `_` wildcards and complex `%` combinations.
 fn batch_string_like_general(
-    values: &[String],
+    values: &[std::sync::Arc<str>],
     nulls: Option<&[bool]>,
     pattern: &str,
 ) -> Vec<bool> {
@@ -461,7 +461,7 @@ fn like_match(text: &str, pattern: &str) -> bool {
 /// # Returns
 ///
 /// Boolean mask where true means the string is less than target
-pub fn batch_string_lt(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
+pub fn batch_string_lt(values: &[std::sync::Arc<str>], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -473,14 +473,14 @@ pub fn batch_string_lt(values: &[String], nulls: Option<&[bool]>, target: &str) 
             }
         }
 
-        result.push(value.as_str() < target);
+        result.push(&**value < target);
     }
 
     result
 }
 
 /// Batch string greater than comparison
-pub fn batch_string_gt(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
+pub fn batch_string_gt(values: &[std::sync::Arc<str>], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -492,14 +492,14 @@ pub fn batch_string_gt(values: &[String], nulls: Option<&[bool]>, target: &str) 
             }
         }
 
-        result.push(value.as_str() > target);
+        result.push(&**value > target);
     }
 
     result
 }
 
 /// Batch string less than or equal comparison
-pub fn batch_string_le(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
+pub fn batch_string_le(values: &[std::sync::Arc<str>], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -511,14 +511,14 @@ pub fn batch_string_le(values: &[String], nulls: Option<&[bool]>, target: &str) 
             }
         }
 
-        result.push(value.as_str() <= target);
+        result.push(&**value <= target);
     }
 
     result
 }
 
 /// Batch string greater than or equal comparison
-pub fn batch_string_ge(values: &[String], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
+pub fn batch_string_ge(values: &[std::sync::Arc<str>], nulls: Option<&[bool]>, target: &str) -> Vec<bool> {
     let mut result = Vec::with_capacity(values.len());
 
     for (i, value) in values.iter().enumerate() {
@@ -530,7 +530,7 @@ pub fn batch_string_ge(values: &[String], nulls: Option<&[bool]>, target: &str) 
             }
         }
 
-        result.push(value.as_str() >= target);
+        result.push(&**value >= target);
     }
 
     result
@@ -543,10 +543,10 @@ mod tests {
     #[test]
     fn test_batch_string_eq() {
         let values = vec![
-            "apple".to_string(),
-            "banana".to_string(),
-            "apple".to_string(),
-            "cherry".to_string(),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("banana"),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("cherry"),
         ];
 
         let result = batch_string_eq(&values, None, "apple");
@@ -556,10 +556,10 @@ mod tests {
     #[test]
     fn test_batch_string_eq_with_nulls() {
         let values = vec![
-            "apple".to_string(),
-            "banana".to_string(),
-            "apple".to_string(),
-            "cherry".to_string(),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("banana"),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("cherry"),
         ];
         let nulls = Some(vec![false, false, true, false]);
 
@@ -569,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_ne() {
-        let values = vec!["apple".to_string(), "banana".to_string(), "apple".to_string()];
+        let values = vec![std::sync::Arc::from("apple"), std::sync::Arc::from("banana"), std::sync::Arc::from("apple")];
 
         let result = batch_string_ne(&values, None, "apple");
         assert_eq!(result, vec![false, true, false]);
@@ -578,10 +578,10 @@ mod tests {
     #[test]
     fn test_batch_string_starts_with() {
         let values = vec![
-            "apple".to_string(),
-            "apricot".to_string(),
-            "banana".to_string(),
-            "app".to_string(),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("apricot"),
+            std::sync::Arc::from("banana"),
+            std::sync::Arc::from("app"),
         ];
 
         let result = batch_string_starts_with(&values, None, "app");
@@ -591,10 +591,10 @@ mod tests {
     #[test]
     fn test_batch_string_ends_with() {
         let values = vec![
-            "apple".to_string(),
-            "pineapple".to_string(),
-            "banana".to_string(),
-            "le".to_string(),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("pineapple"),
+            std::sync::Arc::from("banana"),
+            std::sync::Arc::from("le"),
         ];
 
         let result = batch_string_ends_with(&values, None, "le");
@@ -604,10 +604,10 @@ mod tests {
     #[test]
     fn test_batch_string_contains() {
         let values = vec![
-            "apple".to_string(),
-            "pineapple".to_string(),
-            "banana".to_string(),
-            "application".to_string(),
+            std::sync::Arc::from("apple"),
+            std::sync::Arc::from("pineapple"),
+            std::sync::Arc::from("banana"),
+            std::sync::Arc::from("application"),
         ];
 
         let result = batch_string_contains(&values, None, "app");
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_prefix() {
-        let values = vec!["apple".to_string(), "apricot".to_string(), "banana".to_string()];
+        let values = vec![std::sync::Arc::from("apple"), std::sync::Arc::from("apricot"), std::sync::Arc::from("banana")];
 
         let pattern = LikePattern::parse("ap%");
         let result = batch_string_like(&values, None, &pattern);
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_suffix() {
-        let values = vec!["apple".to_string(), "pineapple".to_string(), "banana".to_string()];
+        let values = vec![std::sync::Arc::from("apple"), std::sync::Arc::from("pineapple"), std::sync::Arc::from("banana")];
 
         let pattern = LikePattern::parse("%ple");
         let result = batch_string_like(&values, None, &pattern);
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_like_contains() {
-        let values = vec!["apple".to_string(), "pineapple".to_string(), "banana".to_string()];
+        let values = vec![std::sync::Arc::from("apple"), std::sync::Arc::from("pineapple"), std::sync::Arc::from("banana")];
 
         let pattern = LikePattern::parse("%app%");
         let result = batch_string_like(&values, None, &pattern);
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn test_batch_string_like_prefix_suffix() {
         let values =
-            vec!["apple".to_string(), "ample".to_string(), "banana".to_string(), "ale".to_string()];
+            vec![std::sync::Arc::from("apple"), std::sync::Arc::from("ample"), std::sync::Arc::from("banana"), std::sync::Arc::from("ale")];
 
         let pattern = LikePattern::parse("a%le");
         let result = batch_string_like(&values, None, &pattern);
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn test_batch_string_comparisons() {
-        let values = vec!["apple".to_string(), "banana".to_string(), "cherry".to_string()];
+        let values = vec![std::sync::Arc::from("apple"), std::sync::Arc::from("banana"), std::sync::Arc::from("cherry")];
 
         // Less than
         let result = batch_string_lt(&values, None, "banana");
@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn test_empty_values() {
-        let values: Vec<String> = vec![];
+        let values: Vec<std::sync::Arc<str>> = vec![];
 
         let result = batch_string_eq(&values, None, "test");
         assert!(result.is_empty());
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn test_empty_pattern() {
-        let values = vec!["".to_string(), "a".to_string(), "".to_string()];
+        let values = vec![std::sync::Arc::from(""), std::sync::Arc::from("a"), std::sync::Arc::from("")];
 
         // Exact match empty string
         let result = batch_string_eq(&values, None, "");

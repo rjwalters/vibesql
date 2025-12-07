@@ -32,7 +32,7 @@ fn test_upper_basic() {
 
     let results = execute_query(&db, "SELECT UPPER('hello') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("HELLO".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("HELLO")));
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn test_upper_already_uppercase() {
 
     let results = execute_query(&db, "SELECT UPPER('WORLD') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("WORLD".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("WORLD")));
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn test_upper_mixed_case() {
 
     let results = execute_query(&db, "SELECT UPPER('HeLLo WoRLd') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("HELLO WORLD".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("HELLO WORLD")));
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_upper_with_numbers() {
 
     let results = execute_query(&db, "SELECT UPPER('test123') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("TEST123".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("TEST123")));
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn test_lower_basic() {
 
     let results = execute_query(&db, "SELECT LOWER('HELLO') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn test_lower_already_lowercase() {
 
     let results = execute_query(&db, "SELECT LOWER('world') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("world".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("world")));
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_lower_mixed_case() {
 
     let results = execute_query(&db, "SELECT LOWER('HeLLo WoRLd') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello world".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello world")));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn test_lower_with_numbers() {
 
     let results = execute_query(&db, "SELECT LOWER('TEST123') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("test123".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("test123")));
 }
 
 #[test]
@@ -140,13 +140,13 @@ fn test_upper_with_table_data() {
     );
     db.create_table(schema).unwrap();
 
-    db.insert_row("USERS", Row::new(vec![SqlValue::Varchar("alice".to_string())])).unwrap();
-    db.insert_row("USERS", Row::new(vec![SqlValue::Varchar("bob".to_string())])).unwrap();
+    db.insert_row("USERS", Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("alice"))])).unwrap();
+    db.insert_row("USERS", Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("bob"))])).unwrap();
 
     let results = execute_query(&db, "SELECT UPPER(name) AS upper_name FROM users;").unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("ALICE".to_string()));
-    assert_eq!(results[1].values[0], SqlValue::Varchar("BOB".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("ALICE")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("BOB")));
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn test_case_insensitive_function_names() {
 
     assert_eq!(results1[0].values[0], results2[0].values[0]);
     assert_eq!(results2[0].values[0], results3[0].values[0]);
-    assert_eq!(results1[0].values[0], SqlValue::Varchar("TEST".to_string()));
+    assert_eq!(results1[0].values[0], SqlValue::Varchar(std::sync::Arc::from("TEST")));
 }
 
 // --- SUBSTRING tests ---
@@ -174,7 +174,7 @@ fn test_substring_basic_with_length() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello world', 1, 5) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn test_substring_without_length() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello world', 7) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("world".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("world")));
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn test_substring_middle_of_string() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello world', 7, 5) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("world".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("world")));
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn test_substring_single_char() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello', 1, 1) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("h".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("h")));
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn test_substring_length_exceeds_string() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello', 3, 100) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("llo".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("llo")));
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn test_substring_start_exceeds_length() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello', 100, 5) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn test_substring_zero_length() {
     let results =
         execute_query(&db, "SELECT SUBSTRING('hello', 1, 0) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 // --- TRIM tests ---
@@ -266,7 +266,7 @@ fn test_trim_basic() {
 
     let results = execute_query(&db, "SELECT TRIM('  hello  ') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn test_trim_leading_only() {
 
     let results = execute_query(&db, "SELECT TRIM('  hello') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn test_trim_trailing_only() {
 
     let results = execute_query(&db, "SELECT TRIM('hello  ') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn test_trim_no_spaces() {
 
     let results = execute_query(&db, "SELECT TRIM('hello') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn test_trim_only_spaces() {
 
     let results = execute_query(&db, "SELECT TRIM('   ') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("")));
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn test_trim_preserves_internal_spaces() {
     let results =
         execute_query(&db, "SELECT TRIM('  hello world  ') AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello world".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello world")));
 }
 
 #[test]

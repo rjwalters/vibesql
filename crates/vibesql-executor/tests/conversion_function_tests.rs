@@ -35,12 +35,12 @@ fn eval_function_expect_error(name: &str, args: Vec<vibesql_ast::Expression>) {
 
 /// Helper to create a varchar literal expression
 fn varchar_lit(value: &str) -> vibesql_ast::Expression {
-    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(value.to_string()))
+    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(value)))
 }
 
 /// Helper to create a character literal expression
 fn character_lit(value: &str) -> vibesql_ast::Expression {
-    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(value.to_string()))
+    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from(value)))
 }
 
 /// Helper to create a date literal expression
@@ -276,7 +276,7 @@ fn test_to_char_date() {
     let result = eval_function("TO_CHAR", vec![date_lit("2023-12-25"), varchar_lit("YYYY-MM-DD")]);
     match result {
         vibesql_types::SqlValue::Varchar(s) => {
-            assert_eq!(s, "2023-12-25");
+            assert_eq!(s.as_ref(), "2023-12-25");
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -290,7 +290,7 @@ fn test_to_char_timestamp() {
     );
     match result {
         vibesql_types::SqlValue::Varchar(s) => {
-            assert_eq!(s, "2023-12-25 14:30:45");
+            assert_eq!(s.as_ref(), "2023-12-25 14:30:45");
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -361,7 +361,7 @@ fn test_to_char_time() {
     let result = eval_function("TO_CHAR", vec![time_lit("14:30:45"), varchar_lit("HH24:MI:SS")]);
     match result {
         vibesql_types::SqlValue::Varchar(s) => {
-            assert_eq!(s, "14:30:45");
+            assert_eq!(s.as_ref(), "14:30:45");
         }
         _ => panic!("Expected Varchar result"),
     }
@@ -378,8 +378,8 @@ fn test_to_char_non_string_format() {
 fn test_cast_integer_to_varchar() {
     let result = eval_function("CAST", vec![int_lit(42), varchar_lit("VARCHAR")]);
     match result {
-        vibesql_types::SqlValue::Varchar(s) => assert_eq!(s, "42"),
-        vibesql_types::SqlValue::Character(s) => assert_eq!(s, "42"),
+        vibesql_types::SqlValue::Varchar(s) => assert_eq!(s.as_ref(), "42"),
+        vibesql_types::SqlValue::Character(s) => assert_eq!(s.as_ref(), "42"),
         _ => panic!("Expected string result, got {:?}", result),
     }
 }

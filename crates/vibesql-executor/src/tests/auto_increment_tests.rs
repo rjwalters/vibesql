@@ -49,7 +49,7 @@ fn test_auto_increment_basic_inserts() {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
-            SqlValue::Varchar("alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("alice")),
         )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -62,7 +62,7 @@ fn test_auto_increment_basic_inserts() {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
-            SqlValue::Varchar("bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("bob")),
         )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -76,9 +76,9 @@ fn test_auto_increment_basic_inserts() {
 
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].values[0], SqlValue::Integer(1)); // First id should be 1
-    assert_eq!(rows[0].values[1], SqlValue::Varchar("alice".to_string()));
+    assert_eq!(rows[0].values[1], SqlValue::Varchar(std::sync::Arc::from("alice")));
     assert_eq!(rows[1].values[0], SqlValue::Integer(2)); // Second id should be 2
-    assert_eq!(rows[1].values[1], SqlValue::Varchar("bob".to_string()));
+    assert_eq!(rows[1].values[1], SqlValue::Varchar(std::sync::Arc::from("bob")));
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn test_last_insert_rowid_basic() {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
-            SqlValue::Varchar("alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("alice")),
         )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -183,7 +183,7 @@ fn test_last_insert_rowid_basic() {
         table_name: "users".to_string(),
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
-            SqlValue::Varchar("bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("bob")),
         )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -236,9 +236,9 @@ fn test_last_insert_rowid_multi_row_insert() {
         table_name: "items".to_string(),
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![
-            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("item1".to_string()))],
-            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("item2".to_string()))],
-            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar("item3".to_string()))],
+            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("item1")))],
+            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("item2")))],
+            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("item3")))],
         ]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -300,7 +300,7 @@ fn test_last_insert_rowid_no_auto_increment() {
         columns: vec!["id".to_string(), "name".to_string()],
         source: InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(100)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar("test".to_string())),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("test"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -355,7 +355,7 @@ fn test_last_insert_rowid_via_select() {
         table_name: "users".to_string(),
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
-            SqlValue::Varchar("alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("alice")),
         )]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

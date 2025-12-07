@@ -6,6 +6,7 @@
 //!
 //! Related: #3915
 
+use std::sync::Arc;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::InsertExecutor;
 use vibesql_storage::Database;
@@ -32,7 +33,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(name.to_string())),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: None,
@@ -168,17 +169,17 @@ fn test_multi_row_insert_invalidates_cache() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar("Product 2".to_string())),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("Product 2"))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(200)),
             ],
             vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar("Product 3".to_string())),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("Product 3"))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(300)),
             ],
             vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(4)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar("Product 4".to_string())),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("Product 4"))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(400)),
             ],
         ]),
@@ -239,7 +240,7 @@ fn test_insert_select_invalidates_cache() {
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(name.to_string())),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
             ]]),
             conflict_clause: None,

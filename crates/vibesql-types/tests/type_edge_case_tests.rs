@@ -6,7 +6,7 @@ use vibesql_types::*;
 
 #[test]
 fn test_empty_string_varchar() {
-    let value = SqlValue::Varchar("".to_string());
+    let value = SqlValue::Varchar(std::sync::Arc::from(""));
     assert_eq!(format!("{}", value), "");
     assert!(!value.is_null());
 }
@@ -31,6 +31,6 @@ fn test_very_small_bigint() {
 
 #[test]
 fn test_special_characters_in_varchar() {
-    let value = SqlValue::Varchar("Hello, 世界! 🌍".to_string());
+    let value = SqlValue::Varchar(std::sync::Arc::from("Hello, 世界! 🌍"));
     assert_eq!(format!("{}", value), "Hello, 世界! 🌍");
 }

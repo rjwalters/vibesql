@@ -136,7 +136,7 @@ fn test_on_delete_cascade_multi_level() {
         Row::new(vec![
             SqlValue::Integer(10),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Parent1".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Parent1")),
         ]),
     )
     .unwrap();
@@ -145,7 +145,7 @@ fn test_on_delete_cascade_multi_level() {
         Row::new(vec![
             SqlValue::Integer(100),
             SqlValue::Integer(10),
-            SqlValue::Varchar("Child1".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Child1")),
         ]),
     )
     .unwrap();
@@ -739,7 +739,7 @@ fn test_self_referential_table() {
     // Insert employees: CEO (no manager), Manager (reports to CEO), Employee (reports to Manager)
     db.insert_row(
         "EMPLOYEE",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Varchar("CEO".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("CEO"))]),
     )
     .unwrap();
     db.insert_row(
@@ -747,7 +747,7 @@ fn test_self_referential_table() {
         Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Manager".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Manager")),
         ]),
     )
     .unwrap();
@@ -756,7 +756,7 @@ fn test_self_referential_table() {
         Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Integer(2),
-            SqlValue::Varchar("Employee".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Employee")),
         ]),
     )
     .unwrap();
@@ -789,7 +789,7 @@ fn test_multi_column_foreign_key() {
         Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Integer(100),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();

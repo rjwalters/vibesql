@@ -17,7 +17,7 @@ pub(crate) struct ColumnBuilder {
     type_class: ColumnTypeClass,
     int64_values: Vec<i64>,
     float64_values: Vec<f64>,
-    string_values: Vec<String>,
+    string_values: Vec<Arc<str>>,
     bool_values: Vec<bool>,
     date_values: Vec<Date>,
     time_values: Vec<Time>,
@@ -145,7 +145,7 @@ impl ColumnBuilder {
                 self.nulls.push(false);
             }
             (ColumnTypeClass::String, SqlValue::Null) => {
-                self.string_values.push(String::new());
+                self.string_values.push(Arc::from(""));
                 self.nulls.push(true);
             }
 

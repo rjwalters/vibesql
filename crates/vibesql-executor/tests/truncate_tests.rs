@@ -61,17 +61,17 @@ fn test_truncate_basic() {
     // Insert test data
     db.insert_row(
         "test_table",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("row1".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("row1"))]),
     )
     .unwrap();
     db.insert_row(
         "test_table",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("row2".to_string())]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("row2"))]),
     )
     .unwrap();
     db.insert_row(
         "test_table",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("row3".to_string())]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("row3"))]),
     )
     .unwrap();
 
@@ -135,7 +135,7 @@ fn test_truncate_if_exists_existing() {
     // Insert data
     db.insert_row(
         "existing_table",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("data".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("data"))]),
     )
     .unwrap();
 
@@ -205,7 +205,7 @@ fn test_truncate_blocked_by_delete_triggers() {
     // Insert rows
     db.insert_row(
         "triggered_table",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("data1".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("data1"))]),
     )
     .unwrap();
 
@@ -256,7 +256,7 @@ fn test_truncate_blocked_by_after_delete_trigger() {
 
     db.insert_row(
         "audit_table",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("test".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("test"))]),
     )
     .unwrap();
 
@@ -305,7 +305,7 @@ fn test_truncate_allowed_with_insert_trigger() {
     for i in 0..10 {
         db.insert_row(
             "insert_triggered",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("data{}", i))]),
+            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("data{}", i)))]),
         )
         .unwrap();
     }
@@ -354,7 +354,7 @@ fn test_truncate_allowed_with_update_trigger() {
 
     db.insert_row(
         "update_triggered",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("data".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("data"))]),
     )
     .unwrap();
 
@@ -417,7 +417,7 @@ fn test_truncate_blocked_by_fk_references() {
     // Insert parent rows
     db.insert_row(
         "parent",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Parent1".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Parent1"))]),
     )
     .unwrap();
 
@@ -459,7 +459,7 @@ fn test_truncate_allowed_no_fk_references() {
     for i in 0..100 {
         db.insert_row(
             "standalone",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("data{}", i))]),
+            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("data{}", i)))]),
         )
         .unwrap();
     }
@@ -525,7 +525,7 @@ fn test_truncate_preserves_table_structure() {
         "structured_table",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("test@example.com".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("test@example.com")),
             SqlValue::Integer(25),
         ]),
     )
@@ -553,7 +553,7 @@ fn test_truncate_preserves_table_structure() {
         "structured_table",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("new@example.com".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("new@example.com")),
             SqlValue::Integer(30),
         ]),
     )
@@ -571,7 +571,7 @@ fn test_truncate_clears_all_data() {
     for i in 0..1000 {
         db.insert_row(
             "large_table",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("data_{}", i))]),
+            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("data_{}", i)))]),
         )
         .unwrap();
     }
@@ -592,7 +592,7 @@ fn test_truncate_clears_all_data() {
     // Verify we can insert new data
     db.insert_row(
         "large_table",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("new_data".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("new_data"))]),
     )
     .unwrap();
     assert_eq!(db.get_table("large_table").unwrap().row_count(), 1);
@@ -613,7 +613,7 @@ fn test_truncate_returns_correct_row_count() {
         for i in 0..count {
             db.insert_row(
                 "count_test",
-                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(format!("row_{}", i))]),
+                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("row_{}", i)))]),
             )
             .unwrap();
         }

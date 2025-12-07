@@ -379,19 +379,19 @@ fn condition_to_sql(
         ComparisonOp::Contains => {
             let value_str = cond.value.as_str().ok_or("contains requires a string value")?;
             let param_idx = params.len() + 1;
-            params.push(vibesql_types::SqlValue::Varchar(format!("%{}%", value_str)));
+            params.push(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("%{}%", value_str))));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::StartsWith => {
             let value_str = cond.value.as_str().ok_or("startsWith requires a string value")?;
             let param_idx = params.len() + 1;
-            params.push(vibesql_types::SqlValue::Varchar(format!("{}%", value_str)));
+            params.push(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("{}%", value_str))));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::EndsWith => {
             let value_str = cond.value.as_str().ok_or("endsWith requires a string value")?;
             let param_idx = params.len() + 1;
-            params.push(vibesql_types::SqlValue::Varchar(format!("%{}", value_str)));
+            params.push(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("%{}", value_str))));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::In => {
@@ -1687,7 +1687,7 @@ mod tests {
         let sql = where_clause_to_sql(&clause, &mut params).unwrap();
         assert_eq!(sql, "email LIKE $1");
         if let vibesql_types::SqlValue::Varchar(s) = &params[0] {
-            assert_eq!(s, "%smith%");
+            assert_eq!(s.as_ref(), "%smith%");
         }
     }
 
@@ -1699,7 +1699,7 @@ mod tests {
         let sql = where_clause_to_sql(&clause, &mut params).unwrap();
         assert_eq!(sql, "name LIKE $1");
         if let vibesql_types::SqlValue::Varchar(s) = &params[0] {
-            assert_eq!(s, "Dr.%");
+            assert_eq!(s.as_ref(), "Dr.%");
         }
     }
 
@@ -1711,7 +1711,7 @@ mod tests {
         let sql = where_clause_to_sql(&clause, &mut params).unwrap();
         assert_eq!(sql, "email LIKE $1");
         if let vibesql_types::SqlValue::Varchar(s) = &params[0] {
-            assert_eq!(s, "%@example.com");
+            assert_eq!(s.as_ref(), "%@example.com");
         }
     }
 

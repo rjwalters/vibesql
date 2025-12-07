@@ -34,7 +34,7 @@ fn test_substr_basic() {
     let results =
         execute_query(&db, "SELECT SUBSTR('hello world', 1, 5) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("hello".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
 }
 
 // Test INSTR
@@ -114,7 +114,7 @@ fn test_format_with_decimals() {
 
     let results = execute_query(&db, "SELECT FORMAT(1234567.89, 2) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("1,234,567.89".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("1,234,567.89")));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn test_format_no_decimals() {
 
     let results = execute_query(&db, "SELECT FORMAT(1000000, 0) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("1,000,000".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("1,000,000")));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn test_format_negative() {
     // Test with integer subtraction to get negative number
     let results = execute_query(&db, "SELECT FORMAT(0 - 1234, 2) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("-1,234.00".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("-1,234.00")));
 }
 
 // Test VERSION
@@ -162,7 +162,7 @@ fn test_database() {
 
     let results = execute_query(&db, "SELECT DATABASE() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("default".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("default")));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn test_schema() {
 
     let results = execute_query(&db, "SELECT SCHEMA() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("default".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("default")));
 }
 
 // Test USER/CURRENT_USER
@@ -183,7 +183,7 @@ fn test_user() {
 
     let results = execute_query(&db, "SELECT USER() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("anonymous".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("anonymous")));
 }
 
 #[test]
@@ -193,5 +193,5 @@ fn test_current_user() {
 
     let results = execute_query(&db, "SELECT CURRENT_USER() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("anonymous".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("anonymous")));
 }

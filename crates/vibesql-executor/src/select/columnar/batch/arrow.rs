@@ -144,7 +144,7 @@ fn convert_arrow_array(
                 }
             })?;
 
-            let values: Vec<String> = (0..arr.len()).map(|i| arr.value(i).to_string()).collect();
+            let values: Vec<Arc<str>> = (0..arr.len()).map(|i| Arc::from(arr.value(i))).collect();
             let nulls = if arr.null_count() > 0 {
                 Some(Arc::new((0..arr.len()).map(|i| arr.is_null(i)).collect()))
             } else {

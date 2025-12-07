@@ -164,7 +164,7 @@ mod evaluator_tests {
             vibesql_storage::Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]);
         let inner_row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(42),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]);
 
         let evaluator =
@@ -269,7 +269,7 @@ mod evaluator_tests {
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(42),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]);
 
         // Column reference with correct table qualifier
@@ -279,7 +279,7 @@ mod evaluator_tests {
         };
 
         let result = evaluator.eval(&expr, &row);
-        assert_eq!(result, Ok(SqlValue::Varchar("Alice".to_string())));
+        assert_eq!(result, Ok(SqlValue::Varchar(std::sync::Arc::from("Alice"))));
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod evaluator_tests {
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = vibesql_storage::Row::new(vec![
             SqlValue::Integer(42),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]);
 
         // Column reference with correct table but non-existent column

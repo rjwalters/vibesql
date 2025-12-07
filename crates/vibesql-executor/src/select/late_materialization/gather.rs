@@ -143,7 +143,7 @@ pub fn gather_column_array(
         }
 
         ColumnArray::String(values, nulls) => {
-            let gathered: Vec<String> =
+            let gathered: Vec<std::sync::Arc<str>> =
                 selection.iter().map(|idx| values[idx as usize].clone()).collect();
             let gathered_nulls = nulls
                 .as_ref()
@@ -152,7 +152,7 @@ pub fn gather_column_array(
         }
 
         ColumnArray::FixedString(values, nulls) => {
-            let gathered: Vec<String> =
+            let gathered: Vec<std::sync::Arc<str>> =
                 selection.iter().map(|idx| values[idx as usize].clone()).collect();
             let gathered_nulls = nulls
                 .as_ref()
@@ -395,8 +395,8 @@ mod gather_tests {
         let names = gather_single_column(&batch, &selection, 1).unwrap();
 
         assert_eq!(names.len(), 2);
-        assert_eq!(names[0], SqlValue::Varchar("Bob".into()));
-        assert_eq!(names[1], SqlValue::Varchar("Dave".into()));
+        assert_eq!(names[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+        assert_eq!(names[1], SqlValue::Varchar(std::sync::Arc::from("Dave")));
     }
 
     #[test]
@@ -436,8 +436,8 @@ mod gather_tests {
 
         assert_eq!(gathered.row_count(), 2);
         assert_eq!(gathered.column_count(), 1);
-        assert_eq!(gathered.get_value(0, 0).unwrap(), SqlValue::Varchar("Alice".into()));
-        assert_eq!(gathered.get_value(1, 0).unwrap(), SqlValue::Varchar("Eve".into()));
+        assert_eq!(gathered.get_value(0, 0).unwrap(), SqlValue::Varchar(std::sync::Arc::from("Alice")));
+        assert_eq!(gathered.get_value(1, 0).unwrap(), SqlValue::Varchar(std::sync::Arc::from("Eve")));
     }
 
     #[test]

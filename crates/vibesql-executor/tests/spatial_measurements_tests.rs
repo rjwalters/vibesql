@@ -31,12 +31,12 @@ fn test_st_distance_point_to_point() {
         args: vec![
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(0 0)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(0 0)")))],
                 character_unit: None,
             },
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(3 4)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(3 4)")))],
                 character_unit: None,
             },
         ],
@@ -59,12 +59,12 @@ fn test_st_distance_same_point() {
         args: vec![
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(1 1)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(1 1)")))],
                 character_unit: None,
             },
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(1 1)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(1 1)")))],
                 character_unit: None,
             },
         ],
@@ -86,9 +86,7 @@ fn test_st_length_linestring() {
         name: "ST_LENGTH".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(
-                "LINESTRING(0 0, 3 0, 3 4)".to_string(),
-            ))],
+            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 3 0, 3 4)")))],
             character_unit: None,
         }],
         character_unit: None,
@@ -109,9 +107,7 @@ fn test_st_area_polygon() {
         name: "ST_AREA".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(
-                "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))".to_string(),
-            ))],
+            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))],
             character_unit: None,
         }],
         character_unit: None,
@@ -134,9 +130,7 @@ fn test_st_centroid_polygon() {
             name: "ST_CENTROID".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(
-                    "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))".to_string(),
-                ))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -161,7 +155,7 @@ fn test_st_envelope() {
             name: "ST_ENVELOPE".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(5 5)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(5 5)")))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -186,7 +180,7 @@ fn test_st_null_handling_distance() {
             Expression::Literal(SqlValue::Null),
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(0 0)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(0 0)")))],
                 character_unit: None,
             },
         ],
@@ -215,9 +209,7 @@ fn test_st_perimeter_polygon() {
         name: "ST_PERIMETER".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(
-                "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))".to_string(),
-            ))],
+            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))],
             character_unit: None,
         }],
         character_unit: None,
@@ -240,9 +232,7 @@ fn test_st_convex_hull() {
             name: "ST_CONVEXHULL".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(
-                    "LINESTRING(0 0, 1 1, 0 1)".to_string(),
-                ))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 1, 0 1)")))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -267,7 +257,7 @@ fn test_st_point_on_surface_point() {
             name: "ST_POINTONSURFACE".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar("POINT(5 5)".to_string()))],
+                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(5 5)")))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -290,7 +280,7 @@ fn test_st_wrong_arity_distance() {
         name: "ST_DISTANCE".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar("POINT(0 0)".to_string()))],
+            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(0 0)")))],
             character_unit: None,
         }],
         character_unit: None,
@@ -307,7 +297,7 @@ fn test_st_wrong_type_area() {
         name: "ST_AREA".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar("POINT(5 5)".to_string()))],
+            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(5 5)")))],
             character_unit: None,
         }],
         character_unit: None,

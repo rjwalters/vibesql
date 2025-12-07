@@ -240,7 +240,7 @@ impl GroupKeySpec {
                             SqlValue::Integer(row.get_i64_unchecked(*idx))
                         }
                         DataType::Varchar { .. } | DataType::Character { .. } => {
-                            SqlValue::Varchar(row.get_string_unchecked(*idx).to_string())
+                            SqlValue::Varchar(std::sync::Arc::from(row.get_string_unchecked(*idx)))
                         }
                         DataType::DoublePrecision | DataType::Real | DataType::Decimal { .. } => {
                             SqlValue::Double(row.get_f64_unchecked(*idx))
@@ -260,13 +260,13 @@ impl GroupKeySpec {
     pub fn key_to_values(&self, key: &GroupKey) -> Vec<SqlValue> {
         match key {
             GroupKey::SingleI64(v) => vec![SqlValue::Integer(*v)],
-            GroupKey::SingleString(v) => vec![SqlValue::Varchar(v.clone())],
+            GroupKey::SingleString(v) => vec![SqlValue::Varchar(std::sync::Arc::from(v.clone()))],
             GroupKey::TwoChars(a, b) => vec![
-                SqlValue::Varchar(String::from_utf8_lossy(&[*a]).into_owned()),
-                SqlValue::Varchar(String::from_utf8_lossy(&[*b]).into_owned()),
+                SqlValue::Varchar(std::sync::Arc::from(String::from_utf8_lossy(&[*a]).into_owned())),
+                SqlValue::Varchar(std::sync::Arc::from(String::from_utf8_lossy(&[*b]).into_owned())),
             ],
             GroupKey::TwoI64(a, b) => vec![SqlValue::Integer(*a), SqlValue::Integer(*b)],
-            GroupKey::I64String(i, s) => vec![SqlValue::Integer(*i), SqlValue::Varchar(s.clone())],
+            GroupKey::I64String(i, s) => vec![SqlValue::Integer(*i), SqlValue::Varchar(std::sync::Arc::from(s.clone()))],
             GroupKey::ThreeI64(a, b, c) => {
                 vec![SqlValue::Integer(*a), SqlValue::Integer(*b), SqlValue::Integer(*c)]
             }
@@ -415,7 +415,7 @@ impl GroupKeySpec {
                             return GroupKey::Generic(vec![SqlValue::Null]);
                         }
                     }
-                    return GroupKey::SingleString(values[row_idx].clone());
+                    return GroupKey::SingleString(values[row_idx].to_string());
                 }
                 if let Some(ColumnArray::FixedString(values, nulls)) = batch.column(*col_idx) {
                     if let Some(null_mask) = nulls {
@@ -423,7 +423,7 @@ impl GroupKeySpec {
                             return GroupKey::Generic(vec![SqlValue::Null]);
                         }
                     }
-                    return GroupKey::SingleString(values[row_idx].clone());
+                    return GroupKey::SingleString(values[row_idx].to_string());
                 }
                 // Fallback
                 batch
@@ -495,10 +495,10 @@ impl GroupKeySpec {
     #[inline]
     fn extract_string(batch: &ColumnarBatch, col_idx: usize, row_idx: usize) -> String {
         if let Some(ColumnArray::String(values, _)) = batch.column(col_idx) {
-            return values[row_idx].clone();
+            return values[row_idx].to_string();
         }
         if let Some(ColumnArray::FixedString(values, _)) = batch.column(col_idx) {
-            return values[row_idx].clone();
+            return values[row_idx].to_string();
         }
         String::new()
     }
@@ -556,8 +556,8 @@ mod tests {
         let values = spec.key_to_values(&key);
 
         assert_eq!(values.len(), 2);
-        assert_eq!(values[0], SqlValue::Varchar("A".to_string()));
-        assert_eq!(values[1], SqlValue::Varchar("F".to_string()));
+        assert_eq!(values[0], SqlValue::Varchar(std::sync::Arc::from("A")));
+        assert_eq!(values[1], SqlValue::Varchar(std::sync::Arc::from("F")));
     }
 
     #[test]
@@ -566,9 +566,9 @@ mod tests {
 
         // Create a batch with string columns (like TPC-H Q1: l_returnflag, l_linestatus)
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Varchar("F".to_string())]),
-            Row::new(vec![SqlValue::Varchar("N".to_string()), SqlValue::Varchar("O".to_string())]),
-            Row::new(vec![SqlValue::Varchar("R".to_string()), SqlValue::Varchar("F".to_string())]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Varchar(std::sync::Arc::from("F"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("N")), SqlValue::Varchar(std::sync::Arc::from("O"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("R")), SqlValue::Varchar(std::sync::Arc::from("F"))]),
         ];
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
 

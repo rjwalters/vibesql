@@ -58,50 +58,50 @@ pub fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Beverages".to_string()),
-            SqlValue::Varchar("Soft drinks, coffees, teas, beers, and ales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Beverages")),
+            SqlValue::Varchar(std::sync::Arc::from("Soft drinks, coffees, teas, beers, and ales")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Condiments".to_string()),
-            SqlValue::Varchar("Sweet and savory sauces".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Condiments")),
+            SqlValue::Varchar(std::sync::Arc::from("Sweet and savory sauces")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Confections".to_string()),
-            SqlValue::Varchar("Desserts and candies".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Confections")),
+            SqlValue::Varchar(std::sync::Arc::from("Desserts and candies")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Dairy Products".to_string()),
-            SqlValue::Varchar("Cheeses".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Dairy Products")),
+            SqlValue::Varchar(std::sync::Arc::from("Cheeses")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar("Meat/Poultry".to_string()),
-            SqlValue::Varchar("Prepared meats".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Meat/Poultry")),
+            SqlValue::Varchar(std::sync::Arc::from("Prepared meats")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar("Produce".to_string()),
-            SqlValue::Varchar("Dried fruit and bean curd".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Produce")),
+            SqlValue::Varchar(std::sync::Arc::from("Dried fruit and bean curd")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar("Seafood".to_string()),
-            SqlValue::Varchar("Seaweed and fish".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Seafood")),
+            SqlValue::Varchar(std::sync::Arc::from("Seaweed and fish")),
         ]))
         .unwrap();
 
@@ -111,7 +111,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Chai".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chai")),
             SqlValue::Integer(1),
             SqlValue::Float(18.0),
             SqlValue::Integer(39),
@@ -122,7 +122,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Chang".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chang")),
             SqlValue::Integer(1),
             SqlValue::Float(19.0),
             SqlValue::Integer(17),
@@ -133,7 +133,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Aniseed Syrup".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Aniseed Syrup")),
             SqlValue::Integer(2),
             SqlValue::Float(10.0),
             SqlValue::Integer(13),
@@ -144,7 +144,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Chef Anton's Cajun Seasoning".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chef Anton's Cajun Seasoning")),
             SqlValue::Integer(2),
             SqlValue::Float(22.0),
             SqlValue::Integer(53),
@@ -155,7 +155,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Chef Anton's Gumbo Mix".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chef Anton's Gumbo Mix")),
             SqlValue::Integer(2),
             SqlValue::Float(21.35),
             SqlValue::Integer(0),
@@ -167,7 +167,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar("Mishi Kobe Niku".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Mishi Kobe Niku")),
             SqlValue::Integer(3),
             SqlValue::Float(97.0),
             SqlValue::Integer(29),
@@ -178,7 +178,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar("Sir Rodney's Marmalade".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sir Rodney's Marmalade")),
             SqlValue::Integer(3),
             SqlValue::Float(81.0),
             SqlValue::Integer(40),
@@ -189,7 +189,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar("Carnarvon Tigers".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Carnarvon Tigers")),
             SqlValue::Integer(3),
             SqlValue::Float(62.5),
             SqlValue::Integer(42),
@@ -200,7 +200,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(9),
-            SqlValue::Varchar("Northwoods Cranberry Sauce".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Northwoods Cranberry Sauce")),
             SqlValue::Integer(2),
             SqlValue::Float(40.0),
             SqlValue::Integer(6),
@@ -211,7 +211,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(10),
-            SqlValue::Varchar("Alice Mutton".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice Mutton")),
             SqlValue::Integer(3),
             SqlValue::Float(39.0),
             SqlValue::Integer(0),
@@ -222,7 +222,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(11),
-            SqlValue::Varchar("Queso Manchego La Pastora".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Queso Manchego La Pastora")),
             SqlValue::Integer(2),
             SqlValue::Float(38.0),
             SqlValue::Integer(86),
@@ -233,7 +233,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(12),
-            SqlValue::Varchar("Ikura".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Ikura")),
             SqlValue::Integer(3),
             SqlValue::Float(31.0),
             SqlValue::Integer(31),
@@ -244,7 +244,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(13),
-            SqlValue::Varchar("Grandma's Boysenberry Spread".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Grandma's Boysenberry Spread")),
             SqlValue::Integer(2),
             SqlValue::Float(25.0),
             SqlValue::Integer(120),
@@ -255,7 +255,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(14),
-            SqlValue::Varchar("Tofu".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Tofu")),
             SqlValue::Integer(1),
             SqlValue::Float(23.25),
             SqlValue::Integer(35),
@@ -266,7 +266,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(15),
-            SqlValue::Varchar("Queso Cabrales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Queso Cabrales")),
             SqlValue::Integer(2),
             SqlValue::Float(21.0),
             SqlValue::Integer(22),
@@ -278,7 +278,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(16),
-            SqlValue::Varchar("Pavlova".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Pavlova")),
             SqlValue::Integer(3),
             SqlValue::Float(17.45),
             SqlValue::Integer(29),
@@ -289,7 +289,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(17),
-            SqlValue::Varchar("Raclette Courdavault".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Raclette Courdavault")),
             SqlValue::Integer(4),
             SqlValue::Float(15.0),
             SqlValue::Integer(79),
@@ -300,7 +300,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(18),
-            SqlValue::Varchar("Perth Pasties".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Perth Pasties")),
             SqlValue::Integer(6),
             SqlValue::Float(12.8),
             SqlValue::Integer(0),
@@ -311,7 +311,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(19),
-            SqlValue::Varchar("Manjimup Dried Apples".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Manjimup Dried Apples")),
             SqlValue::Integer(7),
             SqlValue::Float(18.0),
             SqlValue::Integer(20),
@@ -322,7 +322,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(20),
-            SqlValue::Varchar("Inlagd Sill".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Inlagd Sill")),
             SqlValue::Integer(8),
             SqlValue::Float(19.0),
             SqlValue::Integer(112),
@@ -421,36 +421,36 @@ pub fn create_employees_db() -> Database {
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineering".to_string()),
-            SqlValue::Varchar("San Francisco".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
+            SqlValue::Varchar(std::sync::Arc::from("San Francisco")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Sales".to_string()),
-            SqlValue::Varchar("New York".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
+            SqlValue::Varchar(std::sync::Arc::from("New York")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Marketing".to_string()),
-            SqlValue::Varchar("Los Angeles".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing")),
+            SqlValue::Varchar(std::sync::Arc::from("Los Angeles")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Human Resources".to_string()),
-            SqlValue::Varchar("Chicago".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Human Resources")),
+            SqlValue::Varchar(std::sync::Arc::from("Chicago")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Operations".to_string()),
-            SqlValue::Varchar("Seattle".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Operations")),
+            SqlValue::Varchar(std::sync::Arc::from("Seattle")),
         ]))
         .unwrap();
 
@@ -459,7 +459,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Cloud Migration".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Cloud Migration")),
             SqlValue::Integer(1),
             SqlValue::Integer(500000),
         ]))
@@ -467,7 +467,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Mobile App".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Mobile App")),
             SqlValue::Integer(1),
             SqlValue::Integer(350000),
         ]))
@@ -475,7 +475,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Data Analytics Platform".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Data Analytics Platform")),
             SqlValue::Integer(1),
             SqlValue::Integer(220000),
         ]))
@@ -483,7 +483,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Marketing Campaign".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing Campaign")),
             SqlValue::Integer(3),
             SqlValue::Integer(150000),
         ]))
@@ -491,7 +491,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Brand Redesign".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Brand Redesign")),
             SqlValue::Integer(3),
             SqlValue::Integer(125000),
         ]))
@@ -499,7 +499,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar("CRM Implementation".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("CRM Implementation")),
             SqlValue::Integer(2),
             SqlValue::Integer(150000),
         ]))
@@ -507,7 +507,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar("HR System Upgrade".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("HR System Upgrade")),
             SqlValue::Integer(4),
             SqlValue::Integer(75000),
         ]))
@@ -515,7 +515,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar("Warehouse Automation".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Warehouse Automation")),
             SqlValue::Integer(5),
             SqlValue::Integer(410000),
         ]))
@@ -530,14 +530,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
-            SqlValue::Varchar("Johnson".to_string()),
-            SqlValue::Varchar("Alice Johnson".to_string()),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(std::sync::Arc::from("Johnson")),
+            SqlValue::Varchar(std::sync::Arc::from("Alice Johnson")),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Senior Engineer".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Senior Engineer")),
             SqlValue::Float(95000.0),
-            SqlValue::Varchar("2020-01-15".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2020-01-15")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -546,14 +546,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
-            SqlValue::Varchar("Smith".to_string()),
-            SqlValue::Varchar("Bob Smith".to_string()),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(std::sync::Arc::from("Bob Smith")),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar("Sales Manager".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales Manager")),
             SqlValue::Float(85000.0),
-            SqlValue::Varchar("2019-03-22".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2019-03-22")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -562,14 +562,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Integer(3),
-            SqlValue::Varchar("Carol".to_string()),
-            SqlValue::Varchar("White".to_string()),
-            SqlValue::Varchar("Carol White".to_string()),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Carol")),
+            SqlValue::Varchar(std::sync::Arc::from("White")),
+            SqlValue::Varchar(std::sync::Arc::from("Carol White")),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineer".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineer")),
             SqlValue::Float(75000.0),
-            SqlValue::Varchar("2021-06-10".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2021-06-10")),
             SqlValue::Integer(1),
         ]))
         .unwrap();
@@ -578,14 +578,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(4),
             SqlValue::Integer(4),
-            SqlValue::Varchar("David".to_string()),
-            SqlValue::Varchar("Brown".to_string()),
-            SqlValue::Varchar("David Brown".to_string()),
-            SqlValue::Varchar("Marketing".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("David")),
+            SqlValue::Varchar(std::sync::Arc::from("Brown")),
+            SqlValue::Varchar(std::sync::Arc::from("David Brown")),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing")),
             SqlValue::Integer(3),
-            SqlValue::Varchar("Marketing Specialist".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing Specialist")),
             SqlValue::Float(65000.0),
-            SqlValue::Varchar("2022-01-05".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2022-01-05")),
             SqlValue::Integer(7),
         ]))
         .unwrap();
@@ -594,14 +594,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(5),
             SqlValue::Integer(5),
-            SqlValue::Varchar("Eve".to_string()),
-            SqlValue::Varchar("Martinez".to_string()),
-            SqlValue::Varchar("Eve Martinez".to_string()),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Eve")),
+            SqlValue::Varchar(std::sync::Arc::from("Martinez")),
+            SqlValue::Varchar(std::sync::Arc::from("Eve Martinez")),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Senior Engineer".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Senior Engineer")),
             SqlValue::Float(110000.0),
-            SqlValue::Varchar("2018-09-12".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2018-09-12")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -610,14 +610,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(6),
             SqlValue::Integer(6),
-            SqlValue::Varchar("Frank".to_string()),
-            SqlValue::Varchar("Wilson".to_string()),
-            SqlValue::Varchar("Frank Wilson".to_string()),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Frank")),
+            SqlValue::Varchar(std::sync::Arc::from("Wilson")),
+            SqlValue::Varchar(std::sync::Arc::from("Frank Wilson")),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar("Sales Representative".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales Representative")),
             SqlValue::Float(55000.0),
-            SqlValue::Varchar("2021-11-20".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2021-11-20")),
             SqlValue::Integer(2),
         ]))
         .unwrap();
@@ -626,14 +626,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(7),
             SqlValue::Integer(7),
-            SqlValue::Varchar("Grace".to_string()),
-            SqlValue::Varchar("Taylor".to_string()),
-            SqlValue::Varchar("Grace Taylor".to_string()),
-            SqlValue::Varchar("Marketing".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Grace")),
+            SqlValue::Varchar(std::sync::Arc::from("Taylor")),
+            SqlValue::Varchar(std::sync::Arc::from("Grace Taylor")),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing")),
             SqlValue::Integer(3),
-            SqlValue::Varchar("Marketing Manager".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing Manager")),
             SqlValue::Float(90000.0),
-            SqlValue::Varchar("2019-07-08".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2019-07-08")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -642,14 +642,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(8),
             SqlValue::Integer(8),
-            SqlValue::Varchar("Henry".to_string()),
-            SqlValue::Varchar("Anderson".to_string()),
-            SqlValue::Varchar("Henry Anderson".to_string()),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Henry")),
+            SqlValue::Varchar(std::sync::Arc::from("Anderson")),
+            SqlValue::Varchar(std::sync::Arc::from("Henry Anderson")),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineer".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineer")),
             SqlValue::Float(80000.0),
-            SqlValue::Varchar("2020-12-01".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2020-12-01")),
             SqlValue::Integer(1),
         ]))
         .unwrap();
@@ -659,14 +659,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(9),
             SqlValue::Integer(9),
-            SqlValue::Varchar("Maria".to_string()),
-            SqlValue::Varchar("Clark".to_string()),
-            SqlValue::Varchar("Maria Clark".to_string()),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Maria")),
+            SqlValue::Varchar(std::sync::Arc::from("Clark")),
+            SqlValue::Varchar(std::sync::Arc::from("Maria Clark")),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar("Sales Representative".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales Representative")),
             SqlValue::Float(58000.0),
-            SqlValue::Varchar("2022-04-15".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2022-04-15")),
             SqlValue::Integer(2),
         ]))
         .unwrap();
@@ -675,14 +675,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(10),
             SqlValue::Integer(10),
-            SqlValue::Varchar("Nathan".to_string()),
-            SqlValue::Varchar("Lewis".to_string()),
-            SqlValue::Varchar("Nathan Lewis".to_string()),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Nathan")),
+            SqlValue::Varchar(std::sync::Arc::from("Lewis")),
+            SqlValue::Varchar(std::sync::Arc::from("Nathan Lewis")),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar("Senior Engineer".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Senior Engineer")),
             SqlValue::Float(105000.0),
-            SqlValue::Varchar("2019-05-18".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2019-05-18")),
             SqlValue::Integer(5),
         ]))
         .unwrap();
@@ -691,14 +691,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(11),
             SqlValue::Integer(11),
-            SqlValue::Varchar("Olivia".to_string()),
-            SqlValue::Varchar("Walker".to_string()),
-            SqlValue::Varchar("Olivia Walker".to_string()),
-            SqlValue::Varchar("Marketing".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Olivia")),
+            SqlValue::Varchar(std::sync::Arc::from("Walker")),
+            SqlValue::Varchar(std::sync::Arc::from("Olivia Walker")),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing")),
             SqlValue::Integer(3),
-            SqlValue::Varchar("Marketing Specialist".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Marketing Specialist")),
             SqlValue::Float(67000.0),
-            SqlValue::Varchar("2021-08-22".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2021-08-22")),
             SqlValue::Integer(7),
         ]))
         .unwrap();
@@ -707,14 +707,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(12),
             SqlValue::Integer(12),
-            SqlValue::Varchar("Paul".to_string()),
-            SqlValue::Varchar("Hall".to_string()),
-            SqlValue::Varchar("Paul Hall".to_string()),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Paul")),
+            SqlValue::Varchar(std::sync::Arc::from("Hall")),
+            SqlValue::Varchar(std::sync::Arc::from("Paul Hall")),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar("Sales Representative".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales Representative")),
             SqlValue::Float(56000.0),
-            SqlValue::Varchar("2023-02-10".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("2023-02-10")),
             SqlValue::Integer(2),
         ]))
         .unwrap();
@@ -801,8 +801,8 @@ pub fn create_university_db() -> Database {
         students_table
             .insert(Row::new(vec![
                 SqlValue::Integer(i),
-                SqlValue::Varchar(name.to_string()),
-                SqlValue::Varchar(major.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
+                SqlValue::Varchar(std::sync::Arc::from(major)),
                 SqlValue::Float(gpa),
             ]))
             .unwrap();
@@ -826,8 +826,8 @@ pub fn create_university_db() -> Database {
         courses_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(name.to_string()),
-                SqlValue::Varchar(dept.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(name)),
+                SqlValue::Varchar(std::sync::Arc::from(dept)),
                 SqlValue::Integer(credits),
             ]))
             .unwrap();
@@ -859,8 +859,8 @@ pub fn create_university_db() -> Database {
                 .insert(Row::new(vec![
                     SqlValue::Integer(student_id),
                     SqlValue::Integer(course_id),
-                    SqlValue::Varchar(grade.to_string()),
-                    SqlValue::Varchar("Fall 2024".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from(grade)),
+                    SqlValue::Varchar(std::sync::Arc::from("Fall 2024")),
                 ]))
                 .unwrap();
 
@@ -877,7 +877,7 @@ pub fn create_university_db() -> Database {
                 SqlValue::Integer(student_id),
                 SqlValue::Integer(course_id),
                 SqlValue::Null,
-                SqlValue::Varchar("Spring 2025".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Spring 2025")),
             ]))
             .unwrap();
     }

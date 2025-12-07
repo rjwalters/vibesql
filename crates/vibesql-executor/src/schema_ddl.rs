@@ -176,7 +176,7 @@ impl SchemaExecutor {
             // Extract the mode string from the value
             let mode_str = match &value {
                 vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                    s.clone()
+                    s.to_string()
                 }
                 other => other.to_string(),
             };

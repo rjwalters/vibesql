@@ -3,6 +3,8 @@
 //! This module handles bidirectional conversion of values between Python
 //! and Rust SqlValue types, supporting DB-API 2.0 conventions.
 
+use std::sync::Arc;
+
 use pyo3::{prelude::*, types::PyTuple};
 
 use crate::ProgrammingError;
@@ -85,7 +87,7 @@ pub fn py_to_sqlvalue(_py: Python, obj: &Bound<'_, PyAny>) -> PyResult<vibesql_t
 
     // 3. String types
     if let Ok(val) = obj.extract::<String>() {
-        return Ok(vibesql_types::SqlValue::Varchar(val));
+        return Ok(vibesql_types::SqlValue::Varchar(Arc::from(val)));
     }
 
     // 4. Boolean types

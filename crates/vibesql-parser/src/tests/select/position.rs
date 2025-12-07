@@ -23,14 +23,14 @@ fn test_parse_position_basic() {
                         assert_eq!(
                             **substring,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "lo".to_string()
+                                std::sync::Arc::from("lo")
                             ))
                         );
                         // Check string
                         assert_eq!(
                             **string,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "hello".to_string()
+                                std::sync::Arc::from("hello")
                             ))
                         );
                     }
@@ -59,13 +59,13 @@ fn test_parse_position_substring_found() {
                         assert_eq!(
                             **substring,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "world".to_string()
+                                std::sync::Arc::from("world")
                             ))
                         );
                         assert_eq!(
                             **string,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "hello world".to_string()
+                                std::sync::Arc::from("hello world")
                             ))
                         );
                     }
@@ -95,7 +95,7 @@ fn test_parse_position_with_column() {
                         assert_eq!(
                             **substring,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "x".to_string()
+                                std::sync::Arc::from("x")
                             ))
                         );
                         assert_eq!(
@@ -170,7 +170,7 @@ fn test_parse_position_with_function() {
                         assert_eq!(
                             **substring,
                             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                                "a".to_string()
+                                std::sync::Arc::from("a")
                             ))
                         );
                         // Check that string is a Function expression

@@ -140,7 +140,7 @@ pub fn sql_value_to_json(val: &SqlValue) -> JsonValue {
                 json!(*f)
             }
         }
-        SqlValue::Character(s) | SqlValue::Varchar(s) => JsonValue::String(s.clone()),
+        SqlValue::Character(s) | SqlValue::Varchar(s) => JsonValue::String(s.to_string()),
         SqlValue::Timestamp(ts) => JsonValue::String(format!("{:?}", ts)),
         SqlValue::Date(d) => JsonValue::String(format!("{:?}", d)),
         SqlValue::Time(t) => JsonValue::String(format!("{:?}", t)),
@@ -163,7 +163,7 @@ pub fn json_to_sql_value(val: &JsonValue) -> Result<SqlValue, String> {
                 Err("Invalid number".to_string())
             }
         }
-        JsonValue::String(s) => Ok(SqlValue::Varchar(s.clone())),
+        JsonValue::String(s) => Ok(SqlValue::Varchar(std::sync::Arc::from(s.clone()))),
         JsonValue::Array(_) => Err("Arrays not yet supported".to_string()),
         JsonValue::Object(_) => Err("Objects not yet supported".to_string()),
     }

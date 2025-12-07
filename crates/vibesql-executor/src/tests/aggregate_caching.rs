@@ -209,16 +209,16 @@ fn test_cache_cleared_between_groups() {
     db.insert_row(
         "items",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Varchar("A".to_string()),
-            vibesql_types::SqlValue::Varchar("item1".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("A")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("item1")),
         ]),
     )
     .unwrap();
     db.insert_row(
         "items",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Varchar("A".to_string()),
-            vibesql_types::SqlValue::Varchar("item2".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("A")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("item2")),
         ]),
     )
     .unwrap();
@@ -227,24 +227,24 @@ fn test_cache_cleared_between_groups() {
     db.insert_row(
         "items",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Varchar("B".to_string()),
-            vibesql_types::SqlValue::Varchar("item3".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("B")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("item3")),
         ]),
     )
     .unwrap();
     db.insert_row(
         "items",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Varchar("B".to_string()),
-            vibesql_types::SqlValue::Varchar("item4".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("B")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("item4")),
         ]),
     )
     .unwrap();
     db.insert_row(
         "items",
         vibesql_storage::Row::new(vec![
-            vibesql_types::SqlValue::Varchar("B".to_string()),
-            vibesql_types::SqlValue::Varchar("item5".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("B")),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("item5")),
         ]),
     )
     .unwrap();
@@ -305,11 +305,11 @@ fn test_cache_cleared_between_groups() {
     assert_eq!(result.len(), 2);
 
     // Category A: COUNT(*) = 2, so 2 + 2 = 4
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("A".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("A")));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(4));
 
     // Category B: COUNT(*) = 3, so 3 + 3 = 6
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar("B".to_string()));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("B")));
     assert_eq!(result[1].values[1], vibesql_types::SqlValue::Integer(6));
 }
 

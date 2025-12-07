@@ -332,10 +332,10 @@ mod tests {
         );
 
         let rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("active".to_string())]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("inactive".to_string())]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("active".to_string())]),
-            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("active".to_string())]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("active"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("inactive"))]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("active"))]),
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("active"))]),
             Row::new(vec![SqlValue::Integer(5), SqlValue::Null]),
         ];
 
@@ -350,7 +350,7 @@ mod tests {
         let pred = Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-            right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))),
         };
 
         let selectivity = estimate_selectivity(&pred, &stats);
@@ -367,7 +367,7 @@ mod tests {
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-                right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
@@ -398,7 +398,7 @@ mod tests {
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-                right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
@@ -424,8 +424,8 @@ mod tests {
         let pred = Expression::InList {
             expr: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
             values: vec![
-                Expression::Literal(SqlValue::Varchar("active".to_string())),
-                Expression::Literal(SqlValue::Varchar("inactive".to_string())),
+                Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active"))),
+                Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("inactive"))),
             ],
             negated: false,
         };
@@ -443,7 +443,7 @@ mod tests {
         // NDV for status is 2, so selectivity = 1/2 = 0.5
         let pred_single = Expression::InList {
             expr: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-            values: vec![Expression::Literal(SqlValue::Varchar("active".to_string()))],
+            values: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))],
             negated: false,
         };
 
@@ -471,7 +471,7 @@ mod tests {
                         table: None,
                         column: "status".to_string(),
                     }),
-                    right: Box::new(Expression::Literal(SqlValue::Varchar("active".to_string()))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))),
                 }),
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
@@ -479,7 +479,7 @@ mod tests {
                         table: None,
                         column: "status".to_string(),
                     }),
-                    right: Box::new(Expression::Literal(SqlValue::Varchar("inactive".to_string()))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("inactive")))),
                 }),
             }),
             right: Box::new(Expression::BinaryOp {

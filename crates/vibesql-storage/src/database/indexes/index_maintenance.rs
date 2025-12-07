@@ -41,6 +41,7 @@ pub(super) fn apply_prefix_truncation(value: &SqlValue, prefix_length: Option<u6
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             // Take first N characters (UTF-8 aware)
             let truncated: String = s.chars().take(prefix_len as usize).collect();
+            let truncated = std::sync::Arc::<str>::from(truncated);
             // Return same type as input
             match value {
                 SqlValue::Varchar(_) => SqlValue::Varchar(truncated),

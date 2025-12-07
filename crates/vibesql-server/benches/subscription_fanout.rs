@@ -227,7 +227,7 @@ fn bench_channel_fanout(c: &mut Criterion) {
                 },
                 |(senders, receivers)| async move {
                     // Benchmark: send to all channels
-                    let update = SubscriptionUpdate::Full { rows: vec![] };
+                    let update = SubscriptionUpdate::Full { subscription_id: SubscriptionId::new(), rows: vec![] };
                     for sender in &senders {
                         let _ = sender.try_send(update.clone());
                     }

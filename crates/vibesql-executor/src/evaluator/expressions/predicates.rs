@@ -136,7 +136,7 @@ impl ExpressionEvaluator<'_> {
                 | vibesql_types::SqlValue::Character(needle),
                 vibesql_types::SqlValue::Varchar(haystack)
                 | vibesql_types::SqlValue::Character(haystack),
-            ) => match haystack.find(needle.as_str()) {
+            ) => match haystack.find(&**needle) {
                 Some(pos) => Ok(vibesql_types::SqlValue::Integer((pos + 1) as i64)),
                 None => Ok(vibesql_types::SqlValue::Integer(0)),
             },
@@ -168,7 +168,7 @@ impl ExpressionEvaluator<'_> {
         // Extract the string value
         let s = match &string_val {
             vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                s.as_str()
+                &**s
             }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
@@ -190,7 +190,7 @@ impl ExpressionEvaluator<'_> {
             }
 
             match removal_val {
-                vibesql_types::SqlValue::Varchar(c) | vibesql_types::SqlValue::Character(c) => c,
+                vibesql_types::SqlValue::Varchar(c) | vibesql_types::SqlValue::Character(c) => c.to_string(),
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
                         left: removal_val.clone(),
@@ -236,7 +236,7 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
-        Ok(vibesql_types::SqlValue::Varchar(result))
+        Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
     }
 
     /// Evaluate EXTRACT expression

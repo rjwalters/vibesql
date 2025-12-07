@@ -12,6 +12,7 @@
 //! this is used to track which queries a specific client is subscribed to.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -612,10 +613,10 @@ mod tests {
         // Store a result
         let rows = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
             },
             crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Bob"))],
             },
         ];
         manager.update_result(&id, 12345, rows.clone());
@@ -660,7 +661,7 @@ mod tests {
 
         // Store initial result
         let initial_rows = vec![crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         }];
         manager.update_result(&id, 11111, initial_rows);
 
@@ -672,10 +673,10 @@ mod tests {
         // Update with new result
         let new_rows = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
             },
             crate::Row {
-                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Bob"))],
             },
         ];
         manager.update_result(&id, 22222, new_rows);

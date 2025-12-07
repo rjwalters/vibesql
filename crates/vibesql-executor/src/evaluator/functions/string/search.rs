@@ -28,7 +28,7 @@ pub(in crate::evaluator::functions) fn position(
             | vibesql_types::SqlValue::Character(haystack),
         ) => {
             // Find returns 0-indexed position, SQL needs 1-indexed
-            match haystack.find(needle.as_str()) {
+            match haystack.find(&**needle) {
                 Some(pos) => Ok(vibesql_types::SqlValue::Integer((pos + 1) as i64)),
                 None => Ok(vibesql_types::SqlValue::Integer(0)),
             }
@@ -63,7 +63,7 @@ pub(in crate::evaluator::functions) fn instr(
         ) => {
             // Find returns 0-indexed position, convert to 1-indexed
             // Return 0 if not found (SQL convention)
-            let position = haystack.find(needle.as_str()).map(|pos| (pos + 1) as i64).unwrap_or(0);
+            let position = haystack.find(&**needle).map(|pos| (pos + 1) as i64).unwrap_or(0);
             Ok(vibesql_types::SqlValue::Integer(position))
         }
         (haystack, needle) => Err(ExecutorError::UnsupportedFeature(format!(
@@ -117,7 +117,7 @@ pub(in crate::evaluator::functions) fn locate(
             let position = if start_pos >= haystack.len() {
                 0 // Start beyond string length -> not found
             } else {
-                haystack[start_pos..].find(needle.as_str())
+                haystack[start_pos..].find(&**needle)
                     .map(|pos| (pos + start_pos + 1) as i64) // Convert to 1-indexed
                     .unwrap_or(0)
             };

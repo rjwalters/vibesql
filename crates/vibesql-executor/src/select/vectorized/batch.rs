@@ -433,7 +433,7 @@ fn arrow_value_to_sql(array: &dyn Array, idx: usize) -> Result<SqlValue, Executo
                     context: "arrow_value_to_sql".to_string(),
                 }
             })?;
-            Ok(SqlValue::Varchar(arr.value(idx).to_string()))
+            Ok(SqlValue::Varchar(std::sync::Arc::from(arr.value(idx))))
         }
         DataType::Boolean => {
             let arr = array.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
@@ -479,8 +479,8 @@ mod tests {
     #[test]
     fn test_rows_to_record_batch_basic() {
         let rows = vec![
-            Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar("hello".to_string())] },
-            Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("world".to_string())] },
+            Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("hello"))] },
+            Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("world"))] },
         ];
 
         let column_names = vec!["id".to_string(), "name".to_string()];
@@ -497,7 +497,7 @@ mod tests {
                 values: vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(3.5),
-                    SqlValue::Varchar("test".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
                 ],
             },
@@ -505,7 +505,7 @@ mod tests {
                 values: vec![
                     SqlValue::Integer(2),
                     SqlValue::Double(2.5),
-                    SqlValue::Varchar("data".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("data")),
                     SqlValue::Boolean(false),
                 ],
             },
@@ -529,7 +529,7 @@ mod tests {
                 values: vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(3.5),
-                    SqlValue::Varchar("test".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
                 ],
             },
@@ -537,7 +537,7 @@ mod tests {
                 values: vec![
                     SqlValue::Integer(2),
                     SqlValue::Double(2.5),
-                    SqlValue::Varchar("data".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("data")),
                     SqlValue::Boolean(false),
                 ],
             },
@@ -721,7 +721,7 @@ mod tests {
                 values: vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(1.1),
-                    SqlValue::Varchar("test".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("test")),
                     SqlValue::Boolean(true),
                 ],
             },
@@ -730,7 +730,7 @@ mod tests {
                 values: vec![
                     SqlValue::Integer(3),
                     SqlValue::Double(3.3),
-                    SqlValue::Varchar("data".to_string()),
+                    SqlValue::Varchar(std::sync::Arc::from("data")),
                     SqlValue::Boolean(false),
                 ],
             },

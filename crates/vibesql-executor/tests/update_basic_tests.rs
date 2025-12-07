@@ -44,7 +44,7 @@ fn test_update_with_where_clause() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef { table: None, column: "department".to_string() }),
             op: BinaryOperator::Equal,
-            right: Box::new(Expression::Literal(SqlValue::Varchar("Engineering".to_string()))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Engineering")))),
         })),
     };
 
@@ -77,7 +77,7 @@ fn test_update_multiple_columns() {
             },
             Assignment {
                 column: "department".to_string(),
-                value: Expression::Literal(SqlValue::Varchar("Sales".to_string())),
+                value: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sales"))),
             },
         ],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -94,7 +94,7 @@ fn test_update_multiple_columns() {
     let table = db.get_table("employees").unwrap();
     let row = &table.scan()[0];
     assert_eq!(row.get(2).unwrap(), &SqlValue::Integer(55000));
-    assert_eq!(row.get(3).unwrap(), &SqlValue::Varchar("Sales".to_string()));
+    assert_eq!(row.get(3).unwrap(), &SqlValue::Varchar(std::sync::Arc::from("Sales")));
 }
 
 #[test]

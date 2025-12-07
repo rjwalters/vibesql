@@ -123,8 +123,8 @@ mod tests {
     #[test]
     fn test_string_column() {
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("Alice".to_string())]),
-            Row::new(vec![SqlValue::Varchar("Bob".to_string())]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
             Row::new(vec![SqlValue::Null]),
         ];
 
@@ -164,12 +164,12 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Double(3.14),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Null,
-                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Bob")),
             ]),
             Row::new(vec![SqlValue::Integer(3), SqlValue::Double(2.71), SqlValue::Null]),
         ];

@@ -33,8 +33,8 @@ pub(in crate::evaluator::functions) fn substring(
     // Extract string - supports implicit coercion from Date/Timestamp to string
     // This enables TPC-H Q9 pattern: SUBSTR(o_orderdate, 1, 4) to extract year
     let s: Cow<str> = match string_val {
-        vibesql_types::SqlValue::Varchar(s) => Cow::Borrowed(s.as_str()),
-        vibesql_types::SqlValue::Character(s) => Cow::Borrowed(s.as_str()),
+        vibesql_types::SqlValue::Varchar(s) => Cow::Borrowed(&**s),
+        vibesql_types::SqlValue::Character(s) => Cow::Borrowed(&**s),
         vibesql_types::SqlValue::Date(d) => Cow::Owned(d.to_string()),
         vibesql_types::SqlValue::Timestamp(ts) => Cow::Owned(ts.to_string()),
         _ => {
@@ -98,7 +98,7 @@ pub(in crate::evaluator::functions) fn substring(
         s[start_idx..].to_string()
     };
 
-    Ok(vibesql_types::SqlValue::Varchar(result))
+    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
 }
 
 /// LEFT(string, n) - Leftmost n characters
@@ -121,11 +121,11 @@ pub(in crate::evaluator::functions) fn left(
             vibesql_types::SqlValue::Integer(n),
         ) => {
             if *n < 0 {
-                Ok(vibesql_types::SqlValue::Varchar(String::new()))
+                Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")))
             } else {
                 let n_usize = *n as usize;
                 let result: String = s.chars().take(n_usize).collect();
-                Ok(vibesql_types::SqlValue::Varchar(result))
+                Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
             }
         }
         (a, b) => Err(ExecutorError::UnsupportedFeature(format!(
@@ -155,7 +155,7 @@ pub(in crate::evaluator::functions) fn right(
             vibesql_types::SqlValue::Integer(n),
         ) => {
             if *n < 0 {
-                Ok(vibesql_types::SqlValue::Varchar(String::new()))
+                Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")))
             } else {
                 let n_usize = *n as usize;
                 let char_count = s.chars().count();
@@ -164,7 +164,7 @@ pub(in crate::evaluator::functions) fn right(
                 } else {
                     let skip_count = char_count - n_usize;
                     let result: String = s.chars().skip(skip_count).collect();
-                    Ok(vibesql_types::SqlValue::Varchar(result))
+                    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
                 }
             }
         }

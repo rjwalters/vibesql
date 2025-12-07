@@ -89,15 +89,15 @@ fn test_double_nan_hash() {
 
 #[test]
 fn test_varchar_hash() {
-    let v1 = SqlValue::Varchar("hello".to_string());
-    let v2 = SqlValue::Varchar("hello".to_string());
+    let v1 = SqlValue::Varchar(std::sync::Arc::from("hello"));
+    let v2 = SqlValue::Varchar(std::sync::Arc::from("hello"));
     assert_eq!(calculate_hash(&v1), calculate_hash(&v2));
 }
 
 #[test]
 fn test_character_hash() {
-    let v1 = SqlValue::Character("test".to_string());
-    let v2 = SqlValue::Character("test".to_string());
+    let v1 = SqlValue::Character(std::sync::Arc::from("test"));
+    let v2 = SqlValue::Character(std::sync::Arc::from("test"));
     assert_eq!(calculate_hash(&v1), calculate_hash(&v2));
 }
 

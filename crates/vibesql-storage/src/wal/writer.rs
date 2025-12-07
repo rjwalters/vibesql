@@ -239,7 +239,7 @@ mod tests {
             .append_op(WalOp::Insert {
                 table_id: 1,
                 row_id: 100,
-                values: vec![SqlValue::Varchar("test".to_string())],
+                values: vec![SqlValue::Varchar(std::sync::Arc::from("test"))],
             })
             .unwrap();
 

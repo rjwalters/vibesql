@@ -12,7 +12,7 @@ fn test_integer_display() {
 
 #[test]
 fn test_varchar_display() {
-    let value = SqlValue::Varchar("hello".to_string());
+    let value = SqlValue::Varchar(std::sync::Arc::from("hello"));
     assert_eq!(format!("{}", value), "hello");
 }
 
@@ -83,7 +83,7 @@ fn test_double_display() {
 
 #[test]
 fn test_character_display() {
-    let value = SqlValue::Character("test".to_string());
+    let value = SqlValue::Character(std::sync::Arc::from("test"));
     assert_eq!(format!("{}", value), "test");
 }
 

@@ -187,8 +187,8 @@ fn vibesql_insert(
             &[
                 SqlValue::Integer(id),
                 SqlValue::Integer(k),
-                SqlValue::Varchar(c.to_string()),
-                SqlValue::Varchar(pad.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(c)),
+                SqlValue::Varchar(std::sync::Arc::from(pad)),
             ],
         )
         .unwrap();
@@ -197,7 +197,7 @@ fn vibesql_insert(
 /// Execute an update query on VibeSQL (update non-indexed column) using prepared statement
 fn vibesql_update_non_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, c: &str) {
     session
-        .execute_prepared_mut(stmt, &[SqlValue::Varchar(c.to_string()), SqlValue::Integer(id)])
+        .execute_prepared_mut(stmt, &[SqlValue::Varchar(std::sync::Arc::from(c)), SqlValue::Integer(id)])
         .unwrap();
 }
 

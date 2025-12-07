@@ -513,7 +513,7 @@ impl CompiledPredicate {
 
             // String comparisons
             (SqlValue::Varchar(x), SqlValue::Varchar(y)) => {
-                Some(Self::apply_range_op(x.as_str(), op, y.as_str()))
+                Some(Self::apply_range_op(&**x, op, &**y))
             }
 
             // Floating point comparisons (same type)
@@ -707,12 +707,12 @@ mod tests {
 
         // Test matching row
         let row =
-            Row { values: vec![SqlValue::Integer(42), SqlValue::Varchar("test".to_string())] };
+            Row { values: vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("test"))] };
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test non-matching row
         let row =
-            Row { values: vec![SqlValue::Integer(99), SqlValue::Varchar("test".to_string())] };
+            Row { values: vec![SqlValue::Integer(99), SqlValue::Varchar(std::sync::Arc::from("test"))] };
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 
@@ -738,16 +738,16 @@ mod tests {
 
         // Test row that matches both conditions
         let row =
-            Row { values: vec![SqlValue::Integer(50), SqlValue::Varchar("test".to_string())] };
+            Row { values: vec![SqlValue::Integer(50), SqlValue::Varchar(std::sync::Arc::from("test"))] };
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test row that fails first condition
-        let row = Row { values: vec![SqlValue::Integer(5), SqlValue::Varchar("test".to_string())] };
+        let row = Row { values: vec![SqlValue::Integer(5), SqlValue::Varchar(std::sync::Arc::from("test"))] };
         assert_eq!(compiled.evaluate(&row), Some(false));
 
         // Test row that fails second condition
         let row =
-            Row { values: vec![SqlValue::Integer(150), SqlValue::Varchar("test".to_string())] };
+            Row { values: vec![SqlValue::Integer(150), SqlValue::Varchar(std::sync::Arc::from("test"))] };
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 

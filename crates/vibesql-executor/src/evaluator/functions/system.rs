@@ -22,7 +22,7 @@ pub(super) fn version(
 
     // Get version from Cargo.toml at compile time
     let version = env!("CARGO_PKG_VERSION");
-    Ok(vibesql_types::SqlValue::Varchar(format!("NistMemSQL {}", version)))
+    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("NistMemSQL {}", version))))
 }
 
 /// DATABASE() / SCHEMA() - Return current database name
@@ -36,7 +36,7 @@ pub(super) fn database(
 
     // In current implementation, return default database name
     // In future with connection context, return actual database name
-    Ok(vibesql_types::SqlValue::Varchar("default".to_string()))
+    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("default")))
 }
 
 /// USER() / CURRENT_USER() - Return current user
@@ -50,5 +50,5 @@ pub(super) fn user(
 
     // In current implementation, return default user
     // In future with authentication, return actual username
-    Ok(vibesql_types::SqlValue::Varchar("anonymous".to_string()))
+    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("anonymous")))
 }

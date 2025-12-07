@@ -426,9 +426,9 @@ fn compute_group_aggregate_indexed(
 /// // GROUP BY l_returnflag
 ///
 /// let rows = vec![
-///     Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(100.0)]),
-///     Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Double(200.0)]),
-///     Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Double(150.0)]),
+///     Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(100.0)]),
+///     Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Double(200.0)]),
+///     Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Double(150.0)]),
 /// ];
 ///
 /// let group_cols = vec![0]; // Group by first column (l_returnflag)
@@ -607,11 +607,11 @@ mod batch_tests {
         // group_key: [A, B, A, B, A]
         // values:    [10, 20, 30, 40, 50]
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Integer(10)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Integer(20)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Integer(30)]),
-            Row::new(vec![SqlValue::Varchar("B".to_string()), SqlValue::Integer(40)]),
-            Row::new(vec![SqlValue::Varchar("A".to_string()), SqlValue::Integer(50)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Integer(10)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Integer(20)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Integer(30)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("B")), SqlValue::Integer(40)]),
+            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Integer(50)]),
         ];
         ColumnarBatch::from_rows(&rows).unwrap()
     }
@@ -631,11 +631,11 @@ mod batch_tests {
         sorted.sort_by(|a, b| a.get(0).unwrap().partial_cmp(b.get(0).unwrap()).unwrap());
 
         // Group A: 10 + 30 + 50 = 90
-        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar("A".to_string())));
+        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("A"))));
         assert_eq!(sorted[0].get(1), Some(&SqlValue::Integer(90)));
 
         // Group B: 20 + 40 = 60
-        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar("B".to_string())));
+        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("B"))));
         assert_eq!(sorted[1].get(1), Some(&SqlValue::Integer(60)));
     }
 
@@ -651,7 +651,7 @@ mod batch_tests {
         sorted.sort_by(|a, b| a.get(0).unwrap().partial_cmp(b.get(0).unwrap()).unwrap());
 
         // Group A: (10 + 30 + 50) / 3 = 30.0
-        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar("A".to_string())));
+        assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("A"))));
         if let Some(SqlValue::Double(avg)) = sorted[0].get(1) {
             assert!((avg - 30.0).abs() < 0.001);
         } else {
@@ -659,7 +659,7 @@ mod batch_tests {
         }
 
         // Group B: (20 + 40) / 2 = 30.0
-        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar("B".to_string())));
+        assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("B"))));
         if let Some(SqlValue::Double(avg)) = sorted[1].get(1) {
             assert!((avg - 30.0).abs() < 0.001);
         } else {

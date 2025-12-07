@@ -24,7 +24,7 @@ pub(in crate::evaluator::functions) fn replace(
             vibesql_types::SqlValue::Varchar(text) | vibesql_types::SqlValue::Character(text),
             vibesql_types::SqlValue::Varchar(from) | vibesql_types::SqlValue::Character(from),
             vibesql_types::SqlValue::Varchar(to) | vibesql_types::SqlValue::Character(to),
-        ) => Ok(vibesql_types::SqlValue::Varchar(text.replace(from.as_str(), to.as_str()))),
+        ) => Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(text.replace(&**from, &**to)))),
         (a, b, c) => Err(ExecutorError::UnsupportedFeature(format!(
             "REPLACE requires string arguments, got {:?}, {:?}, {:?}",
             a, b, c
@@ -46,7 +46,8 @@ pub(in crate::evaluator::functions) fn reverse(
     match &args[0] {
         vibesql_types::SqlValue::Null => Ok(vibesql_types::SqlValue::Null),
         vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-            Ok(vibesql_types::SqlValue::Varchar(s.chars().rev().collect()))
+            let reversed: String = s.chars().rev().collect();
+            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(reversed)))
         }
         val => Err(ExecutorError::UnsupportedFeature(format!(
             "REVERSE requires string argument, got {:?}",

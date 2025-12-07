@@ -51,7 +51,7 @@ fn test_insert_with_default() {
                     // Check that second value is a string literal
                     match &values[0][1] {
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
-                            assert_eq!(s, "Alice");
+                            assert_eq!(s.as_ref(), "Alice");
                         }
                         _ => panic!("Expected string literal 'Alice', got {:?}", values[0][1]),
                     }

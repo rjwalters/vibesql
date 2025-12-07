@@ -34,7 +34,7 @@ fn test_between_integer() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Alice".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
             vibesql_types::SqlValue::Integer(25),
         ]),
     )
@@ -43,7 +43,7 @@ fn test_between_integer() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("Bob".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
             vibesql_types::SqlValue::Integer(30),
         ]),
     )
@@ -52,7 +52,7 @@ fn test_between_integer() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("Charlie".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             vibesql_types::SqlValue::Integer(35),
         ]),
     )
@@ -61,7 +61,7 @@ fn test_between_integer() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar("David".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("David")),
             vibesql_types::SqlValue::Integer(40),
         ]),
     )
@@ -114,9 +114,9 @@ fn test_between_integer() {
 
     // Should return Bob (30) and Charlie (35)
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("Bob".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(30));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar("Charlie".to_string()));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")));
     assert_eq!(result[1].values[1], vibesql_types::SqlValue::Integer(35));
 }
 
@@ -152,7 +152,7 @@ fn test_not_between() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar("Cheap".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Cheap")),
             vibesql_types::SqlValue::Integer(5),
         ]),
     )
@@ -161,7 +161,7 @@ fn test_not_between() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar("Mid".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Mid")),
             vibesql_types::SqlValue::Integer(15),
         ]),
     )
@@ -170,7 +170,7 @@ fn test_not_between() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar("Expensive".to_string()),
+            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Expensive")),
             vibesql_types::SqlValue::Integer(25),
         ]),
     )
@@ -214,8 +214,8 @@ fn test_not_between() {
 
     // Should return Cheap (5) and Expensive (25)
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar("Cheap".to_string()));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar("Expensive".to_string()));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Cheap")));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Expensive")));
 }
 
 #[test]

@@ -467,7 +467,7 @@ mod tests {
 
         assert_eq!(prepared.param_count(), 2);
 
-        let params = vec![SqlValue::Integer(42), SqlValue::Varchar("John".to_string())];
+        let params = vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("John"))];
         let bound = prepared.bind(&params).unwrap();
         assert!(matches!(bound, Statement::Select(_)));
     }
@@ -626,8 +626,8 @@ mod tests {
 
         let bound = stmt
             .bind(&[
-                SqlValue::Varchar("Bob".to_string()),
-                SqlValue::Varchar("bob@example.com".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Bob")),
+                SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
             ])
             .unwrap();
         assert!(matches!(bound, Statement::Insert(_)));
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(stmt.param_count(), 2);
 
         let bound =
-            stmt.bind(&[SqlValue::Varchar("Charlie".to_string()), SqlValue::Integer(42)]).unwrap();
+            stmt.bind(&[SqlValue::Varchar(std::sync::Arc::from("Charlie")), SqlValue::Integer(42)]).unwrap();
         assert!(matches!(bound, Statement::Update(_)));
     }
 

@@ -43,7 +43,7 @@ fn create_stock_db() -> Database {
                 SqlValue::Integer(1),                             // s_w_id
                 SqlValue::Integer(i),                             // s_i_id
                 SqlValue::Integer(5 + (i % 20)),                  // s_quantity
-                SqlValue::Varchar(format!("Stock data {}", i)),   // s_data
+                SqlValue::Varchar(std::sync::Arc::from(format!("Stock data {}", i))),   // s_data
             ]),
         )
         .unwrap();
@@ -57,7 +57,7 @@ fn create_stock_db() -> Database {
                 SqlValue::Integer(2),                             // s_w_id
                 SqlValue::Integer(i),                             // s_i_id
                 SqlValue::Integer(10 + i),                        // s_quantity (11-15)
-                SqlValue::Varchar(format!("Stock data W2-{}", i)),
+                SqlValue::Varchar(std::sync::Arc::from(format!("Stock data W2-{}", i))),
             ]),
         )
         .unwrap();

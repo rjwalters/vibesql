@@ -200,9 +200,9 @@ fn test_bulk_load_multi_column() {
 
     let key_schema = vec![DataType::Integer, DataType::Varchar { max_length: Some(50) }];
     let sorted_entries = vec![
-        (vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())], 0),
-        (vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())], 1),
-        (vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())], 2),
+        (vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))], 0),
+        (vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))], 1),
+        (vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))], 2),
     ];
 
     let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
@@ -212,7 +212,7 @@ fn test_bulk_load_multi_column() {
     assert_eq!(root_leaf.entries.len(), 3);
     assert_eq!(
         root_leaf.entries[0].0,
-        vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]
+        vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]
     );
 }
 
@@ -472,9 +472,9 @@ fn test_insert_multi_column_keys() {
 
     // Insert multi-column keys
     let keys = vec![
-        (vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())], 0),
-        (vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())], 1),
-        (vec![SqlValue::Integer(1), SqlValue::Varchar("Zoe".to_string())], 2),
+        (vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))], 0),
+        (vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))], 1),
+        (vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Zoe"))], 2),
     ];
 
     for (key, row_id) in keys {
@@ -668,16 +668,16 @@ fn test_delete_multi_column_keys() {
 
     let key_schema = vec![DataType::Integer, DataType::Varchar { max_length: Some(50) }];
     let sorted_entries = vec![
-        (vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())], 0),
-        (vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())], 1),
-        (vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())], 2),
+        (vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))], 0),
+        (vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))], 1),
+        (vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))], 2),
     ];
 
     let mut index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
     // Delete middle entry
     assert!(index
-        .delete(&vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())])
+        .delete(&vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))])
         .unwrap());
 
     // Verify deletion
@@ -685,11 +685,11 @@ fn test_delete_multi_column_keys() {
     assert_eq!(root_leaf.entries.len(), 2);
     assert_eq!(
         root_leaf.entries[0].0,
-        vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]
+        vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]
     );
     assert_eq!(
         root_leaf.entries[1].0,
-        vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())]
+        vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]
     );
 }
 

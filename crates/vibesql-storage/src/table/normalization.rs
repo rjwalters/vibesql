@@ -142,7 +142,7 @@ impl<'a> RowNormalizer<'a> {
             // Character types
             DataType::Character { length } => {
                 if let SqlValue::Character(s) = value {
-                    *s = Self::normalize_char_value(s, *length);
+                    *s = std::sync::Arc::from(Self::normalize_char_value(s, *length));
                 } else {
                     return Err(StorageError::TypeMismatch {
                         column: column_name.to_string(),
@@ -156,7 +156,7 @@ impl<'a> RowNormalizer<'a> {
                     // Truncate if exceeds max_length
                     if let Some(max_len) = max_length {
                         if s.len() > *max_len {
-                            *s = s[..*max_len].to_string();
+                            *s = std::sync::Arc::from(&s[..*max_len]);
                         }
                     }
                 } else {
@@ -175,7 +175,7 @@ impl<'a> RowNormalizer<'a> {
                 if let SqlValue::Varchar(s) = value {
                     // Truncate to 128 if exceeds
                     if s.len() > 128 {
-                        *s = s[..128].to_string();
+                        *s = std::sync::Arc::from(&s[..128]);
                     }
                 } else {
                     return Err(StorageError::TypeMismatch {
@@ -443,13 +443,13 @@ mod tests {
         let row = Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Character("ABC".to_string()), // Should be padded to 5
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Character(std::sync::Arc::from("ABC")), // Should be padded to 5
             ],
         };
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
-        assert_eq!(normalized.values[2], SqlValue::Character("ABC  ".to_string()));
+        assert_eq!(normalized.values[2], SqlValue::Character(std::sync::Arc::from("ABC  ")));
     }
 
     #[test]
@@ -460,13 +460,13 @@ mod tests {
         let row = Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Character("ABCDEFGH".to_string()), // Should be truncated to 5
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Character(std::sync::Arc::from("ABCDEFGH")), // Should be truncated to 5
             ],
         };
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
-        assert_eq!(normalized.values[2], SqlValue::Character("ABCDE".to_string()));
+        assert_eq!(normalized.values[2], SqlValue::Character(std::sync::Arc::from("ABCDE")));
     }
 
     #[test]
@@ -477,8 +477,8 @@ mod tests {
         let row = Row {
             values: vec![
                 SqlValue::Null, // id is NOT NULL
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Character("ABC".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Character(std::sync::Arc::from("ABC")),
             ],
         };
 
@@ -494,9 +494,9 @@ mod tests {
 
         let row = Row {
             values: vec![
-                SqlValue::Varchar("not_an_int".to_string()), // Wrong type for id
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Character("ABC".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("not_an_int")), // Wrong type for id
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Character(std::sync::Arc::from("ABC")),
             ],
         };
 
@@ -514,8 +514,8 @@ mod tests {
         let row = Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(long_name.clone()),
-                SqlValue::Character("ABC".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(long_name.clone())),
+                SqlValue::Character(std::sync::Arc::from("ABC")),
             ],
         };
 
@@ -535,7 +535,7 @@ mod tests {
         let row = Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Alice")),
                 SqlValue::Null, // code is nullable
             ],
         };

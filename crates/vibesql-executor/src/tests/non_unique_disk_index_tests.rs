@@ -56,9 +56,9 @@ fn test_basic_non_unique_index_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();
@@ -67,9 +67,9 @@ fn test_basic_non_unique_index_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(120000),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
         ]),
     )
     .unwrap();
@@ -78,9 +78,9 @@ fn test_basic_non_unique_index_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(80000),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
         ]),
     )
     .unwrap();
@@ -89,9 +89,9 @@ fn test_basic_non_unique_index_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(110000),
-            SqlValue::Varchar("Diana".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Diana")),
         ]),
     )
     .unwrap();
@@ -148,9 +148,9 @@ fn test_multi_column_non_unique_index() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();
@@ -159,9 +159,9 @@ fn test_multi_column_non_unique_index() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(120000),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
         ]),
     )
     .unwrap();
@@ -170,9 +170,9 @@ fn test_multi_column_non_unique_index() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(80000),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
         ]),
     )
     .unwrap();
@@ -182,9 +182,9 @@ fn test_multi_column_non_unique_index() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Eve".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Eve")),
         ]),
     )
     .unwrap();
@@ -247,9 +247,9 @@ fn test_range_queries_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();
@@ -258,9 +258,9 @@ fn test_range_queries_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(120000),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
         ]),
     )
     .unwrap();
@@ -269,9 +269,9 @@ fn test_range_queries_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(110000),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
         ]),
     )
     .unwrap();
@@ -280,9 +280,9 @@ fn test_range_queries_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Diana".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Diana")),
         ]),
     )
     .unwrap();
@@ -291,9 +291,9 @@ fn test_range_queries_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(90000),
-            SqlValue::Varchar("Eve".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Eve")),
         ]),
     )
     .unwrap();
@@ -352,9 +352,9 @@ fn test_updates_affecting_non_unique_indexes() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();
@@ -363,9 +363,9 @@ fn test_updates_affecting_non_unique_indexes() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(120000),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
         ]),
     )
     .unwrap();
@@ -374,9 +374,9 @@ fn test_updates_affecting_non_unique_indexes() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Sales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Sales")),
             SqlValue::Integer(80000),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
         ]),
     )
     .unwrap();
@@ -385,9 +385,9 @@ fn test_updates_affecting_non_unique_indexes() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(110000),
-            SqlValue::Varchar("Diana".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Diana")),
         ]),
     )
     .unwrap();
@@ -467,9 +467,9 @@ fn test_deletes_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(100000),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
         ]),
     )
     .unwrap();
@@ -478,9 +478,9 @@ fn test_deletes_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(120000),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
         ]),
     )
     .unwrap();
@@ -489,9 +489,9 @@ fn test_deletes_with_duplicates() {
         "employees",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Engineering".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
             SqlValue::Integer(110000),
-            SqlValue::Varchar("Diana".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Diana")),
         ]),
     )
     .unwrap();
@@ -560,9 +560,9 @@ fn test_heavy_duplicate_scenario_in_memory() {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(i as i64),
-                SqlValue::Varchar("Engineering".to_string()),
+                SqlValue::Varchar(std::sync::Arc::from("Engineering")),
                 SqlValue::Integer(100000),
-                SqlValue::Varchar(format!("Employee{}", i)),
+                SqlValue::Varchar(std::sync::Arc::from(format!("Employee{}", i))),
             ]),
         )
         .unwrap();
@@ -624,9 +624,9 @@ fn test_heavy_duplicate_scenario_disk_backed() {
             "employees",
             Row::new(vec![
                 SqlValue::Integer(i as i64),
-                SqlValue::Varchar(dept.to_string()),
+                SqlValue::Varchar(std::sync::Arc::from(dept)),
                 SqlValue::Integer(80000 + (i % 50000) as i64),
-                SqlValue::Varchar(format!("Employee{}", i)),
+                SqlValue::Varchar(std::sync::Arc::from(format!("Employee{}", i))),
             ]),
         )
         .unwrap();

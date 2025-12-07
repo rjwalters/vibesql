@@ -103,7 +103,7 @@ fn test_datetime_now() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar("now".to_string()))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("now")))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -122,7 +122,7 @@ fn test_datetime_now_case_insensitive() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar("NOW".to_string()))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("NOW")))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -136,7 +136,7 @@ fn test_datetime_with_timestamp_string() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar("2024-03-15 14:30:45".to_string()))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("2024-03-15 14:30:45")))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -154,7 +154,7 @@ fn test_datetime_with_date_string() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar("2024-03-15".to_string()))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("2024-03-15")))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -173,7 +173,7 @@ fn test_datetime_with_iso_format() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar("2024-03-15T14:30:45".to_string()))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("2024-03-15T14:30:45")))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -253,7 +253,7 @@ fn test_datetime_invalid_string_error() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar("invalid-date".to_string()))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("invalid-date")))],
     );
     let result = evaluator.eval(&expr, &row);
 
@@ -268,8 +268,8 @@ fn test_datetime_modifiers_not_supported() {
     let expr = create_datetime_function(
         "DATETIME",
         vec![
-            create_literal(vibesql_types::SqlValue::Varchar("now".to_string())),
-            create_literal(vibesql_types::SqlValue::Varchar("+1 day".to_string())),
+            create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("now"))),
+            create_literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("+1 day"))),
         ],
     );
     let result = evaluator.eval(&expr, &row);

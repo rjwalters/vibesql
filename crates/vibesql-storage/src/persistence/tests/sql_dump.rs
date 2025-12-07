@@ -29,10 +29,10 @@ fn test_save_sql_dump() {
     // Insert test data
     let table = db.get_table_mut("test").unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]))
+        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]))
         .unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]))
+        .insert(crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]))
         .unwrap();
 
     // Save SQL dump
@@ -56,8 +56,8 @@ fn test_sql_value_to_literal() {
 
     assert_eq!(sql_value_to_literal(&SqlValue::Null), "NULL");
     assert_eq!(sql_value_to_literal(&SqlValue::Integer(42)), "42");
-    assert_eq!(sql_value_to_literal(&SqlValue::Varchar("test".to_string())), "'test'");
-    assert_eq!(sql_value_to_literal(&SqlValue::Varchar("test's".to_string())), "'test''s'");
+    assert_eq!(sql_value_to_literal(&SqlValue::Varchar(std::sync::Arc::from("test"))), "'test'");
+    assert_eq!(sql_value_to_literal(&SqlValue::Varchar(std::sync::Arc::from("test's"))), "'test''s'");
     assert_eq!(sql_value_to_literal(&SqlValue::Boolean(true)), "TRUE");
     assert_eq!(sql_value_to_literal(&SqlValue::Boolean(false)), "FALSE");
 }
@@ -85,7 +85,7 @@ fn test_sql_dump_with_nulls() {
     let table = db.get_table_mut("test_nulls").unwrap();
     table.insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Null])).unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("text".to_string())]))
+        .insert(crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("text"))]))
         .unwrap();
     table.insert(crate::Row::new(vec![SqlValue::Integer(3), SqlValue::Null])).unwrap();
 
@@ -126,22 +126,22 @@ fn test_sql_dump_with_quotes() {
     // Insert test data with various quote types
     let table = db.get_table_mut("test_quotes").unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("it's".to_string())]))
+        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("it's"))]))
         .unwrap();
     table
         .insert(crate::Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("say \"hello\"".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("say \"hello\"")),
         ]))
         .unwrap();
     table
         .insert(crate::Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("it's a \"test\"".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("it's a \"test\"")),
         ]))
         .unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("".to_string())]))
+        .insert(crate::Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from(""))]))
         .unwrap();
 
     // Save SQL dump
@@ -337,8 +337,8 @@ fn test_sql_dump_all_data_types() {
             SqlValue::Float(3.14),
             SqlValue::Real(2.718),
             SqlValue::Double(1.414),
-            SqlValue::Varchar("test".to_string()),
-            SqlValue::Character("fixed".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("test")),
+            SqlValue::Character(std::sync::Arc::from("fixed")),
             SqlValue::Boolean(true),
             SqlValue::Numeric(123.45),
             SqlValue::Numeric(999.0),
@@ -416,7 +416,7 @@ fn test_sql_dump_large_dataset() {
         table
             .insert(crate::Row::new(vec![
                 SqlValue::Integer(i as i64),
-                SqlValue::Varchar(format!("value_{}", i)),
+                SqlValue::Varchar(std::sync::Arc::from(format!("value_{}", i))),
             ]))
             .unwrap();
     }
@@ -467,7 +467,7 @@ fn test_read_sql_dump() {
     // Insert test data
     let table = db.get_table_mut("test_load").unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Test".to_string())]))
+        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Test"))]))
         .unwrap();
 
     // Save SQL dump

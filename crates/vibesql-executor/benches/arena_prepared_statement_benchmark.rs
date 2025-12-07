@@ -89,10 +89,10 @@ fn create_oltp_database(row_count: usize) -> Database {
     for i in 0..row_count {
         let user_row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(format!("User_{}", i)),
-            SqlValue::Varchar(format!("user{}@example.com", i)),
+            SqlValue::Varchar(std::sync::Arc::from(format!("User_{}", i))),
+            SqlValue::Varchar(std::sync::Arc::from(format!("user{}@example.com", i))),
             SqlValue::Integer((20 + (i % 50)) as i64),
-            SqlValue::Varchar(if i % 3 == 0 { "active" } else { "inactive" }.to_string()),
+            SqlValue::Varchar(std::sync::Arc::from(if i % 3 == 0 { "active" } else { "inactive" })),
         ]);
         db.insert_row("users", user_row).unwrap();
 
@@ -101,7 +101,7 @@ fn create_oltp_database(row_count: usize) -> Database {
             let order_row = Row::new(vec![
                 SqlValue::Integer((i * 3 + j) as i64),
                 SqlValue::Integer(i as i64),
-                SqlValue::Varchar(format!("Product_{}", j)),
+                SqlValue::Varchar(std::sync::Arc::from(format!("Product_{}", j))),
                 SqlValue::Integer((1 + j % 10) as i64),
                 SqlValue::Numeric((1000 + (i * 100)) as f64 / 100.0),
             ]);
@@ -215,8 +215,8 @@ fn bench_parameter_binding(c: &mut Criterion) {
                         &stmt_3param,
                         &[
                             SqlValue::Integer(i),
-                            SqlValue::Varchar(format!("User_{}", i)),
-                            SqlValue::Varchar("active".to_string()),
+                            SqlValue::Varchar(std::sync::Arc::from(format!("User_{}", i))),
+                            SqlValue::Varchar(std::sync::Arc::from("active")),
                         ],
                     )
                     .unwrap();
@@ -344,7 +344,7 @@ fn bench_workload_multi_filter(c: &mut Criterion) {
                         &[
                             SqlValue::Integer(start),
                             SqlValue::Integer(start + 100),
-                            SqlValue::Varchar("active".to_string()),
+                            SqlValue::Varchar(std::sync::Arc::from("active")),
                         ],
                     )
                     .unwrap();

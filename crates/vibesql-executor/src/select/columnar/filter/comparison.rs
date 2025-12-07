@@ -79,7 +79,7 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             } else {
                 // If parsing fails, fall back to string comparison
                 let date_str = date.to_string();
-                date_str.as_str().cmp(s.as_str())
+                date_str.as_str().cmp(&**s)
             }
         }
         (SqlValue::Varchar(s), SqlValue::Date(date))
@@ -90,7 +90,7 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             } else {
                 // If parsing fails, fall back to string comparison
                 let date_str = date.to_string();
-                s.as_str().cmp(date_str.as_str())
+                (&**s).cmp(date_str.as_str())
             }
         }
 
