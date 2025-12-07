@@ -45,5 +45,11 @@ pub(super) fn execute_rename_table(
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
     }
 
+    // Invalidate the database-level columnar cache for both old and new table names.
+    // The old table name's cache is invalidated since the table no longer exists,
+    // and the new table name's cache is invalidated to ensure fresh columnar data.
+    database.invalidate_columnar_cache(&stmt.table_name);
+    database.invalidate_columnar_cache(&stmt.new_table_name);
+
     Ok(format!("Table '{}' renamed to '{}'", stmt.table_name, stmt.new_table_name))
 }

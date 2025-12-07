@@ -48,6 +48,9 @@ pub(super) fn execute_add_column(
         row.add_value(default_value.clone());
     }
 
+    // Invalidate the database-level columnar cache since table structure changed.
+    database.invalidate_columnar_cache(&stmt.table_name);
+
     Ok(format!("Column '{}' added to table '{}'", stmt.column_def.name, stmt.table_name))
 }
 
@@ -99,6 +102,9 @@ pub(super) fn execute_drop_column(
     for row in table.rows_mut() {
         let _ = row.remove_value(col_index);
     }
+
+    // Invalidate the database-level columnar cache since table structure changed.
+    database.invalidate_columnar_cache(&stmt.table_name);
 
     Ok(format!("Column '{}' dropped from table '{}'", stmt.column_name, stmt.table_name))
 }
@@ -266,6 +272,9 @@ pub(super) fn execute_modify_column(
         table.schema_mut().set_column_default(col_index, *default_expr.clone())?;
     }
 
+    // Invalidate the database-level columnar cache since table structure changed.
+    database.invalidate_columnar_cache(&stmt.table_name);
+
     Ok(format!("Column '{}' modified in table '{}'", stmt.column_name, stmt.table_name))
 }
 
@@ -318,6 +327,9 @@ pub(super) fn execute_change_column(
     if let Some(ref default_expr) = stmt.new_column_def.default_value {
         table.schema_mut().set_column_default(col_index, *default_expr.clone())?;
     }
+
+    // Invalidate the database-level columnar cache since table structure changed.
+    database.invalidate_columnar_cache(&stmt.table_name);
 
     Ok(format!(
         "Column '{}' changed to '{}' in table '{}'",
