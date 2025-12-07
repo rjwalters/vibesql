@@ -733,11 +733,15 @@ async fn subscribe_stream(
         }
     };
 
-    // Send initial results
+    // Send initial results using the database from the registry
     let columns_clone = columns.clone();
+    // Re-get the database from registry and send initial results
+    let db_for_initial = state.registry.get_or_create(&db_name).await;
+    let db_guard = db_for_initial.read().await;
     if let Err(e) =
-        state.subscription_manager.send_initial_results(subscription_id, &state.db).await
+        state.subscription_manager.send_initial_results(subscription_id, &db_guard).await
     {
+        drop(db_guard);
         error!("Failed to send initial results: {}", e);
         state.subscription_manager.unsubscribe(subscription_id);
 
@@ -757,9 +761,11 @@ async fn subscribe_stream(
 
         return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
     }
+    drop(db_guard); // Release the read lock before entering the streaming loop
 
     // Create stream that receives updates from subscription and converts to SSE events
     let stream = async_stream::stream! {
+        let mut is_first_event = true;
         while let Some(update) = rx.recv().await {
             match update {
                 SubscriptionUpdate::Full { rows, .. } => {
@@ -769,8 +775,16 @@ async fn subscribe_stream(
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
                         .collect();
 
+                    // First Full event is the initial result, subsequent ones are updates
+                    let event_type_str = if is_first_event {
+                        is_first_event = false;
+                        "initial"
+                    } else {
+                        "update"
+                    };
+
                     let event_data = match serde_json::to_string(&SseEvent {
-                        event_type: "update".to_string(),
+                        event_type: event_type_str.to_string(),
                         columns: Some(columns_clone.clone()),
                         rows: Some(row_values),
                         old: None,
@@ -785,7 +799,7 @@ async fn subscribe_stream(
                     };
 
                     yield Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                        Event::default().event("update").data(event_data)
+                        Event::default().event(event_type_str).data(event_data)
                     );
                 }
                 SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
