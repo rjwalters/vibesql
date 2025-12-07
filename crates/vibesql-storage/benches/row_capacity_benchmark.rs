@@ -10,8 +10,7 @@
 //!   cargo bench --package vibesql-storage --bench row_capacity_benchmark --no-run
 //!   ./target/release/deps/row_capacity_benchmark-*
 //!
-//! Environment Variables:
-//!   ROW_CAPACITY_ITERATIONS  Number of iterations per test (default: 100000)
+//! The benchmark uses criterion's default sample collection.
 
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use smallvec::SmallVec;
@@ -33,9 +32,9 @@ type Row12 = SmallVec<[SqlValue; 12]>;
 fn make_value(i: usize) -> SqlValue {
     match i % 5 {
         0 => SqlValue::Integer(i as i64 * 1000),
-        1 => SqlValue::Double(i as f64 * 3.14159),
+        1 => SqlValue::Double(i as f64 * 2.5),
         2 => SqlValue::Varchar(Arc::from(format!("value_{}", i))),
-        3 => SqlValue::Boolean(i % 2 == 0),
+        3 => SqlValue::Boolean(i.is_multiple_of(2)),
         4 => SqlValue::Null,
         _ => unreachable!(),
     }
