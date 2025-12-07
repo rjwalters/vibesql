@@ -60,7 +60,7 @@ pub fn read_data<R: Read>(reader: &mut R, db: &mut Database) -> Result<(), Stora
                     values.push(read_sql_value(reader)?);
                 }
 
-                let row = crate::Row { values };
+                let row = crate::Row::from_vec(values);
                 table.insert(row).map_err(|e| {
                     StorageError::NotImplemented(format!("Failed to insert row: {}", e))
                 })?;

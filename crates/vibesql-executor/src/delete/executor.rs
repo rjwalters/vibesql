@@ -294,7 +294,7 @@ impl DeleteExecutor {
         // BEFORE deleting rows (while row indices are still valid and we have old values)
         // First emit WAL entries for each row (needed for recovery replay)
         for (idx, row) in &rows_and_indices_to_delete {
-            database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.clone());
+            database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.to_vec());
         }
 
         // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)

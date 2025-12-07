@@ -195,12 +195,10 @@ fn test_hash_join_duplicate_keys() {
 
 fn create_test_rows(count: usize) -> Vec<vibesql_storage::Row> {
     (0..count)
-        .map(|i| vibesql_storage::Row {
-            values: vec![
+        .map(|i| vibesql_storage::Row::from_vec(vec![
                 SqlValue::Integer(i as i64 % 100), // Keys with duplicates
                 SqlValue::Varchar(std::sync::Arc::from(format!("value{}", i))),
-            ],
-        })
+            ]))
         .collect()
 }
 
@@ -236,18 +234,10 @@ fn test_build_hash_table_sequential_with_duplicates() {
 #[test]
 fn test_build_hash_table_sequential_null_values() {
     let rows = vec![
-        vibesql_storage::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null1"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("two"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null2"))],
-        },
+        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null1"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("two"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null2"))]),
     ];
 
     let hash_table = build_hash_table_sequential(&rows, 0);
@@ -306,21 +296,11 @@ fn test_parallel_sequential_equivalence_large() {
 #[test]
 fn test_parallel_with_null_values() {
     let rows = vec![
-        vibesql_storage::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null1"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("two"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null2"))],
-        },
-        vibesql_storage::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one_dup"))],
-        },
+        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null1"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("two"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("null2"))]),
+        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("one_dup"))]),
     ];
 
     let par_table = build_hash_table_parallel(&rows, 0);

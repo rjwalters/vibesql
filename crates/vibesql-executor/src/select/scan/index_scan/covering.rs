@@ -182,7 +182,7 @@ pub(super) fn execute_covering_index_scan(
 
         // Create one row per row_index (handles non-unique indexes)
         for _ in row_indices {
-            rows.push(Row { values: projected_values.clone() });
+            rows.push(Row::from_vec(projected_values.clone()));
         }
     }
 

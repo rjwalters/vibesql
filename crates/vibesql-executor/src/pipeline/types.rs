@@ -364,7 +364,7 @@ mod tests {
     use vibesql_types::SqlValue;
 
     fn make_test_row(values: Vec<i64>) -> Row {
-        Row::new(values.into_iter().map(SqlValue::Integer).collect())
+        Row::new(values.into_iter().map(SqlValue::Integer).collect::<Vec<_>>())
     }
 
     fn make_test_rows() -> Vec<Row> {

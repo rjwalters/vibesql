@@ -388,12 +388,10 @@ mod tests {
 
     fn create_test_rows(count: usize) -> Vec<Row> {
         (0..count)
-            .map(|i| Row {
-                values: vec![
+            .map(|i| Row::from_vec(vec![
                     vibesql_types::SqlValue::Integer(i as i64),
                     vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("row{}", i))),
-                ],
-            })
+                ]))
             .collect()
     }
 
@@ -509,20 +507,16 @@ mod tests {
     #[test]
     fn test_parallel_scan_preserves_row_structure() {
         let rows = vec![
-            Row {
-                values: vec![
+            Row::from_vec(vec![
                     vibesql_types::SqlValue::Integer(1),
                     vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test")),
                     vibesql_types::SqlValue::Null,
-                ],
-            },
-            Row {
-                values: vec![
+                ]),
+            Row::from_vec(vec![
                     vibesql_types::SqlValue::Integer(2),
                     vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test2")),
                     vibesql_types::SqlValue::Double(3.5),
-                ],
-            },
+                ]),
         ];
 
         let filtered = parallel_scan_filter(&rows, |_| true);
