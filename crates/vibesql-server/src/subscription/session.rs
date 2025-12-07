@@ -21,6 +21,48 @@ use crate::Row;
 /// Unique identifier for a subscription (UUID bytes)
 pub type SessionSubscriptionId = [u8; 16];
 
+/// Primary key column indices for a table.
+///
+/// Used for selective column updates: when sending subscription updates,
+/// PK columns must always be included so clients can identify which rows changed.
+#[derive(Debug, Clone, Default)]
+pub struct TablePkInfo {
+    /// Maps table name (lowercase) to its primary key column indices.
+    /// `None` means the table has no primary key defined.
+    /// `Some(vec![])` means PK info couldn't be determined (fallback to first column).
+    pub pk_indices: HashMap<String, Option<Vec<usize>>>,
+}
+
+impl TablePkInfo {
+    /// Create an empty TablePkInfo
+    pub fn new() -> Self {
+        Self { pk_indices: HashMap::new() }
+    }
+
+    /// Add PK info for a table
+    pub fn add_table(&mut self, table_name: &str, pk_indices: Option<Vec<usize>>) {
+        self.pk_indices.insert(table_name.to_lowercase(), pk_indices);
+    }
+
+    /// Get PK column indices for a table.
+    /// Returns None if the table has no PK or wasn't found.
+    /// Falls back to `vec![0]` (first column) if PK info is unavailable.
+    pub fn get_pk_columns(&self, table_name: &str) -> Vec<usize> {
+        match self.pk_indices.get(&table_name.to_lowercase()) {
+            Some(Some(indices)) if !indices.is_empty() => indices.clone(),
+            _ => vec![0], // Fallback: assume first column is PK
+        }
+    }
+
+    /// Check if we have explicit PK info for a table (not using fallback)
+    pub fn has_explicit_pk(&self, table_name: &str) -> bool {
+        matches!(
+            self.pk_indices.get(&table_name.to_lowercase()),
+            Some(Some(indices)) if !indices.is_empty()
+        )
+    }
+}
+
 /// Information about an active subscription in a session
 #[derive(Debug, Clone)]
 pub struct SessionSubscription {
@@ -42,6 +84,9 @@ pub struct SessionSubscription {
     /// Optional filter expression (SQL WHERE clause) for filtering updates.
     /// If present, only rows matching the filter are sent to the client.
     pub filter: Option<String>,
+    /// Primary key column indices for each table in the subscription.
+    /// Used for selective column updates to identify rows.
+    pub pk_info: TablePkInfo,
 }
 
 /// Manages subscriptions for a single connection/session
@@ -81,7 +126,7 @@ impl SessionSubscriptionManager {
         }
     }
 
-    /// Subscribe to a query with the given table dependencies
+    /// Subscribe to a query with the given table dependencies and PK info
     ///
     /// Returns the generated subscription ID on success, or an error if limits are exceeded.
     ///
@@ -91,6 +136,7 @@ impl SessionSubscriptionManager {
     /// * `params` - Parameter values for parameterized queries
     /// * `table_dependencies` - Tables that this subscription depends on
     /// * `filter` - Optional filter expression (SQL WHERE clause) to apply to updates
+    /// * `pk_info` - Primary key column indices for each table, used for selective updates
     ///
     /// # Errors
     ///
@@ -102,6 +148,7 @@ impl SessionSubscriptionManager {
         params: Vec<Option<Vec<u8>>>,
         table_dependencies: HashSet<String>,
         filter: Option<String>,
+        pk_info: TablePkInfo,
     ) -> Result<SessionSubscriptionId, SubscriptionError> {
         // Check per-connection limit
         if self.subscriptions.len() >= self.config.max_per_connection {
@@ -126,6 +173,7 @@ impl SessionSubscriptionManager {
             last_result: None,
             paused: false,
             filter,
+            pk_info,
         };
 
         // Update table -> subscription index (normalize to lowercase for case-insensitive matching)
@@ -333,6 +381,7 @@ mod tests {
                 vec![],
                 deps,
                 None,
+                TablePkInfo::default(),
             )
             .unwrap();
 
@@ -369,13 +418,16 @@ mod tests {
         deps2.insert("users".to_string());
         deps2.insert("products".to_string());
 
-        let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1, None).unwrap();
+        let id1 = manager
+            .subscribe("SELECT * FROM users".to_string(), vec![], deps1, None, TablePkInfo::default())
+            .unwrap();
         let id2 = manager
             .subscribe(
                 "SELECT * FROM users JOIN products ON users.id = products.seller_id".to_string(),
                 vec![],
                 deps2,
                 None,
+                TablePkInfo::default(),
             )
             .unwrap();
 
@@ -409,8 +461,24 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone(), None).unwrap();
-        manager.subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps, None).unwrap();
+        manager
+            .subscribe(
+                "SELECT * FROM users".to_string(),
+                vec![],
+                deps.clone(),
+                None,
+                TablePkInfo::default(),
+            )
+            .unwrap();
+        manager
+            .subscribe(
+                "SELECT * FROM users WHERE id = 1".to_string(),
+                vec![],
+                deps,
+                None,
+                TablePkInfo::default(),
+            )
+            .unwrap();
 
         assert_eq!(manager.subscription_count(), 2);
 
@@ -445,14 +513,33 @@ mod tests {
         deps.insert("users".to_string());
 
         // First two subscriptions should succeed
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone(), None).unwrap();
         manager
-            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone(), None)
+            .subscribe(
+                "SELECT * FROM users".to_string(),
+                vec![],
+                deps.clone(),
+                None,
+                TablePkInfo::default(),
+            )
+            .unwrap();
+        manager
+            .subscribe(
+                "SELECT * FROM users WHERE id = 1".to_string(),
+                vec![],
+                deps.clone(),
+                None,
+                TablePkInfo::default(),
+            )
             .unwrap();
 
         // Third subscription should fail with limit exceeded
-        let result =
-            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps, None);
+        let result = manager.subscribe(
+            "SELECT * FROM users WHERE id = 2".to_string(),
+            vec![],
+            deps,
+            None,
+            TablePkInfo::default(),
+        );
         assert!(matches!(
             result,
             Err(SubscriptionError::ConnectionLimitExceeded { current: 2, max: 2 })
@@ -475,14 +562,33 @@ mod tests {
         deps.insert("users".to_string());
 
         // First two subscriptions should succeed (rate limit = 2/sec)
-        manager.subscribe("SELECT * FROM users".to_string(), vec![], deps.clone(), None).unwrap();
         manager
-            .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone(), None)
+            .subscribe(
+                "SELECT * FROM users".to_string(),
+                vec![],
+                deps.clone(),
+                None,
+                TablePkInfo::default(),
+            )
+            .unwrap();
+        manager
+            .subscribe(
+                "SELECT * FROM users WHERE id = 1".to_string(),
+                vec![],
+                deps.clone(),
+                None,
+                TablePkInfo::default(),
+            )
             .unwrap();
 
         // Third subscription should be rate limited
-        let result =
-            manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps, None);
+        let result = manager.subscribe(
+            "SELECT * FROM users WHERE id = 2".to_string(),
+            vec![],
+            deps,
+            None,
+            TablePkInfo::default(),
+        );
         assert!(matches!(result, Err(SubscriptionError::RateLimited { .. })));
     }
 
@@ -494,7 +600,9 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
+        let id = manager
+            .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, TablePkInfo::default())
+            .unwrap();
 
         // Initially no result stored
         let sub = manager.get(&id).unwrap();
@@ -525,7 +633,9 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
+        let id = manager
+            .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, TablePkInfo::default())
+            .unwrap();
 
         // Get mutable reference and modify
         let sub = manager.get_mut(&id).unwrap();
@@ -544,7 +654,9 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
+        let id = manager
+            .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, TablePkInfo::default())
+            .unwrap();
 
         // Store initial result
         let initial_rows = vec![crate::Row {
@@ -581,7 +693,9 @@ mod tests {
         let mut deps = HashSet::new();
         deps.insert("users".to_string());
 
-        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
+        let id = manager
+            .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, TablePkInfo::default())
+            .unwrap();
 
         // Initially not paused
         assert_eq!(manager.is_paused(&id), Some(false));
@@ -623,10 +737,107 @@ mod tests {
                 vec![],
                 deps,
                 filter.clone(),
+                TablePkInfo::default(),
             )
             .unwrap();
 
         let sub = manager.get(&id).unwrap();
         assert_eq!(sub.filter, filter);
+    }
+
+    #[test]
+    fn test_pk_info_stored_in_subscription() {
+        let mut manager = SessionSubscriptionManager::new();
+
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        // Create PK info with specific indices
+        let mut pk_info = TablePkInfo::new();
+        pk_info.add_table("users", Some(vec![0])); // id column at index 0
+
+        let id = manager
+            .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, pk_info)
+            .unwrap();
+
+        // Verify PK info is stored
+        let sub = manager.get(&id).unwrap();
+        assert!(sub.pk_info.has_explicit_pk("users"));
+        assert_eq!(sub.pk_info.get_pk_columns("users"), vec![0]);
+    }
+
+    #[test]
+    fn test_pk_info_composite_key() {
+        let mut manager = SessionSubscriptionManager::new();
+
+        let mut deps = HashSet::new();
+        deps.insert("order_items".to_string());
+
+        // Create PK info with composite key (order_id, item_id)
+        let mut pk_info = TablePkInfo::new();
+        pk_info.add_table("order_items", Some(vec![0, 1])); // Composite key
+
+        let id = manager
+            .subscribe("SELECT * FROM order_items".to_string(), vec![], deps, None, pk_info)
+            .unwrap();
+
+        // Verify composite PK is stored
+        let sub = manager.get(&id).unwrap();
+        assert!(sub.pk_info.has_explicit_pk("order_items"));
+        assert_eq!(sub.pk_info.get_pk_columns("order_items"), vec![0, 1]);
+    }
+
+    #[test]
+    fn test_pk_info_non_first_column() {
+        let mut manager = SessionSubscriptionManager::new();
+
+        let mut deps = HashSet::new();
+        deps.insert("products".to_string());
+
+        // Create PK info where PK is not the first column
+        // (e.g., table: name, description, product_id where product_id is PK at index 2)
+        let mut pk_info = TablePkInfo::new();
+        pk_info.add_table("products", Some(vec![2]));
+
+        let id = manager
+            .subscribe("SELECT * FROM products".to_string(), vec![], deps, None, pk_info)
+            .unwrap();
+
+        // Verify non-first-column PK is correctly stored
+        let sub = manager.get(&id).unwrap();
+        assert!(sub.pk_info.has_explicit_pk("products"));
+        assert_eq!(sub.pk_info.get_pk_columns("products"), vec![2]);
+    }
+
+    #[test]
+    fn test_pk_info_fallback_to_first_column() {
+        let pk_info = TablePkInfo::new();
+
+        // Table not in PK info should fallback to first column
+        assert_eq!(pk_info.get_pk_columns("unknown_table"), vec![0]);
+        assert!(!pk_info.has_explicit_pk("unknown_table"));
+    }
+
+    #[test]
+    fn test_pk_info_no_pk_defined() {
+        let mut pk_info = TablePkInfo::new();
+        pk_info.add_table("no_pk_table", None); // Table has no PK
+
+        // Should still fallback to first column
+        assert_eq!(pk_info.get_pk_columns("no_pk_table"), vec![0]);
+        assert!(!pk_info.has_explicit_pk("no_pk_table"));
+    }
+
+    #[test]
+    fn test_pk_info_case_insensitive() {
+        let mut pk_info = TablePkInfo::new();
+        pk_info.add_table("Users", Some(vec![0]));
+
+        // Should work regardless of case
+        assert_eq!(pk_info.get_pk_columns("users"), vec![0]);
+        assert_eq!(pk_info.get_pk_columns("USERS"), vec![0]);
+        assert_eq!(pk_info.get_pk_columns("Users"), vec![0]);
+        assert!(pk_info.has_explicit_pk("users"));
+        assert!(pk_info.has_explicit_pk("USERS"));
     }
 }
