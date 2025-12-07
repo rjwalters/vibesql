@@ -762,7 +762,7 @@ async fn subscribe_stream(
     let stream = async_stream::stream! {
         while let Some(update) = rx.recv().await {
             match update {
-                SubscriptionUpdate::Full { rows } => {
+                SubscriptionUpdate::Full { rows, .. } => {
                     // Convert rows to JSON
                     let row_values: Vec<Vec<serde_json::Value>> = rows
                         .iter()
@@ -788,7 +788,7 @@ async fn subscribe_stream(
                         Event::default().event("update").data(event_data)
                     );
                 }
-                SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+                SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                     let insert_rows: Vec<Vec<serde_json::Value>> = inserts
                         .iter()
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
@@ -825,7 +825,7 @@ async fn subscribe_stream(
                         Event::default().event("delta").data(event_data)
                     );
                 }
-                SubscriptionUpdate::Error { message } => {
+                SubscriptionUpdate::Error { message, .. } => {
                     let event_data = match serde_json::to_string(&SseEvent {
                         event_type: "error".to_string(),
                         columns: None,
