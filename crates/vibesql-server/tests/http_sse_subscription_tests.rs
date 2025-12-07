@@ -624,6 +624,20 @@ async fn test_sse_invalid_selective_ratio() {
 
     let server = start_test_server_with_config(config).await;
 
+    // Set up database via wire protocol
+    let mut test_client =
+        common::TestClient::connect(server.addr()).await.expect("Failed to connect for setup");
+
+    test_client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ =
+        test_client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    test_client
+        .send_query("CREATE TABLE IF NOT EXISTS users (id INT, name VARCHAR)")
+        .await
+        .expect("Failed to create table");
+    let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
+
     let http_addr = server.http_addr().expect("HTTP server should be enabled");
     let http_url = format!("http://{}/api/subscribe", http_addr);
     let client = reqwest::Client::new();
@@ -633,6 +647,7 @@ async fn test_sse_invalid_selective_ratio() {
         Duration::from_secs(2),
         client
             .get(&http_url)
+            .header("X-Database-Name", "testdb")
             .query(&[
                 ("query", "SELECT * FROM users"),
                 ("selective_max_changed_ratio", "1.5"),
@@ -658,7 +673,7 @@ async fn test_sse_invalid_selective_ratio() {
                                     found_error = true;
                                     // Check for ratio validation error message
                                     if let Some(error_msg) = event.get("error").and_then(|v| v.as_str()) {
-                                        assert!(error_msg.contains("between 0.0 and 1.0"));
+                                        assert!(error_msg.contains("between 0.0 and 1.0"), "Error message '{}' doesn't contain expected text", error_msg);
                                     }
                                 }
                             }
