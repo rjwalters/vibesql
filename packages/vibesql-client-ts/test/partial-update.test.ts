@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { MessageParser } from '../src/protocol/parser';
+import { MessageParser, parseColumnValue, TYPE_OIDS } from '../src/protocol/parser';
 import { MessageCodes, SubscriptionPartialDataMessage } from '../src/protocol/messages';
 
 describe('SubscriptionPartialData Message Parsing', () => {
@@ -303,5 +303,50 @@ describe('SubscriptionPartialData Message Parsing', () => {
 
     expect(messages).toHaveLength(1);
     expect(messages[0].type).toBe('SubscriptionPartialData');
+  });
+});
+
+describe('parseColumnValue Type Conversion', () => {
+  it('should convert integer types to numbers', () => {
+    expect(parseColumnValue('42', TYPE_OIDS.INT4)).toBe(42);
+    expect(parseColumnValue('-123', TYPE_OIDS.INT8)).toBe(-123);
+    expect(parseColumnValue('0', TYPE_OIDS.INT2)).toBe(0);
+  });
+
+  it('should convert float types to numbers', () => {
+    expect(parseColumnValue('3.14159', TYPE_OIDS.FLOAT8)).toBeCloseTo(3.14159);
+    expect(parseColumnValue('-2.5', TYPE_OIDS.FLOAT4)).toBeCloseTo(-2.5);
+  });
+
+  it('should preserve NUMERIC as string for precision', () => {
+    // NUMERIC/DECIMAL types are returned as strings to preserve precision
+    expect(parseColumnValue('1.23e10', TYPE_OIDS.NUMERIC)).toBe('1.23e10');
+    expect(parseColumnValue('123456789012345678901234567890', TYPE_OIDS.NUMERIC)).toBe('123456789012345678901234567890');
+  });
+
+  it('should convert boolean type', () => {
+    expect(parseColumnValue('t', TYPE_OIDS.BOOLEAN)).toBe(true);
+    expect(parseColumnValue('f', TYPE_OIDS.BOOLEAN)).toBe(false);
+  });
+
+  it('should convert timestamp types to Date objects', () => {
+    const timestamp = parseColumnValue('2024-01-15 10:30:00', TYPE_OIDS.TIMESTAMP);
+    expect(timestamp).toBeInstanceOf(Date);
+    expect(timestamp.getFullYear()).toBe(2024);
+
+    const timestamptz = parseColumnValue('2024-01-15 10:30:00+00', TYPE_OIDS.TIMESTAMPTZ);
+    expect(timestamptz).toBeInstanceOf(Date);
+
+    const date = parseColumnValue('2024-01-15', TYPE_OIDS.DATE);
+    expect(date).toBeInstanceOf(Date);
+  });
+
+  it('should return strings as-is for text types', () => {
+    expect(parseColumnValue('hello world', TYPE_OIDS.TEXT)).toBe('hello world');
+    expect(parseColumnValue('test', TYPE_OIDS.VARCHAR)).toBe('test');
+  });
+
+  it('should return strings for unknown type OIDs', () => {
+    expect(parseColumnValue('unknown', 99999)).toBe('unknown');
   });
 });

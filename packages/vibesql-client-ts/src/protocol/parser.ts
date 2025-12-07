@@ -22,7 +22,12 @@ import {
   SubscriptionPartialDataMessage,
   PartialRow,
 } from './messages';
-import { parseColumnValue } from './typeConversion';
+import { parseColumnValue, PgTypeOid } from './typeConversion';
+
+// Re-export for backwards compatibility
+export { parseColumnValue, PgTypeOid };
+// Legacy alias for backwards compatibility with existing tests
+export const TYPE_OIDS = PgTypeOid;
 
 /**
  * Message parser state machine
