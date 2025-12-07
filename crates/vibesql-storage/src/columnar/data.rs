@@ -9,6 +9,12 @@
 //! - Zero-copy sharing between storage and executor layers
 //! - O(1) clone operations (reference count bump instead of data copy)
 //! - Cache-friendly columnar data that can be shared across query executions
+//!
+//! ## String Interning
+//!
+//! String columns can benefit from string interning for columns with limited
+//! distinct values. The `ColumnBuilder` with string interning enabled will
+//! deduplicate identical strings, reducing memory usage and improving cache locality.
 
 use std::sync::Arc;
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};

@@ -41,15 +41,37 @@
 //! - [`types`]: Column type classification (`ColumnTypeClass`)
 //! - [`data`]: Column data storage (`ColumnData`)
 //! - [`builder`]: Column construction utilities (`ColumnBuilder`)
+//! - [`string_interner`]: String deduplication for low-cardinality columns (`StringInterner`)
 //! - [`table`]: Columnar table storage (`ColumnarTable`)
+//!
+//! ## String Interning for Optimization
+//!
+//! For columns with many repeated string values (enum-like data, status codes,
+//! category names), enable string interning in the `ColumnBuilder`:
+//!
+//! ```ignore
+//! let mut builder = ColumnBuilder::new(ColumnTypeClass::String, 10000)
+//!     .with_string_interning(100); // Expect ~100 distinct values
+//!
+//! for row in rows {
+//!     builder.push(&row_value)?;
+//! }
+//!
+//! let column = builder.build();
+//! ```
+//!
+//! This reduces memory usage by storing each distinct string value only once
+//! while allowing O(1) cloning via `Arc<str>` reference counting.
 
 mod builder;
 mod data;
+mod string_interner;
 mod table;
 mod types;
 
 // Public re-exports
 pub use data::ColumnData;
+pub use string_interner::{InternerStats, StringInterner};
 pub use table::ColumnarTable;
 
 #[cfg(test)]
