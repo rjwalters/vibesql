@@ -100,6 +100,8 @@ pub fn create_http_router(
         .route("/api/tables/{table_name}/rows/{id}", delete(super::crud::delete_row))
         // GraphQL endpoint
         .route("/api/graphql", post(graphql_handler))
+        // Stats endpoints
+        .route("/stats/subscriptions/efficiency", get(get_efficiency_stats))
         .with_state(state);
 
     // Create storage sub-router with its own state
@@ -426,6 +428,22 @@ async fn health_check() -> impl IntoResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+/// Get subscription partial update efficiency statistics
+async fn get_efficiency_stats(
+    State(state): State<HttpState>,
+) -> impl IntoResponse {
+    if let Some(metrics) = &state.metrics {
+        let stats = metrics.get_efficiency_stats();
+        (StatusCode::OK, Json(stats)).into_response()
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse::new("Metrics not available")),
+        )
+            .into_response()
+    }
 }
 
 /// Execute a SQL query with optional pagination
