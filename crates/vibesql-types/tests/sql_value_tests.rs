@@ -1,5 +1,10 @@
 use vibesql_types::*;
 
+// Helper to create StringValue from &str (works with both Arc<str> and ArcStr)
+fn sv(s: &str) -> StringValue {
+    StringValue::from(s)
+}
+
 // ============================================================================
 // SqlValue Tests - Test SQL value representation
 // ============================================================================
@@ -12,7 +17,7 @@ fn test_integer_value_creation() {
 
 #[test]
 fn test_varchar_value_creation() {
-    let value = SqlValue::Varchar(std::sync::Arc::from("hello"));
+    let value = SqlValue::Varchar(sv("hello"));
     assert_eq!(format!("{:?}", value), "Varchar(\"hello\")");
 }
 
@@ -52,7 +57,7 @@ fn test_integer_is_not_null() {
 
 #[test]
 fn test_varchar_is_not_null() {
-    let value = SqlValue::Varchar(std::sync::Arc::from("test"));
+    let value = SqlValue::Varchar(sv("test"));
     assert!(!value.is_null());
 }
 
@@ -68,7 +73,7 @@ fn test_integer_value_has_integer_type() {
 
 #[test]
 fn test_varchar_value_has_varchar_type() {
-    let value = SqlValue::Varchar(std::sync::Arc::from("test"));
+    let value = SqlValue::Varchar(sv("test"));
     // Note: VARCHAR values don't have a specific max_length in the value itself
     // We'll handle this properly when we implement it
     match value.get_type() {
@@ -130,7 +135,7 @@ fn test_double_value_has_double_type() {
 
 #[test]
 fn test_character_value_has_character_type() {
-    let value = SqlValue::Character(std::sync::Arc::from("hello"));
+    let value = SqlValue::Character(sv("hello"));
     match value.get_type() {
         DataType::Character { .. } => {} // Success
         _ => panic!("Expected Character type"),

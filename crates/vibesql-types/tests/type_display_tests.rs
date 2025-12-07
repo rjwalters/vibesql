@@ -1,5 +1,11 @@
 use vibesql_types::*;
 
+// Helper to create StringValue from &str (works with both Arc<str> and ArcStr)
+fn sv(s: &str) -> vibesql_types::StringValue {
+    vibesql_types::StringValue::from(s)
+}
+
+
 // ============================================================================
 // Display/Format Tests - How types are displayed
 // ============================================================================
@@ -12,7 +18,7 @@ fn test_integer_display() {
 
 #[test]
 fn test_varchar_display() {
-    let value = SqlValue::Varchar(std::sync::Arc::from("hello"));
+    let value = SqlValue::Varchar(sv("hello"));
     assert_eq!(format!("{}", value), "hello");
 }
 
@@ -83,7 +89,7 @@ fn test_double_display() {
 
 #[test]
 fn test_character_display() {
-    let value = SqlValue::Character(std::sync::Arc::from("test"));
+    let value = SqlValue::Character(sv("test"));
     assert_eq!(format!("{}", value), "test");
 }
 
