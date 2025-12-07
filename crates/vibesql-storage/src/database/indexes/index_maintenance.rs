@@ -463,13 +463,28 @@ impl IndexManager {
         row: &Row,
         row_index: usize,
     ) {
+        self.update_indexes_for_delete_with_values(table_name, table_schema, &row.values, row_index);
+    }
+
+    /// Update user-defined indexes for delete operation using raw values slice
+    ///
+    /// This is an optimization over `update_indexes_for_delete` that avoids requiring
+    /// a full Row struct. Useful when you already have a values slice and want to
+    /// avoid the overhead of wrapping it in a Row.
+    pub fn update_indexes_for_delete_with_values(
+        &mut self,
+        table_name: &str,
+        table_schema: &vibesql_catalog::TableSchema,
+        values: &[SqlValue],
+        row_index: usize,
+    ) {
         for (index_name, metadata) in &self.indexes {
             // Case-insensitive comparison for table name matching
             // SQL parser normalizes identifiers to uppercase, but table/index metadata
             // may store the original case from DDL statements
             if metadata.table_name.eq_ignore_ascii_case(table_name) {
                 if let Some(index_data) = self.index_data.get_mut(index_name) {
-                    // Build key from the row
+                    // Build key from the values slice
                     let key_values: Vec<SqlValue> = metadata
                         .columns
                         .iter()
@@ -477,7 +492,7 @@ impl IndexManager {
                             let col_idx = table_schema
                                 .get_column_index(&col.column_name)
                                 .expect("Index column should exist");
-                            let value = &row.values[col_idx];
+                            let value = &values[col_idx];
                             let truncated = apply_prefix_truncation(value, col.prefix_length);
                             // Normalize numeric types for consistent ordering/comparison
                             crate::database::indexes::index_operations::normalize_for_comparison(

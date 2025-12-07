@@ -496,11 +496,27 @@ impl Operations {
         row: &Row,
         row_index: usize,
     ) {
+        self.update_indexes_for_delete_with_values(catalog, table_name, &row.values, row_index);
+    }
+
+    /// Update user-defined indexes for delete operation using raw values slice
+    ///
+    /// This is an optimization over `update_indexes_for_delete` that avoids requiring
+    /// a full Row struct. Useful in the fast delete path where we already have a values
+    /// slice and want to avoid wrapping overhead.
+    pub fn update_indexes_for_delete_with_values(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        values: &[vibesql_types::SqlValue],
+        row_index: usize,
+    ) {
         if let Some(table_schema) = catalog.get_table(table_name) {
-            self.index_manager.update_indexes_for_delete(table_name, table_schema, row, row_index);
+            self.index_manager
+                .update_indexes_for_delete_with_values(table_name, table_schema, values, row_index);
         }
 
-        self.update_spatial_indexes_for_delete(catalog, table_name, row, row_index);
+        self.update_spatial_indexes_for_delete_with_values(catalog, table_name, values, row_index);
     }
 
     /// Batch update user-defined indexes for delete operation
@@ -1071,6 +1087,16 @@ impl Operations {
         row: &Row,
         row_index: usize,
     ) {
+        self.update_spatial_indexes_for_delete_with_values(catalog, table_name, &row.values, row_index);
+    }
+
+    fn update_spatial_indexes_for_delete_with_values(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        table_name: &str,
+        values: &[vibesql_types::SqlValue],
+        row_index: usize,
+    ) {
         let table_schema = match catalog.get_table(table_name) {
             Some(schema) => schema,
             None => return,
@@ -1088,7 +1114,7 @@ impl Operations {
             .collect();
 
         for (index_name, col_idx) in indexes_to_update {
-            let geom_value = &row.values[col_idx];
+            let geom_value = &values[col_idx];
 
             if let Some(mbr) = extract_mbr_from_sql_value(geom_value) {
                 if let Some((_, index)) = self.spatial_indexes.get_mut(&index_name) {

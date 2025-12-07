@@ -763,10 +763,10 @@ impl Database {
         table_name: &str,
         pk_values: &[vibesql_types::SqlValue],
     ) -> Result<bool, StorageError> {
-        // First, find the row index and clone the row for index updates
-        // This is necessary to satisfy the borrow checker - we need the row data
-        // to update indexes, but we also need mutable access to delete the row
-        let (row_index, row_clone) = {
+        // First, find the row index and clone only the values (not the full Row struct)
+        // This avoids double-cloning: previously we cloned the Row, then cloned its values for WAL.
+        // Now we clone values only once and use a reference for index updates.
+        let (row_index, values) = {
             let table = self
                 .get_table(table_name)
                 .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
@@ -779,23 +779,26 @@ impl Database {
                 None => return Err(StorageError::Other("Table has no primary key".to_string())),
             };
 
-            // Get the row - we need to clone it for index updates
-            let row = match table.get_row(row_index) {
-                Some(r) => r.clone(),
+            // Get the row values - clone once for both WAL and index updates
+            let values = match table.get_row(row_index) {
+                Some(r) => r.values.clone(),
                 None => return Ok(false), // Row already deleted
             };
 
-            (row_index, row)
+            (row_index, values)
         };
 
-        // Emit WAL entry before any modifications (needed for crash recovery)
-        // Only clone values if persistence is actually enabled to avoid unnecessary allocation
-        if self.persistence_enabled() {
-            self.emit_wal_delete(table_name, row_index as u64, row_clone.values.clone());
-        }
+        // Update user-defined indexes first (using reference to values)
+        // This must happen before we move ownership of values to WAL
+        self.operations
+            .update_indexes_for_delete_with_values(&self.catalog, table_name, &values, row_index);
 
-        // Update user-defined indexes with the cloned row
-        self.operations.update_indexes_for_delete(&self.catalog, table_name, &row_clone, row_index);
+        // Emit WAL entry before deleting (needed for crash recovery)
+        // Only emit if persistence is enabled to avoid unnecessary work
+        // Move ownership of values to avoid a second clone
+        if self.persistence_enabled() {
+            self.emit_wal_delete(table_name, row_index as u64, values);
+        }
 
         // Now delete the row (this updates the internal PK hash index)
         let table_mut = self
