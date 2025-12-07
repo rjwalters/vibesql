@@ -19,6 +19,8 @@ import {
   ParameterStatusMessage,
   SubscriptionDataMessage,
   SubscriptionErrorMessage,
+  SubscriptionPartialDataMessage,
+  PartialRow,
 } from './messages';
 
 /**
@@ -97,6 +99,8 @@ export class MessageParser {
         return this.parseSubscriptionData(data);
       case MessageCodes.SubscriptionError:
         return this.parseSubscriptionError(data);
+      case MessageCodes.SubscriptionPartialData:
+        return this.parseSubscriptionPartialData(data);
       default:
         console.warn(`Unknown message type: ${type}`);
         return null;
@@ -339,6 +343,84 @@ export class MessageParser {
       type: 'SubscriptionError',
       subscriptionId,
       error,
+    };
+  }
+
+  /**
+   * Parse subscription partial data message (VibeSql extension)
+   * Wire format:
+   *   subscription_id: [u8; 16]
+   *   update_type: u8 (always 4 for SelectiveUpdate)
+   *   row_count: i32
+   *   For each row:
+   *     total_columns: u16
+   *     bitmap: [u8; ceil(total_columns/8)]
+   *     For each present column (bit=1):
+   *       value_len: i32 (-1 for NULL, else byte count)
+   *       value: [u8; value_len] (if len >= 0)
+   */
+  private parseSubscriptionPartialData(
+    data: Buffer
+  ): SubscriptionPartialDataMessage {
+    // Skip the 4-byte length field included in the data buffer
+    let offset = 4;
+
+    const subscriptionId = data.slice(offset, offset + 16);
+    offset += 16;
+
+    // Skip update_type (always 4 for SelectiveUpdate)
+    offset += 1;
+
+    const rowCount = data.readInt32BE(offset);
+    offset += 4;
+
+    const rows: PartialRow[] = [];
+
+    for (let i = 0; i < rowCount; i++) {
+      const totalColumns = data.readUInt16BE(offset);
+      offset += 2;
+
+      // Calculate bitmap size (ceil(totalColumns / 8))
+      const bitmapSize = Math.ceil(totalColumns / 8);
+      const bitmap = data.slice(offset, offset + bitmapSize);
+      offset += bitmapSize;
+
+      // Parse which columns are present based on bitmap
+      const presentColumns: number[] = [];
+      for (let col = 0; col < totalColumns; col++) {
+        const byteIndex = Math.floor(col / 8);
+        const bitIndex = 7 - (col % 8); // MSB first
+        if ((bitmap[byteIndex] & (1 << bitIndex)) !== 0) {
+          presentColumns.push(col);
+        }
+      }
+
+      // Parse values for present columns
+      const values: (any | null)[] = [];
+      for (const _colIndex of presentColumns) {
+        const valueLen = data.readInt32BE(offset);
+        offset += 4;
+
+        if (valueLen === -1) {
+          values.push(null);
+        } else {
+          const value = data.slice(offset, offset + valueLen).toString('utf8');
+          values.push(value);
+          offset += valueLen;
+        }
+      }
+
+      rows.push({
+        totalColumns,
+        presentColumns,
+        values,
+      });
+    }
+
+    return {
+      type: 'SubscriptionPartialData',
+      subscriptionId,
+      rows,
     };
   }
 

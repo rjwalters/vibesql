@@ -31,6 +31,7 @@ export const MessageCodes = {
   Unsubscribe: 0xf1,
   SubscriptionData: 0xf2,
   SubscriptionError: 0xf3,
+  SubscriptionPartialData: 0xf7,
 };
 
 /**
@@ -156,6 +157,34 @@ export interface SubscriptionErrorMessage {
 }
 
 /**
+ * Partial column value for selective updates
+ */
+export interface PartialColumnValue {
+  columnIndex: number;
+  value: any;
+}
+
+/**
+ * Partial row with only changed columns
+ */
+export interface PartialRow {
+  totalColumns: number;
+  presentColumns: number[];
+  values: (any | null)[];
+}
+
+/**
+ * Subscription partial data message (VibeSql extension)
+ * Used for selective column updates where only changed columns are sent
+ */
+export interface SubscriptionPartialDataMessage {
+  type: 'SubscriptionPartialData';
+  subscriptionId: Buffer;
+  rows: PartialRow[];
+  columns?: ColumnDescription[];
+}
+
+/**
  * Data row message
  */
 export interface DataRowMessage {
@@ -233,7 +262,8 @@ export type BackendMessage =
   | ReadyForQueryMessage
   | ErrorResponseMessage
   | SubscriptionDataMessage
-  | SubscriptionErrorMessage;
+  | SubscriptionErrorMessage
+  | SubscriptionPartialDataMessage;
 
 /**
  * All possible frontend messages
