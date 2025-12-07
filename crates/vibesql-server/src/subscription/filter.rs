@@ -422,6 +422,7 @@ impl SubscriptionFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_simple_equality_filter() {

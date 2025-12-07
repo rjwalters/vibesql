@@ -1152,6 +1152,7 @@ pub fn create_partial_row_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_subscription_id_uniqueness() {
@@ -2324,14 +2325,14 @@ mod tests {
         let old_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
             ],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(150),
             ],
         };
@@ -2355,17 +2356,17 @@ mod tests {
         let old_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("active".to_string()),
+                SqlValue::Varchar(Arc::from("active")),
             ],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar(Arc::from("Bob")),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("inactive".to_string()),
+                SqlValue::Varchar(Arc::from("inactive")),
             ],
         };
 
@@ -2381,16 +2382,16 @@ mod tests {
             delta.old_values,
             vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
-                SqlValue::Varchar("active".to_string())
+                SqlValue::Varchar(Arc::from("Alice")),
+                SqlValue::Varchar(Arc::from("active"))
             ]
         );
         assert_eq!(
             delta.new_values,
             vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Bob".to_string()),
-                SqlValue::Varchar("inactive".to_string())
+                SqlValue::Varchar(Arc::from("Bob")),
+                SqlValue::Varchar(Arc::from("inactive"))
             ]
         );
     }
@@ -2400,7 +2401,7 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let pk_columns = vec![0];
@@ -2414,10 +2415,10 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old_row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new_row = crate::Row {
-            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar(Arc::from("Alice"))],
         };
 
         let pk_columns = vec![0];
@@ -2437,7 +2438,7 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old_row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new_row = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
 
@@ -2460,14 +2461,14 @@ mod tests {
             values: vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("old".to_string()),
+                SqlValue::Varchar(Arc::from("old")),
             ],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("new".to_string()),
+                SqlValue::Varchar(Arc::from("new")),
             ],
         };
 
@@ -2484,7 +2485,7 @@ mod tests {
             vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("old".to_string())
+                SqlValue::Varchar(Arc::from("old"))
             ]
         );
         assert_eq!(
@@ -2492,7 +2493,7 @@ mod tests {
             vec![
                 SqlValue::Integer(1),
                 SqlValue::Integer(100),
-                SqlValue::Varchar("new".to_string())
+                SqlValue::Varchar(Arc::from("new"))
             ]
         );
     }
@@ -2502,12 +2503,12 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let old_row = crate::Row {
-            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(Arc::from("Alice"))],
         };
         let new_row = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar(Arc::from("Alice")),
                 SqlValue::Integer(100),
             ],
         };
