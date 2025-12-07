@@ -20,6 +20,42 @@ use std::collections::HashSet;
 use vibesql_ast::{Expression, FromClause, SelectItem, SelectStmt, Statement};
 use vibesql_storage::Database;
 
+/// Reasons why PK detection was not confident
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PkDetectionFailureReason {
+    /// Query could not be parsed
+    ParseError,
+    /// Query has a set operation (UNION, INTERSECT, etc.)
+    SetOperation,
+    /// Query has no FROM clause
+    NoFromClause,
+    /// Query involves multiple tables (join)
+    MultipleTablesInQuery,
+    /// The referenced table was not found in the database
+    TableNotFound,
+    /// The table has no primary key defined
+    NoPrimaryKeyOnTable,
+    /// PK columns are not in the query's result set
+    PkColumnsNotInResultSet,
+    /// Query has a subquery in FROM clause
+    SubqueryInFrom,
+}
+
+impl std::fmt::Display for PkDetectionFailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ParseError => write!(f, "query parse error"),
+            Self::SetOperation => write!(f, "query contains set operation (UNION/INTERSECT/EXCEPT)"),
+            Self::NoFromClause => write!(f, "query has no FROM clause"),
+            Self::MultipleTablesInQuery => write!(f, "query involves multiple tables (join)"),
+            Self::TableNotFound => write!(f, "table not found in database"),
+            Self::NoPrimaryKeyOnTable => write!(f, "table has no primary key defined"),
+            Self::PkColumnsNotInResultSet => write!(f, "PK columns not present in SELECT list"),
+            Self::SubqueryInFrom => write!(f, "FROM clause contains subquery"),
+        }
+    }
+}
+
 /// Result of PK column detection
 #[derive(Debug, Clone)]
 pub struct PkDetectionResult {
@@ -29,6 +65,8 @@ pub struct PkDetectionResult {
     pub confident: bool,
     /// Tables involved in the query
     pub tables: HashSet<String>,
+    /// Reason for lack of confidence (set when confident is false)
+    pub reason: Option<PkDetectionFailureReason>,
 }
 
 impl Default for PkDetectionResult {
@@ -37,6 +75,29 @@ impl Default for PkDetectionResult {
             pk_column_indices: vec![0], // Default: assume first column is PK
             confident: false,
             tables: HashSet::new(),
+            reason: None,
+        }
+    }
+}
+
+impl PkDetectionResult {
+    /// Create a default result with a specific failure reason
+    fn with_reason(reason: PkDetectionFailureReason) -> Self {
+        Self {
+            pk_column_indices: vec![0],
+            confident: false,
+            tables: HashSet::new(),
+            reason: Some(reason),
+        }
+    }
+
+    /// Create a default result with a specific failure reason and tables
+    fn with_reason_and_tables(reason: PkDetectionFailureReason, tables: HashSet<String>) -> Self {
+        Self {
+            pk_column_indices: vec![0],
+            confident: false,
+            tables,
+            reason: Some(reason),
         }
     }
 }
@@ -53,7 +114,7 @@ pub fn detect_pk_columns(sql: &str, db: &Database) -> PkDetectionResult {
     // Parse the query
     let stmt = match vibesql_parser::Parser::parse_sql(sql) {
         Ok(stmt) => stmt,
-        Err(_) => return PkDetectionResult::default(),
+        Err(_) => return PkDetectionResult::with_reason(PkDetectionFailureReason::ParseError),
     };
 
     detect_pk_columns_from_stmt(&stmt, db)
@@ -71,13 +132,13 @@ pub fn detect_pk_columns_from_stmt(stmt: &Statement, db: &Database) -> PkDetecti
 fn detect_pk_from_select(select: &SelectStmt, db: &Database) -> PkDetectionResult {
     // Don't handle set operations (UNION, etc.) - too complex
     if select.set_operation.is_some() {
-        return PkDetectionResult::default();
+        return PkDetectionResult::with_reason(PkDetectionFailureReason::SetOperation);
     }
 
     // Extract the FROM clause
     let from = match &select.from {
         Some(from) => from,
-        None => return PkDetectionResult::default(),
+        None => return PkDetectionResult::with_reason(PkDetectionFailureReason::NoFromClause),
     };
 
     // Check if this is a simple single-table query
@@ -89,16 +150,29 @@ fn detect_pk_from_select(select: &SelectStmt, db: &Database) -> PkDetectionResul
         }
     };
 
+    let mut tables = HashSet::new();
+    tables.insert(table_name.clone());
+
     // Get the table schema
     let table = match db.get_table(&table_name) {
         Some(t) => t,
-        None => return PkDetectionResult::default(),
+        None => {
+            return PkDetectionResult::with_reason_and_tables(
+                PkDetectionFailureReason::TableNotFound,
+                tables,
+            );
+        }
     };
 
     // Get PK column indices from schema
     let pk_indices = match table.schema.get_primary_key_indices() {
         Some(indices) => indices,
-        None => return PkDetectionResult::default(),
+        None => {
+            return PkDetectionResult::with_reason_and_tables(
+                PkDetectionFailureReason::NoPrimaryKeyOnTable,
+                tables,
+            );
+        }
     };
 
     // Get PK column names
@@ -108,7 +182,10 @@ fn detect_pk_from_select(select: &SelectStmt, db: &Database) -> PkDetectionResul
         .collect();
 
     if pk_column_names.is_empty() {
-        return PkDetectionResult::default();
+        return PkDetectionResult::with_reason_and_tables(
+            PkDetectionFailureReason::NoPrimaryKeyOnTable,
+            tables,
+        );
     }
 
     // Map PK column names to result set positions
@@ -119,14 +196,21 @@ fn detect_pk_from_select(select: &SelectStmt, db: &Database) -> PkDetectionResul
         table_alias.as_deref(),
     );
 
-    let mut tables = HashSet::new();
-    tables.insert(table_name);
-
     if result_pk_indices.is_empty() {
         // PKs not in result set - use default
-        PkDetectionResult { pk_column_indices: vec![0], confident: false, tables }
+        PkDetectionResult {
+            pk_column_indices: vec![0],
+            confident: false,
+            tables,
+            reason: Some(PkDetectionFailureReason::PkColumnsNotInResultSet),
+        }
     } else {
-        PkDetectionResult { pk_column_indices: result_pk_indices, confident: true, tables }
+        PkDetectionResult {
+            pk_column_indices: result_pk_indices,
+            confident: true,
+            tables,
+            reason: None,
+        }
     }
 }
 
@@ -151,10 +235,15 @@ fn detect_pk_from_join(
     db: &Database,
 ) -> PkDetectionResult {
     // Collect all tables and their aliases
-    let tables_info = collect_join_tables(from);
+    let (tables_info, has_subquery) = collect_join_tables(from);
 
     if tables_info.is_empty() {
-        return PkDetectionResult::default();
+        let reason = if has_subquery {
+            PkDetectionFailureReason::SubqueryInFrom
+        } else {
+            PkDetectionFailureReason::MultipleTablesInQuery
+        };
+        return PkDetectionResult::with_reason(reason);
     }
 
     let mut tables = HashSet::new();
@@ -168,12 +257,26 @@ fn detect_pk_from_join(
 
     let table = match db.get_table(first_table) {
         Some(t) => t,
-        None => return PkDetectionResult { pk_column_indices: vec![0], confident: false, tables },
+        None => {
+            return PkDetectionResult {
+                pk_column_indices: vec![0],
+                confident: false,
+                tables,
+                reason: Some(PkDetectionFailureReason::TableNotFound),
+            };
+        }
     };
 
     let pk_indices = match table.schema.get_primary_key_indices() {
         Some(indices) => indices,
-        None => return PkDetectionResult { pk_column_indices: vec![0], confident: false, tables },
+        None => {
+            return PkDetectionResult {
+                pk_column_indices: vec![0],
+                confident: false,
+                tables,
+                reason: Some(PkDetectionFailureReason::NoPrimaryKeyOnTable),
+            };
+        }
     };
 
     let pk_column_names: Vec<String> = pk_indices
@@ -182,7 +285,12 @@ fn detect_pk_from_join(
         .collect();
 
     if pk_column_names.is_empty() {
-        return PkDetectionResult { pk_column_indices: vec![0], confident: false, tables };
+        return PkDetectionResult {
+            pk_column_indices: vec![0],
+            confident: false,
+            tables,
+            reason: Some(PkDetectionFailureReason::NoPrimaryKeyOnTable),
+        };
     }
 
     // Try to map with table alias for qualified references
@@ -194,31 +302,48 @@ fn detect_pk_from_join(
     );
 
     if result_pk_indices.is_empty() {
-        PkDetectionResult { pk_column_indices: vec![0], confident: false, tables }
+        PkDetectionResult {
+            pk_column_indices: vec![0],
+            confident: false,
+            tables,
+            reason: Some(PkDetectionFailureReason::PkColumnsNotInResultSet),
+        }
     } else {
         // Not fully confident for joins since we only handle first table
-        PkDetectionResult { pk_column_indices: result_pk_indices, confident: false, tables }
+        PkDetectionResult {
+            pk_column_indices: result_pk_indices,
+            confident: false,
+            tables,
+            reason: Some(PkDetectionFailureReason::MultipleTablesInQuery),
+        }
     }
 }
 
 /// Collect all tables from a JOIN clause
-fn collect_join_tables(from: &FromClause) -> Vec<(String, Option<String>)> {
+/// Returns (tables, has_subquery) tuple
+fn collect_join_tables(from: &FromClause) -> (Vec<(String, Option<String>)>, bool) {
     let mut tables = Vec::new();
-    collect_join_tables_recursive(from, &mut tables);
-    tables
+    let mut has_subquery = false;
+    collect_join_tables_recursive(from, &mut tables, &mut has_subquery);
+    (tables, has_subquery)
 }
 
-fn collect_join_tables_recursive(from: &FromClause, tables: &mut Vec<(String, Option<String>)>) {
+fn collect_join_tables_recursive(
+    from: &FromClause,
+    tables: &mut Vec<(String, Option<String>)>,
+    has_subquery: &mut bool,
+) {
     match from {
         FromClause::Table { name, alias, .. } => {
             tables.push((name.to_lowercase(), alias.clone()));
         }
         FromClause::Join { left, right, .. } => {
-            collect_join_tables_recursive(left, tables);
-            collect_join_tables_recursive(right, tables);
+            collect_join_tables_recursive(left, tables, has_subquery);
+            collect_join_tables_recursive(right, tables, has_subquery);
         }
         FromClause::Subquery { .. } => {
             // Can't easily extract table info from subqueries
+            *has_subquery = true;
         }
     }
 }
@@ -448,5 +573,89 @@ mod tests {
 
         assert!(result.confident);
         assert_eq!(result.pk_column_indices, vec![0]); // id (aliased as user_id) is first
+    }
+
+    // Tests for PkDetectionFailureReason
+    #[test]
+    fn test_reason_parse_error() {
+        let db = create_test_db();
+        let result = detect_pk_columns("INVALID SQL", &db);
+
+        assert!(!result.confident);
+        assert_eq!(result.reason, Some(PkDetectionFailureReason::ParseError));
+    }
+
+    #[test]
+    fn test_reason_table_not_found() {
+        let db = create_test_db();
+        let result = detect_pk_columns("SELECT * FROM nonexistent_table", &db);
+
+        assert!(!result.confident);
+        assert_eq!(result.reason, Some(PkDetectionFailureReason::TableNotFound));
+    }
+
+    #[test]
+    fn test_reason_pk_columns_not_in_result_set() {
+        let db = create_test_db();
+        let result = detect_pk_columns("SELECT name, email FROM users", &db);
+
+        assert!(!result.confident);
+        assert_eq!(result.reason, Some(PkDetectionFailureReason::PkColumnsNotInResultSet));
+    }
+
+    #[test]
+    fn test_reason_multiple_tables_in_query() {
+        let db = create_test_db();
+        let result = detect_pk_columns(
+            "SELECT u.id, o.order_id FROM users u JOIN orders o ON u.id = o.user_id",
+            &db,
+        );
+
+        assert!(!result.confident);
+        assert_eq!(result.reason, Some(PkDetectionFailureReason::MultipleTablesInQuery));
+    }
+
+    #[test]
+    fn test_reason_no_from_clause() {
+        let db = create_test_db();
+        let result = detect_pk_columns("SELECT 1 + 1", &db);
+
+        assert!(!result.confident);
+        assert_eq!(result.reason, Some(PkDetectionFailureReason::NoFromClause));
+    }
+
+    #[test]
+    fn test_reason_set_operation() {
+        let db = create_test_db();
+        let result = detect_pk_columns("SELECT id FROM users UNION SELECT order_id FROM orders", &db);
+
+        assert!(!result.confident);
+        assert_eq!(result.reason, Some(PkDetectionFailureReason::SetOperation));
+    }
+
+    #[test]
+    fn test_confident_query_has_no_reason() {
+        let db = create_test_db();
+        let result = detect_pk_columns("SELECT * FROM users", &db);
+
+        assert!(result.confident);
+        assert_eq!(result.reason, None);
+    }
+
+    #[test]
+    fn test_failure_reason_display() {
+        // Test Display implementation
+        assert_eq!(
+            PkDetectionFailureReason::ParseError.to_string(),
+            "query parse error"
+        );
+        assert_eq!(
+            PkDetectionFailureReason::TableNotFound.to_string(),
+            "table not found in database"
+        );
+        assert_eq!(
+            PkDetectionFailureReason::MultipleTablesInQuery.to_string(),
+            "query involves multiple tables (join)"
+        );
     }
 }

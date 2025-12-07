@@ -63,6 +63,39 @@ These metrics track the effectiveness of partial/selective updates, which reduce
 - `pk_mismatch` - Cannot find matching old row by primary key
 - `no_changes` - No column changes detected
 
+### Debug Logging for PK Detection
+
+When running with `RUST_LOG=debug` or `RUST_LOG=vibesql_server=debug`, additional debug messages are logged to help diagnose why subscriptions fall back to full updates instead of selective updates.
+
+**PK Detection Logs** (at subscription creation):
+```
+PK detection confident for subscription: pk_columns=[0], tables={"users"}
+PK detection not confident for subscription: reason=<reason>, pk_columns=[0], tables={"users"}, query=SELECT ...
+```
+
+**PK Detection Failure Reasons**:
+| Reason | Description |
+|--------|-------------|
+| `query parse error` | SQL query could not be parsed |
+| `query contains set operation (UNION/INTERSECT/EXCEPT)` | Query uses UNION, INTERSECT, or EXCEPT |
+| `query has no FROM clause` | Query does not reference any table |
+| `query involves multiple tables (join)` | Query joins multiple tables |
+| `table not found in database` | Referenced table does not exist |
+| `table has no primary key defined` | Table lacks a PRIMARY KEY constraint |
+| `PK columns not present in SELECT list` | Primary key columns not included in SELECT |
+| `FROM clause contains subquery` | Query uses a subquery in the FROM clause |
+
+**Selective Update Fallback Logs** (at update time):
+```
+Selective update skipped for subscription <id>: disabled in config
+Selective update skipped for subscription <id>: row count mismatch (old=X, new=Y)
+Selective update skipped for subscription <id>: cannot match row by PK (pk_columns=[...])
+Selective update: N rows exceeded change threshold for subscription <id>
+Selective update skipped for subscription <id>: no column changes detected
+```
+
+These logs help operators understand why subscriptions are sending full data updates (0xF2) instead of selective column updates (0xF7).
+
 ## Understanding Partial Update Efficiency
 
 The partial update system optimizes bandwidth for subscriptions by only sending columns that have changed, rather than full rows.
