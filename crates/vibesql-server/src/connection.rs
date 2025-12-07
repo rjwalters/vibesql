@@ -7,8 +7,8 @@ use crate::protocol::{
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta, extract_table_refs, hash_rows, SessionSubscriptionManager, SubscriptionId,
-    SubscriptionManager, SubscriptionUpdate,
+    compute_delta, extract_table_refs, hash_rows, SubscriptionId, SubscriptionManager,
+    SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -50,11 +50,10 @@ pub struct ConnectionHandler {
     active_connections: Arc<AtomicUsize>,
     /// Database registry for shared database instances across connections
     database_registry: DatabaseRegistry,
-    /// Session-level subscription manager for real-time query subscriptions
-    subscription_manager: SessionSubscriptionManager,
-    /// Global subscription manager for processing storage change events
-    #[allow(dead_code)]
-    global_subscription_manager: Arc<SubscriptionManager>,
+    /// Unique identifier for this connection (for subscription tracking)
+    connection_id: String,
+    /// Global subscription manager for processing storage change events and tracking subscriptions
+    subscription_manager: Arc<SubscriptionManager>,
     /// Broadcast sender for notifying other connections about mutations
     mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     /// Broadcast receiver for receiving mutation notifications from other connections
@@ -80,7 +79,7 @@ impl ConnectionHandler {
         password_store: Option<Arc<PasswordStore>>,
         active_connections: Arc<AtomicUsize>,
         database_registry: DatabaseRegistry,
-        global_subscription_manager: Arc<SubscriptionManager>,
+        subscription_manager: Arc<SubscriptionManager>,
         mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     ) -> Self {
         // Split the TCP stream for async select! usage
@@ -89,6 +88,10 @@ impl ConnectionHandler {
 
         // Subscribe to the broadcast channel to receive notifications from other connections
         let mutation_broadcast_rx = mutation_broadcast_tx.subscribe();
+
+        // Generate a unique connection ID for subscription tracking
+        let connection_id = uuid::Uuid::new_v4().to_string();
+
         Self {
             read_half,
             write_half,
@@ -102,8 +105,8 @@ impl ConnectionHandler {
             connection_start: Instant::now(),
             active_connections,
             database_registry,
-            subscription_manager: SessionSubscriptionManager::new(),
-            global_subscription_manager,
+            connection_id,
+            subscription_manager,
             mutation_broadcast_tx,
             mutation_broadcast_rx,
         }
@@ -311,7 +314,8 @@ impl ConnectionHandler {
                 match self.handle_client_message(msg).await? {
                     ClientMessageResult::Continue => {}
                     ClientMessageResult::Terminate => {
-                        self.subscription_manager.clear();
+                        self.subscription_manager
+                            .unsubscribe_all_for_connection(&self.connection_id);
                         return Ok(());
                     }
                 }
@@ -330,7 +334,7 @@ impl ConnectionHandler {
                 notification = self.mutation_broadcast_rx.recv() => {
                     match notification {
                         Ok(n) => {
-                            if self.subscription_manager.subscription_count() > 0 {
+                            if self.subscription_manager.connection_subscription_count(&self.connection_id) > 0 {
                                 self.handle_cross_connection_notification(&n.affected_tables).await;
                             }
                         }
@@ -363,7 +367,8 @@ impl ConnectionHandler {
         }
 
         // Clean up subscriptions when connection closes
-        self.subscription_manager.clear();
+        self.subscription_manager
+            .unsubscribe_all_for_connection(&self.connection_id);
 
         Ok(())
     }
@@ -385,7 +390,7 @@ impl ConnectionHandler {
 
             FrontendMessage::Unsubscribe { subscription_id } => {
                 debug!("Unsubscribe: {:?}", subscription_id);
-                self.subscription_manager.unsubscribe(&subscription_id);
+                self.subscription_manager.unsubscribe_by_wire_id(&subscription_id);
                 // No response needed per protocol spec
                 Ok(ClientMessageResult::Continue)
             }
@@ -409,16 +414,12 @@ impl ConnectionHandler {
     /// This method supports delta updates to reduce network bandwidth when
     /// only a small portion of the result set has changed.
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
-        // Collect subscriptions that need updating along with their previous state
+        // Collect subscriptions for THIS connection that need updating
         let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
             .iter()
             .flat_map(|table| {
                 self.subscription_manager
-                    .get_subscriptions_for_table_with_details(table)
-                    .map(|(id, sub)| {
-                        (*id, sub.query.clone(), sub.last_result_hash, sub.last_result.clone())
-                    })
-                    .collect::<Vec<_>>()
+                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
             })
             .collect();
 
@@ -528,7 +529,7 @@ impl ConnectionHandler {
                         }
 
                         // Update stored result for next delta computation
-                        self.subscription_manager.update_result(
+                        self.subscription_manager.update_result_by_wire_id(
                             &subscription_id,
                             new_hash,
                             new_rows,
@@ -705,7 +706,7 @@ impl ConnectionHandler {
     ///
     /// Parses the query, extracts table dependencies, executes the query,
     /// registers the subscription, and sends the initial data to the client.
-    async fn handle_subscribe(&mut self, query: &str, params: Vec<Option<Vec<u8>>>) -> Result<()> {
+    async fn handle_subscribe(&mut self, query: &str, _params: Vec<Option<Vec<u8>>>) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
         // Parse the query to extract table dependencies
@@ -722,20 +723,26 @@ impl ConnectionHandler {
         // Extract table dependencies from the query
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
 
-        // Register the subscription first (to get the ID)
-        let subscription_id = match self.subscription_manager.subscribe(
+        // Generate a wire subscription ID (UUID) for the wire protocol
+        let wire_subscription_id = *uuid::Uuid::new_v4().as_bytes();
+
+        // Create a dummy channel - wire protocol sends data directly through TCP socket,
+        // not through the subscription manager's channel-based notification system
+        let (notify_tx, _notify_rx) = tokio::sync::mpsc::channel(1);
+
+        // Register the subscription with the global subscription manager
+        if let Err(e) = self.subscription_manager.subscribe_for_connection(
             query.to_string(),
-            params,
-            table_dependencies,
+            notify_tx,
+            self.connection_id.clone(),
+            wire_subscription_id,
+            table_dependencies.clone(),
         ) {
-            Ok(id) => id,
-            Err(e) => {
-                // Send subscription error with a dummy subscription ID (subscription failed before registration)
-                let error_id = [0u8; 16];
-                self.send_subscription_error(&error_id, &format!("{}", e)).await?;
-                return Ok(());
-            }
-        };
+            // Send subscription error with a dummy subscription ID (subscription failed before registration)
+            let error_id = [0u8; 16];
+            self.send_subscription_error(&error_id, &format!("{}", e)).await?;
+            return Ok(());
+        }
 
         // Execute the query to get initial data
         match session.execute(query).await {
@@ -746,8 +753,8 @@ impl ConnectionHandler {
 
                 // Compute hash and store result for future delta computation
                 let result_hash = hash_rows(&result_rows);
-                self.subscription_manager.update_result(
-                    &subscription_id,
+                self.subscription_manager.update_result_by_wire_id(
+                    &wire_subscription_id,
                     result_hash,
                     result_rows.clone(),
                 );
@@ -762,7 +769,7 @@ impl ConnectionHandler {
 
                 // Send initial subscription data
                 self.send_subscription_data(
-                    &subscription_id,
+                    &wire_subscription_id,
                     SubscriptionUpdateType::Full,
                     wire_rows,
                 )
@@ -770,17 +777,17 @@ impl ConnectionHandler {
             }
             Ok(_) => {
                 // Non-SELECT query - send error and remove subscription
-                self.subscription_manager.unsubscribe(&subscription_id);
+                self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
                 self.send_subscription_error(
-                    &subscription_id,
+                    &wire_subscription_id,
                     "Only SELECT queries can be subscribed to",
                 )
                 .await?;
             }
             Err(e) => {
                 // Query execution failed - remove subscription and send error
-                self.subscription_manager.unsubscribe(&subscription_id);
-                self.send_subscription_error(&subscription_id, &format!("Execution error: {}", e))
+                self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                self.send_subscription_error(&wire_subscription_id, &format!("Execution error: {}", e))
                     .await?;
             }
         }
@@ -808,16 +815,12 @@ impl ConnectionHandler {
             return;
         }
 
-        // Collect subscriptions that need updating along with their previous state
+        // Collect subscriptions for THIS connection that need updating
         let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
             .iter()
             .flat_map(|table| {
                 self.subscription_manager
-                    .get_subscriptions_for_table_with_details(table)
-                    .map(|(id, sub)| {
-                        (*id, sub.query.clone(), sub.last_result_hash, sub.last_result.clone())
-                    })
-                    .collect::<Vec<_>>()
+                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
             })
             .collect();
 
@@ -919,7 +922,7 @@ impl ConnectionHandler {
                         }
 
                         // Update stored result for next delta computation
-                        self.subscription_manager.update_result(
+                        self.subscription_manager.update_result_by_wire_id(
                             &subscription_id,
                             new_hash,
                             new_rows,

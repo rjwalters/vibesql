@@ -301,9 +301,9 @@ impl SubscriptionManager {
         // Register subscription
         self.subscriptions.insert(id, subscription);
 
-        // Index by tables
+        // Index by tables (lowercase for case-insensitive matching)
         for table in table_dependencies {
-            self.table_index.entry(table).or_default().insert(id);
+            self.table_index.entry(table.to_lowercase()).or_default().insert(id);
         }
 
         // Index by connection
@@ -441,6 +441,113 @@ impl SubscriptionManager {
             .get(connection_id)
             .map(|c| c.load(Ordering::Acquire))
             .unwrap_or(0)
+    }
+
+    /// Get affected subscription details for wire protocol
+    ///
+    /// This method finds all subscriptions that depend on the given table and returns
+    /// their details needed for wire protocol notifications.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - The table name to find affected subscriptions for
+    ///
+    /// # Returns
+    ///
+    /// Vector of (wire_subscription_id, query, last_result_hash, last_result) for
+    /// each affected subscription that has a wire ID.
+    pub fn get_affected_subscriptions_for_wire_protocol(
+        &self,
+        table: &str,
+    ) -> Vec<([u8; 16], String, u64, Option<Vec<crate::Row>>)> {
+        let table_lower = table.to_lowercase();
+        let subscription_ids: Vec<SubscriptionId> = self
+            .table_index
+            .get(&table_lower)
+            .map(|ids| ids.iter().copied().collect())
+            .unwrap_or_default();
+
+        subscription_ids
+            .into_iter()
+            .filter_map(|id| {
+                self.subscriptions.get(&id).and_then(|sub| {
+                    sub.wire_subscription_id.map(|wire_id| {
+                        (wire_id, sub.query.clone(), sub.last_result_hash, sub.last_result.clone())
+                    })
+                })
+            })
+            .collect()
+    }
+
+    /// Get affected subscription details for wire protocol filtered by connection
+    ///
+    /// This method finds subscriptions for a specific connection that depend on the
+    /// given table and returns their details needed for wire protocol notifications.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - The table name to find affected subscriptions for
+    /// * `connection_id` - The connection ID to filter by
+    ///
+    /// # Returns
+    ///
+    /// Vector of (wire_subscription_id, query, last_result_hash, last_result) for
+    /// each affected subscription that belongs to the specified connection.
+    pub fn get_affected_subscriptions_for_connection(
+        &self,
+        table: &str,
+        connection_id: &str,
+    ) -> Vec<([u8; 16], String, u64, Option<Vec<crate::Row>>)> {
+        let table_lower = table.to_lowercase();
+        let subscription_ids: Vec<SubscriptionId> = self
+            .table_index
+            .get(&table_lower)
+            .map(|ids| ids.iter().copied().collect())
+            .unwrap_or_default();
+
+        subscription_ids
+            .into_iter()
+            .filter_map(|id| {
+                self.subscriptions.get(&id).and_then(|sub| {
+                    // Only include subscriptions that belong to this connection
+                    if sub.connection_id.as_deref() == Some(connection_id) {
+                        sub.wire_subscription_id.map(|wire_id| {
+                            (
+                                wire_id,
+                                sub.query.clone(),
+                                sub.last_result_hash,
+                                sub.last_result.clone(),
+                            )
+                        })
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Update the stored result for a subscription by wire ID
+    ///
+    /// This is used by wire protocol to store results for delta computation.
+    ///
+    /// # Arguments
+    ///
+    /// * `wire_id` - The wire protocol subscription ID (UUID bytes)
+    /// * `result_hash` - Hash of the new result set
+    /// * `result` - The new result set
+    pub fn update_result_by_wire_id(
+        &self,
+        wire_id: &[u8; 16],
+        result_hash: u64,
+        result: Vec<crate::Row>,
+    ) {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                sub.last_result_hash = result_hash;
+                sub.last_result = Some(result);
+            }
+        }
     }
 
     /// Get the number of active subscriptions
@@ -1557,5 +1664,269 @@ mod tests {
         // Get all metrics when no subscriptions exist
         let all_metrics = manager.get_all_metrics();
         assert!(all_metrics.is_empty());
+    }
+
+    // ========================================================================
+    // Tests for connection tracking methods
+    // ========================================================================
+
+    #[test]
+    fn test_subscribe_for_connection() {
+        let manager = SubscriptionManager::new();
+        let (tx, _rx) = mpsc::channel(16);
+
+        let connection_id = "conn-1".to_string();
+        let wire_id: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+        let result = manager.subscribe_for_connection(
+            "SELECT * FROM users".to_string(),
+            tx,
+            connection_id.clone(),
+            wire_id,
+            tables,
+        );
+
+        assert!(result.is_ok());
+        let id = result.unwrap();
+
+        // Verify subscription was registered
+        assert_eq!(manager.subscription_count(), 1);
+        assert_eq!(manager.connection_subscription_count(&connection_id), 1);
+
+        // Verify wire ID index works
+        let found_id = manager.find_subscription_by_wire_id(&wire_id);
+        assert_eq!(found_id, Some(id));
+    }
+
+    #[test]
+    fn test_subscribe_for_connection_limit_enforcement() {
+        use crate::subscription::SubscriptionConfig;
+
+        let config = SubscriptionConfig {
+            max_per_connection: 2,
+            max_global: 10,
+            ..Default::default()
+        };
+        let manager = SubscriptionManager::with_config(config);
+        let connection_id = "conn-1".to_string();
+
+        // Create 2 subscriptions (at the limit)
+        for i in 0..2 {
+            let (tx, _rx) = mpsc::channel(16);
+            let mut wire_id = [0u8; 16];
+            wire_id[0] = i;
+            let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+            let result = manager.subscribe_for_connection(
+                format!("SELECT {} FROM users", i),
+                tx,
+                connection_id.clone(),
+                wire_id,
+                tables,
+            );
+            assert!(result.is_ok(), "Subscription {} should succeed", i);
+        }
+
+        assert_eq!(manager.connection_subscription_count(&connection_id), 2);
+
+        // Third subscription should fail (connection limit)
+        let (tx, _rx) = mpsc::channel(16);
+        let wire_id = [2u8; 16];
+        let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+        let result = manager.subscribe_for_connection(
+            "SELECT 3 FROM users".to_string(),
+            tx,
+            connection_id.clone(),
+            wire_id,
+            tables,
+        );
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::subscription::SubscriptionError::ConnectionLimitExceeded { current, max } => {
+                assert_eq!(current, 2);
+                assert_eq!(max, 2);
+            }
+            e => panic!("Expected ConnectionLimitExceeded, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_unsubscribe_by_wire_id() {
+        let manager = SubscriptionManager::new();
+        let (tx, _rx) = mpsc::channel(16);
+
+        let connection_id = "conn-1".to_string();
+        let wire_id: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+        manager
+            .subscribe_for_connection(
+                "SELECT * FROM users".to_string(),
+                tx,
+                connection_id.clone(),
+                wire_id,
+                tables,
+            )
+            .unwrap();
+
+        assert_eq!(manager.subscription_count(), 1);
+        assert_eq!(manager.connection_subscription_count(&connection_id), 1);
+
+        // Unsubscribe by wire ID
+        manager.unsubscribe_by_wire_id(&wire_id);
+
+        assert_eq!(manager.subscription_count(), 0);
+        assert_eq!(manager.connection_subscription_count(&connection_id), 0);
+
+        // Wire ID should no longer be found
+        assert!(manager.find_subscription_by_wire_id(&wire_id).is_none());
+    }
+
+    #[test]
+    fn test_unsubscribe_all_for_connection() {
+        let manager = SubscriptionManager::new();
+        let connection_id1 = "conn-1".to_string();
+        let connection_id2 = "conn-2".to_string();
+
+        // Create subscriptions for connection 1
+        for i in 0..3 {
+            let (tx, _rx) = mpsc::channel(16);
+            let mut wire_id = [0u8; 16];
+            wire_id[0] = i;
+            let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+            manager
+                .subscribe_for_connection(
+                    format!("SELECT {} FROM users", i),
+                    tx,
+                    connection_id1.clone(),
+                    wire_id,
+                    tables,
+                )
+                .unwrap();
+        }
+
+        // Create subscriptions for connection 2
+        for i in 0..2 {
+            let (tx, _rx) = mpsc::channel(16);
+            let mut wire_id = [10u8; 16];
+            wire_id[0] = i + 10;
+            let tables: HashSet<String> = ["orders".to_string()].into_iter().collect();
+
+            manager
+                .subscribe_for_connection(
+                    format!("SELECT {} FROM orders", i),
+                    tx,
+                    connection_id2.clone(),
+                    wire_id,
+                    tables,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(manager.subscription_count(), 5);
+        assert_eq!(manager.connection_subscription_count(&connection_id1), 3);
+        assert_eq!(manager.connection_subscription_count(&connection_id2), 2);
+
+        // Unsubscribe all for connection 1
+        manager.unsubscribe_all_for_connection(&connection_id1);
+
+        assert_eq!(manager.subscription_count(), 2);
+        assert_eq!(manager.connection_subscription_count(&connection_id1), 0);
+        assert_eq!(manager.connection_subscription_count(&connection_id2), 2);
+    }
+
+    #[test]
+    fn test_connection_subscription_count() {
+        let manager = SubscriptionManager::new();
+        let connection_id = "conn-1".to_string();
+
+        // Initially zero
+        assert_eq!(manager.connection_subscription_count(&connection_id), 0);
+
+        // Add a subscription
+        let (tx, _rx) = mpsc::channel(16);
+        let wire_id: [u8; 16] = [1u8; 16];
+        let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+        manager
+            .subscribe_for_connection(
+                "SELECT * FROM users".to_string(),
+                tx,
+                connection_id.clone(),
+                wire_id,
+                tables,
+            )
+            .unwrap();
+
+        assert_eq!(manager.connection_subscription_count(&connection_id), 1);
+
+        // Non-existent connection should return 0
+        assert_eq!(manager.connection_subscription_count("non-existent"), 0);
+    }
+
+    #[test]
+    fn test_get_affected_subscriptions_for_wire_protocol() {
+        let manager = SubscriptionManager::new();
+        let connection_id = "conn-1".to_string();
+
+        // Create a subscription for "users" table
+        let (tx, _rx) = mpsc::channel(16);
+        let wire_id: [u8; 16] = [1u8; 16];
+        let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+        manager
+            .subscribe_for_connection(
+                "SELECT * FROM users".to_string(),
+                tx,
+                connection_id.clone(),
+                wire_id,
+                tables,
+            )
+            .unwrap();
+
+        // Query for affected subscriptions
+        let affected = manager.get_affected_subscriptions_for_wire_protocol("users");
+        assert_eq!(affected.len(), 1);
+        assert_eq!(affected[0].0, wire_id);
+        assert_eq!(affected[0].1, "SELECT * FROM users");
+
+        // Query for non-existent table
+        let affected = manager.get_affected_subscriptions_for_wire_protocol("orders");
+        assert!(affected.is_empty());
+    }
+
+    #[test]
+    fn test_update_result_by_wire_id() {
+        let manager = SubscriptionManager::new();
+        let connection_id = "conn-1".to_string();
+
+        let (tx, _rx) = mpsc::channel(16);
+        let wire_id: [u8; 16] = [1u8; 16];
+        let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+        manager
+            .subscribe_for_connection(
+                "SELECT * FROM users".to_string(),
+                tx,
+                connection_id.clone(),
+                wire_id,
+                tables,
+            )
+            .unwrap();
+
+        // Update the result
+        let rows = vec![crate::Row { values: vec![vibesql_types::SqlValue::Integer(42)] }];
+        manager.update_result_by_wire_id(&wire_id, 12345, rows.clone());
+
+        // Verify the result was stored
+        let affected = manager.get_affected_subscriptions_for_wire_protocol("users");
+        assert_eq!(affected.len(), 1);
+        assert_eq!(affected[0].2, 12345); // last_result_hash
+        assert!(affected[0].3.is_some()); // last_result
+        assert_eq!(affected[0].3.as_ref().unwrap().len(), 1);
     }
 }

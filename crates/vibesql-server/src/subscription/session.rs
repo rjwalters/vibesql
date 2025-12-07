@@ -1,4 +1,11 @@
-//! Session-level subscription management
+//! Session-level subscription management (deprecated)
+//!
+//! **DEPRECATED**: This module is deprecated. Use `SubscriptionManager` with
+//! connection tracking methods instead:
+//! - `subscribe_for_connection()` - Subscribe for a specific connection
+//! - `unsubscribe_by_wire_id()` - Unsubscribe by wire protocol ID
+//! - `unsubscribe_all_for_connection()` - Clean up all subscriptions for a connection
+//! - `connection_subscription_count()` - Get subscription count for a connection
 //!
 //! This module provides a per-connection subscription manager that tracks
 //! subscriptions for a single client session. Unlike the global SubscriptionManager,
@@ -33,6 +40,13 @@ pub struct SessionSubscription {
 }
 
 /// Manages subscriptions for a single connection/session
+///
+/// **DEPRECATED**: Use `SubscriptionManager` with connection tracking methods instead.
+/// See module documentation for migration guide.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use SubscriptionManager with subscribe_for_connection() instead"
+)]
 #[derive(Debug)]
 pub struct SessionSubscriptionManager {
     /// Active subscriptions by ID
