@@ -46,13 +46,21 @@ console.log(result.rows);
 
 ## Building
 
-```bash
-# Build the WASM package
-wasm-pack build --target web
+Build from the repository root using the provided script:
 
-# Or for Node.js
-wasm-pack build --target nodejs
+```bash
+# From repository root
+./scripts/build-wasm.sh
+
+# Output location: web-demo/public/pkg/
 ```
+
+The build script handles:
+- macOS LLVM configuration (required for wasm32 target)
+- Size-optimized release settings
+- Correct output directory for the web demo
+
+See [web-demo/README.md](../../web-demo/README.md) for full development setup.
 
 ## Documentation
 
