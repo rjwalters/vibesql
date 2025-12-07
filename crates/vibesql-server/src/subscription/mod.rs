@@ -306,6 +306,12 @@ pub struct Subscription {
     pub channel_buffer_size: usize,
     /// Slow consumer threshold percentage
     pub slow_consumer_threshold_percent: u8,
+    /// Optional connection/session ID that owns this subscription
+    /// Used for connection-level subscription tracking and cleanup
+    pub connection_id: Option<String>,
+    /// Optional wire protocol subscription ID (UUID bytes)
+    /// Used to bridge between wire protocol IDs and internal SubscriptionId
+    pub wire_subscription_id: Option<[u8; 16]>,
 }
 
 impl Subscription {
@@ -338,6 +344,8 @@ impl Subscription {
             updates_dropped: 0,
             channel_buffer_size: 64, // default buffer size
             slow_consumer_threshold_percent: 80,
+            connection_id: None,
+            wire_subscription_id: None,
         }
     }
 
@@ -361,6 +369,38 @@ impl Subscription {
             updates_dropped: 0,
             channel_buffer_size: config.channel_buffer_size,
             slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
+            connection_id: None,
+            wire_subscription_id: None,
+        }
+    }
+
+    /// Create a new subscription for a specific connection (wire protocol)
+    ///
+    /// This associates the subscription with a connection ID for tracking
+    /// and cleanup when the connection closes.
+    pub fn for_connection(
+        query: String,
+        tables: HashSet<String>,
+        notify_tx: mpsc::Sender<SubscriptionUpdate>,
+        connection_id: String,
+        wire_subscription_id: [u8; 16],
+        config: &SubscriptionConfig,
+    ) -> Self {
+        Self {
+            id: SubscriptionId::new(),
+            query,
+            tables,
+            last_result_hash: 0,
+            last_result: None,
+            notify_tx,
+            retry_policy: SubscriptionRetryPolicy::default(),
+            retry_count: 0,
+            updates_sent: 0,
+            updates_dropped: 0,
+            channel_buffer_size: config.channel_buffer_size,
+            slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
+            connection_id: Some(connection_id),
+            wire_subscription_id: Some(wire_subscription_id),
         }
     }
 }
@@ -381,6 +421,8 @@ pub enum SubscriptionUpdate {
     /// - A new subscription is created (initial results)
     /// - The results have changed and delta calculation isn't available
     Full {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
         /// All rows in the result set
         rows: Vec<crate::Row>,
     },
@@ -391,6 +433,8 @@ pub enum SubscriptionUpdate {
     /// for large result sets with small changes. Sent when the change
     /// can be expressed as a set of inserts, updates, and deletes.
     Delta {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
         /// Newly inserted rows (in new result, not in previous)
         inserts: Vec<crate::Row>,
         /// Updated rows (old value, new value) - rows with same identity but different content
@@ -404,9 +448,22 @@ pub enum SubscriptionUpdate {
     /// Sent when the subscription query fails to execute, typically due to
     /// schema changes that invalidate the query.
     Error {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
         /// Error message describing what went wrong
         message: String,
     },
+}
+
+impl SubscriptionUpdate {
+    /// Get the subscription ID this update is for
+    pub fn subscription_id(&self) -> SubscriptionId {
+        match self {
+            SubscriptionUpdate::Full { subscription_id, .. } => *subscription_id,
+            SubscriptionUpdate::Delta { subscription_id, .. } => *subscription_id,
+            SubscriptionUpdate::Error { subscription_id, .. } => *subscription_id,
+        }
+    }
 }
 
 // ============================================================================
@@ -533,7 +590,11 @@ fn hash_row(row: &crate::Row) -> u64 {
 ///
 /// Returns `Some(SubscriptionUpdate::Delta)` if there are changes,
 /// or `None` if the result sets are identical.
-pub fn compute_delta(old: &[crate::Row], new: &[crate::Row]) -> Option<SubscriptionUpdate> {
+pub fn compute_delta(
+    subscription_id: SubscriptionId,
+    old: &[crate::Row],
+    new: &[crate::Row],
+) -> Option<SubscriptionUpdate> {
     use std::collections::HashMap;
 
     // Build hash maps for efficient lookup
@@ -588,7 +649,7 @@ pub fn compute_delta(old: &[crate::Row], new: &[crate::Row]) -> Option<Subscript
     // This is semantically correct, just not optimal for clients that could patch in place
     let updates = Vec::new();
 
-    Some(SubscriptionUpdate::Delta { inserts, updates, deletes })
+    Some(SubscriptionUpdate::Delta { subscription_id, inserts, updates, deletes })
 }
 
 #[cfg(test)]
@@ -674,7 +735,8 @@ mod tests {
         ];
 
         // Same old and new should return None
-        let delta = compute_delta(&rows, &rows);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &rows, &rows);
         assert!(delta.is_none());
     }
 
@@ -693,11 +755,12 @@ mod tests {
             crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
                 assert_eq!(inserts[0].values[1], SqlValue::Varchar("Bob".to_string()));
@@ -723,11 +786,12 @@ mod tests {
             values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
         }];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 1);
@@ -749,11 +813,12 @@ mod tests {
             values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
         }];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(deletes.len(), 1);
                 assert!(updates.is_empty());
@@ -777,11 +842,12 @@ mod tests {
             crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 2);
                 assert!(updates.is_empty());
                 assert!(deletes.is_empty());
@@ -802,11 +868,12 @@ mod tests {
         ];
         let new: Vec<crate::Row> = vec![];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 2);
@@ -831,11 +898,12 @@ mod tests {
             crate::Row { values: vec![SqlValue::Integer(1)] },
         ];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 // One additional duplicate row was inserted
                 assert_eq!(inserts.len(), 1);
                 assert!(updates.is_empty());

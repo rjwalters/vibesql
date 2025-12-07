@@ -7,8 +7,8 @@ use crate::protocol::{
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
 use crate::subscription::{
-    compute_delta, extract_table_refs, hash_rows, SessionSubscriptionManager, SubscriptionManager,
-    SubscriptionUpdate,
+    compute_delta, extract_table_refs, hash_rows, SessionSubscriptionManager, SubscriptionId,
+    SubscriptionManager, SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -463,7 +463,10 @@ impl ConnectionHandler {
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
                             // We have previous results - try to compute delta
-                            if let Some(delta) = compute_delta(old_rows, &new_rows) {
+                            // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
+                            if let Some(delta) =
+                                compute_delta(SubscriptionId::default(), old_rows, &new_rows)
+                            {
                                 // Send delta updates
                                 if let Err(e) =
                                     self.send_delta_updates(&subscription_id, &delta).await
@@ -479,6 +482,7 @@ impl ConnectionHandler {
                                     ref inserts,
                                     ref updates,
                                     ref deletes,
+                                    ..
                                 } = delta
                                 {
                                     debug!(
@@ -556,7 +560,7 @@ impl ConnectionHandler {
         subscription_id: &[u8; 16],
         delta: &SubscriptionUpdate,
     ) -> Result<()> {
-        if let SubscriptionUpdate::Delta { inserts, updates, deletes } = delta {
+        if let SubscriptionUpdate::Delta { inserts, updates, deletes, .. } = delta {
             // Send deletes first (so clients can remove before adding)
             if !deletes.is_empty() {
                 let wire_rows = Self::rows_to_wire_format(deletes);
@@ -858,7 +862,10 @@ impl ConnectionHandler {
                         // Determine whether to send delta or full update
                         if let Some(ref old_rows) = last_result {
                             // We have previous results - try to compute delta
-                            if let Some(delta) = compute_delta(old_rows, &new_rows) {
+                            // Use a placeholder SubscriptionId since wire protocol uses [u8; 16]
+                            if let Some(delta) =
+                                compute_delta(SubscriptionId::default(), old_rows, &new_rows)
+                            {
                                 // Send delta updates
                                 if let Err(e) =
                                     self.send_delta_updates(&subscription_id, &delta).await
@@ -871,6 +878,7 @@ impl ConnectionHandler {
                                     ref inserts,
                                     ref updates,
                                     ref deletes,
+                                    ..
                                 } = delta
                                 {
                                     debug!(
