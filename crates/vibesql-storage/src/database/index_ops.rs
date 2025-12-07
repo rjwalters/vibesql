@@ -5,6 +5,7 @@
 use super::core::Database;
 use super::operations::SpatialIndexMetadata;
 use crate::{Row, StorageError};
+use std::sync::Arc;
 use vibesql_ast::IndexColumn;
 
 // ============================================================================
@@ -1146,7 +1147,7 @@ mod tests {
         for i in 0..10 {
             let row = Row::new(vec![
                 SqlValue::Integer(i),
-                SqlValue::Varchar(format!("Item {}", i)),
+                SqlValue::Varchar(format!("Item {}", i).into()),
             ]);
             db.insert_row("items", row).unwrap();
         }
