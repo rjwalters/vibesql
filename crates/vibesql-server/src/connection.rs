@@ -6,7 +6,11 @@ use crate::protocol::{
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
-use crate::subscription::{extract_table_refs, SessionSubscriptionManager, SubscriptionManager};
+use crate::subscription::{
+    compute_delta, extract_table_refs, hash_rows, SessionSubscriptionManager, SubscriptionManager,
+    SubscriptionUpdate,
+};
+use crate::Row;
 use anyhow::Result;
 use bytes::BytesMut;
 use std::collections::{HashMap, HashSet};
@@ -402,14 +406,18 @@ impl ConnectionHandler {
     ///
     /// When another connection mutates tables, this method is called to
     /// check if any of our subscriptions are affected and send updates.
+    /// This method supports delta updates to reduce network bandwidth when
+    /// only a small portion of the result set has changed.
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
-        // Collect subscriptions that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String)> = affected_tables
+        // Collect subscriptions that need updating along with their previous state
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
             .iter()
             .flat_map(|table| {
                 self.subscription_manager
                     .get_subscriptions_for_table_with_details(table)
-                    .map(|(id, sub)| (*id, sub.query.clone()))
+                    .map(|(id, sub)| {
+                        (*id, sub.query.clone(), sub.last_result_hash, sub.last_result.clone())
+                    })
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -422,7 +430,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _)| seen.insert(*id))
+            .filter(|(id, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -432,32 +440,95 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
                     Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert rows to wire format
-                        let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
-                            .iter()
-                            .map(|row| {
-                                row.values
-                                    .iter()
-                                    .map(|v| Some(v.to_string().as_bytes().to_vec()))
-                                    .collect()
-                            })
-                            .collect();
+                        // Convert to our Row format for delta computation
+                        let new_rows: Vec<Row> =
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
 
-                        // Send full update
-                        if let Err(e) = self
-                            .send_subscription_data(
-                                &subscription_id,
-                                SubscriptionUpdateType::Full,
-                                wire_rows,
-                            )
-                            .await
-                        {
-                            warn!("Failed to send cross-connection subscription update: {}", e);
+                        // Compute hash for change detection
+                        let new_hash = hash_rows(&new_rows);
+
+                        // Skip if results haven't changed
+                        if new_hash == last_hash {
+                            debug!(
+                                "Cross-connection update: results unchanged for subscription {:?}",
+                                subscription_id
+                            );
+                            continue;
                         }
+
+                        // Determine whether to send delta or full update
+                        if let Some(ref old_rows) = last_result {
+                            // We have previous results - try to compute delta
+                            if let Some(delta) = compute_delta(old_rows, &new_rows) {
+                                // Send delta updates
+                                if let Err(e) =
+                                    self.send_delta_updates(&subscription_id, &delta).await
+                                {
+                                    warn!(
+                                        "Failed to send cross-connection delta update: {}",
+                                        e
+                                    );
+                                }
+
+                                // Log delta statistics
+                                if let SubscriptionUpdate::Delta {
+                                    ref inserts,
+                                    ref updates,
+                                    ref deletes,
+                                } = delta
+                                {
+                                    debug!(
+                                        "Cross-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
+                                        inserts.len(),
+                                        updates.len(),
+                                        deletes.len(),
+                                        subscription_id
+                                    );
+                                }
+                            } else {
+                                // No delta computed (shouldn't happen if hash changed)
+                                // Fall back to full update
+                                let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                if let Err(e) = self
+                                    .send_subscription_data(
+                                        &subscription_id,
+                                        SubscriptionUpdateType::Full,
+                                        wire_rows,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to send cross-connection full update: {}", e);
+                                }
+                            }
+                        } else {
+                            // No previous results - send full update
+                            debug!(
+                                "Cross-connection update: no previous result, sending full update for subscription {:?}",
+                                subscription_id
+                            );
+                            let wire_rows = Self::rows_to_wire_format(&new_rows);
+                            if let Err(e) = self
+                                .send_subscription_data(
+                                    &subscription_id,
+                                    SubscriptionUpdateType::Full,
+                                    wire_rows,
+                                )
+                                .await
+                            {
+                                warn!("Failed to send cross-connection full update: {}", e);
+                            }
+                        }
+
+                        // Update stored result for next delta computation
+                        self.subscription_manager.update_result(
+                            &subscription_id,
+                            new_hash,
+                            new_rows,
+                        );
                     }
                     Ok(_) => {
                         // Non-SELECT result - shouldn't happen for a subscription query
@@ -475,6 +546,72 @@ impl ConnectionHandler {
                 }
             }
         }
+    }
+
+    /// Send delta updates to a subscription
+    ///
+    /// The wire protocol sends separate messages for inserts, updates, and deletes.
+    async fn send_delta_updates(
+        &mut self,
+        subscription_id: &[u8; 16],
+        delta: &SubscriptionUpdate,
+    ) -> Result<()> {
+        if let SubscriptionUpdate::Delta { inserts, updates, deletes } = delta {
+            // Send deletes first (so clients can remove before adding)
+            if !deletes.is_empty() {
+                let wire_rows = Self::rows_to_wire_format(deletes);
+                self.send_subscription_data(
+                    subscription_id,
+                    SubscriptionUpdateType::DeltaDelete,
+                    wire_rows,
+                )
+                .await?;
+            }
+
+            // Send updates
+            // Note: The current delta computation doesn't detect updates (they appear as delete+insert)
+            // but we support the wire format for future enhancements
+            if !updates.is_empty() {
+                // For updates, we send the new values
+                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = updates
+                    .iter()
+                    .map(|(_, new_row)| {
+                        new_row
+                            .values
+                            .iter()
+                            .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                            .collect()
+                    })
+                    .collect();
+                self.send_subscription_data(
+                    subscription_id,
+                    SubscriptionUpdateType::DeltaUpdate,
+                    wire_rows,
+                )
+                .await?;
+            }
+
+            // Send inserts last
+            if !inserts.is_empty() {
+                let wire_rows = Self::rows_to_wire_format(inserts);
+                self.send_subscription_data(
+                    subscription_id,
+                    SubscriptionUpdateType::DeltaInsert,
+                    wire_rows,
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Convert rows to wire format for sending over the protocol
+    fn rows_to_wire_format(rows: &[Row]) -> Vec<Vec<Option<Vec<u8>>>> {
+        rows.iter()
+            .map(|row| {
+                row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
+            })
+            .collect()
     }
 
     /// Execute a SQL query
@@ -599,6 +736,18 @@ impl ConnectionHandler {
         // Execute the query to get initial data
         match session.execute(query).await {
             Ok(ExecutionResult::Select { rows, .. }) => {
+                // Convert rows to our Row format for delta computation
+                let result_rows: Vec<Row> =
+                    rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+
+                // Compute hash and store result for future delta computation
+                let result_hash = hash_rows(&result_rows);
+                self.subscription_manager.update_result(
+                    &subscription_id,
+                    result_hash,
+                    result_rows.clone(),
+                );
+
                 // Convert rows to wire format
                 let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
                     .iter()
@@ -640,6 +789,7 @@ impl ConnectionHandler {
     /// This method parses the mutation query to extract the affected table,
     /// finds all subscriptions that depend on that table, re-executes their
     /// queries, and sends updated results to the client.
+    /// Supports delta updates to reduce network bandwidth.
     async fn notify_affected_subscriptions(&mut self, mutation_query: &str) {
         // Parse the mutation query to extract affected tables
         let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {
@@ -654,14 +804,15 @@ impl ConnectionHandler {
             return;
         }
 
-        // Collect subscriptions that need updating
-        // We collect (subscription_id, query) pairs to avoid borrowing issues
-        let subscriptions_to_update: Vec<([u8; 16], String)> = affected_tables
+        // Collect subscriptions that need updating along with their previous state
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
             .iter()
             .flat_map(|table| {
                 self.subscription_manager
                     .get_subscriptions_for_table_with_details(table)
-                    .map(|(id, sub)| (*id, sub.query.clone()))
+                    .map(|(id, sub)| {
+                        (*id, sub.query.clone(), sub.last_result_hash, sub.last_result.clone())
+                    })
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -674,7 +825,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _)| seen.insert(*id))
+            .filter(|(id, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -684,32 +835,87 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
                     Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert rows to wire format
-                        let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
-                            .iter()
-                            .map(|row| {
-                                row.values
-                                    .iter()
-                                    .map(|v| Some(v.to_string().as_bytes().to_vec()))
-                                    .collect()
-                            })
-                            .collect();
+                        // Convert to our Row format for delta computation
+                        let new_rows: Vec<Row> =
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
 
-                        // Send full update (could optimize to send delta in the future)
-                        if let Err(e) = self
-                            .send_subscription_data(
-                                &subscription_id,
-                                SubscriptionUpdateType::Full,
-                                wire_rows,
-                            )
-                            .await
-                        {
-                            warn!("Failed to send subscription update: {}", e);
+                        // Compute hash for change detection
+                        let new_hash = hash_rows(&new_rows);
+
+                        // Skip if results haven't changed
+                        if new_hash == last_hash {
+                            debug!(
+                                "Same-connection update: results unchanged for subscription {:?}",
+                                subscription_id
+                            );
+                            continue;
                         }
+
+                        // Determine whether to send delta or full update
+                        if let Some(ref old_rows) = last_result {
+                            // We have previous results - try to compute delta
+                            if let Some(delta) = compute_delta(old_rows, &new_rows) {
+                                // Send delta updates
+                                if let Err(e) =
+                                    self.send_delta_updates(&subscription_id, &delta).await
+                                {
+                                    warn!("Failed to send same-connection delta update: {}", e);
+                                }
+
+                                // Log delta statistics
+                                if let SubscriptionUpdate::Delta {
+                                    ref inserts,
+                                    ref updates,
+                                    ref deletes,
+                                } = delta
+                                {
+                                    debug!(
+                                        "Same-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
+                                        inserts.len(),
+                                        updates.len(),
+                                        deletes.len(),
+                                        subscription_id
+                                    );
+                                }
+                            } else {
+                                // No delta computed - send full update
+                                let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                if let Err(e) = self
+                                    .send_subscription_data(
+                                        &subscription_id,
+                                        SubscriptionUpdateType::Full,
+                                        wire_rows,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to send same-connection full update: {}", e);
+                                }
+                            }
+                        } else {
+                            // No previous results - send full update
+                            let wire_rows = Self::rows_to_wire_format(&new_rows);
+                            if let Err(e) = self
+                                .send_subscription_data(
+                                    &subscription_id,
+                                    SubscriptionUpdateType::Full,
+                                    wire_rows,
+                                )
+                                .await
+                            {
+                                warn!("Failed to send same-connection full update: {}", e);
+                            }
+                        }
+
+                        // Update stored result for next delta computation
+                        self.subscription_manager.update_result(
+                            &subscription_id,
+                            new_hash,
+                            new_rows,
+                        );
                     }
                     Ok(_) => {
                         // Non-SELECT result - shouldn't happen for a subscription query
