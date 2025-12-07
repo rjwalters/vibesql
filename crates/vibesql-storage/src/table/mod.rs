@@ -170,7 +170,7 @@ pub struct Table {
 
     /// Native columnar storage - primary storage for columnar tables
     /// For columnar tables, this is the authoritative data source
-    /// For row tables, this is None (use columnar_cache for converted data)
+    /// For row tables, this is None (use Database::get_columnar() for cached columnar data)
     native_columnar: Option<crate::ColumnarTable>,
 
     /// Hash indexes for constraint validation (managed by IndexManager)
@@ -187,17 +187,14 @@ pub struct Table {
     /// Counter for modifications since last statistics update
     modifications_since_stats: usize,
 
-    /// Cached columnar representation for SIMD-accelerated queries (row tables only)
-    /// Invalidated on any table modification (INSERT/UPDATE/DELETE)
-    /// Uses RwLock for thread-safe interior mutability since scan_columnar takes &self
-    /// Not used for native columnar tables (they use native_columnar directly)
-    columnar_cache: std::sync::RwLock<Option<crate::ColumnarTable>>,
+    // Note: Table-level columnar caching was removed in #3892 to eliminate duplicate
+    // caching with Database::columnar_cache. All columnar caching now goes through
+    // Database::get_columnar() which provides LRU eviction and Arc-based sharing.
+    // Table::scan_columnar() performs fresh conversion on each call.
 }
 
 impl Clone for Table {
     fn clone(&self) -> Self {
-        // Clone the columnar cache if present
-        let cached = self.columnar_cache.read().unwrap().clone();
         Table {
             schema: self.schema.clone(),
             rows: self.rows.clone(),
@@ -208,7 +205,6 @@ impl Clone for Table {
             append_tracker: self.append_tracker.clone(),
             statistics: self.statistics.clone(),
             modifications_since_stats: self.modifications_since_stats,
-            columnar_cache: std::sync::RwLock::new(cached),
         }
     }
 }
@@ -245,7 +241,6 @@ impl Table {
             append_tracker: AppendModeTracker::new(),
             statistics: None,
             modifications_since_stats: 0,
-            columnar_cache: std::sync::RwLock::new(None),
         }
     }
 
@@ -290,11 +285,9 @@ impl Table {
         }
 
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // Note: Database-level columnar cache invalidation is handled by the executor
         if self.native_columnar.is_some() {
             self.rebuild_native_columnar()?;
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         Ok(())
@@ -415,11 +408,9 @@ impl Table {
 
         // Phase 7: Handle columnar storage
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // Note: Database-level columnar cache invalidation is handled by the executor
         if self.native_columnar.is_some() {
             self.rebuild_native_columnar()?;
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         Ok(row_count)
@@ -580,7 +571,12 @@ impl Table {
     /// # Performance
     ///
     /// For **native columnar tables**: Zero conversion overhead - returns data directly.
-    /// For **row tables**: O(n * m) conversion cost, cached for subsequent queries.
+    /// For **row tables**: O(n * m) conversion cost per call.
+    ///
+    /// # Caching
+    ///
+    /// This method does not cache results. For cached columnar access with LRU eviction,
+    /// use `Database::get_columnar()` which provides Arc-based sharing across queries.
     ///
     /// # Returns
     ///
@@ -602,13 +598,9 @@ impl Table {
             return Ok(native.clone());
         }
 
-        // For row tables, check cache first (read lock)
-        {
-            let cache = self.columnar_cache.read().unwrap();
-            if let Some(cached) = cache.as_ref() {
-                return Ok(cached.clone());
-            }
-        }
+        // For row tables, perform fresh conversion each time
+        // Note: Caching is now handled at the Database level via Database::get_columnar()
+        // which provides LRU eviction and Arc-based sharing across queries.
 
         // Get column names from schema
         let column_names: Vec<String> =
@@ -624,13 +616,8 @@ impl Table {
             .collect();
 
         // Convert rows to columnar format
-        let columnar = crate::ColumnarTable::from_row_refs(&live_rows, &column_names)
-            .map_err(|e| StorageError::Other(format!("Columnar conversion failed: {}", e)))?;
-
-        // Cache the result for future queries (write lock)
-        *self.columnar_cache.write().unwrap() = Some(columnar.clone());
-
-        Ok(columnar)
+        crate::ColumnarTable::from_row_refs(&live_rows, &column_names)
+            .map_err(|e| StorageError::Other(format!("Columnar conversion failed: {}", e)))
     }
 
     /// Get number of live (non-deleted) rows
@@ -688,7 +675,8 @@ impl Table {
         self.indexes.clear();
         // Reset append mode tracking
         self.append_tracker.reset();
-        // Clear native columnar if present, or invalidate cache for row tables
+        // Clear native columnar if present
+        // Note: Database-level columnar cache invalidation is handled by the executor
         if self.native_columnar.is_some() {
             let column_names: Vec<String> =
                 self.schema.columns.iter().map(|c| c.name.clone()).collect();
@@ -696,8 +684,6 @@ impl Table {
                 crate::ColumnarTable::from_rows(&[], &column_names)
                     .expect("Creating empty columnar table should never fail"),
             );
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
     }
 
@@ -726,11 +712,9 @@ impl Table {
         self.indexes.update_for_update(&self.schema, &old_row, &normalized_row, index);
 
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // Note: Database-level columnar cache invalidation is handled by the executor
         if self.native_columnar.is_some() {
             self.rebuild_native_columnar()?;
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         Ok(())
@@ -787,11 +771,9 @@ impl Table {
         self.rows[index] = normalized_row;
 
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // Note: Database-level columnar cache invalidation is handled by the executor
         if self.native_columnar.is_some() {
             self.rebuild_native_columnar()?;
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         Ok(())
@@ -834,10 +816,7 @@ impl Table {
         // Update the row (direct move, no validation)
         self.rows[index] = new_row;
 
-        // Invalidate columnar cache (skip for native columnar as it's rare in OLTP)
-        if self.native_columnar.is_none() {
-            *self.columnar_cache.write().unwrap() = None;
-        }
+        // Note: Database-level columnar cache invalidation is handled by the executor
     }
 
     /// Update a single column value in-place without cloning the row
@@ -867,10 +846,7 @@ impl Table {
     ) {
         self.rows[row_index].values[col_index] = new_value;
 
-        // Invalidate columnar cache
-        if self.native_columnar.is_none() {
-            *self.columnar_cache.write().unwrap() = None;
-        }
+        // Note: Database-level columnar cache invalidation is handled by the executor
     }
 
     /// Delete rows matching a predicate
@@ -981,11 +957,9 @@ impl Table {
         };
 
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // Note: Database-level columnar cache invalidation is handled by the executor
         if self.native_columnar.is_some() {
             let _ = self.rebuild_native_columnar();
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         DeleteResult::new(deleted, compacted)
@@ -1054,11 +1028,9 @@ impl Table {
         };
 
         // For native columnar tables, rebuild columnar data
-        // For row tables, invalidate the cache
+        // (Row tables use Database::columnar_cache which is invalidated by executors)
         if self.native_columnar.is_some() {
             let _ = self.rebuild_native_columnar();
-        } else {
-            *self.columnar_cache.write().unwrap() = None;
         }
 
         DeleteResult::new(deleted, compacted)
@@ -1295,10 +1267,10 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_batch_invalidates_columnar_cache() {
+    fn test_insert_batch_columnar_scan_includes_new_rows() {
         let mut table = create_test_table();
 
-        // Insert some initial rows and build columnar cache
+        // Insert some initial rows
         table.insert(create_row(1, "Alice")).unwrap();
         let _ = table.scan_columnar().unwrap();
 
@@ -1306,7 +1278,7 @@ mod tests {
         let rows = vec![create_row(2, "Bob"), create_row(3, "Charlie")];
         table.insert_batch(rows).unwrap();
 
-        // Columnar cache should reflect all rows after rebuild
+        // Columnar scan should reflect all rows
         let columnar = table.scan_columnar().unwrap();
         assert_eq!(columnar.row_count(), 3);
     }
