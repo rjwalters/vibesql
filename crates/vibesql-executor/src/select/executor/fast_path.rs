@@ -1665,11 +1665,6 @@ impl SelectExecutor<'_> {
             None => return Ok(None),
         };
 
-        // No ORDER BY (streaming path doesn't maintain order beyond index order)
-        if stmt.order_by.is_some() {
-            return Ok(None);
-        }
-
         // No LIMIT (streaming doesn't help much with LIMIT)
         if stmt.limit.is_some() {
             return Ok(None);
@@ -1701,6 +1696,37 @@ impl SelectExecutor<'_> {
                 None => return Ok(None),
             };
 
+        // If ORDER BY is present, validate it's a simple column reference in the projected columns
+        let order_by_info = if let Some(order_by) = &stmt.order_by {
+            // Only support single-column ORDER BY
+            if order_by.len() != 1 {
+                return Ok(None);
+            }
+            let order_item = &order_by[0];
+            // Must be a column reference
+            let order_col = match &order_item.expr {
+                Expression::ColumnRef { column, .. } => column,
+                _ => return Ok(None),
+            };
+            // Find the order column in the projected columns
+            // First, map projected indices to column names
+            let projected_col_names: Vec<&str> = col_indices
+                .iter()
+                .map(|&idx| table.schema.columns[idx].name.as_str())
+                .collect();
+            // Find the position in projected columns
+            let order_idx = match projected_col_names
+                .iter()
+                .position(|&name| name.eq_ignore_ascii_case(order_col))
+            {
+                Some(idx) => idx,
+                None => return Ok(None), // ORDER BY column not in projected columns
+            };
+            Some((order_idx, order_item.direction.clone()))
+        } else {
+            None
+        };
+
         // Find an index on the PK column (may not be named pk_{table})
         let index_names = self.database.list_indexes_for_table(table_name);
         let pk_index_data = index_names.iter().find_map(|idx_name| {
@@ -1730,15 +1756,76 @@ impl SelectExecutor<'_> {
         };
 
         // Stream with early projection - only clone needed columns
-        let rows: Vec<Row> = streaming_iter
-            .filter_map(|idx| {
-                table.get_row(idx).map(|row| {
-                    let projected_values: Vec<SqlValue> =
-                        col_indices.iter().map(|&col_idx| row.values[col_idx].clone()).collect();
-                    Row { values: projected_values }
+        // Optimization: For single-column projection, avoid Vec allocation
+        let mut rows: Vec<Row> = if col_indices.len() == 1 {
+            let col_idx = col_indices[0];
+            streaming_iter
+                .filter_map(|idx| {
+                    table.get_row(idx).map(|row| {
+                        Row { values: vec![row.values[col_idx].clone()] }
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        } else {
+            streaming_iter
+                .filter_map(|idx| {
+                    table.get_row(idx).map(|row| {
+                        let projected_values: Vec<SqlValue> =
+                            col_indices.iter().map(|&col_idx| row.values[col_idx].clone()).collect();
+                        Row { values: projected_values }
+                    })
+                })
+                .collect()
+        };
+
+        // Apply DISTINCT if needed (deduplicate rows)
+        // For DISTINCT + ORDER BY, sort first then deduplicate to preserve order
+        if stmt.distinct {
+            use crate::select::grouping::compare_sql_values;
+            use std::cmp::Ordering;
+
+            // Sort: use ORDER BY if specified, otherwise sort by all columns for dedup
+            if let Some((order_idx, ref direction)) = order_by_info {
+                rows.sort_by(|a, b| {
+                    let cmp = compare_sql_values(&a.values[order_idx], &b.values[order_idx]);
+                    match direction {
+                        vibesql_ast::OrderDirection::Asc => cmp,
+                        vibesql_ast::OrderDirection::Desc => cmp.reverse(),
+                    }
+                });
+            } else {
+                // Sort by all columns for deduplication (any consistent ordering works)
+                rows.sort_by(|a, b| {
+                    for (va, vb) in a.values.iter().zip(b.values.iter()) {
+                        let cmp = compare_sql_values(va, vb);
+                        if cmp != Ordering::Equal {
+                            return cmp;
+                        }
+                    }
+                    Ordering::Equal
+                });
+            }
+
+            // Deduplicate by removing consecutive duplicates (stable dedup)
+            // This works because we sorted first, so duplicates are adjacent
+            rows.dedup_by(|a, b| {
+                a.values
+                    .iter()
+                    .zip(b.values.iter())
+                    .all(|(va, vb)| compare_sql_values(va, vb) == Ordering::Equal)
+            });
+        } else if let Some((order_idx, direction)) = order_by_info {
+            // Apply ORDER BY without DISTINCT
+            use crate::select::grouping::compare_sql_values;
+
+            rows.sort_by(|a, b| {
+                let cmp = compare_sql_values(&a.values[order_idx], &b.values[order_idx]);
+                match direction {
+                    vibesql_ast::OrderDirection::Asc => cmp,
+                    vibesql_ast::OrderDirection::Desc => cmp.reverse(),
+                }
+            });
+        }
 
         Ok(Some(rows))
     }
