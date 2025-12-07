@@ -18,8 +18,8 @@ fn test_e2e_char_type() {
         "CODES",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Character("ABC".to_string()), // Will be padded to "ABC  " (5 chars)
-            SqlValue::Character("Hello".to_string()), // Will be padded to "Hello     " (10 chars)
+            SqlValue::Character(std::sync::Arc::from("ABC")), // Will be padded to "ABC  " (5 chars)
+            SqlValue::Character(std::sync::Arc::from("Hello")), // Will be padded to "Hello     " (10 chars)
         ]),
     )
     .unwrap();
@@ -28,8 +28,8 @@ fn test_e2e_char_type() {
         "CODES",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Character("12345".to_string()), // Exact length (5 chars)
-            SqlValue::Character("World".to_string()), // Will be padded to "World     " (10 chars)
+            SqlValue::Character(std::sync::Arc::from("12345")), // Exact length (5 chars)
+            SqlValue::Character(std::sync::Arc::from("World")), // Will be padded to "World     " (10 chars)
         ]),
     )
     .unwrap();
@@ -38,8 +38,8 @@ fn test_e2e_char_type() {
         "CODES",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Character("TOOLONG".to_string()), // Will be truncated to "TOOLO" (5 chars)
-            SqlValue::Character("VeryLongName".to_string()), /* Will be truncated to
+            SqlValue::Character(std::sync::Arc::from("TOOLONG")), // Will be truncated to "TOOLO" (5 chars)
+            SqlValue::Character(std::sync::Arc::from("VeryLongName")), /* Will be truncated to
                                                          * "VeryLongNa" (10 chars) */
         ]),
     )
@@ -51,18 +51,18 @@ fn test_e2e_char_type() {
 
     // Row 1: Check padding
     assert_eq!(results[0].values[0], SqlValue::Integer(1));
-    assert_eq!(results[0].values[1], SqlValue::Character("ABC  ".to_string()));
-    assert_eq!(results[0].values[2], SqlValue::Character("Hello     ".to_string()));
+    assert_eq!(results[0].values[1], SqlValue::Character(std::sync::Arc::from("ABC  ")));
+    assert_eq!(results[0].values[2], SqlValue::Character(std::sync::Arc::from("Hello     ")));
 
     // Row 2: Check exact length
     assert_eq!(results[1].values[0], SqlValue::Integer(2));
-    assert_eq!(results[1].values[1], SqlValue::Character("12345".to_string()));
-    assert_eq!(results[1].values[2], SqlValue::Character("World     ".to_string()));
+    assert_eq!(results[1].values[1], SqlValue::Character(std::sync::Arc::from("12345")));
+    assert_eq!(results[1].values[2], SqlValue::Character(std::sync::Arc::from("World     ")));
 
     // Row 3: Check truncation
     assert_eq!(results[2].values[0], SqlValue::Integer(3));
-    assert_eq!(results[2].values[1], SqlValue::Character("TOOLO".to_string()));
-    assert_eq!(results[2].values[2], SqlValue::Character("VeryLongNa".to_string()));
+    assert_eq!(results[2].values[1], SqlValue::Character(std::sync::Arc::from("TOOLO")));
+    assert_eq!(results[2].values[2], SqlValue::Character(std::sync::Arc::from("VeryLongNa")));
 
     // Test WHERE clause with CHAR comparison
     let results = execute_select(&db, "SELECT id FROM codes WHERE code = 'ABC  '").unwrap();

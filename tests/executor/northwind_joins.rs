@@ -51,22 +51,22 @@ fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Beverages".to_string()),
-            SqlValue::Varchar("Soft drinks, coffees, teas, beers, and ales".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Beverages")),
+            SqlValue::Varchar(std::sync::Arc::from("Soft drinks, coffees, teas, beers, and ales")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Condiments".to_string()),
-            SqlValue::Varchar("Sweet and savory sauces".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Condiments")),
+            SqlValue::Varchar(std::sync::Arc::from("Sweet and savory sauces")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Confections".to_string()),
-            SqlValue::Varchar("Desserts, candies, and sweet breads".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Confections")),
+            SqlValue::Varchar(std::sync::Arc::from("Desserts, candies, and sweet breads")),
         ]))
         .unwrap();
 
@@ -75,7 +75,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Chai".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chai")),
             SqlValue::Integer(1),
             SqlValue::Float(18.0),
             SqlValue::Integer(39),
@@ -84,7 +84,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Chang".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Chang")),
             SqlValue::Integer(1),
             SqlValue::Float(19.0),
             SqlValue::Integer(17),
@@ -93,7 +93,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Aniseed Syrup".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Aniseed Syrup")),
             SqlValue::Integer(2),
             SqlValue::Float(10.0),
             SqlValue::Integer(13),
@@ -102,7 +102,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(16),
-            SqlValue::Varchar("Pavlova".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Pavlova")),
             SqlValue::Integer(3),
             SqlValue::Float(17.45),
             SqlValue::Integer(29),

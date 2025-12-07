@@ -45,27 +45,27 @@ pub fn insert_sample_users(db: &mut Database) {
     let rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(25),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(17),
         ]),
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Charlie".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
             SqlValue::Integer(30),
         ]),
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Diana".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Diana")),
             SqlValue::Integer(22),
         ]),
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Eve".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Eve")),
             SqlValue::Integer(35),
         ]),
     ];

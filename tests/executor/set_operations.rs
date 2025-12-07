@@ -58,43 +58,43 @@ fn test_e2e_set_operations() {
     // Insert data: table_a has 1, 2, 3, 4; table_b has 3, 4, 5, 6
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("David".to_string())]),
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("David"))]),
     )
     .unwrap();
 
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar("David".to_string())]),
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("David"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(5), SqlValue::Varchar("Eve".to_string())]),
+        Row::new(vec![SqlValue::Integer(5), SqlValue::Varchar(std::sync::Arc::from("Eve"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar("Frank".to_string())]),
+        Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar(std::sync::Arc::from("Frank"))]),
     )
     .unwrap();
 
@@ -152,7 +152,7 @@ fn test_e2e_set_operations() {
     // Test 5: Multiple UNION operations
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(7), SqlValue::Varchar("Grace".to_string())]),
+        Row::new(vec![SqlValue::Integer(7), SqlValue::Varchar(std::sync::Arc::from("Grace"))]),
     )
     .unwrap();
     let results = execute_select(&db,

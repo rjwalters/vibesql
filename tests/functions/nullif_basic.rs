@@ -65,7 +65,7 @@ fn test_nullif_string_unequal() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar("hello".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("hello")),
         "NULLIF('hello', 'world') should return 'hello'"
     );
 }

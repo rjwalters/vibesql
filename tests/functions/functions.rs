@@ -53,8 +53,8 @@ fn test_e2e_coalesce_and_nullif() {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Alice".to_string()),
-            SqlValue::Varchar("Ally".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(std::sync::Arc::from("Ally")),
             SqlValue::Integer(100),
         ]),
     )
@@ -63,7 +63,7 @@ fn test_e2e_coalesce_and_nullif() {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Bob".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Null, // NULL nickname
             SqlValue::Integer(0),
         ]),
@@ -73,8 +73,8 @@ fn test_e2e_coalesce_and_nullif() {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Charlie".to_string()),
-            SqlValue::Varchar("Chuck".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(std::sync::Arc::from("Chuck")),
             SqlValue::Integer(200),
         ]),
     )
@@ -85,14 +85,14 @@ fn test_e2e_coalesce_and_nullif() {
         execute_select(&db, "SELECT COALESCE(nickname, 'Unknown') FROM users WHERE id = 1")
             .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("Ally".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Ally")));
 
     // Test 2: COALESCE with NULL value - returns second argument
     let results =
         execute_select(&db, "SELECT COALESCE(nickname, 'Unknown') FROM users WHERE id = 2")
             .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("Unknown".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Unknown")));
 
     // Test 3: COALESCE with multiple arguments
     let results =
@@ -101,7 +101,7 @@ fn test_e2e_coalesce_and_nullif() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar("Bob".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("Bob")),
         "Should return name when nickname is NULL"
     );
 
@@ -149,7 +149,7 @@ fn test_e2e_coalesce_and_nullif() {
         execute_select(&db, "SELECT name FROM users WHERE COALESCE(nickname, name) = 'Bob'")
             .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("Bob".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
 
     // Test 10: NULLIF with string comparison
     let results =

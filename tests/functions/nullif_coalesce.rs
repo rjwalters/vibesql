@@ -25,7 +25,7 @@ fn test_coalesce_first_non_null() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar("hello".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("hello")),
         "COALESCE should return first non-NULL value"
     );
 }
@@ -58,7 +58,7 @@ fn test_coalesce_two_args() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar("default".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("default")),
         "COALESCE with two args should return second if first is NULL"
     );
 }
@@ -116,7 +116,7 @@ fn test_nullif_string_not_equal() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar("hello".to_string()),
+        SqlValue::Varchar(std::sync::Arc::from("hello")),
         "NULLIF('hello', 'world') should return 'hello'"
     );
 }

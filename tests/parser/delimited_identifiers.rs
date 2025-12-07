@@ -135,20 +135,20 @@ fn test_case_sensitive_column_names() {
     // Insert a row
     db.insert_row(
         "EMPLOYEES",
-        Row::new(vec![SqlValue::Varchar("John".to_string()), SqlValue::Varchar("Doe".to_string())]),
+        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("John")), SqlValue::Varchar(std::sync::Arc::from("Doe"))]),
     )
     .unwrap();
 
     // Query with exact case for quoted identifier
     let result1 = execute_select(&db, r#"SELECT "firstName" FROM employees"#).unwrap();
-    assert_eq!(result1[0].values[0], SqlValue::Varchar("John".to_string()));
+    assert_eq!(result1[0].values[0], SqlValue::Varchar(std::sync::Arc::from("John")));
 
     // Query with any case for unquoted identifier (normalized to LASTNAME)
     let result2 = execute_select(&db, "SELECT lastname FROM employees").unwrap();
-    assert_eq!(result2[0].values[0], SqlValue::Varchar("Doe".to_string()));
+    assert_eq!(result2[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Doe")));
 
     let result3 = execute_select(&db, "SELECT LASTNAME FROM employees").unwrap();
-    assert_eq!(result3[0].values[0], SqlValue::Varchar("Doe".to_string()));
+    assert_eq!(result3[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Doe")));
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn test_reserved_words_as_column_names() {
         "QUERIES",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("table1".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("table1")),
             SqlValue::Integer(100),
         ]),
     )
@@ -219,7 +219,7 @@ fn test_reserved_words_as_column_names() {
     let result = execute_select(&db, r#"SELECT "SELECT", "FROM", "WHERE" FROM queries"#).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], SqlValue::Integer(1));
-    assert_eq!(result[0].values[1], SqlValue::Varchar("table1".to_string()));
+    assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("table1")));
     assert_eq!(result[0].values[2], SqlValue::Integer(100));
 }
 
@@ -253,15 +253,15 @@ fn test_spaces_in_column_names() {
     db.insert_row(
         "CONTACTS",
         Row::new(vec![
-            SqlValue::Varchar("Jane".to_string()),
-            SqlValue::Varchar("Smith".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Jane")),
+            SqlValue::Varchar(std::sync::Arc::from("Smith")),
         ]),
     )
     .unwrap();
 
     let result = execute_select(&db, r#"SELECT "First Name", "Last Name" FROM contacts"#).unwrap();
-    assert_eq!(result[0].values[0], SqlValue::Varchar("Jane".to_string()));
-    assert_eq!(result[0].values[1], SqlValue::Varchar("Smith".to_string()));
+    assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Jane")));
+    assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Smith")));
 }
 
 #[test]
@@ -278,12 +278,12 @@ fn test_escaped_quotes_in_identifiers() {
 
     db.insert_row(
         r#"O"Reilly Books"#,
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Learning Rust".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Learning Rust"))]),
     )
     .unwrap();
 
     let result = execute_select(&db, r#"SELECT "Book""Title" FROM "O""Reilly Books""#).unwrap();
-    assert_eq!(result[0].values[0], SqlValue::Varchar("Learning Rust".to_string()));
+    assert_eq!(result[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Learning Rust")));
 }
 
 // ========================================================================
@@ -303,14 +303,14 @@ fn test_insert_with_delimited_identifiers() {
     // Parser doesn't support INSERT yet, so we use direct storage API
     db.insert_row(
         "products",
-        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar("Widget".to_string())]),
+        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar(std::sync::Arc::from("Widget"))]),
     )
     .unwrap();
 
     let result =
         execute_select(&db, r#"SELECT "productId", "productName" FROM "products""#).unwrap();
     assert_eq!(result[0].values[0], SqlValue::Integer(100));
-    assert_eq!(result[0].values[1], SqlValue::Varchar("Widget".to_string()));
+    assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Widget")));
 }
 
 // ========================================================================

@@ -45,28 +45,28 @@ fn insert_sample_products(db: &mut Database) {
     let rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Apple iPhone".to_string()),
-            SqlValue::Varchar("APPL-001".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Apple iPhone")),
+            SqlValue::Varchar(std::sync::Arc::from("APPL-001")),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("Samsung Galaxy".to_string()),
-            SqlValue::Varchar("SAMS-002".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Samsung Galaxy")),
+            SqlValue::Varchar(std::sync::Arc::from("SAMS-002")),
         ]),
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Apple MacBook".to_string()),
-            SqlValue::Varchar("APPL-100".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Apple MacBook")),
+            SqlValue::Varchar(std::sync::Arc::from("APPL-100")),
         ]),
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar("Microsoft Surface".to_string()),
-            SqlValue::Varchar("MSFT-050".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Microsoft Surface")),
+            SqlValue::Varchar(std::sync::Arc::from("MSFT-050")),
         ]),
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar("Apple Watch".to_string()),
-            SqlValue::Varchar("APPL-200".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Apple Watch")),
+            SqlValue::Varchar(std::sync::Arc::from("APPL-200")),
         ]),
     ];
 
@@ -181,19 +181,19 @@ fn setup_customers_orders_db() -> Database {
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
     )
     .unwrap();
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
     )
     .unwrap();
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar("Charlie".to_string())]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
     )
     .unwrap();
 
@@ -258,7 +258,7 @@ fn test_any_quantifier() {
     ).unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("Alice".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn setup_mixed_types_db() -> Database {
         "MIXED_DATA",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("123".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("123")),
             SqlValue::Integer(456),
             SqlValue::Double(78.9),
         ]),
@@ -349,7 +349,7 @@ fn setup_mixed_types_db() -> Database {
         "MIXED_DATA",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("999".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("999")),
             SqlValue::Integer(111),
             SqlValue::Double(22.3),
         ]),
@@ -380,7 +380,7 @@ fn test_cast_integer_to_varchar() {
             .unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("456".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("456")));
 }
 
 #[test]
@@ -456,7 +456,7 @@ fn test_like_with_exists() {
     ).unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar("Alice".to_string()));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
 }
 
 #[test]

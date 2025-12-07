@@ -348,7 +348,7 @@ fn test_vector_distance_similarity_search() {
         "DOCUMENTS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar("Hello world".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Hello world")),
             SqlValue::Vector(vec![1.0, 0.0, 0.0]),
         ]),
     )
@@ -358,7 +358,7 @@ fn test_vector_distance_similarity_search() {
         "DOCUMENTS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar("World hello".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("World hello")),
             SqlValue::Vector(vec![0.99, 0.01, 0.0]),
         ]),
     )
@@ -368,7 +368,7 @@ fn test_vector_distance_similarity_search() {
         "DOCUMENTS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar("Completely different".to_string()),
+            SqlValue::Varchar(std::sync::Arc::from("Completely different")),
             SqlValue::Vector(vec![0.0, 0.0, 1.0]),
         ]),
     )
