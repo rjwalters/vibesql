@@ -35,6 +35,7 @@ pub struct ServerMetrics {
     selective_update_changed_ratio: Histogram<f64>,
     subscriptions_selective_eligible: Gauge<u64>,
     subscriptions_selective_eligible_count: Arc<AtomicU64>,
+    selective_update_fallbacks_total: Counter<u64>,
 }
 
 impl ServerMetrics {
@@ -135,6 +136,12 @@ impl ServerMetrics {
             .build();
         let subscriptions_selective_eligible_count = Arc::new(AtomicU64::new(0));
 
+        let selective_update_fallbacks_total = meter
+            .u64_counter("vibesql_selective_update_fallbacks_total")
+            .with_description("Selective updates that fell back to full row updates by reason")
+            .with_unit("{fallback}")
+            .build();
+
         Self {
             connections_total,
             connection_errors_total,
@@ -152,6 +159,7 @@ impl ServerMetrics {
             selective_update_changed_ratio,
             subscriptions_selective_eligible,
             subscriptions_selective_eligible_count,
+            selective_update_fallbacks_total,
         }
     }
 
@@ -284,6 +292,19 @@ impl ServerMetrics {
     /// Get the current count of selective-eligible subscriptions
     pub fn selective_eligible_count(&self) -> u64 {
         self.subscriptions_selective_eligible_count.load(Ordering::Relaxed)
+    }
+
+    /// Record a selective update fallback
+    ///
+    /// # Arguments
+    /// * `reason` - The reason for fallback:
+    ///   - `"disabled"` - Selective updates disabled in config
+    ///   - `"threshold_exceeded"` - Too many columns changed (exceeds threshold)
+    ///   - `"row_count_mismatch"` - Row count changed between updates
+    ///   - `"pk_mismatch"` - PK columns couldn't be matched
+    ///   - `"no_changes"` - No actual column changes detected
+    pub fn record_selective_fallback(&self, reason: &str) {
+        self.selective_update_fallbacks_total.add(1, &[KeyValue::new("reason", reason.to_string())]);
     }
 }
 

@@ -338,6 +338,9 @@ pub struct Subscription {
     /// Whether this subscription is eligible for selective column updates
     /// True when PK columns were confidently detected
     pub selective_eligible: bool,
+    /// Configuration for selective column updates
+    /// Per-subscription overrides for server-level config
+    pub selective_updates: SelectiveColumnConfig,
 }
 
 impl Subscription {
@@ -375,6 +378,7 @@ impl Subscription {
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
+            selective_updates: SelectiveColumnConfig::default(),
         }
     }
 
@@ -403,6 +407,7 @@ impl Subscription {
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
+            selective_updates: SelectiveColumnConfig::default(),
         }
     }
 
@@ -464,6 +469,7 @@ impl Subscription {
             filter,
             pk_columns,
             selective_eligible: false,
+            selective_updates: SelectiveColumnConfig::default(),
         }
     }
 
@@ -1083,6 +1089,36 @@ pub fn should_use_selective_update(
     true
 }
 
+pub fn should_use_selective_update_with_metrics(
+    diff: &ColumnDiff,
+    total_columns: usize,
+    config: &SelectiveColumnConfig,
+    metrics: Option<&crate::observability::metrics::ServerMetrics>,
+) -> bool {
+    if !config.enabled {
+        if let Some(m) = metrics {
+            m.record_selective_fallback("disabled");
+        }
+        return false;
+    }
+
+    // Check minimum changed columns
+    if diff.changed_columns.len() < config.min_changed_columns {
+        return false;
+    }
+
+    // Check maximum ratio
+    let changed_ratio = diff.changed_columns.len() as f64 / total_columns as f64;
+    if changed_ratio > config.max_changed_columns_ratio {
+        if let Some(m) = metrics {
+            m.record_selective_fallback("threshold_exceeded");
+        }
+        return false;
+    }
+
+    true
+}
+
 /// Create a partial row update from old and new rows
 ///
 /// # Arguments
@@ -1123,6 +1159,87 @@ pub fn create_partial_row_update(
     // Check if we should use selective update
     let changed_ratio = changed_columns.len() as f64 / total_columns as f64;
     if !config.enabled || changed_ratio > config.max_changed_columns_ratio {
+        return None;
+    }
+
+    // Build included columns: PK columns + changed columns, sorted
+    let mut included_columns: Vec<usize> = pk_columns.to_vec();
+    for &idx in &changed_columns {
+        if !included_columns.contains(&idx) {
+            included_columns.push(idx);
+        }
+    }
+    included_columns.sort_unstable();
+
+    // Extract values for included columns
+    let values: Vec<Option<Vec<u8>>> =
+        included_columns.iter().map(|&idx| new_row[idx].clone()).collect();
+
+    // Convert to u16 for protocol
+    let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
+
+    Some(crate::protocol::messages::PartialRowUpdate::new(
+        total_columns as u16,
+        &present_columns,
+        values,
+    ))
+}
+
+/// Create a partial row update from old and new rows with metrics recording
+///
+/// # Arguments
+/// * `old_row` - The previous row values (wire format)
+/// * `new_row` - The current row values (wire format)
+/// * `pk_columns` - Primary key column indices
+/// * `config` - Selective column configuration
+/// * `metrics` - Optional metrics for recording fallback reasons
+///
+/// # Returns
+/// * `Some(PartialRowUpdate)` if selective update should be used
+/// * `None` if full row should be sent instead
+pub fn create_partial_row_update_with_metrics(
+    old_row: &[Option<Vec<u8>>],
+    new_row: &[Option<Vec<u8>>],
+    pk_columns: &[usize],
+    config: &SelectiveColumnConfig,
+    metrics: Option<&crate::observability::metrics::ServerMetrics>,
+) -> Option<crate::protocol::messages::PartialRowUpdate> {
+    // Rows must have same number of columns
+    if old_row.len() != new_row.len() {
+        if let Some(m) = metrics {
+            m.record_selective_fallback("row_count_mismatch");
+        }
+        return None;
+    }
+
+    let total_columns = new_row.len();
+    let mut changed_columns = Vec::new();
+
+    // Compare each column
+    for (idx, (old_val, new_val)) in old_row.iter().zip(new_row.iter()).enumerate() {
+        if old_val != new_val {
+            changed_columns.push(idx);
+        }
+    }
+
+    // If no columns changed, return None
+    if changed_columns.is_empty() {
+        if let Some(m) = metrics {
+            m.record_selective_fallback("no_changes");
+        }
+        return None;
+    }
+
+    // Check if we should use selective update
+    let changed_ratio = changed_columns.len() as f64 / total_columns as f64;
+    if !config.enabled || changed_ratio > config.max_changed_columns_ratio {
+        if let Some(m) = metrics {
+            if !config.enabled {
+                m.record_selective_fallback("disabled");
+            } else {
+                m.record_selective_fallback("threshold_exceeded");
+            }
+        }
         return None;
     }
 

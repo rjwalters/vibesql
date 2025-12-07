@@ -735,11 +735,17 @@ impl ConnectionHandler {
         // Check if selective updates are enabled in config
         let config = &self.config.subscriptions.selective_updates;
         if !config.enabled {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_selective_fallback("disabled");
+            }
             return false;
         }
 
         // Row counts must match for selective updates (no inserts/deletes)
         if old_rows.len() != new_rows.len() {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_selective_fallback("row_count_mismatch");
+            }
             return false;
         }
 
@@ -790,12 +796,18 @@ impl ConnectionHandler {
             } else {
                 // Can't find matching old row - this is an insert, not an update
                 // Fall back to regular updates
+                if let Some(metrics) = self.observability.metrics() {
+                    metrics.record_selective_fallback("pk_mismatch");
+                }
                 return false;
             }
         }
 
         // If no partial updates were generated, nothing changed
         if partial_updates.is_empty() {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.record_selective_fallback("no_changes");
+            }
             return false;
         }
 
