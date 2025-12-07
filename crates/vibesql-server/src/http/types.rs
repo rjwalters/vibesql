@@ -198,3 +198,37 @@ pub struct BlobMetadataResponse {
     /// ISO 8601 timestamp when blob was created
     pub created_at: String,
 }
+
+// ============================================================================
+// Subscription Efficiency Stats Types
+// ============================================================================
+
+/// Reasons why partial updates were not used
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartialUpdateFallbacks {
+    /// Partial updates disabled in configuration
+    pub disabled: u64,
+    /// Ratio of changed columns exceeded threshold
+    pub threshold_exceeded: u64,
+    /// Row count mismatch between expected and actual
+    pub row_count_mismatch: u64,
+    /// Primary key columns didn't match between updates
+    pub pk_mismatch: u64,
+    /// No columns changed in the update
+    pub no_changes: u64,
+}
+
+/// Subscription partial update efficiency statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionEfficiencyStats {
+    /// Overall efficiency ratio (partial bytes saved / total possible bytes)
+    pub partial_update_efficiency: f64,
+    /// Total bytes saved by using partial updates
+    pub total_bytes_saved: u64,
+    /// Breakdown of fallback reasons when partial updates weren't used
+    pub fallbacks: PartialUpdateFallbacks,
+    /// Total partial updates sent
+    pub partial_updates_sent: u64,
+    /// Total full updates sent
+    pub full_updates_sent: u64,
+}

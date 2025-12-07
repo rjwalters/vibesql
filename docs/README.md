@@ -8,6 +8,7 @@
 - [ODBC/JDBC Connectivity](ODBC_JDBC_CONNECTIVITY.md) - Database connectivity via PostgreSQL wire protocol
 
 ### Server & APIs
+- [Server Configuration](server-config.md) - Server configuration reference
 - [HTTP API](http-api.md) - REST and GraphQL endpoints
 - [Transactions](transactions.md) - Transaction handling and durability hints
 

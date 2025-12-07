@@ -1,6 +1,7 @@
 //! Common test utilities for vibesql-server integration tests
 
 use bytes::{BufMut, BytesMut};
+use opentelemetry::global;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use vibesql_server::config::{
 };
 use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
 use vibesql_server::http::create_http_router;
-use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider};
+use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider, ServerMetrics};
 use vibesql_server::registry::DatabaseRegistry;
 use vibesql_server::subscription::SubscriptionConfig;
 use vibesql_server::SubscriptionManager;
@@ -219,6 +220,167 @@ pub fn test_config_with_password(password_file: std::path::PathBuf) -> Config {
     config.auth.method = "password".to_string();
     config.auth.password_file = Some(password_file);
     config
+}
+
+/// Test server with metrics handle - holds the test server and shared metrics for verification
+#[allow(dead_code)]
+pub struct TestServerWithMetrics {
+    pub server: TestServer,
+    pub metrics: ServerMetrics,
+}
+
+impl TestServerWithMetrics {
+    /// Get the server address (TCP wire protocol)
+    #[allow(dead_code)]
+    pub fn addr(&self) -> SocketAddr {
+        self.server.addr()
+    }
+
+    /// Get the HTTP server address (if HTTP is enabled)
+    #[allow(dead_code)]
+    pub fn http_addr(&self) -> Option<SocketAddr> {
+        self.server.http_addr()
+    }
+
+    /// Shutdown the server
+    #[allow(dead_code)]
+    pub fn shutdown(self) {
+        self.server.shutdown();
+    }
+}
+
+/// Start a test server with metrics enabled for verification
+///
+/// This returns both the test server and a shared `ServerMetrics` instance
+/// that can be used to verify metric values after running test scenarios.
+#[allow(dead_code)]
+pub async fn start_test_server_with_metrics(mut config: Config) -> TestServerWithMetrics {
+    // Create metrics using the global meter
+    let meter = global::meter("vibesql_test_metrics");
+    let metrics = ServerMetrics::new(&meter);
+
+    // Bind to a random available port for TCP wire protocol
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("Failed to bind");
+    let addr = listener.local_addr().expect("Failed to get local address");
+
+    // Update config with actual port
+    config.server.port = addr.port();
+    config.server.host = "127.0.0.1".to_string();
+
+    // Bind HTTP server to a separate random port if enabled
+    let http_addr = if config.http.enabled {
+        let http_listener =
+            TcpListener::bind("127.0.0.1:0").await.expect("Failed to bind HTTP server");
+        let http_addr = http_listener.local_addr().expect("Failed to get HTTP local address");
+        config.http.port = http_addr.port();
+        config.http.host = "127.0.0.1".to_string();
+        Some((http_addr, http_listener))
+    } else {
+        None
+    };
+
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+
+    let config = Arc::new(config);
+
+    // Initialize observability (disabled for tests, we use custom metrics)
+    let observability = Arc::new(
+        ObservabilityProvider::init(&config.observability).expect("Failed to init observability"),
+    );
+
+    // Load password store if configured
+    let password_store = config.auth.password_file.as_ref().map(|password_file| {
+        Arc::new(
+            PasswordStore::load_from_file(password_file).expect("Failed to load password file"),
+        )
+    });
+
+    // Track active connections
+    let active_connections = Arc::new(AtomicUsize::new(0));
+
+    // Create shared subscription manager for tests
+    let subscription_manager = Arc::new(SubscriptionManager::new());
+
+    // Create shared database registry for tests
+    let database_registry = DatabaseRegistry::new();
+
+    // Create broadcast channel for cross-connection subscription notifications
+    let (mutation_broadcast_tx, _mutation_broadcast_rx) =
+        broadcast::channel::<TableMutationNotification>(1024);
+
+    // Start HTTP server if enabled
+    let http_server_addr = if let Some((http_socket_addr, http_listener)) = http_addr {
+        // Create a shared database for HTTP API (like main.rs does)
+        let mut db = Database::new();
+        let change_rx = db.enable_change_events(1024);
+        let db = Arc::new(db);
+
+        // Clone subscription manager for HTTP
+        let subscription_manager_for_http = Arc::clone(&subscription_manager);
+        let registry_for_http = database_registry.clone();
+
+        // Spawn the subscription manager event loop
+        let db_for_subscription_task = Arc::clone(&db);
+        let subscription_manager_for_loop = Arc::clone(&subscription_manager);
+        tokio::spawn(async move {
+            subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
+        });
+
+        // Spawn HTTP server with our test metrics
+        let db_for_http = Arc::clone(&db);
+        let metrics_for_http = Some(metrics.clone());
+        tokio::spawn(async move {
+            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http, metrics_for_http);
+            axum::serve(http_listener, app).await.expect("HTTP server error");
+        });
+
+        Some(http_socket_addr)
+    } else {
+        None
+    };
+
+    // Spawn TCP wire protocol server task
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                result = listener.accept() => {
+                    match result {
+                        Ok((stream, peer_addr)) => {
+                            let config = Arc::clone(&config);
+                            let observability = Arc::clone(&observability);
+                            let password_store = password_store.clone();
+                            let active_connections = Arc::clone(&active_connections);
+                            let database_registry = database_registry.clone();
+                            let subscription_manager = Arc::clone(&subscription_manager);
+                            let mutation_broadcast_tx = mutation_broadcast_tx.clone();
+
+                            tokio::spawn(async move {
+                                let mut handler = ConnectionHandler::new(
+                                    stream,
+                                    peer_addr,
+                                    config,
+                                    observability,
+                                    password_store,
+                                    active_connections,
+                                    database_registry,
+                                    subscription_manager,
+                                    mutation_broadcast_tx,
+                                );
+                                let _ = handler.handle().await;
+                            });
+                        }
+                        Err(_) => break,
+                    }
+                }
+                _ = &mut shutdown_rx => {
+                    break;
+                }
+            }
+        }
+    });
+
+    let server = TestServer { addr, http_addr: http_server_addr, shutdown_tx: Some(shutdown_tx) };
+    TestServerWithMetrics { server, metrics }
 }
 
 /// Test client for connecting to the server

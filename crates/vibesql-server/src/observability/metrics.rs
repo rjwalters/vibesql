@@ -47,6 +47,16 @@ pub struct ServerMetrics {
     pk_detection_total: Counter<u64>,
     selective_update_decisions_total: Counter<u64>,
     selective_update_column_ratio: Histogram<f64>,
+
+    // Trackable counters for HTTP stats endpoint (OpenTelemetry metrics don't expose values)
+    fallback_disabled_count: Arc<AtomicU64>,
+    fallback_threshold_exceeded_count: Arc<AtomicU64>,
+    fallback_row_count_mismatch_count: Arc<AtomicU64>,
+    fallback_pk_mismatch_count: Arc<AtomicU64>,
+    fallback_no_changes_count: Arc<AtomicU64>,
+    total_bytes_saved_count: Arc<AtomicU64>,
+    partial_updates_sent_count: Arc<AtomicU64>,
+    full_updates_sent_count: Arc<AtomicU64>,
 }
 
 impl ServerMetrics {
@@ -212,6 +222,15 @@ impl ServerMetrics {
             pk_detection_total,
             selective_update_decisions_total,
             selective_update_column_ratio,
+            // Initialize trackable counters for HTTP stats endpoint
+            fallback_disabled_count: Arc::new(AtomicU64::new(0)),
+            fallback_threshold_exceeded_count: Arc::new(AtomicU64::new(0)),
+            fallback_row_count_mismatch_count: Arc::new(AtomicU64::new(0)),
+            fallback_pk_mismatch_count: Arc::new(AtomicU64::new(0)),
+            fallback_no_changes_count: Arc::new(AtomicU64::new(0)),
+            total_bytes_saved_count: Arc::new(AtomicU64::new(0)),
+            partial_updates_sent_count: Arc::new(AtomicU64::new(0)),
+            full_updates_sent_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -342,6 +361,26 @@ impl ServerMetrics {
     pub fn record_partial_update_fallback(&self, reason: &str) {
         self.partial_update_fallbacks_total
             .add(1, &[KeyValue::new("reason", reason.to_string())]);
+
+        // Also increment trackable counter for HTTP stats endpoint
+        match reason {
+            "disabled" => {
+                self.fallback_disabled_count.fetch_add(1, Ordering::Relaxed);
+            }
+            "threshold_exceeded" => {
+                self.fallback_threshold_exceeded_count.fetch_add(1, Ordering::Relaxed);
+            }
+            "row_count_mismatch" => {
+                self.fallback_row_count_mismatch_count.fetch_add(1, Ordering::Relaxed);
+            }
+            "pk_mismatch" => {
+                self.fallback_pk_mismatch_count.fetch_add(1, Ordering::Relaxed);
+            }
+            "no_changes" => {
+                self.fallback_no_changes_count.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
     }
 
     /// Record bytes saved by a partial update compared to full row update
@@ -350,6 +389,18 @@ impl ServerMetrics {
     /// * `bytes_saved` - Estimated bytes saved (full_row_size - partial_update_size)
     pub fn record_partial_update_bytes_saved(&self, bytes_saved: u64) {
         self.partial_update_bytes_saved.record(bytes_saved, &[]);
+        // Also track cumulative bytes saved for HTTP stats endpoint
+        self.total_bytes_saved_count.fetch_add(bytes_saved, Ordering::Relaxed);
+    }
+
+    /// Record that a partial update was sent
+    pub fn record_partial_update_sent(&self) {
+        self.partial_updates_sent_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record that a full update was sent (fallback from partial)
+    pub fn record_full_update_sent(&self) {
+        self.full_updates_sent_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record selective update columns and update efficiency gauge
@@ -435,6 +486,26 @@ impl ServerMetrics {
         if total_columns > 0 {
             let ratio = changed_columns as f64 / total_columns as f64;
             self.selective_update_column_ratio.record(ratio, &[]);
+        }
+    }
+
+    /// Get subscription efficiency stats
+    ///
+    /// Returns efficiency metrics for subscription partial updates, including
+    /// fallback reasons, bytes saved, and update counts.
+    pub fn get_efficiency_stats(&self) -> crate::http::types::SubscriptionEfficiencyStats {
+        crate::http::types::SubscriptionEfficiencyStats {
+            partial_update_efficiency: self.partial_update_efficiency(),
+            total_bytes_saved: self.total_bytes_saved_count.load(Ordering::Relaxed),
+            fallbacks: crate::http::types::PartialUpdateFallbacks {
+                disabled: self.fallback_disabled_count.load(Ordering::Relaxed),
+                threshold_exceeded: self.fallback_threshold_exceeded_count.load(Ordering::Relaxed),
+                row_count_mismatch: self.fallback_row_count_mismatch_count.load(Ordering::Relaxed),
+                pk_mismatch: self.fallback_pk_mismatch_count.load(Ordering::Relaxed),
+                no_changes: self.fallback_no_changes_count.load(Ordering::Relaxed),
+            },
+            partial_updates_sent: self.partial_updates_sent_count.load(Ordering::Relaxed),
+            full_updates_sent: self.full_updates_sent_count.load(Ordering::Relaxed),
         }
     }
 }
@@ -599,5 +670,67 @@ mod tests {
 
         // Edge case: zero total columns should not record
         metrics.record_selective_update_column_ratio(0, 0);
+    }
+
+    #[test]
+    fn test_get_efficiency_stats_tracks_fallbacks() {
+        let metrics = create_test_metrics();
+
+        // Record some fallbacks
+        metrics.record_partial_update_fallback("disabled");
+        metrics.record_partial_update_fallback("disabled");
+        metrics.record_partial_update_fallback("threshold_exceeded");
+        metrics.record_partial_update_fallback("row_count_mismatch");
+        metrics.record_partial_update_fallback("pk_mismatch");
+        metrics.record_partial_update_fallback("no_changes");
+        metrics.record_partial_update_fallback("no_changes");
+        metrics.record_partial_update_fallback("no_changes");
+
+        let stats = metrics.get_efficiency_stats();
+        assert_eq!(stats.fallbacks.disabled, 2);
+        assert_eq!(stats.fallbacks.threshold_exceeded, 1);
+        assert_eq!(stats.fallbacks.row_count_mismatch, 1);
+        assert_eq!(stats.fallbacks.pk_mismatch, 1);
+        assert_eq!(stats.fallbacks.no_changes, 3);
+    }
+
+    #[test]
+    fn test_get_efficiency_stats_tracks_bytes_saved() {
+        let metrics = create_test_metrics();
+
+        // Record some bytes saved
+        metrics.record_partial_update_bytes_saved(100);
+        metrics.record_partial_update_bytes_saved(500);
+        metrics.record_partial_update_bytes_saved(400);
+
+        let stats = metrics.get_efficiency_stats();
+        assert_eq!(stats.total_bytes_saved, 1000);
+    }
+
+    #[test]
+    fn test_get_efficiency_stats_tracks_update_counts() {
+        let metrics = create_test_metrics();
+
+        // Record some updates
+        metrics.record_partial_update_sent();
+        metrics.record_partial_update_sent();
+        metrics.record_partial_update_sent();
+        metrics.record_full_update_sent();
+        metrics.record_full_update_sent();
+
+        let stats = metrics.get_efficiency_stats();
+        assert_eq!(stats.partial_updates_sent, 3);
+        assert_eq!(stats.full_updates_sent, 2);
+    }
+
+    #[test]
+    fn test_get_efficiency_stats_includes_efficiency() {
+        let metrics = create_test_metrics();
+
+        // Record some selective updates: 3 columns sent out of 10 = 70% efficiency
+        metrics.record_selective_update_columns(3, 10);
+
+        let stats = metrics.get_efficiency_stats();
+        assert!((stats.partial_update_efficiency - 0.7).abs() < 0.001);
     }
 }
