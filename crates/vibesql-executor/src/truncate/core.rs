@@ -67,6 +67,13 @@ pub fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usi
     // Reset AUTO_INCREMENT sequences
     reset_auto_increment_sequences(database, table_name)?;
 
+    // Invalidate the database-level columnar cache since table data changed.
+    // Note: The table-level cache is already invalidated by table.clear().
+    // Both invalidations are necessary because they manage separate caches:
+    // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+    // - Database-level cache: used by Database::get_columnar() for cached access
+    database.invalidate_columnar_cache(table_name);
+
     Ok(row_count)
 }
 
