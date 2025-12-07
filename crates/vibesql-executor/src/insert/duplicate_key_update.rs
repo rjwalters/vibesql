@@ -15,6 +15,14 @@ pub fn handle_duplicate_key_update(
     if let Some(row_id) = conflicting_row_id {
         // A conflict exists - update the row
         update_conflicting_row(db, table_name, schema, row_id, row_values, assignments)?;
+
+        // Invalidate the database-level columnar cache since table data changed.
+        // Note: The table-level cache is already invalidated by update_row().
+        // Both invalidations are necessary because they manage separate caches:
+        // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+        // - Database-level cache: used by Database::get_columnar() for cached access
+        db.invalidate_columnar_cache(table_name);
+
         Ok(Some(row_id))
     } else {
         // No conflict - caller should do a normal insert
