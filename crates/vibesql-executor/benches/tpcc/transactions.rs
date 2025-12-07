@@ -560,7 +560,7 @@ impl<'a> VibesqlTransactionExecutor<'a> {
             let prefix = vec![
                 SqlValue::Integer(input.c_w_id as i64),
                 SqlValue::Integer(input.c_d_id as i64),
-                SqlValue::Varchar(std::sync::Arc::from(c_last.clone())),
+                SqlValue::Varchar(arcstr::ArcStr::from(c_last.clone())),
             ];
 
             // Get the index data for customer name lookups

@@ -6,7 +6,6 @@
 //!
 //! Related: #3884, #3890, #3891, #3911
 
-use std::sync::Arc;
 
 mod common;
 
@@ -131,7 +130,7 @@ fn test_update_invalidates_prewarmed_cache() {
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
             op: BinaryOperator::Equal,
-            right: Box::new(Expression::Literal(SqlValue::Varchar(Arc::from("Bob")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob")))),
         })),
     };
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -300,7 +299,7 @@ fn test_update_multiple_columns_invalidates_cache() {
             },
             Assignment {
                 column: "department".to_string(),
-                value: Expression::Literal(SqlValue::Varchar(Arc::from("Management"))),
+                value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Management"))),
             },
         ],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -323,7 +322,7 @@ fn test_update_multiple_columns_invalidates_cache() {
 
     let dept_col = columnar.get_column("department").expect("Column should exist");
     assert!(
-        (0..3).any(|i| matches!(dept_col.get(i), SqlValue::Varchar(ref s) if s.as_ref() == "Management")),
+        (0..3).any(|i| matches!(dept_col.get(i), SqlValue::Varchar(ref s) if s.as_str() == "Management")),
         "New department 'Management' should be visible"
     );
 }

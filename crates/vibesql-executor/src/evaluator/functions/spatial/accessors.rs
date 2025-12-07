@@ -65,7 +65,7 @@ pub fn st_geometry_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
             let geom_with_srid = sql_value_to_geometry(&args[0])?;
-            Ok(SqlValue::Varchar(std::sync::Arc::from(geom_with_srid.geometry_type().to_string())))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(geom_with_srid.geometry_type().to_string())))
         }
     }
 }
@@ -102,7 +102,7 @@ pub fn st_as_text(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Null => Ok(SqlValue::Null),
         _ => {
             let geom_with_srid = sql_value_to_geometry(&args[0])?;
-            Ok(SqlValue::Varchar(std::sync::Arc::from(geom_with_srid.to_ewkt())))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(geom_with_srid.to_ewkt())))
         }
     }
 }
@@ -124,7 +124,7 @@ pub fn st_as_binary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             // Use EWKB format to include SRID
             let wkb_data = geom_with_srid.to_ewkb();
             // Return as hex-encoded string for display (0x...)
-            Ok(SqlValue::Varchar(std::sync::Arc::from(format!("0x{}", hex::encode(wkb_data)))))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(format!("0x{}", hex::encode(wkb_data)))))
         }
     }
 }
@@ -143,7 +143,7 @@ pub fn st_as_geojson(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         _ => {
             let geom_with_srid = sql_value_to_geometry(&args[0])?;
             let geojson = geometry_to_geojson(&geom_with_srid.geometry);
-            Ok(SqlValue::Varchar(std::sync::Arc::from(geojson)))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(geojson)))
         }
     }
 }

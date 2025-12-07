@@ -226,7 +226,7 @@ mod tests {
         // Insert some data
         use vibesql_storage::Row;
         use vibesql_types::SqlValue;
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
+        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         db.insert_row("customers", row).unwrap();
 
         // Verify data exists

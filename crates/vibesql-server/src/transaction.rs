@@ -395,7 +395,7 @@ mod tests {
         let mut mgr = SessionTransactionManager::new();
         mgr.begin().unwrap();
 
-        let row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("test"))]);
+        let row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         mgr.record_insert("users".to_string(), row.clone());
 
         let state = mgr.current().unwrap();
@@ -425,8 +425,8 @@ mod tests {
         let mut mgr = SessionTransactionManager::new();
         mgr.begin().unwrap();
 
-        let old_row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("old"))]);
-        let new_row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("new"))]);
+        let old_row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("old"))]);
+        let new_row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("new"))]);
         mgr.record_update("users".to_string(), 3, old_row, new_row.clone());
 
         let state = mgr.current().unwrap();

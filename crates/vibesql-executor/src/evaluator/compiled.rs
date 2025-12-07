@@ -707,12 +707,12 @@ mod tests {
 
         // Test matching row
         let row =
-            Row::from_vec(vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("test"))]);
+            Row::from_vec(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test non-matching row
         let row =
-            Row::from_vec(vec![SqlValue::Integer(99), SqlValue::Varchar(std::sync::Arc::from("test"))]);
+            Row::from_vec(vec![SqlValue::Integer(99), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 
@@ -738,16 +738,16 @@ mod tests {
 
         // Test row that matches both conditions
         let row =
-            Row::from_vec(vec![SqlValue::Integer(50), SqlValue::Varchar(std::sync::Arc::from("test"))]);
+            Row::from_vec(vec![SqlValue::Integer(50), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test row that fails first condition
-        let row = Row::from_vec(vec![SqlValue::Integer(5), SqlValue::Varchar(std::sync::Arc::from("test"))]);
+        let row = Row::from_vec(vec![SqlValue::Integer(5), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         assert_eq!(compiled.evaluate(&row), Some(false));
 
         // Test row that fails second condition
         let row =
-            Row::from_vec(vec![SqlValue::Integer(150), SqlValue::Varchar(std::sync::Arc::from("test"))]);
+            Row::from_vec(vec![SqlValue::Integer(150), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 

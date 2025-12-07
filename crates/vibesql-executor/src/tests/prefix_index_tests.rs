@@ -95,8 +95,8 @@ fn test_unique_prefix_index_enforces_prefix_uniqueness() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("testuser123@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("testuser123@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .expect("First insert should succeed");
@@ -106,8 +106,8 @@ fn test_unique_prefix_index_enforces_prefix_uniqueness() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("testuser124@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("testuser124@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     );
 
@@ -137,8 +137,8 @@ fn test_unique_prefix_index_allows_different_prefixes() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .expect("First insert should succeed");
@@ -148,8 +148,8 @@ fn test_unique_prefix_index_allows_different_prefixes() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("bob123456@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("bob123456@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     );
 
@@ -178,8 +178,8 @@ fn test_prefix_index_with_short_strings() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("short@test.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("short@test.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .expect("First insert should succeed");
@@ -189,8 +189,8 @@ fn test_prefix_index_with_short_strings() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("short@test.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("short@test.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     );
 
@@ -227,8 +227,8 @@ fn test_composite_prefix_index() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")), // email: "alice@exam" prefix
-            SqlValue::Varchar(std::sync::Arc::from("Alice Smith")),       // name: "Alice" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")), // email: "alice@exam" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),       // name: "Alice" prefix
         ]),
     )
     .expect("First insert should succeed");
@@ -238,8 +238,8 @@ fn test_composite_prefix_index() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.org")), // Same "alice@exam" prefix
-            SqlValue::Varchar(std::sync::Arc::from("Alice Jones")),       // Same "Alice" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.org")), // Same "alice@exam" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Jones")),       // Same "Alice" prefix
         ]),
     );
 
@@ -251,8 +251,8 @@ fn test_composite_prefix_index() {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("bob@example.com")), // Different "bob@exampl" prefix
-            SqlValue::Varchar(std::sync::Arc::from("Alice Smith")),     // Same "Alice" prefix is OK
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")), // Different "bob@exampl" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),     // Same "Alice" prefix is OK
         ]),
     );
 
@@ -281,8 +281,8 @@ fn test_prefix_index_with_utf8_strings() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("josé@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("José")),
+            SqlValue::Varchar(arcstr::ArcStr::from("josé@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("José")),
         ]),
     )
     .expect("First insert should succeed");
@@ -292,8 +292,8 @@ fn test_prefix_index_with_utf8_strings() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("josé@email.com")),
-            SqlValue::Varchar(std::sync::Arc::from("José Jr.")),
+            SqlValue::Varchar(arcstr::ArcStr::from("josé@email.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("José Jr.")),
         ]),
     );
 
@@ -305,8 +305,8 @@ fn test_prefix_index_with_utf8_strings() {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("maria@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Maria")),
+            SqlValue::Varchar(arcstr::ArcStr::from("maria@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Maria")),
         ]),
     );
 
@@ -335,8 +335,8 @@ fn test_non_unique_prefix_index_allows_duplicates() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("testuser123@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("testuser123@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .expect("First insert should succeed");
@@ -346,8 +346,8 @@ fn test_non_unique_prefix_index_allows_duplicates() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("testuser124@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("testuser124@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     );
 

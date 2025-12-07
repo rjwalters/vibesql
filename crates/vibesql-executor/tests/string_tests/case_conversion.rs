@@ -27,11 +27,11 @@ fn test_upper_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "UPPER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")));
 }
 
 #[test]
@@ -40,11 +40,11 @@ fn test_upper_unicode() {
     // Test Greek, accented characters, emojis
     let expr = vibesql_ast::Expression::Function {
         name: "UPPER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("CAFÉ")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("CAFÉ")));
 }
 
 #[test]
@@ -52,11 +52,11 @@ fn test_upper_mixed_case() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "UPPER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("HeLLo WoRLd")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HeLLo WoRLd")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("HELLO WORLD")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HELLO WORLD")));
 }
 
 #[test]
@@ -64,11 +64,11 @@ fn test_upper_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "UPPER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("test")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from("test")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("TEST")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("TEST")));
 }
 
 #[test]
@@ -77,8 +77,8 @@ fn test_upper_wrong_arg_count() {
     let expr = vibesql_ast::Expression::Function {
         name: "UPPER".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("extra"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("test"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("extra"))),
         ],
         character_unit: None,
     };
@@ -115,11 +115,11 @@ fn test_lower_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LOWER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")));
 }
 
 #[test]
@@ -127,11 +127,11 @@ fn test_lower_unicode() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LOWER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("CAFÉ")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("CAFÉ")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("café")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")));
 }
 
 #[test]
@@ -140,8 +140,8 @@ fn test_lower_wrong_arg_count() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOWER".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("TEST"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("extra"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("TEST"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("extra"))),
         ],
         character_unit: None,
     };
@@ -166,9 +166,9 @@ fn test_lower_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LOWER".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(std::sync::Arc::from("TEST")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from("TEST")))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("test")));
 }

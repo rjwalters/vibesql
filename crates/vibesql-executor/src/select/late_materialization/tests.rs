@@ -241,15 +241,15 @@ fn test_memory_estimation() {
 fn test_row_reference_based_join() {
     // Simulate a join using row references instead of copying data
     let left_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Carol"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Carol"))]),
     ];
 
     let right_rows = vec![
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Order-A"))]),
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Order-B"))]),
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Order-C"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Order-A"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Order-B"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Order-C"))]),
     ];
 
     // Instead of copying rows, track references
@@ -279,9 +279,9 @@ fn test_row_reference_based_join() {
     }
 
     assert_eq!(output_rows.len(), 3);
-    assert_eq!(output_rows[0].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("Alice"))));
-    assert_eq!(output_rows[0].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("Order-A"))));
-    assert_eq!(output_rows[2].get(0), Some(&SqlValue::Varchar(std::sync::Arc::from("Bob"))));
+    assert_eq!(output_rows[0].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("Alice"))));
+    assert_eq!(output_rows[0].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("Order-A"))));
+    assert_eq!(output_rows[2].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("Bob"))));
 }
 
 #[test]

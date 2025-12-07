@@ -68,7 +68,7 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
             "t2",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("name_{}", i))),
+                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("name_{}", i))),
             ]),
         )
         .unwrap();
@@ -128,7 +128,7 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     assert_eq!(first_row.values[0], vibesql_types::SqlValue::Integer(1)); // t1.id
     assert_eq!(first_row.values[1], vibesql_types::SqlValue::Integer(10)); // t1.value
     assert_eq!(first_row.values[2], vibesql_types::SqlValue::Integer(1)); // t2.id
-    assert_eq!(first_row.values[3], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("name_1")));
+    assert_eq!(first_row.values[3], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("name_1")));
     // t2.name
 }
 

@@ -77,9 +77,9 @@ fn test_unique_index_basic_insert_enforcement() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -90,9 +90,9 @@ fn test_unique_index_basic_insert_enforcement() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Jones")),
             SqlValue::Null,
         ]),
     );
@@ -130,8 +130,8 @@ fn test_unique_index_null_values_allowed() {
         Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Null, // NULL email
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -142,8 +142,8 @@ fn test_unique_index_null_values_allowed() {
         Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Null, // NULL email again - should succeed
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Jones")),
             SqlValue::Null,
         ]),
     )
@@ -154,8 +154,8 @@ fn test_unique_index_null_values_allowed() {
         Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Null, // Another NULL email - should succeed
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
-            SqlValue::Varchar(std::sync::Arc::from("Brown")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Brown")),
             SqlValue::Null,
         ]),
     )
@@ -195,9 +195,9 @@ fn test_unique_index_composite_key() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("john@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("John")),
-            SqlValue::Varchar(std::sync::Arc::from("Doe")),
+            SqlValue::Varchar(arcstr::ArcStr::from("john@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("John")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Doe")),
             SqlValue::Null,
         ]),
     )
@@ -208,9 +208,9 @@ fn test_unique_index_composite_key() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("johnsmith@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("John")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("johnsmith@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("John")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -221,9 +221,9 @@ fn test_unique_index_composite_key() {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("jane@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Jane")),
-            SqlValue::Varchar(std::sync::Arc::from("Doe")),
+            SqlValue::Varchar(arcstr::ArcStr::from("jane@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Jane")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Doe")),
             SqlValue::Null,
         ]),
     )
@@ -234,9 +234,9 @@ fn test_unique_index_composite_key() {
         "users",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("johndoe2@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("John")),
-            SqlValue::Varchar(std::sync::Arc::from("Doe")),
+            SqlValue::Varchar(arcstr::ArcStr::from("johndoe2@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("John")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Doe")),
             SqlValue::Null,
         ]),
     );
@@ -280,9 +280,9 @@ fn test_unique_index_composite_with_null() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("test1@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("test1@example.com")),
             SqlValue::Null,
-            SqlValue::Varchar(std::sync::Arc::from("Doe")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Doe")),
             SqlValue::Null,
         ]),
     )
@@ -293,9 +293,9 @@ fn test_unique_index_composite_with_null() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("test2@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("test2@example.com")),
             SqlValue::Null,
-            SqlValue::Varchar(std::sync::Arc::from("Doe")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Doe")),
             SqlValue::Null,
         ]),
     )
@@ -328,9 +328,9 @@ fn test_unique_index_update_enforcement() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -340,9 +340,9 @@ fn test_unique_index_update_enforcement() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Jones")),
             SqlValue::Null,
         ]),
     )
@@ -395,9 +395,9 @@ fn test_unique_index_update_same_value_allowed() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -440,9 +440,9 @@ fn test_unique_index_update_to_different_value() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -463,7 +463,7 @@ fn test_unique_index_update_to_different_value() {
     // Verify the email was actually updated
     let table = db.get_table("users").unwrap();
     let row = &table.scan()[0];
-    assert_eq!(row.values[1], SqlValue::Varchar(std::sync::Arc::from("newemail@example.com")));
+    assert_eq!(row.values[1], SqlValue::Varchar(arcstr::ArcStr::from("newemail@example.com")));
 }
 
 #[test]
@@ -488,9 +488,9 @@ fn test_unique_index_update_to_null() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
             SqlValue::Null,
         ]),
     )
@@ -547,10 +547,10 @@ fn test_unique_index_multiple_indexes_on_table() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
-            SqlValue::Varchar(std::sync::Arc::from("555-0001")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("555-0001")),
         ]),
     )
     .unwrap();
@@ -560,10 +560,10 @@ fn test_unique_index_multiple_indexes_on_table() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
-            SqlValue::Varchar(std::sync::Arc::from("555-0002")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Jones")),
+            SqlValue::Varchar(arcstr::ArcStr::from("555-0002")),
         ]),
     );
     assert!(result1.is_err());
@@ -573,10 +573,10 @@ fn test_unique_index_multiple_indexes_on_table() {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("charlie@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
-            SqlValue::Varchar(std::sync::Arc::from("Brown")),
-            SqlValue::Varchar(std::sync::Arc::from("555-0001")),
+            SqlValue::Varchar(arcstr::ArcStr::from("charlie@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Brown")),
+            SqlValue::Varchar(arcstr::ArcStr::from("555-0001")),
         ]),
     );
     assert!(result2.is_err());
@@ -586,10 +586,10 @@ fn test_unique_index_multiple_indexes_on_table() {
         "users",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("diana@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Diana")),
-            SqlValue::Varchar(std::sync::Arc::from("Prince")),
-            SqlValue::Varchar(std::sync::Arc::from("555-0003")),
+            SqlValue::Varchar(arcstr::ArcStr::from("diana@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Diana")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Prince")),
+            SqlValue::Varchar(arcstr::ArcStr::from("555-0003")),
         ]),
     )
     .unwrap();

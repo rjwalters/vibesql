@@ -169,8 +169,8 @@ mod tests {
         let cache = QueryResultCache::new(10);
         let sig = QuerySignature::from_sql("SELECT * FROM users");
         let rows = vec![
-            make_test_row(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
-            make_test_row(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+            make_test_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+            make_test_row(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
         ];
         let schema = make_test_schema();
         let mut tables = HashSet::new();

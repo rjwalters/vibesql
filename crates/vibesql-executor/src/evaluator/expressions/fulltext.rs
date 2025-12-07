@@ -274,7 +274,7 @@ pub fn eval_query_expansion_search(search_terms: &str, text_values: &[String]) -
 /// Evaluate a MATCH...AGAINST expression
 pub fn eval_match_against(
     search_query: &str,
-    text_values: &[std::sync::Arc<str>],
+    text_values: &[arcstr::ArcStr],
     mode: &FulltextMode,
 ) -> Result<bool, ExecutorError> {
     // Skip empty values and convert to strings

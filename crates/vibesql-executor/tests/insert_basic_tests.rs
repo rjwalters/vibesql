@@ -14,7 +14,7 @@ fn test_basic_insert() {
         columns: vec![], // No columns specified
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -40,11 +40,11 @@ fn test_multi_row_insert() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
             ],
         ]),
         conflict_clause: None,
@@ -68,7 +68,7 @@ fn test_insert_with_column_list() {
         table_name: "users".to_string(),
         columns: vec!["name".to_string(), "id".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
         ]]),
         conflict_clause: None,
@@ -131,8 +131,8 @@ fn test_insert_type_mismatch() {
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("not_a_number"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("not_a_number"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -173,7 +173,7 @@ fn test_insert_table_not_found() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -195,7 +195,7 @@ fn test_insert_column_not_found() {
         columns: vec!["id".to_string(), "invalid_col".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -218,7 +218,7 @@ fn test_insert_not_null_constraint_violation() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

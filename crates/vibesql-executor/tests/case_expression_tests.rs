@@ -34,43 +34,43 @@ fn test_simple_case_basic_match() {
         })),
         when_clauses: vec![
             vibesql_ast::CaseWhen {
-                conditions: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active")))],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Active User"))),
+                conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))],
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Active User"))),
             },
             vibesql_ast::CaseWhen {
-                conditions: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("inactive")))],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Inactive User"))),
+                conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("inactive")))],
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Inactive User"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Unknown"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))))),
     };
 
     // Test with 'active' status
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("active")),
+        SqlValue::Varchar(arcstr::ArcStr::from("active")),
         SqlValue::Integer(100),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Active User")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Active User")));
 
     // Test with 'inactive' status
     let row2 = Row::new(vec![
         SqlValue::Integer(2),
-        SqlValue::Varchar(std::sync::Arc::from("inactive")),
+        SqlValue::Varchar(arcstr::ArcStr::from("inactive")),
         SqlValue::Integer(50),
     ]);
     let result2 = evaluator.eval(&case_expr, &row2).unwrap();
-    assert_eq!(result2, SqlValue::Varchar(std::sync::Arc::from("Inactive User")));
+    assert_eq!(result2, SqlValue::Varchar(arcstr::ArcStr::from("Inactive User")));
 
     // Test with unmatched value (should return ELSE)
     let row3 = Row::new(vec![
         SqlValue::Integer(3),
-        SqlValue::Varchar(std::sync::Arc::from("pending")),
+        SqlValue::Varchar(arcstr::ArcStr::from("pending")),
         SqlValue::Integer(75),
     ]);
     let result3 = evaluator.eval(&case_expr, &row3).unwrap();
-    assert_eq!(result3, SqlValue::Varchar(std::sync::Arc::from("Unknown")));
+    assert_eq!(result3, SqlValue::Varchar(arcstr::ArcStr::from("Unknown")));
 }
 
 #[test]
@@ -86,9 +86,9 @@ fn test_simple_case_null_handling() {
         })),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![Expression::Literal(SqlValue::Null)],
-            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Null Status"))),
+            result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Null Status"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Not Null"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Not Null"))))),
     };
 
     // Test with NULL status
@@ -96,7 +96,7 @@ fn test_simple_case_null_handling() {
     // does NOT match. The ELSE result should be returned.
     let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Integer(100)]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Not Null")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Not Null")));
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn test_searched_case_basic() {
                     }),
                     right: Box::new(Expression::Literal(SqlValue::Integer(50))),
                 }],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Low"))),
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Low"))),
             },
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::BinaryOp {
@@ -128,38 +128,38 @@ fn test_searched_case_basic() {
                     }),
                     right: Box::new(Expression::Literal(SqlValue::Integer(100))),
                 }],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Medium"))),
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Medium"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("High"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("High"))))),
     };
 
     // Test value = 25 (should match first condition)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(25),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Low")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Low")));
 
     // Test value = 75 (should match second condition)
     let row2 = Row::new(vec![
         SqlValue::Integer(2),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(75),
     ]);
     let result2 = evaluator.eval(&case_expr, &row2).unwrap();
-    assert_eq!(result2, SqlValue::Varchar(std::sync::Arc::from("Medium")));
+    assert_eq!(result2, SqlValue::Varchar(arcstr::ArcStr::from("Medium")));
 
     // Test value = 150 (should use ELSE)
     let row3 = Row::new(vec![
         SqlValue::Integer(3),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(150),
     ]);
     let result3 = evaluator.eval(&case_expr, &row3).unwrap();
-    assert_eq!(result3, SqlValue::Varchar(std::sync::Arc::from("High")));
+    assert_eq!(result3, SqlValue::Varchar(arcstr::ArcStr::from("High")));
 }
 
 #[test]
@@ -173,19 +173,19 @@ fn test_searched_case_null_condition() {
         operand: None,
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![Expression::Literal(SqlValue::Null)],
-            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("yes"))),
+            result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("yes"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
     };
 
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(100),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
     // Should return ELSE because NULL is not TRUE
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("no")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("no")));
 }
 
 #[test]
@@ -200,11 +200,11 @@ fn test_case_no_else_defaults_to_null() {
         when_clauses: vec![
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("one"))),
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("one"))),
             },
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(2))],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("two"))),
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("two"))),
             },
         ],
         else_result: None, // No ELSE clause
@@ -212,7 +212,7 @@ fn test_case_no_else_defaults_to_null() {
 
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(3),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
@@ -231,24 +231,24 @@ fn test_case_lazy_evaluation() {
         when_clauses: vec![
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("first"))),
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("first"))),
             },
             vibesql_ast::CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
-                result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("second"))),
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("second"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("other"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("other"))))),
     };
 
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(1),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
     // Should match first WHEN clause
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("first")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("first")));
 }
 
 // Tests for comma-separated WHEN values (Issue #409)
@@ -267,19 +267,19 @@ fn test_case_comma_separated_matching_first() {
                 Expression::Literal(SqlValue::Integer(3)),
                 Expression::Literal(SqlValue::Integer(4)),
             ],
-            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("match"))),
+            result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("match"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
     };
 
     // Test with value = 2 (matches first condition in list)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(2),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("match")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("match")));
 }
 
 #[test]
@@ -296,19 +296,19 @@ fn test_case_comma_separated_matching_last() {
                 Expression::Literal(SqlValue::Integer(3)),
                 Expression::Literal(SqlValue::Integer(4)),
             ],
-            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("match"))),
+            result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("match"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
     };
 
     // Test with value = 4 (matches last condition in list)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(4),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("match")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("match")));
 }
 
 #[test]
@@ -325,19 +325,19 @@ fn test_case_comma_separated_no_match() {
                 Expression::Literal(SqlValue::Integer(3)),
                 Expression::Literal(SqlValue::Integer(4)),
             ],
-            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("match"))),
+            result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("match"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
     };
 
     // Test with value = 5 (no match, should return ELSE)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(5),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("no")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("no")));
 }
 
 #[test]
@@ -362,7 +362,7 @@ fn test_case_comma_separated_duplicate_values() {
     // Test with value = 0 (no match, should return ELSE)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(0),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
@@ -390,7 +390,7 @@ fn test_case_comma_separated_with_null() {
     // Test with value = 2 (matches, should return 1)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("test")),
+        SqlValue::Varchar(arcstr::ArcStr::from("test")),
         SqlValue::Integer(2),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
@@ -410,21 +410,21 @@ fn test_case_comma_separated_varchar() {
         })),
         when_clauses: vec![vibesql_ast::CaseWhen {
             conditions: vec![
-                Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("active"))),
-                Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("pending"))),
-                Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("new"))),
+                Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active"))),
+                Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("pending"))),
+                Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("new"))),
             ],
-            result: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("open"))),
+            result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("open"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("closed"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("closed"))))),
     };
 
     // Test with status = 'pending' (matches second condition in list)
     let row = Row::new(vec![
         SqlValue::Integer(1),
-        SqlValue::Varchar(std::sync::Arc::from("pending")),
+        SqlValue::Varchar(arcstr::ArcStr::from("pending")),
         SqlValue::Integer(100),
     ]);
     let result = evaluator.eval(&case_expr, &row).unwrap();
-    assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("open")));
+    assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("open")));
 }

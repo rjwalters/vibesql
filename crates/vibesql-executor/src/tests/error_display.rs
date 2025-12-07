@@ -51,7 +51,7 @@ fn test_type_mismatch_display() {
     let error = ExecutorError::TypeMismatch {
         left: SqlValue::Integer(42),
         op: "+".to_string(),
-        right: SqlValue::Varchar(std::sync::Arc::from("hello")),
+        right: SqlValue::Varchar(arcstr::ArcStr::from("hello")),
     };
     assert!(error.to_string().contains("Type mismatch"));
     assert!(error.to_string().contains("+"));

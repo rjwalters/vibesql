@@ -113,7 +113,7 @@ fn test_transaction_insert_commit() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -147,7 +147,7 @@ fn test_transaction_insert_rollback() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -178,7 +178,7 @@ fn test_transaction_multiple_operations_commit() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -194,7 +194,7 @@ fn test_transaction_multiple_operations_commit() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -224,7 +224,7 @@ fn test_transaction_multiple_operations_rollback() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -240,7 +240,7 @@ fn test_transaction_multiple_operations_rollback() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -277,7 +277,7 @@ fn test_transaction_isolation() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -314,7 +314,7 @@ fn test_transaction_nested_operations() {
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(i)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from(format!("User{}", i)))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(format!("User{}", i)))),
             ]]),
             conflict_clause: None,
             on_duplicate_key_update: None,
@@ -345,7 +345,7 @@ fn test_transaction_empty_rollback() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -375,7 +375,7 @@ fn test_multiple_transactions() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -390,7 +390,7 @@ fn test_multiple_transactions() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -405,5 +405,5 @@ fn test_multiple_transactions() {
     let rows: Vec<_> = table.scan().iter().collect();
     let first_row = &rows[0];
     assert_eq!(first_row.get(0).unwrap(), &SqlValue::Integer(1));
-    assert_eq!(first_row.get(1).unwrap(), &SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(first_row.get(1).unwrap(), &SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
 }

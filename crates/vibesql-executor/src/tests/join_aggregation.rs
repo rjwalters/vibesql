@@ -43,7 +43,7 @@ fn setup_join_test_data(db: &mut Database) {
         "departments",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
         ]),
     )
     .unwrap();
@@ -52,14 +52,14 @@ fn setup_join_test_data(db: &mut Database) {
         "departments",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Sales")),
         ]),
     )
     .unwrap();
 
     db.insert_row(
         "departments",
-        vibesql_storage::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("HR"))]),
+        vibesql_storage::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("HR"))]),
     )
     .unwrap();
 
@@ -68,7 +68,7 @@ fn setup_join_test_data(db: &mut Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             SqlValue::Integer(1), // Engineering
             SqlValue::Integer(95000),
         ]),
@@ -79,7 +79,7 @@ fn setup_join_test_data(db: &mut Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             SqlValue::Integer(1), // Engineering
             SqlValue::Integer(87000),
         ]),
@@ -90,7 +90,7 @@ fn setup_join_test_data(db: &mut Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             SqlValue::Integer(2), // Sales
             SqlValue::Integer(75000),
         ]),
@@ -101,7 +101,7 @@ fn setup_join_test_data(db: &mut Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Diana")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Diana")),
             SqlValue::Integer(2), // Sales
             SqlValue::Integer(72000),
         ]),
@@ -112,7 +112,7 @@ fn setup_join_test_data(db: &mut Database) {
         "employees",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Eve")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Eve")),
             SqlValue::Integer(3), // HR
             SqlValue::Integer(65000),
         ]),
@@ -209,17 +209,17 @@ fn test_inner_join_with_group_by_count() {
     let eng_row = result
         .rows
         .iter()
-        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("Engineering")))
+        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("Engineering")))
         .unwrap();
     let sales_row = result
         .rows
         .iter()
-        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("Sales")))
+        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("Sales")))
         .unwrap();
     let hr_row = result
         .rows
         .iter()
-        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("HR")))
+        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("HR")))
         .unwrap();
 
     assert_eq!(eng_row.get(1).unwrap(), &SqlValue::Integer(2)); // COUNT(*) = Integer
@@ -312,17 +312,17 @@ fn test_left_join_with_group_by_avg_salary() {
     let engineering_row = result
         .rows
         .iter()
-        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("Engineering")))
+        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("Engineering")))
         .unwrap();
     let sales_row = result
         .rows
         .iter()
-        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("Sales")))
+        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("Sales")))
         .unwrap();
     let hr_row = result
         .rows
         .iter()
-        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("HR")))
+        .find(|r| r.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("HR")))
         .unwrap();
 
     // Engineering: (95000 + 87000) / 2 = 91000
@@ -540,7 +540,7 @@ fn test_join_group_by_multiple_aggregates() {
     let engineering_row = result
         .rows
         .iter()
-        .find(|row| row.get(0).unwrap() == &SqlValue::Varchar(std::sync::Arc::from("Engineering")))
+        .find(|row| row.get(0).unwrap() == &SqlValue::Varchar(arcstr::ArcStr::from("Engineering")))
         .unwrap();
     assert_eq!(engineering_row.get(1).unwrap(), &SqlValue::Integer(2)); // COUNT(*)
     assert_eq!(engineering_row.get(2).unwrap(), &SqlValue::Integer(87000)); // MIN(salary)

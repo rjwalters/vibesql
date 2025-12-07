@@ -66,7 +66,7 @@ fn test_new_in_insert_trigger() {
         _ => panic!("Expected Select"),
     };
     assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
 }
 
 #[test]
@@ -215,5 +215,5 @@ fn test_old_in_delete_trigger() {
         _ => panic!("Expected Select"),
     };
     assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
 }

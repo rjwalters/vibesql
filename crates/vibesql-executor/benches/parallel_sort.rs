@@ -56,7 +56,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
         let category_val = if include_nulls && i % 10 == 0 {
             vibesql_types::SqlValue::Null
         } else {
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("cat_{}", i % 20)))
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("cat_{}", i % 20)))
         };
 
         let value_val = if include_nulls && i % 13 == 0 {
@@ -69,7 +69,7 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
             vibesql_types::SqlValue::Integer(i as i64),
             category_val,
             value_val,
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("name_{:06}", i))),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("name_{:06}", i))),
         ]);
         db.insert_row("SORT_TEST", row).unwrap();
     }

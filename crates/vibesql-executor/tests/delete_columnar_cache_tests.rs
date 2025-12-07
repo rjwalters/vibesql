@@ -6,7 +6,6 @@
 //!
 //! Related: #3884, #3912
 
-use std::sync::Arc;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::DeleteExecutor;
 use vibesql_parser::Parser;
@@ -37,7 +36,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         "PRODUCTS",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(id),
-            SqlValue::Varchar(Arc::from(name)),
+            SqlValue::Varchar(arcstr::ArcStr::from(name)),
             SqlValue::Integer(price),
         ]),
     )
@@ -294,13 +293,13 @@ fn test_delete_complex_where_invalidates_cache() {
     // Check that we still have a row with price 150 (Gadget A)
     let has_gadget_a = (0..3).any(|i| {
         matches!(price_col.get(i), SqlValue::Integer(150))
-            && matches!(name_col.get(i), SqlValue::Varchar(ref n) if n.as_ref() == "Gadget A")
+            && matches!(name_col.get(i), SqlValue::Varchar(ref n) if n.as_str() == "Gadget A")
     });
     assert!(has_gadget_a, "Gadget A with price 150 should still exist");
 
     // Widget A should be gone
     let has_widget_a = (0..3).any(|i| {
-        matches!(name_col.get(i), SqlValue::Varchar(ref n) if n.as_ref() == "Widget A")
+        matches!(name_col.get(i), SqlValue::Varchar(ref n) if n.as_str() == "Widget A")
     });
     assert!(!has_widget_a, "Widget A should have been deleted");
 }

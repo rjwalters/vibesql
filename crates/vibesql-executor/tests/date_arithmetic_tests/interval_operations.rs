@@ -11,7 +11,7 @@ fn test_extract_year() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("YEAR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("YEAR"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-03-15".parse().unwrap(),
             )),
@@ -29,7 +29,7 @@ fn test_extract_month() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MONTH"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MONTH"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-03-15".parse().unwrap(),
             )),
@@ -47,7 +47,7 @@ fn test_extract_day() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-03-15".parse().unwrap(),
             )),
@@ -153,7 +153,7 @@ fn test_age_same_date() {
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     if let vibesql_types::SqlValue::Varchar(age_str) = result {
-        assert_eq!(age_str.as_ref(), "0 days");
+        assert_eq!(age_str.as_str(), "0 days");
     } else {
         panic!("Expected VARCHAR result from AGE");
     }

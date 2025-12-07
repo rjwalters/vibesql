@@ -479,8 +479,8 @@ mod tests {
     #[test]
     fn test_rows_to_record_batch_basic() {
         let rows = vec![
-            Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("hello"))]),
-            Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("world"))]),
+            Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("hello"))]),
+            Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("world"))]),
         ];
 
         let column_names = vec!["id".to_string(), "name".to_string()];
@@ -496,13 +496,13 @@ mod tests {
             Row::from_vec(vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(3.5),
-                    SqlValue::Varchar(std::sync::Arc::from("test")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("test")),
                     SqlValue::Boolean(true),
                 ]),
             Row::from_vec(vec![
                     SqlValue::Integer(2),
                     SqlValue::Double(2.5),
-                    SqlValue::Varchar(std::sync::Arc::from("data")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("data")),
                     SqlValue::Boolean(false),
                 ]),
         ];
@@ -524,13 +524,13 @@ mod tests {
             Row::from_vec(vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(3.5),
-                    SqlValue::Varchar(std::sync::Arc::from("test")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("test")),
                     SqlValue::Boolean(true),
                 ]),
             Row::from_vec(vec![
                     SqlValue::Integer(2),
                     SqlValue::Double(2.5),
-                    SqlValue::Varchar(std::sync::Arc::from("data")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("data")),
                     SqlValue::Boolean(false),
                 ]),
         ];
@@ -702,14 +702,14 @@ mod tests {
             Row::from_vec(vec![
                     SqlValue::Integer(1),
                     SqlValue::Double(1.1),
-                    SqlValue::Varchar(std::sync::Arc::from("test")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("test")),
                     SqlValue::Boolean(true),
                 ]),
             Row::from_vec(vec![SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null]),
             Row::from_vec(vec![
                     SqlValue::Integer(3),
                     SqlValue::Double(3.3),
-                    SqlValue::Varchar(std::sync::Arc::from("data")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("data")),
                     SqlValue::Boolean(false),
                 ]),
         ];

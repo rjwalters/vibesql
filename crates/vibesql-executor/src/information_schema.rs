@@ -501,17 +501,17 @@ fn execute_tables_query(catalog: &vibesql_catalog::Catalog) -> Result<SelectResu
             let table_schema_name = &schema_name;
 
             rows.push(Row::new(vec![
-                SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                SqlValue::Varchar(std::sync::Arc::from(table_schema_name.clone())), // table_schema
-                SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                SqlValue::Varchar(std::sync::Arc::from("BASE TABLE")), // table_type
+                SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                SqlValue::Varchar(arcstr::ArcStr::from(table_schema_name.clone())), // table_schema
+                SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                SqlValue::Varchar(arcstr::ArcStr::from("BASE TABLE")), // table_type
                 SqlValue::Null,                           // self_referencing_column_name
                 SqlValue::Null,                           // reference_generation
                 SqlValue::Null,                           // user_defined_type_catalog
                 SqlValue::Null,                           // user_defined_type_schema
                 SqlValue::Null,                           // user_defined_type_name
-                SqlValue::Varchar(std::sync::Arc::from("YES")),     // is_insertable_into
-                SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_typed
+                SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // is_insertable_into
+                SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_typed
                 SqlValue::Null,                           // commit_action
             ]));
         }
@@ -520,17 +520,17 @@ fn execute_tables_query(catalog: &vibesql_catalog::Catalog) -> Result<SelectResu
     // Add views
     for view_name in catalog.list_views() {
         rows.push(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-            SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-            SqlValue::Varchar(std::sync::Arc::from(view_name.clone())),     // table_name
-            SqlValue::Varchar(std::sync::Arc::from("VIEW")),    // table_type
+            SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+            SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+            SqlValue::Varchar(arcstr::ArcStr::from(view_name.clone())),     // table_name
+            SqlValue::Varchar(arcstr::ArcStr::from("VIEW")),    // table_type
             SqlValue::Null,                           // self_referencing_column_name
             SqlValue::Null,                           // reference_generation
             SqlValue::Null,                           // user_defined_type_catalog
             SqlValue::Null,                           // user_defined_type_schema
             SqlValue::Null,                           // user_defined_type_name
-            SqlValue::Varchar(std::sync::Arc::from("NO")), // is_insertable_into (views typically not insertable)
-            SqlValue::Varchar(std::sync::Arc::from("NO")), // is_typed
+            SqlValue::Varchar(arcstr::ArcStr::from("NO")), // is_insertable_into (views typically not insertable)
+            SqlValue::Varchar(arcstr::ArcStr::from("NO")), // is_typed
             SqlValue::Null,                      // commit_action
         ]));
     }
@@ -556,14 +556,14 @@ fn execute_columns_query(
                 let datetime_precision = get_datetime_precision(&column.data_type);
 
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")),    // table_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),     // table_schema
-                    SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),       // table_name
-                    SqlValue::Varchar(std::sync::Arc::from(column.name.clone())),      // column_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")),    // table_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),     // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),       // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(column.name.clone())),      // column_name
                     SqlValue::Integer((ordinal + 1) as i64),     // ordinal_position
                     format_default_value(&column.default_value), // column_default
-                    SqlValue::Varchar(std::sync::Arc::from(if column.nullable { "YES" } else { "NO" })), // is_nullable
-                    SqlValue::Varchar(std::sync::Arc::from(format_data_type(&column.data_type))), // data_type
+                    SqlValue::Varchar(arcstr::ArcStr::from(if column.nullable { "YES" } else { "NO" })), // is_nullable
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_data_type(&column.data_type))), // data_type
                     char_max_len,                             // character_maximum_length
                     char_octet_len,                           // character_octet_length
                     num_precision,                            // numeric_precision
@@ -581,25 +581,25 @@ fn execute_columns_query(
                     SqlValue::Null,                           // domain_catalog
                     SqlValue::Null,                           // domain_schema
                     SqlValue::Null,                           // domain_name
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // udt_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("pg_catalog")), // udt_schema
-                    SqlValue::Varchar(std::sync::Arc::from(format_udt_name(&column.data_type))), // udt_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // udt_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("pg_catalog")), // udt_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(format_udt_name(&column.data_type))), // udt_name
                     SqlValue::Null,                           // scope_catalog
                     SqlValue::Null,                           // scope_schema
                     SqlValue::Null,                           // scope_name
                     SqlValue::Null,                           // maximum_cardinality
-                    SqlValue::Varchar(std::sync::Arc::from(format!("{}", ordinal + 1))), // dtd_identifier
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_self_referencing
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_identity
+                    SqlValue::Varchar(arcstr::ArcStr::from(format!("{}", ordinal + 1))), // dtd_identifier
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_self_referencing
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_identity
                     SqlValue::Null,                           // identity_generation
                     SqlValue::Null,                           // identity_start
                     SqlValue::Null,                           // identity_increment
                     SqlValue::Null,                           // identity_maximum
                     SqlValue::Null,                           // identity_minimum
                     SqlValue::Null,                           // identity_cycle
-                    SqlValue::Varchar(std::sync::Arc::from("NEVER")),   // is_generated
+                    SqlValue::Varchar(arcstr::ArcStr::from("NEVER")),   // is_generated
                     SqlValue::Null,                           // generation_expression
-                    SqlValue::Varchar(std::sync::Arc::from("YES")),     // is_updatable
+                    SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // is_updatable
                 ]));
             }
         }
@@ -622,16 +622,16 @@ fn execute_table_constraints_query(
             if table_schema.primary_key.is_some() {
                 let constraint_name = format!("{}_pkey", table_name);
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                    SqlValue::Varchar(std::sync::Arc::from(constraint_name)),       // constraint_name
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                    SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                    SqlValue::Varchar(std::sync::Arc::from("PRIMARY KEY")), // constraint_type
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_deferrable
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // initially_deferred
-                    SqlValue::Varchar(std::sync::Arc::from("YES")),     // enforced
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)),       // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("PRIMARY KEY")), // constraint_type
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
+                    SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // enforced
                 ]));
             }
 
@@ -639,16 +639,16 @@ fn execute_table_constraints_query(
             for (idx, _unique_cols) in table_schema.unique_constraints.iter().enumerate() {
                 let constraint_name = format!("{}_{}_key", table_name, idx);
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                    SqlValue::Varchar(std::sync::Arc::from(constraint_name)),       // constraint_name
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                    SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                    SqlValue::Varchar(std::sync::Arc::from("UNIQUE")),  // constraint_type
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_deferrable
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // initially_deferred
-                    SqlValue::Varchar(std::sync::Arc::from("YES")),     // enforced
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)),       // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("UNIQUE")),  // constraint_type
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
+                    SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // enforced
                 ]));
             }
 
@@ -659,32 +659,32 @@ fn execute_table_constraints_query(
                     .clone()
                     .unwrap_or_else(|| format!("{}_{}_fkey", table_name, fk.parent_table));
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                    SqlValue::Varchar(std::sync::Arc::from(constraint_name)),       // constraint_name
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                    SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                    SqlValue::Varchar(std::sync::Arc::from("FOREIGN KEY")), // constraint_type
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_deferrable
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // initially_deferred
-                    SqlValue::Varchar(std::sync::Arc::from("YES")),     // enforced
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)),       // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("FOREIGN KEY")), // constraint_type
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
+                    SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // enforced
                 ]));
             }
 
             // Check constraints
             for (check_name, _check_expr) in &table_schema.check_constraints {
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                    SqlValue::Varchar(std::sync::Arc::from(check_name.clone())),    // constraint_name
-                    SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                    SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                    SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                    SqlValue::Varchar(std::sync::Arc::from("CHECK")),   // constraint_type
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // is_deferrable
-                    SqlValue::Varchar(std::sync::Arc::from("NO")),      // initially_deferred
-                    SqlValue::Varchar(std::sync::Arc::from("YES")),     // enforced
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(check_name.clone())),    // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from("CHECK")),   // constraint_type
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
+                    SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // enforced
                 ]));
             }
         }
@@ -708,13 +708,13 @@ fn execute_key_column_usage_query(
                 let constraint_name = format!("{}_pkey", table_name);
                 for (ordinal, col_name) in pk_cols.iter().enumerate() {
                     rows.push(Row::new(vec![
-                        SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                        SqlValue::Varchar(std::sync::Arc::from(constraint_name.clone())), // constraint_name
-                        SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                        SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                        SqlValue::Varchar(std::sync::Arc::from(col_name.clone())),      // column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),      // column_name
                         SqlValue::Integer((ordinal + 1) as i64),  // ordinal_position
                         SqlValue::Null,                           // position_in_unique_constraint
                         SqlValue::Null,                           // referenced_table_schema
@@ -729,13 +729,13 @@ fn execute_key_column_usage_query(
                 let constraint_name = format!("{}_{}_key", table_name, idx);
                 for (ordinal, col_name) in unique_cols.iter().enumerate() {
                     rows.push(Row::new(vec![
-                        SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                        SqlValue::Varchar(std::sync::Arc::from(constraint_name.clone())), // constraint_name
-                        SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                        SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                        SqlValue::Varchar(std::sync::Arc::from(col_name.clone())),      // column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),      // column_name
                         SqlValue::Integer((ordinal + 1) as i64),  // ordinal_position
                         SqlValue::Null,                           // position_in_unique_constraint
                         SqlValue::Null,                           // referenced_table_schema
@@ -755,18 +755,18 @@ fn execute_key_column_usage_query(
                     fk.column_names.iter().zip(fk.parent_column_names.iter()).enumerate()
                 {
                     rows.push(Row::new(vec![
-                        SqlValue::Varchar(std::sync::Arc::from("vibesql")), // constraint_catalog
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // constraint_schema
-                        SqlValue::Varchar(std::sync::Arc::from(constraint_name.clone())), // constraint_name
-                        SqlValue::Varchar(std::sync::Arc::from("vibesql")), // table_catalog
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // table_schema
-                        SqlValue::Varchar(std::sync::Arc::from(table_name.clone())),    // table_name
-                        SqlValue::Varchar(std::sync::Arc::from(col_name.clone())),      // column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),      // column_name
                         SqlValue::Integer((ordinal + 1) as i64),  // ordinal_position
                         SqlValue::Integer((ordinal + 1) as i64),  // position_in_unique_constraint
-                        SqlValue::Varchar(std::sync::Arc::from("public")),  // referenced_table_schema
-                        SqlValue::Varchar(std::sync::Arc::from(fk.parent_table.clone())), // referenced_table_name
-                        SqlValue::Varchar(std::sync::Arc::from(ref_col_name.clone())),  // referenced_column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // referenced_table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(fk.parent_table.clone())), // referenced_table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(ref_col_name.clone())),  // referenced_column_name
                     ]));
                 }
             }
@@ -786,12 +786,12 @@ fn execute_schemata_query(
 
     for schema_name in catalog.list_schemas() {
         rows.push(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("vibesql")), // catalog_name
-            SqlValue::Varchar(std::sync::Arc::from(schema_name.clone())),   // schema_name
+            SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // catalog_name
+            SqlValue::Varchar(arcstr::ArcStr::from(schema_name.clone())),   // schema_name
             SqlValue::Null,                           // schema_owner
             SqlValue::Null,                           // default_character_set_catalog
             SqlValue::Null,                           // default_character_set_schema
-            SqlValue::Varchar(std::sync::Arc::from("UTF8")),    // default_character_set_name
+            SqlValue::Varchar(arcstr::ArcStr::from("UTF8")),    // default_character_set_name
             SqlValue::Null,                           // sql_path
         ]));
     }
@@ -950,7 +950,7 @@ fn get_datetime_precision(dt: &DataType) -> SqlValue {
 /// Format default value for display
 fn format_default_value(default: &Option<vibesql_ast::Expression>) -> SqlValue {
     match default {
-        Some(expr) => SqlValue::Varchar(std::sync::Arc::from(format!("{:?}", expr))), // Simple debug representation
+        Some(expr) => SqlValue::Varchar(arcstr::ArcStr::from(format!("{:?}", expr))), // Simple debug representation
         None => SqlValue::Null,
     }
 }

@@ -28,7 +28,7 @@ fn test_inner_join_two_tables() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -36,7 +36,7 @@ fn test_inner_join_two_tables() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     )
     .unwrap();
@@ -152,7 +152,7 @@ fn test_right_outer_join() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -160,7 +160,7 @@ fn test_right_outer_join() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     )
     .unwrap();
@@ -282,7 +282,7 @@ fn test_full_outer_join() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -290,7 +290,7 @@ fn test_full_outer_join() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     )
     .unwrap();
@@ -420,7 +420,7 @@ fn test_cross_join() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -428,7 +428,7 @@ fn test_cross_join() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     )
     .unwrap();
@@ -454,7 +454,7 @@ fn test_cross_join() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Widget")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget")),
         ]),
     )
     .unwrap();
@@ -462,7 +462,7 @@ fn test_cross_join() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Gadget")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Gadget")),
         ]),
     )
     .unwrap();
@@ -470,7 +470,7 @@ fn test_cross_join() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Doohickey")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Doohickey")),
         ]),
     )
     .unwrap();
@@ -616,7 +616,7 @@ fn test_inner_join_null_values_dont_match() {
         "t1",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("one")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")),
         ]),
     )
     .unwrap();
@@ -624,7 +624,7 @@ fn test_inner_join_null_values_dont_match() {
         "t1",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Null,
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("null-left")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("null-left")),
         ]),
     )
     .unwrap();
@@ -650,7 +650,7 @@ fn test_inner_join_null_values_dont_match() {
         "t2",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("matched")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("matched")),
         ]),
     )
     .unwrap();
@@ -658,7 +658,7 @@ fn test_inner_join_null_values_dont_match() {
         "t2",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Null,
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("null-right")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("null-right")),
         ]),
     )
     .unwrap();
@@ -726,6 +726,6 @@ fn test_inner_join_null_values_dont_match() {
     // Should only have ONE row: the match between (1, "one") and (1, "matched")
     // NULL rows should NOT match each other
     assert_eq!(result.len(), 1, "INNER JOIN should only match non-NULL values");
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("one")));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("matched")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("matched")));
 }

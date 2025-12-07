@@ -226,17 +226,17 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Double(10.5),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Double(20.5),
-                SqlValue::Varchar(std::sync::Arc::from("Bob")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(3),
                 SqlValue::Double(30.5),
-                SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             ]),
         ];
         let column_names = vec!["id".to_string(), "value".to_string(), "name".to_string()];

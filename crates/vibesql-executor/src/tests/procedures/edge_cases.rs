@@ -345,7 +345,7 @@ fn test_procedural_select_into_single_column() {
     // Insert test data
     db.insert_row(
         "users",
-        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
 
@@ -415,7 +415,7 @@ fn test_procedural_select_into_multiple_columns() {
     // Insert test data
     db.insert_row(
         "users",
-        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
 
@@ -572,12 +572,12 @@ fn test_procedural_select_into_error_multiple_rows() {
     // Insert multiple rows
     db.insert_row(
         "users",
-        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
     )
     .unwrap();
 
@@ -640,7 +640,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
     // Insert test data
     db.insert_row(
         "users",
-        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
 

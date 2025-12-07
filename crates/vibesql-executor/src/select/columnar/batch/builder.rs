@@ -170,11 +170,11 @@ impl ColumnarBatch {
                 for row in rows {
                     match row.get(col_idx) {
                         Some(SqlValue::Varchar(v)) => {
-                            values.push(v.clone());
+                            values.push(Arc::from(v.as_str()));
                             nulls.push(false);
                         }
                         Some(SqlValue::Null) => {
-                            values.push(std::sync::Arc::from("")); // placeholder
+                            values.push(Arc::from("")); // placeholder
                             nulls.push(true);
                             has_nulls = true;
                         }
@@ -186,7 +186,7 @@ impl ColumnarBatch {
                             });
                         }
                         None => {
-                            values.push(std::sync::Arc::from(""));
+                            values.push(Arc::from(""));
                             nulls.push(true);
                             has_nulls = true;
                         }
@@ -280,17 +280,17 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Double(10.5),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Double(20.5),
-                SqlValue::Varchar(std::sync::Arc::from("Bob")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(3),
                 SqlValue::Double(30.5),
-                SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             ]),
         ];
 

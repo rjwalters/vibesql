@@ -204,9 +204,9 @@ mod tests {
     #[test]
     fn test_column_statistics_basic() {
         let rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("a"))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("b"))]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("a"))]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("a"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("b"))]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("a"))]),
             Row::new(vec![SqlValue::Integer(4), SqlValue::Null]),
         ];
 
@@ -224,7 +224,7 @@ mod tests {
 
         // Most common value should be 'a' (2/3 = 66.7%)
         assert_eq!(stats.most_common_values.len(), 2);
-        assert_eq!(stats.most_common_values[0].0, SqlValue::Varchar(std::sync::Arc::from("a")));
+        assert_eq!(stats.most_common_values[0].0, SqlValue::Varchar(arcstr::ArcStr::from("a")));
         assert!((stats.most_common_values[0].1 - 0.667).abs() < 0.01);
     }
 

@@ -108,7 +108,7 @@ impl Database {
         };
 
         self.metadata
-            .set_session_variable("SQL_MODE", vibesql_types::SqlValue::Varchar(std::sync::Arc::from(mode_string)));
+            .set_session_variable("SQL_MODE", vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(mode_string.as_str())));
     }
 }
 

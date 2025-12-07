@@ -644,7 +644,7 @@ mod tests {
             data_type: vibesql_types::DataType::Varchar { max_length: None },
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("0")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("0")));
     }
 
     #[test]

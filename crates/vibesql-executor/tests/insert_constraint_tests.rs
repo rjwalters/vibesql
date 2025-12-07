@@ -67,7 +67,7 @@ fn test_insert_primary_key_duplicate_single_column() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ],
     );
     InsertExecutor::execute(&mut db, &stmt1).unwrap();
@@ -77,7 +77,7 @@ fn test_insert_primary_key_duplicate_single_column() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ],
     );
 
@@ -137,7 +137,7 @@ fn test_insert_primary_key_unique_values() {
             "users",
             vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("User{}", i))),
+                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("User{}", i))),
             ],
         );
         InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -162,7 +162,7 @@ fn test_insert_unique_constraint_duplicate() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
         ],
     );
     InsertExecutor::execute(&mut db, &stmt1).unwrap();
@@ -172,7 +172,7 @@ fn test_insert_unique_constraint_duplicate() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
         ],
     );
 
@@ -251,8 +251,8 @@ fn test_insert_multiple_unique_constraints() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice")),
         ],
     );
     InsertExecutor::execute(&mut db, &stmt1).unwrap();
@@ -262,8 +262,8 @@ fn test_insert_multiple_unique_constraints() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bob")),
         ],
     );
     let result = InsertExecutor::execute(&mut db, &stmt2);
@@ -274,8 +274,8 @@ fn test_insert_multiple_unique_constraints() {
         "users",
         vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice")),
         ],
     );
     let result = InsertExecutor::execute(&mut db, &stmt3);

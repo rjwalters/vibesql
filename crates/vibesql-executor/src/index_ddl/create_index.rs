@@ -1010,7 +1010,7 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Vector(vec![1.0, 0.0, 0.0]),
-                SqlValue::Varchar(std::sync::Arc::from("doc1")),
+                SqlValue::Varchar(arcstr::ArcStr::from("doc1")),
             ]),
         )
         .unwrap();
@@ -1021,7 +1021,7 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Vector(vec![0.0, 1.0, 0.0]),
-                SqlValue::Varchar(std::sync::Arc::from("doc2")),
+                SqlValue::Varchar(arcstr::ArcStr::from("doc2")),
             ]),
         )
         .unwrap();
@@ -1032,7 +1032,7 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(3),
                 SqlValue::Vector(vec![0.0, 0.0, 1.0]),
-                SqlValue::Varchar(std::sync::Arc::from("doc3")),
+                SqlValue::Varchar(arcstr::ArcStr::from("doc3")),
             ]),
         )
         .unwrap();
@@ -1043,7 +1043,7 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(4),
                 SqlValue::Vector(vec![0.5, 0.5, 0.0]),
-                SqlValue::Varchar(std::sync::Arc::from("doc4")),
+                SqlValue::Varchar(arcstr::ArcStr::from("doc4")),
             ]),
         )
         .unwrap();

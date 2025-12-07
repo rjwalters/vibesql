@@ -18,14 +18,14 @@ fn test_substr_basic() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")));
 }
 
 #[test]
@@ -34,13 +34,13 @@ fn test_substr_to_end() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(7)),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("World")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("World")));
 }
 
 #[test]
@@ -67,8 +67,8 @@ fn test_instr_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("World"))),
         ],
         character_unit: None,
     };
@@ -82,8 +82,8 @@ fn test_instr_not_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("xyz"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("xyz"))),
         ],
         character_unit: None,
     };
@@ -98,7 +98,7 @@ fn test_instr_null() {
         name: "INSTR".to_string(),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("test"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("test"))),
         ],
         character_unit: None,
     };
@@ -115,8 +115,8 @@ fn test_locate_basic() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("World"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
         ],
         character_unit: None,
     };
@@ -130,8 +130,8 @@ fn test_locate_with_start() {
     let expr = vibesql_ast::Expression::Function {
         name: "LOCATE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("o"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Hello World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("o"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(6)),
         ],
         character_unit: None,
@@ -156,7 +156,7 @@ fn test_format_basic() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("1,234,567.89")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1,234,567.89")));
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn test_format_zero_decimals() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("1,234,568")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1,234,568")));
     // Rounds
 }
 
@@ -187,7 +187,7 @@ fn test_format_adds_zeros() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("42.00")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("42.00")));
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn test_format_negative() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(std::sync::Arc::from("-1,234,567.89")));
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("-1,234,567.89")));
 }
 
 // ============================================================================

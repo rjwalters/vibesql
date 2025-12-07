@@ -39,17 +39,17 @@ fn test_truncate_single_table() {
     // Insert some rows
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
     )
     .unwrap();
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Carol"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Carol"))]),
     )
     .unwrap();
 
@@ -346,7 +346,7 @@ fn test_truncate_resets_auto_increment() {
             table_name: "auto_inc_test".to_string(),
             columns: vec!["data".to_string()],
             source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
-                std::sync::Arc::from(val),
+                arcstr::ArcStr::from(val),
             ))]]),
             conflict_clause: None,
             on_duplicate_key_update: None,
@@ -373,7 +373,7 @@ fn test_truncate_resets_auto_increment() {
     let insert = InsertStmt {
         table_name: "auto_inc_test".to_string(),
         columns: vec!["data".to_string()],
-        source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("d")))]]),
+        source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("d")))]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -509,7 +509,7 @@ fn test_truncate_without_auto_increment() {
     // Insert test data
     db.insert_row(
         "no_auto_inc",
-        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar(std::sync::Arc::from("test"))]),
+        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar(arcstr::ArcStr::from("test"))]),
     )
     .unwrap();
 

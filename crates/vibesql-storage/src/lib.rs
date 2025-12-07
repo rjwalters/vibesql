@@ -87,7 +87,7 @@ mod tests {
         // Insert some rows
         for i in 0..10 {
             let row =
-                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("User {}", i)))]);
+                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("User {}", i)))]);
             table.insert(row).unwrap();
         }
 
@@ -97,7 +97,7 @@ mod tests {
 
         // Try to insert duplicate - should work at table level (constraint check is in executor)
         let duplicate_row =
-            Row::new(vec![SqlValue::Integer(0), SqlValue::Varchar(std::sync::Arc::from("Duplicate User"))]);
+            Row::new(vec![SqlValue::Integer(0), SqlValue::Varchar(arcstr::ArcStr::from("Duplicate User"))]);
         table.insert(duplicate_row).unwrap(); // This succeeds because constraint checking is in
                                               // executor
     }
@@ -121,7 +121,7 @@ mod tests {
 
         // Insert some rows
         for i in 0..5 {
-            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(format!("SKU{}", i)))]);
+            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("SKU{}", i)))]);
             table.insert(row).unwrap();
         }
 
@@ -156,16 +156,16 @@ mod tests {
         // Insert initial row
         let row1 = Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]);
         table.insert(row1).unwrap();
 
         // Update only the 'name' column (non-indexed)
         let updated_row = Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),
         ]);
         let mut changed_columns = std::collections::HashSet::new();
         changed_columns.insert(2); // 'name' column index
@@ -174,7 +174,7 @@ mod tests {
 
         // Verify row was updated
         let row = table.scan().iter().next().unwrap();
-        assert_eq!(row.get(2), Some(&SqlValue::Varchar(std::sync::Arc::from("Alice Smith"))));
+        assert_eq!(row.get(2), Some(&SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith"))));
     }
 
     #[test]
@@ -196,16 +196,16 @@ mod tests {
 
         // Insert initial rows
         table
-            .insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]))
+            .insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]))
             .unwrap();
         table
-            .insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]))
+            .insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]))
             .unwrap();
 
         // Update primary key column
         let updated_row = Row::new(vec![
             SqlValue::Integer(10), // Changed PK
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]);
         let mut changed_columns = std::collections::HashSet::new();
         changed_columns.insert(0); // 'id' column index
@@ -244,16 +244,16 @@ mod tests {
         table
             .insert(Row::new(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             ]))
             .unwrap();
 
         // Update unique constraint column
         let updated_row = Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice.smith@example.com")), // Changed email
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice.smith@example.com")), // Changed email
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]);
         let mut changed_columns = std::collections::HashSet::new();
         changed_columns.insert(1); // 'email' column index
@@ -262,7 +262,7 @@ mod tests {
 
         // Verify unique index was updated
         let row = table.scan().iter().next().unwrap();
-        assert_eq!(row.get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("alice.smith@example.com"))));
+        assert_eq!(row.get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("alice.smith@example.com"))));
     }
 
     #[test]
@@ -294,8 +294,8 @@ mod tests {
         // Insert same initial row into both tables
         let initial_row = Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]);
         table1.insert(initial_row.clone()).unwrap();
         table2.insert(initial_row).unwrap();
@@ -303,8 +303,8 @@ mod tests {
         // Update with selective method
         let updated_row1 = Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),
         ]);
         let mut changed_columns = std::collections::HashSet::new();
         changed_columns.insert(2); // 'name' column

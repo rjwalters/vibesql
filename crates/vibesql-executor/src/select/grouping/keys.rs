@@ -240,7 +240,7 @@ impl GroupKeySpec {
                             SqlValue::Integer(row.get_i64_unchecked(*idx))
                         }
                         DataType::Varchar { .. } | DataType::Character { .. } => {
-                            SqlValue::Varchar(std::sync::Arc::from(row.get_string_unchecked(*idx)))
+                            SqlValue::Varchar(arcstr::ArcStr::from(row.get_string_unchecked(*idx)))
                         }
                         DataType::DoublePrecision | DataType::Real | DataType::Decimal { .. } => {
                             SqlValue::Double(row.get_f64_unchecked(*idx))
@@ -260,13 +260,13 @@ impl GroupKeySpec {
     pub fn key_to_values(&self, key: &GroupKey) -> Vec<SqlValue> {
         match key {
             GroupKey::SingleI64(v) => vec![SqlValue::Integer(*v)],
-            GroupKey::SingleString(v) => vec![SqlValue::Varchar(std::sync::Arc::from(v.clone()))],
+            GroupKey::SingleString(v) => vec![SqlValue::Varchar(arcstr::ArcStr::from(v.clone()))],
             GroupKey::TwoChars(a, b) => vec![
-                SqlValue::Varchar(std::sync::Arc::from(String::from_utf8_lossy(&[*a]).into_owned())),
-                SqlValue::Varchar(std::sync::Arc::from(String::from_utf8_lossy(&[*b]).into_owned())),
+                SqlValue::Varchar(arcstr::ArcStr::from(String::from_utf8_lossy(&[*a]).into_owned())),
+                SqlValue::Varchar(arcstr::ArcStr::from(String::from_utf8_lossy(&[*b]).into_owned())),
             ],
             GroupKey::TwoI64(a, b) => vec![SqlValue::Integer(*a), SqlValue::Integer(*b)],
-            GroupKey::I64String(i, s) => vec![SqlValue::Integer(*i), SqlValue::Varchar(std::sync::Arc::from(s.clone()))],
+            GroupKey::I64String(i, s) => vec![SqlValue::Integer(*i), SqlValue::Varchar(arcstr::ArcStr::from(s.clone()))],
             GroupKey::ThreeI64(a, b, c) => {
                 vec![SqlValue::Integer(*a), SqlValue::Integer(*b), SqlValue::Integer(*c)]
             }
@@ -556,8 +556,8 @@ mod tests {
         let values = spec.key_to_values(&key);
 
         assert_eq!(values.len(), 2);
-        assert_eq!(values[0], SqlValue::Varchar(std::sync::Arc::from("A")));
-        assert_eq!(values[1], SqlValue::Varchar(std::sync::Arc::from("F")));
+        assert_eq!(values[0], SqlValue::Varchar(arcstr::ArcStr::from("A")));
+        assert_eq!(values[1], SqlValue::Varchar(arcstr::ArcStr::from("F")));
     }
 
     #[test]
@@ -566,9 +566,9 @@ mod tests {
 
         // Create a batch with string columns (like TPC-H Q1: l_returnflag, l_linestatus)
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("A")), SqlValue::Varchar(std::sync::Arc::from("F"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("N")), SqlValue::Varchar(std::sync::Arc::from("O"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("R")), SqlValue::Varchar(std::sync::Arc::from("F"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("A")), SqlValue::Varchar(arcstr::ArcStr::from("F"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("N")), SqlValue::Varchar(arcstr::ArcStr::from("O"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("R")), SqlValue::Varchar(arcstr::ArcStr::from("F"))]),
         ];
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
 

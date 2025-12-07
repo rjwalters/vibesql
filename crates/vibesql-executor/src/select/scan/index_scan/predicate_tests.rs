@@ -287,12 +287,12 @@ fn test_extract_composite_predicates_with_string_values() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "department".to_string() }),
-            right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Engineering")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Engineering")))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
-            right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))),
         }),
     };
 
@@ -302,8 +302,8 @@ fn test_extract_composite_predicates_with_string_values() {
     assert!(result.is_some());
     let key = result.unwrap();
     assert_eq!(key.len(), 2);
-    assert_eq!(key[0], SqlValue::Varchar(std::sync::Arc::from("Engineering")));
-    assert_eq!(key[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(key[0], SqlValue::Varchar(arcstr::ArcStr::from("Engineering")));
+    assert_eq!(key[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
 }
 
 #[test]
@@ -573,7 +573,7 @@ fn test_build_residual_where_clause_none_covered() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "c_credit".to_string() }),
-            right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("BC")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("BC")))),
         }),
     };
 
@@ -610,7 +610,7 @@ fn test_build_residual_where_clause_multiple_uncovered() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "c_credit".to_string() }),
-            right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("BC")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("BC")))),
         }),
     };
 

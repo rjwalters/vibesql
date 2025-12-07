@@ -35,8 +35,8 @@ fn create_test_db(row_count: usize) -> Database {
     for i in 0..row_count {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(std::sync::Arc::from(format!("User_{}", i))),
-            SqlValue::Varchar(std::sync::Arc::from(format!("user{}@example.com", i))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("User_{}", i))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("user{}@example.com", i))),
             SqlValue::Integer((20 + (i % 50)) as i64),
         ]);
         db.insert_row("users", row).unwrap();

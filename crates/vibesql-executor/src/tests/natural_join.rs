@@ -57,7 +57,7 @@ fn test_natural_join_single_common_column() {
         "t1",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("a")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("a")),
             vibesql_types::SqlValue::Integer(10),
         ]),
     )
@@ -66,7 +66,7 @@ fn test_natural_join_single_common_column() {
         "t1",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("b")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b")),
             vibesql_types::SqlValue::Integer(20),
         ]),
     )
@@ -75,7 +75,7 @@ fn test_natural_join_single_common_column() {
         "t1",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("c")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("c")),
             vibesql_types::SqlValue::Integer(30),
         ]),
     )
@@ -150,14 +150,14 @@ fn test_natural_join_single_common_column() {
     // First row: id=1
     assert_eq!(result[0].values.len(), 5); // id, name, x, value, y
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1)); // id
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("a"))); // name
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("a"))); // name
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(10)); // x
     assert_eq!(result[0].values[3], vibesql_types::SqlValue::Integer(100)); // value
     assert_eq!(result[0].values[4], vibesql_types::SqlValue::Integer(111)); // y
 
     // Second row: id=2
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2)); // id
-    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("b")));
+    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b")));
     // name
 }
 

@@ -395,8 +395,8 @@ mod gather_tests {
         let names = gather_single_column(&batch, &selection, 1).unwrap();
 
         assert_eq!(names.len(), 2);
-        assert_eq!(names[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
-        assert_eq!(names[1], SqlValue::Varchar(std::sync::Arc::from("Dave")));
+        assert_eq!(names[0], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
+        assert_eq!(names[1], SqlValue::Varchar(arcstr::ArcStr::from("Dave")));
     }
 
     #[test]
@@ -436,8 +436,8 @@ mod gather_tests {
 
         assert_eq!(gathered.row_count(), 2);
         assert_eq!(gathered.column_count(), 1);
-        assert_eq!(gathered.get_value(0, 0).unwrap(), SqlValue::Varchar(std::sync::Arc::from("Alice")));
-        assert_eq!(gathered.get_value(1, 0).unwrap(), SqlValue::Varchar(std::sync::Arc::from("Eve")));
+        assert_eq!(gathered.get_value(0, 0).unwrap(), SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+        assert_eq!(gathered.get_value(1, 0).unwrap(), SqlValue::Varchar(arcstr::ArcStr::from("Eve")));
     }
 
     #[test]

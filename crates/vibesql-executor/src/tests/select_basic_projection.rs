@@ -28,7 +28,7 @@ fn test_select_star() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -36,7 +36,7 @@ fn test_select_star() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     )
     .unwrap();
@@ -65,9 +65,9 @@ fn test_select_star() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
-    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")));
+    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
 }
 
 /// Test SELECT specific columns from a table
@@ -99,7 +99,7 @@ fn test_select_specific_columns() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             vibesql_types::SqlValue::Integer(25),
         ]),
     )
@@ -141,6 +141,6 @@ fn test_select_specific_columns() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(25));
 }

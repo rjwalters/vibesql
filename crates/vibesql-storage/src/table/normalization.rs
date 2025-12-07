@@ -442,12 +442,12 @@ mod tests {
 
         let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
-                SqlValue::Character(std::sync::Arc::from("ABC")), // Should be padded to 5
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                SqlValue::Character(arcstr::ArcStr::from("ABC")), // Should be padded to 5
             ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
-        assert_eq!(normalized.values[2], SqlValue::Character(std::sync::Arc::from("ABC  ")));
+        assert_eq!(normalized.values[2], SqlValue::Character(arcstr::ArcStr::from("ABC  ")));
     }
 
     #[test]
@@ -457,12 +457,12 @@ mod tests {
 
         let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
-                SqlValue::Character(std::sync::Arc::from("ABCDEFGH")), // Should be truncated to 5
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                SqlValue::Character(arcstr::ArcStr::from("ABCDEFGH")), // Should be truncated to 5
             ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
-        assert_eq!(normalized.values[2], SqlValue::Character(std::sync::Arc::from("ABCDE")));
+        assert_eq!(normalized.values[2], SqlValue::Character(arcstr::ArcStr::from("ABCDE")));
     }
 
     #[test]
@@ -472,8 +472,8 @@ mod tests {
 
         let row = Row::from_vec(vec![
                 SqlValue::Null, // id is NOT NULL
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
-                SqlValue::Character(std::sync::Arc::from("ABC")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                SqlValue::Character(arcstr::ArcStr::from("ABC")),
             ]);
 
         let result = normalizer.normalize_and_validate(row);
@@ -487,9 +487,9 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-                SqlValue::Varchar(std::sync::Arc::from("not_an_int")), // Wrong type for id
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
-                SqlValue::Character(std::sync::Arc::from("ABC")),
+                SqlValue::Varchar(arcstr::ArcStr::from("not_an_int")), // Wrong type for id
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                SqlValue::Character(arcstr::ArcStr::from("ABC")),
             ]);
 
         let result = normalizer.normalize_and_validate(row);
@@ -505,8 +505,8 @@ mod tests {
         let long_name = "A".repeat(100); // Exceeds max_length of 50
         let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(std::sync::Arc::from(long_name.clone())),
-                SqlValue::Character(std::sync::Arc::from("ABC")),
+                SqlValue::Varchar(arcstr::ArcStr::from(long_name.clone())),
+                SqlValue::Character(arcstr::ArcStr::from("ABC")),
             ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
@@ -524,7 +524,7 @@ mod tests {
 
         let row = Row::from_vec(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
                 SqlValue::Null, // code is nullable
             ]);
 

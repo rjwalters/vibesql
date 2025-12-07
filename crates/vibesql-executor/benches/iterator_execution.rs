@@ -49,7 +49,7 @@ fn setup_large_table(db: &mut Database, row_count: usize) {
     for i in 0..row_count {
         let row = vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(i as i64),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("row_{}", i))),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("row_{}", i))),
             vibesql_types::SqlValue::Integer((i % 100) as i64),
         ]);
         db.insert_row("LARGE_TABLE", row).unwrap();

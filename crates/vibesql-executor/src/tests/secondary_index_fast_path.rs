@@ -70,8 +70,8 @@ fn create_customer_db() -> Database {
                 SqlValue::Integer(c_id),
                 SqlValue::Integer(c_w_id),
                 SqlValue::Integer(c_d_id),
-                SqlValue::Varchar(std::sync::Arc::from(c_last)),
-                SqlValue::Varchar(std::sync::Arc::from(c_first)),
+                SqlValue::Varchar(arcstr::ArcStr::from(c_last)),
+                SqlValue::Varchar(arcstr::ArcStr::from(c_first)),
                 SqlValue::Numeric(c_balance),
             ]),
         )
@@ -215,8 +215,8 @@ fn test_secondary_index_with_order_by() {
 
         // Should return SMITH customers ordered by first name (Alice, Bob)
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
-        assert_eq!(result[1].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+        assert_eq!(result[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+        assert_eq!(result[1].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -251,8 +251,8 @@ fn test_secondary_index_select_star() {
         // Should return one row (Frank Brown)
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].values[0], SqlValue::Integer(6)); // c_id
-        assert_eq!(result[0].values[3], SqlValue::Varchar(std::sync::Arc::from("BROWN"))); // c_last
-        assert_eq!(result[0].values[4], SqlValue::Varchar(std::sync::Arc::from("Frank")));
+        assert_eq!(result[0].values[3], SqlValue::Varchar(arcstr::ArcStr::from("BROWN"))); // c_last
+        assert_eq!(result[0].values[4], SqlValue::Varchar(arcstr::ArcStr::from("Frank")));
     // c_first
     } else {
         panic!("Expected SELECT statement");

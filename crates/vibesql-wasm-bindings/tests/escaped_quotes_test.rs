@@ -75,7 +75,7 @@ fn test_insert_with_escaped_quotes() {
     match product_name_4 {
         vibesql_types::SqlValue::Varchar(name) => {
             assert_eq!(
-                name.as_ref(), "Chef Anton's Cajun Seasoning",
+                name.as_str(), "Chef Anton's Cajun Seasoning",
                 "Product #4 name should contain apostrophe"
             );
         }
@@ -86,7 +86,7 @@ fn test_insert_with_escaped_quotes() {
     let product_name_5 = &rows[4].values[1];
     match product_name_5 {
         vibesql_types::SqlValue::Varchar(name) => {
-            assert_eq!(name.as_ref(), "Chef Anton's Gumbo Mix", "Product #5 name should contain apostrophe");
+            assert_eq!(name.as_str(), "Chef Anton's Gumbo Mix", "Product #5 name should contain apostrophe");
         }
         _ => panic!("Expected Varchar for product_name"),
     }

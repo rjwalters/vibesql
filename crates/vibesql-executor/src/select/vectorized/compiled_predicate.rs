@@ -572,7 +572,7 @@ mod tests {
         let row = Row::from_vec(vec![
                 SqlValue::Integer(20),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
+                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
         assert!(compiled.evaluate(&row).unwrap());
 
@@ -580,7 +580,7 @@ mod tests {
         let row2 = Row::from_vec(vec![
                 SqlValue::Integer(30),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
+                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
         assert!(!compiled.evaluate(&row2).unwrap());
     }
@@ -685,7 +685,7 @@ mod tests {
         let row = Row::from_vec(vec![
                 SqlValue::Integer(10),  // l_quantity
                 SqlValue::Double(0.05), // l_discount (doesn't match 999.99)
-                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
+                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
 
         // Should return false (short-circuit on first predicate)
@@ -709,7 +709,7 @@ mod tests {
         let row = Row::from_vec(vec![
                 SqlValue::Null, // l_quantity is NULL
                 SqlValue::Double(0.05),
-                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
+                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
 
         // NULL > 10 should return false (not true, not NULL)
@@ -772,7 +772,7 @@ mod tests {
         let row_in_range = Row::from_vec(vec![
                 SqlValue::Integer(50),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
+                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
         assert!(compiled.evaluate(&row_in_range).unwrap());
 
@@ -780,7 +780,7 @@ mod tests {
         let row_out_of_range = Row::from_vec(vec![
                 SqlValue::Integer(200),
                 SqlValue::Double(0.05),
-                SqlValue::Varchar(std::sync::Arc::from("1994-01-01")),
+                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
         assert!(!compiled.evaluate(&row_out_of_range).unwrap());
     }

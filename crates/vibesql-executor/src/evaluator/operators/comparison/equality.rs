@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_string_equality() {
         let result =
-            equal(&SqlValue::Varchar(std::sync::Arc::from("hello")), &SqlValue::Varchar(std::sync::Arc::from("hello")))
+            equal(&SqlValue::Varchar(arcstr::ArcStr::from("hello")), &SqlValue::Varchar(arcstr::ArcStr::from("hello")))
                 .unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
     }
@@ -42,8 +42,8 @@ mod tests {
     #[test]
     fn test_cross_type_string() {
         let result = equal(
-            &SqlValue::Character(std::sync::Arc::from("hello")),
-            &SqlValue::Varchar(std::sync::Arc::from("hello")),
+            &SqlValue::Character(arcstr::ArcStr::from("hello")),
+            &SqlValue::Varchar(arcstr::ArcStr::from("hello")),
         )
         .unwrap();
         assert_eq!(result, SqlValue::Boolean(true));

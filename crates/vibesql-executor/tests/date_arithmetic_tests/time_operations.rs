@@ -16,7 +16,7 @@ fn test_date_add_hours_across_midnight() {
                 "2024-01-15 23:00:00".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("HOUR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HOUR"))),
         ],
         character_unit: None,
     };
@@ -36,7 +36,7 @@ fn test_date_add_minutes_overflow() {
                 "2024-01-15 11:30:00".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(90)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MINUTE"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MINUTE"))),
         ],
         character_unit: None,
     };
@@ -56,7 +56,7 @@ fn test_date_add_seconds_overflow() {
                 "2024-01-15 10:30:30".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3661)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("SECOND"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("SECOND"))),
         ],
         character_unit: None,
     };
@@ -76,7 +76,7 @@ fn test_date_sub_hours_across_midnight() {
                 "2024-01-16 01:00:00".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("HOUR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HOUR"))),
         ],
         character_unit: None,
     };

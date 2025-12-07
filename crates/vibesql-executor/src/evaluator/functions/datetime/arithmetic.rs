@@ -352,7 +352,7 @@ pub fn age(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
     let result = if date1 < date2 { format!("-{}", parts.join(" ")) } else { parts.join(" ") };
 
-    Ok(SqlValue::Varchar(std::sync::Arc::from(result)))
+    Ok(SqlValue::Varchar(arcstr::ArcStr::from(result)))
 }
 
 /// EXTRACT(unit, date) - Extract date/time component

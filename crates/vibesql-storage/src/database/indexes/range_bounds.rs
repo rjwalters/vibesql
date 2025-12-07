@@ -97,8 +97,8 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
 
         // String types: append a null character to get the next string
         // This works because "\0" is the smallest character
-        SqlValue::Varchar(s) => Some(SqlValue::Varchar(std::sync::Arc::from(format!("{}\0", s)))),
-        SqlValue::Character(s) => Some(SqlValue::Character(std::sync::Arc::from(format!("{}\0", s)))),
+        SqlValue::Varchar(s) => Some(SqlValue::Varchar(arcstr::ArcStr::from(format!("{}\0", s).as_str()))),
+        SqlValue::Character(s) => Some(SqlValue::Character(arcstr::ArcStr::from(format!("{}\0", s).as_str()))),
 
         // Boolean: false < true, so true has no next value
         SqlValue::Boolean(false) => Some(SqlValue::Boolean(true)),
@@ -237,8 +237,8 @@ mod tests {
     #[test]
     fn test_calculate_next_value_non_numeric() {
         // Text types
-        assert_eq!(calculate_next_value(&SqlValue::Varchar(std::sync::Arc::from("abc"))), None);
-        assert_eq!(calculate_next_value(&SqlValue::Character(std::sync::Arc::from("hello"))), None);
+        assert_eq!(calculate_next_value(&SqlValue::Varchar(arcstr::ArcStr::from("abc"))), None);
+        assert_eq!(calculate_next_value(&SqlValue::Character(arcstr::ArcStr::from("hello"))), None);
 
         // NULL
         assert_eq!(calculate_next_value(&SqlValue::Null), None);

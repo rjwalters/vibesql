@@ -65,12 +65,12 @@ fn test_simple_join_with_group_by() {
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(100), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(200), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(200), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
     )
     .unwrap();
 

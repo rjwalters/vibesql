@@ -29,7 +29,7 @@ fn test_distinct_removes_duplicate_rows() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
         ]),
     )
     .unwrap();
@@ -37,7 +37,7 @@ fn test_distinct_removes_duplicate_rows() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Books")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books")),
         ]),
     )
     .unwrap();
@@ -45,7 +45,7 @@ fn test_distinct_removes_duplicate_rows() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
         ]),
     )
     .unwrap();
@@ -53,7 +53,7 @@ fn test_distinct_removes_duplicate_rows() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Books")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books")),
         ]),
     )
     .unwrap();
@@ -93,7 +93,7 @@ fn test_distinct_removes_duplicate_rows() {
     assert_eq!(result.len(), 2);
 
     // Extract category values
-    let categories: Vec<std::sync::Arc<str>> = result
+    let categories: Vec<arcstr::ArcStr> = result
         .iter()
         .map(|row| match &row.values[0] {
             vibesql_types::SqlValue::Varchar(s) => s.clone(),
@@ -102,8 +102,8 @@ fn test_distinct_removes_duplicate_rows() {
         .collect();
 
     // Both categories should be present
-    assert!(categories.iter().any(|c| c.as_ref() == "Electronics"));
-    assert!(categories.iter().any(|c| c.as_ref() == "Books"));
+    assert!(categories.iter().any(|c| c.as_str() == "Electronics"));
+    assert!(categories.iter().any(|c| c.as_str() == "Books"));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_distinct_with_multiple_columns() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
             vibesql_types::SqlValue::Integer(100),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("pending")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("pending")),
         ]),
     )
     .unwrap();
@@ -146,7 +146,7 @@ fn test_distinct_with_multiple_columns() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
             vibesql_types::SqlValue::Integer(100),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("shipped")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("shipped")),
         ]),
     )
     .unwrap();
@@ -155,7 +155,7 @@ fn test_distinct_with_multiple_columns() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
             vibesql_types::SqlValue::Integer(100),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("pending")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("pending")),
         ]),
     )
     .unwrap();
@@ -164,7 +164,7 @@ fn test_distinct_with_multiple_columns() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
             vibesql_types::SqlValue::Integer(200),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("pending")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("pending")),
         ]),
     )
     .unwrap();
@@ -238,7 +238,7 @@ fn test_distinct_with_null_values() {
         "items",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Item A")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Item A")),
         ]),
     )
     .unwrap();
@@ -262,7 +262,7 @@ fn test_distinct_with_null_values() {
         "items",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Item A")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Item A")),
         ]),
     )
     .unwrap();
@@ -317,17 +317,17 @@ fn test_distinct_false_preserves_duplicates() {
 
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))]),
     )
     .unwrap();
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))]),
     )
     .unwrap();
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Books"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books"))]),
     )
     .unwrap();
 
@@ -384,7 +384,7 @@ fn test_distinct_with_where_clause() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("admin")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("admin")),
         ]),
     )
     .unwrap();
@@ -392,7 +392,7 @@ fn test_distinct_with_where_clause() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("user")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("user")),
         ]),
     )
     .unwrap();
@@ -400,7 +400,7 @@ fn test_distinct_with_where_clause() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("admin")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("admin")),
         ]),
     )
     .unwrap();
@@ -408,7 +408,7 @@ fn test_distinct_with_where_clause() {
         "users",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("admin")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("admin")),
         ]),
     )
     .unwrap();
@@ -478,7 +478,7 @@ fn test_distinct_with_order_by() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Books")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books")),
         ]),
     )
     .unwrap();
@@ -486,7 +486,7 @@ fn test_distinct_with_order_by() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
         ]),
     )
     .unwrap();
@@ -494,7 +494,7 @@ fn test_distinct_with_order_by() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Books")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books")),
         ]),
     )
     .unwrap();
@@ -502,7 +502,7 @@ fn test_distinct_with_order_by() {
         "products",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(4),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
         ]),
     )
     .unwrap();
@@ -546,6 +546,6 @@ fn test_distinct_with_order_by() {
 
     // Should return 2 unique categories, sorted
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Books")));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Electronics")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books")));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics")));
 }

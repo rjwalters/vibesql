@@ -13,7 +13,7 @@ use vibesql_types::SqlValue;
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {
     // Parse WKT string into internal Geometry enum
-    let sql_value = SqlValue::Varchar(std::sync::Arc::from(wkt_str));
+    let sql_value = SqlValue::Varchar(arcstr::ArcStr::from(wkt_str));
     let geom_with_srid = sql_value_to_geometry(&sql_value)?;
 
     // Convert internal Geometry to geo::Geometry

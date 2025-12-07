@@ -40,7 +40,7 @@ fn test_parse_select_string() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s))
-                        if s.as_ref() == "hello" => {} /* Success */
+                        if s.as_str() == "hello" => {} /* Success */
                     _ => panic!("Expected Varchar('hello'), got {:?}", expr),
                 },
                 _ => panic!("Expected Expression select item"),

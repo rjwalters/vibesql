@@ -19,7 +19,7 @@ fn test_after_update_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -46,7 +46,7 @@ fn test_after_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
-            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice_updated"))),
+            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice_updated"))),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {
@@ -79,7 +79,7 @@ fn test_before_update_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -106,7 +106,7 @@ fn test_before_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
-            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice_updated"))),
+            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice_updated"))),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {

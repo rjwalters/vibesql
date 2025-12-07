@@ -263,7 +263,7 @@ fn test_table_local_predicate_with_explicit_join() {
             "customers",
             vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(i),
-                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(format!("Customer{}", i))),
+                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("Customer{}", i))),
             ]),
         )
         .unwrap();

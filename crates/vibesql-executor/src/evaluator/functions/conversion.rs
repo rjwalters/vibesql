@@ -158,7 +158,7 @@ pub(super) fn to_char(
             let naive_date = NaiveDate::from_ymd_opt(date.year, date.month as u32, date.day as u32)
                 .ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid date".to_string()))?;
             let formatted = super::super::date_format::format_date(&naive_date, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Timestamp(ts) => {
             use chrono::NaiveDate;
@@ -178,7 +178,7 @@ pub(super) fn to_char(
             let naive_timestamp = NaiveDateTime::new(naive_date, naive_time);
             let formatted =
                 super::super::date_format::format_timestamp(&naive_timestamp, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Time(time) => {
             use chrono::NaiveTime;
@@ -191,33 +191,33 @@ pub(super) fn to_char(
             )
             .ok_or_else(|| ExecutorError::UnsupportedFeature("Invalid time".to_string()))?;
             let formatted = super::super::date_format::format_time(&naive_time, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
 
         // Number formatting
         vibesql_types::SqlValue::Integer(n) => {
             let formatted = super::super::date_format::format_number(*n as f64, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Smallint(n) => {
             let formatted = super::super::date_format::format_number(*n as f64, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Bigint(n) => {
             let formatted = super::super::date_format::format_number(*n as f64, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Float(n) => {
             let formatted = super::super::date_format::format_number(*n as f64, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Double(n) => {
             let formatted = super::super::date_format::format_number(*n, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Real(n) => {
             let formatted = super::super::date_format::format_number(*n as f64, format_str)?;
-            Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
 
         val => {

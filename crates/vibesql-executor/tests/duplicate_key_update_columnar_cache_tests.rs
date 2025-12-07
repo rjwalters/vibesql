@@ -6,7 +6,6 @@
 //!
 //! Related: #3884, #3890, #3913
 
-use std::sync::Arc;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::InsertExecutor;
 use vibesql_storage::Database;
@@ -33,7 +32,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(stock)),
         ]]),
         conflict_clause: None,
@@ -49,7 +48,7 @@ fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(stock)),
         ]]),
         conflict_clause: None,
@@ -210,7 +209,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(score)),
             ]]),
             conflict_clause: None,
@@ -231,7 +230,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)), // Different id
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("alice"))), // Same name (conflict)
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice"))), // Same name (conflict)
             vibesql_ast::Expression::Literal(SqlValue::Integer(999)), // New score
         ]]),
         conflict_clause: None,
@@ -312,7 +311,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("Widget"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Widget"))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(30)),
         ]]),
         conflict_clause: None,

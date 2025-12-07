@@ -88,6 +88,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Concurrent data structures (for subscription manager)
 dashmap = "6"
+arcstr = "1.2"
 
 [dev-dependencies]
 bytes = "1.0"

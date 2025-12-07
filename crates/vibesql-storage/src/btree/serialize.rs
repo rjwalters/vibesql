@@ -439,8 +439,8 @@ mod tests {
         // Create leaf node with multi-column keys
         let mut node = LeafNode::new(page_id);
         node.entries = vec![
-            (vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))], vec![100]),
-            (vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))], vec![200]),
+            (vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))], vec![100]),
+            (vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))], vec![200]),
         ];
         node.next_leaf = 0;
 
@@ -454,11 +454,11 @@ mod tests {
         assert_eq!(loaded_node.entries.len(), 2);
         assert_eq!(
             loaded_node.entries[0].0,
-            vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]
+            vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]
         );
         assert_eq!(
             loaded_node.entries[1].0,
-            vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]
+            vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]
         );
     }
 

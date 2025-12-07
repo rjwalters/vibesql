@@ -124,7 +124,7 @@ fn test_scalar_subquery_error_multiple_columns() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();

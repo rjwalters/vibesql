@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn test_empty_pattern() {
-        let values = vec![std::sync::Arc::from(""), std::sync::Arc::from("a"), std::sync::Arc::from("")];
+        let values: Vec<std::sync::Arc<str>> = vec![std::sync::Arc::from(""), std::sync::Arc::from("a"), std::sync::Arc::from("")];
 
         // Exact match empty string
         let result = batch_string_eq(&values, None, "");

@@ -47,7 +47,7 @@ fn setup_customers_orders_db() -> Database {
         "CUSTOMERS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             SqlValue::Boolean(true),
         ]),
     )
@@ -57,7 +57,7 @@ fn setup_customers_orders_db() -> Database {
         "CUSTOMERS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             SqlValue::Boolean(true),
         ]),
     )
@@ -67,7 +67,7 @@ fn setup_customers_orders_db() -> Database {
         "CUSTOMERS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             SqlValue::Boolean(false),
         ]),
     )
@@ -77,7 +77,7 @@ fn setup_customers_orders_db() -> Database {
         "CUSTOMERS",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Diana")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Diana")),
             SqlValue::Boolean(true),
         ]),
     )
@@ -336,12 +336,12 @@ fn test_delete_with_nested_exists() {
     // Insert test data
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
     )
     .unwrap();
 

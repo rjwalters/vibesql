@@ -35,7 +35,7 @@ fn setup_test_db() -> Database {
     // Insert data into customer (500 rows)
     for i in 1..=500 {
         let segment = if i % 2 == 0 { "BUILDING" } else { "FURNITURE" };
-        let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(std::sync::Arc::from(segment))]);
+        let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(segment))]);
         db.insert_row("CUSTOMER", row).unwrap();
     }
 
@@ -62,7 +62,7 @@ fn setup_test_db() -> Database {
         let row = Row::new(vec![
             SqlValue::Integer(i),
             SqlValue::Integer(custkey),
-            SqlValue::Varchar(std::sync::Arc::from(date)),
+            SqlValue::Varchar(arcstr::ArcStr::from(date)),
             SqlValue::Integer(i % 3),
         ]);
         db.insert_row("ORDERS", row).unwrap();
@@ -92,7 +92,7 @@ fn setup_test_db() -> Database {
             SqlValue::Integer(orderkey),
             SqlValue::Integer(100 * i),
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from(date)),
+            SqlValue::Varchar(arcstr::ArcStr::from(date)),
         ]);
         db.insert_row("LINEITEM", row).unwrap();
     }

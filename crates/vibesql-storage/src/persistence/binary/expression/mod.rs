@@ -624,7 +624,7 @@ mod tests {
     fn test_function_roundtrip() {
         let expr = Expression::Function {
             name: "UPPER".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("test")))],
+            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("test")))],
             character_unit: None,
         };
         let mut buf = Vec::new();

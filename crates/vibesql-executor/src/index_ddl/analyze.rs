@@ -129,21 +129,21 @@ mod tests {
         table
             .insert(Row::new(vec![
                 SqlValue::Integer(1),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
                 SqlValue::Integer(30),
             ]))
             .unwrap();
         table
             .insert(Row::new(vec![
                 SqlValue::Integer(2),
-                SqlValue::Varchar(std::sync::Arc::from("Bob")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
                 SqlValue::Integer(25),
             ]))
             .unwrap();
         table
             .insert(Row::new(vec![
                 SqlValue::Integer(3),
-                SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
                 SqlValue::Integer(35),
             ]))
             .unwrap();
@@ -273,7 +273,7 @@ mod tests {
             table
                 .insert(Row::new(vec![
                     SqlValue::Integer(4),
-                    SqlValue::Varchar(std::sync::Arc::from("Diana")),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Diana")),
                     SqlValue::Integer(28),
                 ]))
                 .unwrap();

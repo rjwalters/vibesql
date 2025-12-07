@@ -776,7 +776,7 @@ mod tests {
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef { table: None, column: "city".to_string() }),
-                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Boston")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Boston")))),
             }),
         };
 

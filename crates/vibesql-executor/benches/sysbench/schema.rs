@@ -203,8 +203,8 @@ fn load_sbtest_vibesql(db: &mut VibeDB, data: &mut SysbenchData) {
         let row = Row::new(vec![
             SqlValue::Integer(id),
             SqlValue::Integer(k),
-            SqlValue::Varchar(std::sync::Arc::from(c)),
-            SqlValue::Varchar(std::sync::Arc::from(padding)),
+            SqlValue::Varchar(arcstr::ArcStr::from(c)),
+            SqlValue::Varchar(arcstr::ArcStr::from(padding)),
         ]);
         db.insert_row("SBTEST1", row).unwrap();
     }

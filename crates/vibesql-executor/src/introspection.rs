@@ -64,7 +64,7 @@ impl<'a> IntrospectionExecutor<'a> {
         let column_name = format!("Tables_in_{}", schema_name);
         let rows: Vec<Row> = filtered_tables
             .into_iter()
-            .map(|name| Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(name))]))
+            .map(|name| Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(name))]))
             .collect();
 
         Ok(SelectResult { columns: vec![column_name], rows })
@@ -89,7 +89,7 @@ impl<'a> IntrospectionExecutor<'a> {
 
         let rows: Vec<Row> = filtered_schemas
             .into_iter()
-            .map(|name| Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(name))]))
+            .map(|name| Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(name))]))
             .collect();
 
         Ok(SelectResult { columns: vec!["Database".to_string()], rows })
@@ -134,11 +134,11 @@ impl<'a> IntrospectionExecutor<'a> {
             }
 
             // Field: column name
-            let field = SqlValue::Varchar(std::sync::Arc::from(col.name.clone()));
+            let field = SqlValue::Varchar(arcstr::ArcStr::from(col.name.clone()));
 
             // Type: data type as string
             let type_str = format_data_type(&col.data_type);
-            let col_type = SqlValue::Varchar(std::sync::Arc::from(type_str));
+            let col_type = SqlValue::Varchar(arcstr::ArcStr::from(type_str));
 
             // Null: YES or NO
             let nullable = SqlValue::Varchar(if col.nullable { "YES" } else { "NO" }.into());
@@ -156,7 +156,7 @@ impl<'a> IntrospectionExecutor<'a> {
             let default = col
                 .default_value
                 .as_ref()
-                .map(|expr| SqlValue::Varchar(std::sync::Arc::from(format!("{:?}", expr))))
+                .map(|expr| SqlValue::Varchar(arcstr::ArcStr::from(format!("{:?}", expr))))
                 .unwrap_or(SqlValue::Null);
 
             // Extra: auto_increment, etc. (we don't have auto_increment info yet)
@@ -243,11 +243,11 @@ impl<'a> IntrospectionExecutor<'a> {
         if let Some(ref pk_cols) = table.primary_key {
             for (seq, col_name) in pk_cols.iter().enumerate() {
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from(stmt.table_name.clone())), // Table
+                    SqlValue::Varchar(arcstr::ArcStr::from(stmt.table_name.clone())), // Table
                     SqlValue::Integer(0),                       // Non_unique (0 = unique)
                     SqlValue::Varchar("PRIMARY".into()),        // Key_name
                     SqlValue::Integer((seq + 1) as i64),        // Seq_in_index
-                    SqlValue::Varchar(std::sync::Arc::from(col_name.clone())),        // Column_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),        // Column_name
                     SqlValue::Varchar("A".into()),              // Collation (A = ascending)
                     SqlValue::Null,                             // Cardinality
                     SqlValue::Null,                             // Sub_part
@@ -280,11 +280,11 @@ impl<'a> IntrospectionExecutor<'a> {
                 };
 
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(std::sync::Arc::from(stmt.table_name.clone())), // Table
+                    SqlValue::Varchar(arcstr::ArcStr::from(stmt.table_name.clone())), // Table
                     SqlValue::Integer(non_unique),              // Non_unique
-                    SqlValue::Varchar(std::sync::Arc::from(index.name.clone())),      // Key_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(index.name.clone())),      // Key_name
                     SqlValue::Integer((seq + 1) as i64),        // Seq_in_index
-                    SqlValue::Varchar(std::sync::Arc::from(col.column_name.clone())), // Column_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(col.column_name.clone())), // Column_name
                     SqlValue::Varchar(collation.into()),        // Collation
                     SqlValue::Null,                             // Cardinality
                     col.prefix_length
@@ -390,7 +390,7 @@ impl<'a> IntrospectionExecutor<'a> {
         sql.push_str("\n)");
 
         let rows =
-            vec![Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(table.name.clone())), SqlValue::Varchar(std::sync::Arc::from(sql))])];
+            vec![Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(table.name.clone())), SqlValue::Varchar(arcstr::ArcStr::from(sql))])];
 
         Ok(SelectResult { columns: vec!["Table".to_string(), "Create Table".to_string()], rows })
     }
@@ -698,7 +698,7 @@ mod tests {
         let has_primary = result.rows.iter().any(|r| {
             match &r.values[2] {
                 // Key_name column
-                SqlValue::Varchar(s) => s.as_ref() == "PRIMARY",
+                SqlValue::Varchar(s) => s.as_str() == "PRIMARY",
                 _ => false,
             }
         });

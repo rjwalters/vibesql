@@ -4,7 +4,7 @@ use super::*;
 fn test_row_creation() {
     let row = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
     assert_eq!(row.len(), 2);
     assert_eq!(row.get(0), Some(&vibesql_types::SqlValue::Integer(1)));
@@ -45,7 +45,7 @@ fn test_table_insert() {
 
     let row = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
 
     let result = table.insert(row);
@@ -214,7 +214,7 @@ fn test_debug_info() {
         "users",
         Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -246,7 +246,7 @@ fn test_dump_table() {
         "users",
         Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]),
     )
     .unwrap();
@@ -254,7 +254,7 @@ fn test_dump_table() {
         "users",
         Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]),
     )
     .unwrap();
@@ -330,16 +330,16 @@ fn test_update_row_selective_non_indexed_column() {
     // Insert initial row
     let row1 = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
     table.insert_row(row1).unwrap();
 
     // Update only the 'name' column (non-indexed)
     let updated_row = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice Smith")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),
     ]);
     let mut changed_columns = std::collections::HashSet::new();
     changed_columns.insert(2); // 'name' column index
@@ -348,7 +348,7 @@ fn test_update_row_selective_non_indexed_column() {
 
     // Verify row was updated
     let row = table.scan().iter().next().unwrap();
-    assert_eq!(row.get(2), Some(&vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice Smith"))));
+    assert_eq!(row.get(2), Some(&vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith"))));
 }
 
 #[test]
@@ -372,20 +372,20 @@ fn test_update_row_selective_primary_key_column() {
     table
         .insert_row(Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]))
         .unwrap();
     table
         .insert_row(Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
         ]))
         .unwrap();
 
     // Update primary key column
     let updated_row = Row::new(vec![
         vibesql_types::SqlValue::Integer(10), // Changed PK
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
     let mut changed_columns = std::collections::HashSet::new();
     changed_columns.insert(0); // 'id' column index
@@ -424,16 +424,16 @@ fn test_update_row_selective_unique_constraint_column() {
     table
         .insert_row(Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
         ]))
         .unwrap();
 
     // Update unique constraint column
     let updated_row = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice.smith@example.com")), // Changed email
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice.smith@example.com")), // Changed email
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
     let mut changed_columns = std::collections::HashSet::new();
     changed_columns.insert(1); // 'email' column index
@@ -444,7 +444,7 @@ fn test_update_row_selective_unique_constraint_column() {
     let row = table.scan().iter().next().unwrap();
     assert_eq!(
         row.get(1),
-        Some(&vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice.smith@example.com")))
+        Some(&vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice.smith@example.com")))
     );
 }
 
@@ -477,8 +477,8 @@ fn test_update_row_selective_vs_full_correctness() {
     // Insert same initial row into both tables
     let initial_row = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
     table1.insert_row(initial_row.clone()).unwrap();
     table2.insert_row(initial_row).unwrap();
@@ -486,8 +486,8 @@ fn test_update_row_selective_vs_full_correctness() {
     // Update with selective method
     let updated_row1 = Row::new(vec![
         vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-        vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice Smith")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),
     ]);
     let mut changed_columns = std::collections::HashSet::new();
     changed_columns.insert(2); // 'name' column

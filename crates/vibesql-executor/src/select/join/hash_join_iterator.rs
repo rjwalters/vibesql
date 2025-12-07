@@ -251,9 +251,9 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
-                vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))],
-                vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+                vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))],
             ],
         );
 
@@ -309,8 +309,8 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: Some(50) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))],
-                vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("Unknown"))],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))],
             ],
         );
 
@@ -335,7 +335,7 @@ mod tests {
         // NULLs should not match each other in equi-joins
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].values[0], SqlValue::Integer(1)); // user id
-        assert_eq!(results[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice"))); // user name
+        assert_eq!(results[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice"))); // user name
         assert_eq!(results[0].values[2], SqlValue::Integer(1)); // order user_id
         assert_eq!(results[0].values[3], SqlValue::Integer(100)); // order amount
     }
@@ -393,8 +393,8 @@ mod tests {
             "users",
             vec![("id", DataType::Integer), ("type", DataType::Varchar { max_length: Some(10) })],
             vec![
-                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("admin"))],
-                vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("user"))],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("admin"))],
+                vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("user"))],
             ],
         );
 

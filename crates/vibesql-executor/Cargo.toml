@@ -28,6 +28,7 @@ lru = "0.16"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
 ahash = "0.8"
+arcstr = "1.2"
 
 # Arrow dependencies for vectorized execution
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)

@@ -39,7 +39,7 @@ fn test_call_procedure_with_in_parameter() {
     // CALL greet('Alice');
     let call = CallStmt {
         procedure_name: "greet".to_string(),
-        arguments: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice")))],
+        arguments: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))],
     };
 
     let result = advanced_objects::execute_call(&call, &mut db);
@@ -125,7 +125,7 @@ fn test_declare_with_default_value() {
             ProceduralStatement::Declare {
                 name: "message".to_string(),
                 data_type: DataType::Varchar { max_length: Some(20) },
-                default_value: Some(Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Hello"))))),
+                default_value: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Hello"))))),
             },
         ]),
         sql_security: None,
@@ -222,7 +222,7 @@ fn test_concat_function_in_procedure() {
                     name: "CONCAT".to_string(),
                     args: vec![
                         Expression::ColumnRef { table: None, column: "first".to_string() },
-                        Expression::Literal(SqlValue::Varchar(std::sync::Arc::from(" "))),
+                        Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(" "))),
                         Expression::ColumnRef { table: None, column: "last".to_string() },
                     ],
                     character_unit: None,
@@ -239,8 +239,8 @@ fn test_concat_function_in_procedure() {
     let call = CallStmt {
         procedure_name: "test_concat".to_string(),
         arguments: vec![
-            Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("John"))),
-            Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Doe"))),
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("John"))),
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Doe"))),
         ],
     };
 

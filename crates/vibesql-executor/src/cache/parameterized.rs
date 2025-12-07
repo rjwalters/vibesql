@@ -546,7 +546,7 @@ mod tests {
                         table: None,
                         column: "col2".to_string(),
                     }),
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("John")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("John")))),
                 }),
             }),
             group_by: None,

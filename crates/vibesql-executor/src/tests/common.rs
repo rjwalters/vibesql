@@ -45,7 +45,7 @@ pub fn setup_users_table_with_active(db: &mut Database) {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             SqlValue::Boolean(true),
         ]),
     )
@@ -55,7 +55,7 @@ pub fn setup_users_table_with_active(db: &mut Database) {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             SqlValue::Boolean(false),
         ]),
     )
@@ -65,7 +65,7 @@ pub fn setup_users_table_with_active(db: &mut Database) {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             SqlValue::Boolean(true),
         ]),
     )

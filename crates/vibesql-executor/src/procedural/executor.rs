@@ -192,7 +192,7 @@ pub fn evaluate_expression(
                 let val = evaluate_expression(arg, _db, ctx)?;
                 result.push_str(&val.to_string());
             }
-            Ok(SqlValue::Varchar(std::sync::Arc::from(result)))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(result)))
         }
 
         // Other expressions not yet supported
@@ -312,7 +312,7 @@ fn cast_to_type(
 
         DataType::Varchar { .. } | DataType::Character { .. } => {
             // Convert to string
-            Ok(SqlValue::Varchar(std::sync::Arc::from(value.to_string())))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string())))
         }
 
         DataType::Boolean => match value {

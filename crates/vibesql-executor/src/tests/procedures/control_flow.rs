@@ -9,7 +9,7 @@ fn test_if_simple_boolean_true() {
     let mut ctx = ExecutionContext::new();
 
     // DECLARE result VARCHAR(20);
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
 
     // IF TRUE THEN
     //   SET result = 'executed';
@@ -18,7 +18,7 @@ fn test_if_simple_boolean_true() {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         then_statements: vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("executed")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("executed")))),
         }],
         else_statements: None,
     };
@@ -26,7 +26,7 @@ fn test_if_simple_boolean_true() {
     let result = execute_procedural_statement(&if_stmt, &mut ctx, &mut db);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), ControlFlow::Continue);
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("executed"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("executed"))));
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn test_if_simple_boolean_false() {
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();
 
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
 
     // IF FALSE THEN
     //   SET result = 'executed';
@@ -43,7 +43,7 @@ fn test_if_simple_boolean_false() {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(false))),
         then_statements: vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("executed")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("executed")))),
         }],
         else_statements: None,
     };
@@ -52,7 +52,7 @@ fn test_if_simple_boolean_false() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), ControlFlow::Continue);
     // Variable should remain unchanged
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("initial"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("initial"))));
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_if_with_else() {
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();
 
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
 
     // IF FALSE THEN
     //   SET result = 'then';
@@ -71,18 +71,18 @@ fn test_if_with_else() {
         condition: Box::new(Expression::Literal(SqlValue::Boolean(false))),
         then_statements: vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("then")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("then")))),
         }],
         else_statements: Some(vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("else")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("else")))),
         }]),
     };
 
     let result = execute_procedural_statement(&if_stmt, &mut ctx, &mut db);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), ControlFlow::Continue);
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("else"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("else"))));
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_if_integer_condition() {
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();
 
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
 
     // IF 1 THEN (non-zero = true)
     //   SET result = 'nonzero';
@@ -99,22 +99,22 @@ fn test_if_integer_condition() {
         condition: Box::new(Expression::Literal(SqlValue::Integer(1))),
         then_statements: vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("nonzero")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("nonzero")))),
         }],
         else_statements: None,
     };
 
     let result = execute_procedural_statement(&if_stmt, &mut ctx, &mut db);
     assert!(result.is_ok());
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("nonzero"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("nonzero"))));
 
     // Test with 0 (should be false)
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
     let if_stmt_zero = ProceduralStatement::If {
         condition: Box::new(Expression::Literal(SqlValue::Integer(0))),
         then_statements: vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("zero")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("zero")))),
         }],
         else_statements: None,
     };
@@ -122,7 +122,7 @@ fn test_if_integer_condition() {
     let result = execute_procedural_statement(&if_stmt_zero, &mut ctx, &mut db);
     assert!(result.is_ok());
     // Should not execute then branch
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("initial"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("initial"))));
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn test_if_null_condition() {
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();
 
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
 
     // IF NULL THEN (NULL = false)
     //   SET result = 'executed';
@@ -139,7 +139,7 @@ fn test_if_null_condition() {
         condition: Box::new(Expression::Literal(SqlValue::Null)),
         then_statements: vec![ProceduralStatement::Set {
             name: "result".to_string(),
-            value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("executed")))),
+            value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("executed")))),
         }],
         else_statements: None,
     };
@@ -147,7 +147,7 @@ fn test_if_null_condition() {
     let result = execute_procedural_statement(&if_stmt, &mut ctx, &mut db);
     assert!(result.is_ok());
     // Should not execute then branch
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("initial"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("initial"))));
 }
 
 // Test 2: WHILE loop basic functionality
@@ -351,7 +351,7 @@ fn test_nested_if() {
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();
 
-    ctx.set_variable("result", SqlValue::Varchar(std::sync::Arc::from("initial")));
+    ctx.set_variable("result", SqlValue::Varchar(arcstr::ArcStr::from("initial")));
 
     // IF TRUE THEN
     //   IF TRUE THEN
@@ -364,7 +364,7 @@ fn test_nested_if() {
             condition: Box::new(Expression::Literal(SqlValue::Boolean(true))),
             then_statements: vec![ProceduralStatement::Set {
                 name: "result".to_string(),
-                value: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("nested")))),
+                value: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("nested")))),
             }],
             else_statements: None,
         }],
@@ -373,7 +373,7 @@ fn test_nested_if() {
 
     let result = execute_procedural_statement(&nested_if, &mut ctx, &mut db);
     assert!(result.is_ok());
-    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(std::sync::Arc::from("nested"))));
+    assert_eq!(ctx.get_variable("result"), Some(&SqlValue::Varchar(arcstr::ArcStr::from("nested"))));
 }
 
 // Test 7: RETURN in IF branch

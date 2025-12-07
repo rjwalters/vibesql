@@ -77,7 +77,7 @@ fn test_date_add_days() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(7)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
         ],
         character_unit: None,
     };
@@ -96,7 +96,7 @@ fn test_date_add_months() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MONTH"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MONTH"))),
         ],
         character_unit: None,
     };
@@ -115,7 +115,7 @@ fn test_date_add_years() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("YEAR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("YEAR"))),
         ],
         character_unit: None,
     };
@@ -134,7 +134,7 @@ fn test_date_add_negative() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(-5)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
         ],
         character_unit: None,
     };
@@ -153,7 +153,7 @@ fn test_adddate_alias() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
         ],
         character_unit: None,
     };
@@ -174,7 +174,7 @@ fn test_date_sub_days() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(7)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
         ],
         character_unit: None,
     };
@@ -193,7 +193,7 @@ fn test_date_sub_months() {
                 "2024-04-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MONTH"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MONTH"))),
         ],
         character_unit: None,
     };
@@ -212,7 +212,7 @@ fn test_subdate_alias() {
                 "2024-01-15".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
         ],
         character_unit: None,
     };

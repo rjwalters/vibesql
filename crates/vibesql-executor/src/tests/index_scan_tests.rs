@@ -42,9 +42,9 @@ fn create_test_db() -> Database {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
             SqlValue::Integer(25),
-            SqlValue::Varchar(std::sync::Arc::from("Boston")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Boston")),
         ]),
     )
     .unwrap();
@@ -53,9 +53,9 @@ fn create_test_db() -> Database {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")),
             SqlValue::Integer(30),
-            SqlValue::Varchar(std::sync::Arc::from("New York")),
+            SqlValue::Varchar(arcstr::ArcStr::from("New York")),
         ]),
     )
     .unwrap();
@@ -64,9 +64,9 @@ fn create_test_db() -> Database {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("charlie@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("charlie@example.com")),
             SqlValue::Integer(25),
-            SqlValue::Varchar(std::sync::Arc::from("Boston")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Boston")),
         ]),
     )
     .unwrap();
@@ -75,9 +75,9 @@ fn create_test_db() -> Database {
         "users",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("diana@example.com")),
+            SqlValue::Varchar(arcstr::ArcStr::from("diana@example.com")),
             SqlValue::Integer(35),
-            SqlValue::Varchar(std::sync::Arc::from("Chicago")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Chicago")),
         ]),
     )
     .unwrap();
@@ -114,7 +114,7 @@ fn test_index_scan_with_email_index() {
         // Should return exactly 1 row
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].values[0], SqlValue::Integer(1));
-        assert_eq!(result[0].values[1], SqlValue::Varchar(std::sync::Arc::from("alice@example.com")));
+        assert_eq!(result[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")));
     } else {
         panic!("Expected SELECT statement");
     }
@@ -288,9 +288,9 @@ fn test_unique_index_enforcement() {
         "users",
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")), // duplicate
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")), // duplicate
             SqlValue::Integer(40),
-            SqlValue::Varchar(std::sync::Arc::from("Seattle")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Seattle")),
         ]),
     );
 

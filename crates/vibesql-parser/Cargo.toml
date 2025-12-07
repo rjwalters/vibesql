@@ -14,6 +14,7 @@ vibesql-ast = { version = "0.1.2", path = "../vibesql-ast" }
 vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
 phf = { version = "0.13", features = ["macros"] }
 bumpalo = { version = "3.16", features = ["collections"] }
+arcstr = "1.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

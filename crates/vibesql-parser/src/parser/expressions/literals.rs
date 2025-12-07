@@ -24,7 +24,7 @@ impl Parser {
                 }
             }
             Token::String(s) => {
-                let string_val = std::sync::Arc::<str>::from(s.as_str());
+                let string_val = arcstr::ArcStr::from(s.as_str());
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                     string_val,

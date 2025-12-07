@@ -297,7 +297,7 @@ mod tests {
     }
 
     fn lit_str(s: &str) -> Expression {
-        Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(s)))
+        Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(s)))
     }
 
     fn binary_op(op: BinaryOperator, left: Expression, right: Expression) -> Expression {

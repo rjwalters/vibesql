@@ -11,7 +11,7 @@ fn test_update_with_default_value() {
     // CREATE TABLE users (id INT, name VARCHAR(50) DEFAULT 'Unknown')
     let mut name_column =
         ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false);
-    name_column.default_value = Some(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Unknown"))));
+    name_column.default_value = Some(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))));
 
     let schema = TableSchema::new(
         "users".to_string(),
@@ -22,7 +22,7 @@ fn test_update_with_default_value() {
     // INSERT a row
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
 
@@ -43,7 +43,7 @@ fn test_update_with_default_value() {
     // Verify default value was used
     let table = db.get_table("users").unwrap();
     let row = &table.scan()[0];
-    assert_eq!(row.get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("Unknown"))));
+    assert_eq!(row.get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))));
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_update_default_no_default_value_defined() {
     // INSERT a row
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     )
     .unwrap();
 

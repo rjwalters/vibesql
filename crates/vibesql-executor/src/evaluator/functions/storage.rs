@@ -26,7 +26,7 @@ pub fn eval_storage_url(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             // For now, simply construct a URL from the blob ID
             // In a full implementation, this would consult the BlobStorageService
             let url = format!("/storage/blobs/{}", blob_id_str);
-            Ok(SqlValue::Varchar(std::sync::Arc::from(url)))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(url)))
         }
         _ => Err(ExecutorError::UnsupportedExpression(
             "STORAGE_URL argument must be TEXT".to_string(),
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn test_storage_url_function() {
-        let blob_id = SqlValue::Varchar(std::sync::Arc::from("550e8400-e29b-41d4-a716-446655440000"));
+        let blob_id = SqlValue::Varchar(arcstr::ArcStr::from("550e8400-e29b-41d4-a716-446655440000"));
         let result = eval_storage_url(&[blob_id]).unwrap();
 
         match result {

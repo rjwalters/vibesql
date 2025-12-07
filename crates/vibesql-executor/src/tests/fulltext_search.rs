@@ -31,8 +31,8 @@ fn test_match_against_natural_language_single_column() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MySQL Database Guide")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Learn about MySQL database management")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MySQL Database Guide")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn about MySQL database management")),
         ]),
     )
     .unwrap();
@@ -40,8 +40,8 @@ fn test_match_against_natural_language_single_column() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MySQL Tutorial")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Learn MySQL database management")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MySQL Tutorial")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn MySQL database management")),
         ]),
     )
     .unwrap();
@@ -49,8 +49,8 @@ fn test_match_against_natural_language_single_column() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("PostgreSQL Features")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Advanced PostgreSQL features")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("PostgreSQL Features")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Advanced PostgreSQL features")),
         ]),
     )
     .unwrap();
@@ -98,8 +98,8 @@ fn test_match_against_multiple_columns() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Database Guide")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Learn SQL and database concepts")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Database Guide")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn SQL and database concepts")),
         ]),
     )
     .unwrap();
@@ -107,8 +107,8 @@ fn test_match_against_multiple_columns() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Web Development")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Build websites with web frameworks")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Web Development")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Build websites with web frameworks")),
         ]),
     )
     .unwrap();
@@ -116,8 +116,8 @@ fn test_match_against_multiple_columns() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Python Tutorial")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Master SQL with Python")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Python Tutorial")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Master SQL with Python")),
         ]),
     )
     .unwrap();
@@ -160,7 +160,7 @@ fn test_match_against_no_matches() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("ABC Article")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("ABC Article")),
         ]),
     )
     .unwrap();
@@ -168,7 +168,7 @@ fn test_match_against_no_matches() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("XYZ Article")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("XYZ Article")),
         ]),
     )
     .unwrap();
@@ -216,8 +216,8 @@ fn test_match_against_boolean_mode_required() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MySQL and PostgreSQL")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Two popular databases")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MySQL and PostgreSQL")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Two popular databases")),
         ]),
     )
     .unwrap();
@@ -225,8 +225,8 @@ fn test_match_against_boolean_mode_required() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Oracle Database")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Enterprise database solution")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Oracle Database")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Enterprise database solution")),
         ]),
     )
     .unwrap();
@@ -234,8 +234,8 @@ fn test_match_against_boolean_mode_required() {
         "ARTICLES",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("MySQL Features")),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Learn about MySQL")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MySQL Features")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn about MySQL")),
         ]),
     )
     .unwrap();

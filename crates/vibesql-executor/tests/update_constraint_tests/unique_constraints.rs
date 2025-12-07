@@ -16,12 +16,12 @@ fn test_update_unique_constraint_duplicate() {
     // Insert two users
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("alice@example.com"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("bob@example.com"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com"))]),
     )
     .unwrap();
 
@@ -29,7 +29,7 @@ fn test_update_unique_constraint_duplicate() {
     let stmt = create_update_with_id_clause(
         "users",
         "email",
-        SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
+        SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
         2,
     );
 
@@ -52,12 +52,12 @@ fn test_update_unique_constraint_to_unique_value() {
     // Insert two users
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("alice@example.com"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("bob@example.com"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com"))]),
     )
     .unwrap();
 
@@ -65,7 +65,7 @@ fn test_update_unique_constraint_to_unique_value() {
     let stmt = create_update_with_id_clause(
         "users",
         "email",
-        SqlValue::Varchar(std::sync::Arc::from("robert@example.com")),
+        SqlValue::Varchar(arcstr::ArcStr::from("robert@example.com")),
         2,
     );
 
@@ -75,7 +75,7 @@ fn test_update_unique_constraint_to_unique_value() {
     // Verify the update
     let table = db.get_table("users").unwrap();
     let rows: Vec<&Row> = table.scan().iter().collect();
-    assert_eq!(rows[1].get(1).unwrap(), &SqlValue::Varchar(std::sync::Arc::from("robert@example.com")));
+    assert_eq!(rows[1].get(1).unwrap(), &SqlValue::Varchar(arcstr::ArcStr::from("robert@example.com")));
 }
 
 #[test]
@@ -86,12 +86,12 @@ fn test_update_unique_constraint_allows_null() {
     // Insert two users with email
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("alice@example.com"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("bob@example.com"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com"))]),
     )
     .unwrap();
 
@@ -122,8 +122,8 @@ fn test_update_unique_constraint_composite() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
         ]),
     )
     .unwrap();
@@ -131,8 +131,8 @@ fn test_update_unique_constraint_composite() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Jones")),
         ]),
     )
     .unwrap();
@@ -143,11 +143,11 @@ fn test_update_unique_constraint_composite() {
         assignments: vec![
             Assignment {
                 column: "first_name".to_string(),
-                value: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))),
+                value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
             },
             Assignment {
                 column: "last_name".to_string(),
-                value: Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Smith"))),
+                value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Smith"))),
             },
         ],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {

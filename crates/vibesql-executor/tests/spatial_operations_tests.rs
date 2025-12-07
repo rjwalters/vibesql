@@ -35,7 +35,7 @@ fn test_st_simplify_linestring() {
             args: vec![
                 Expression::Function {
                     name: "ST_GEOMFROMTEXT".to_string(),
-                    args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 0.1, 2 0, 3 0)")))],
+                    args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 0.1, 2 0, 3 0)")))],
                     character_unit: None,
                 },
                 Expression::Literal(SqlValue::Double(0.5)), // High tolerance
@@ -64,7 +64,7 @@ fn test_st_simplify_polygon() {
             args: vec![
                 Expression::Function {
                     name: "ST_GEOMFROMTEXT".to_string(),
-                    args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 10 0, 10.1 5, 10 10, 0 10, 0 0))")))],
+                    args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 10 0, 10.1 5, 10 10, 0 10, 0 0))")))],
                     character_unit: None,
                 },
                 Expression::Literal(SqlValue::Double(1.0)), // Tolerance
@@ -105,7 +105,7 @@ fn test_st_simplify_zero_tolerance() {
             args: vec![
                 Expression::Function {
                     name: "ST_GEOMFROMTEXT".to_string(),
-                    args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 1, 2 2)")))],
+                    args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 1, 2 2)")))],
                     character_unit: None,
                 },
                 Expression::Literal(SqlValue::Double(0.0)), // Zero tolerance
@@ -130,7 +130,7 @@ fn test_st_simplify_wrong_arity() {
         name: "ST_SIMPLIFY".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 1)")))],
+            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 1)")))],
             character_unit: None,
         }],
         character_unit: None,
@@ -147,7 +147,7 @@ fn test_st_simplify_negative_tolerance() {
         args: vec![
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 1)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 1)")))],
                 character_unit: None,
             },
             Expression::Literal(SqlValue::Double(-1.0)), // Negative tolerance
@@ -169,7 +169,7 @@ fn test_st_simplify_with_integer_tolerance() {
             args: vec![
                 Expression::Function {
                     name: "ST_GEOMFROMTEXT".to_string(),
-                    args: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 1, 2 2)")))],
+                    args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 1, 2 2)")))],
                     character_unit: None,
                 },
                 Expression::Literal(SqlValue::Integer(1)), // Integer tolerance

@@ -245,7 +245,7 @@ impl CombinedExpressionEvaluator<'_> {
             }
         };
 
-        Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
     }
 
     /// Evaluate IN operator with value list: expr IN (val1, val2, ...)

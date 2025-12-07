@@ -113,6 +113,6 @@ fn test_delete_multiple_rows() {
 
     let remaining_name = if let SqlValue::Varchar(name) = table.scan()[0].get(1).unwrap() {
         name.clone()
-    } else { std::sync::Arc::from("") };
-    assert_eq!(remaining_name.as_ref(), "Alice");
+    } else { arcstr::ArcStr::from("") };
+    assert_eq!(remaining_name.as_str(), "Alice");
 }

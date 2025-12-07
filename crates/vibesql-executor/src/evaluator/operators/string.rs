@@ -19,10 +19,10 @@ impl StringOps {
         use SqlValue::*;
 
         match (left, right) {
-            (Varchar(a), Varchar(b)) => Ok(Varchar(std::sync::Arc::from(format!("{}{}", a, b)))),
-            (Varchar(a), Character(b)) => Ok(Varchar(std::sync::Arc::from(format!("{}{}", a, b)))),
-            (Character(a), Varchar(b)) => Ok(Varchar(std::sync::Arc::from(format!("{}{}", a, b)))),
-            (Character(a), Character(b)) => Ok(Varchar(std::sync::Arc::from(format!("{}{}", a, b)))),
+            (Varchar(a), Varchar(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
+            (Varchar(a), Character(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
+            (Character(a), Varchar(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
+            (Character(a), Character(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
             _ => Err(ExecutorError::TypeMismatch {
                 left: left.clone(),
                 op: "||".to_string(),
@@ -39,44 +39,44 @@ mod tests {
     #[test]
     fn test_varchar_concat() {
         let result = StringOps::concat(
-            &SqlValue::Varchar(std::sync::Arc::from("Hello")),
-            &SqlValue::Varchar(std::sync::Arc::from(" World")),
+            &SqlValue::Varchar(arcstr::ArcStr::from("Hello")),
+            &SqlValue::Varchar(arcstr::ArcStr::from(" World")),
         )
         .unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Hello World")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Hello World")));
     }
 
     #[test]
     fn test_char_concat() {
         let result = StringOps::concat(
-            &SqlValue::Character(std::sync::Arc::from("Hello")),
-            &SqlValue::Character(std::sync::Arc::from(" World")),
+            &SqlValue::Character(arcstr::ArcStr::from("Hello")),
+            &SqlValue::Character(arcstr::ArcStr::from(" World")),
         )
         .unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Hello World")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Hello World")));
     }
 
     #[test]
     fn test_mixed_string_concat() {
         let result = StringOps::concat(
-            &SqlValue::Varchar(std::sync::Arc::from("Hello")),
-            &SqlValue::Character(std::sync::Arc::from(" World")),
+            &SqlValue::Varchar(arcstr::ArcStr::from("Hello")),
+            &SqlValue::Character(arcstr::ArcStr::from(" World")),
         )
         .unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Hello World")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Hello World")));
 
         let result = StringOps::concat(
-            &SqlValue::Character(std::sync::Arc::from("Hello")),
-            &SqlValue::Varchar(std::sync::Arc::from(" World")),
+            &SqlValue::Character(arcstr::ArcStr::from("Hello")),
+            &SqlValue::Varchar(arcstr::ArcStr::from(" World")),
         )
         .unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Hello World")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Hello World")));
     }
 
     #[test]
     fn test_type_error() {
         let result =
-            StringOps::concat(&SqlValue::Integer(1), &SqlValue::Varchar(std::sync::Arc::from("test")));
+            StringOps::concat(&SqlValue::Integer(1), &SqlValue::Varchar(arcstr::ArcStr::from("test")));
         assert!(result.is_err());
     }
 }

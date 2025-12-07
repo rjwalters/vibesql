@@ -1008,7 +1008,7 @@ fn test_lookup_by_index_batch() {
         table
             .insert(Row::from_vec(vec![
                 SqlValue::Integer(i),
-                SqlValue::Varchar(std::sync::Arc::from(format!("Product{}", i))),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("Product{}", i))),
             ]))
             .unwrap();
     }

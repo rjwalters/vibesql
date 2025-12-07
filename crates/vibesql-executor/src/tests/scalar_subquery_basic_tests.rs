@@ -40,7 +40,7 @@ fn test_scalar_subquery_in_where_clause() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             vibesql_types::SqlValue::Integer(50000),
         ]),
     )
@@ -49,7 +49,7 @@ fn test_scalar_subquery_in_where_clause() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             vibesql_types::SqlValue::Integer(60000),
         ]),
     )
@@ -58,7 +58,7 @@ fn test_scalar_subquery_in_where_clause() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             vibesql_types::SqlValue::Integer(70000),
         ]),
     )
@@ -129,7 +129,7 @@ fn test_scalar_subquery_in_where_clause() {
     // Only Charlie (70000) should be returned
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(3));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Charlie")));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(70000));
 }
 
@@ -166,7 +166,7 @@ fn test_scalar_subquery_in_select_list() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             vibesql_types::SqlValue::Integer(50000),
         ]),
     )
@@ -175,7 +175,7 @@ fn test_scalar_subquery_in_select_list() {
         "employees",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             vibesql_types::SqlValue::Integer(70000),
         ]),
     )
@@ -257,10 +257,10 @@ fn test_scalar_subquery_in_select_list() {
 
     // Should have 2 rows, each with max_sal = 70000
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(50000));
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(70000)); // max_sal
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Bob")));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     assert_eq!(result[1].values[1], vibesql_types::SqlValue::Integer(70000));
     assert_eq!(result[1].values[2], vibesql_types::SqlValue::Integer(70000)); // max_sal
 }

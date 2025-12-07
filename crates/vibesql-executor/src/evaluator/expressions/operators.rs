@@ -151,12 +151,12 @@ mod tests {
     fn test_not_varchar() {
         // Non-empty varchar is truthy, so NOT should return false
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(std::sync::Arc::from("hello"))).unwrap(),
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from("hello"))).unwrap(),
             SqlValue::Boolean(false)
         );
         // Empty varchar is also considered truthy in this implementation
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(std::sync::Arc::from(""))).unwrap(),
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Varchar(arcstr::ArcStr::from(""))).unwrap(),
             SqlValue::Boolean(false)
         );
     }
@@ -215,17 +215,17 @@ mod tests {
     fn test_unary_plus_on_text() {
         // SQLite behavior: unary + on text returns text unchanged (identity operation)
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Varchar(std::sync::Arc::from("hello"))).unwrap(),
-            SqlValue::Varchar(std::sync::Arc::from("hello"))
+            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Varchar(arcstr::ArcStr::from("hello"))).unwrap(),
+            SqlValue::Varchar(arcstr::ArcStr::from("hello"))
         );
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Character(std::sync::Arc::from("world"))).unwrap(),
-            SqlValue::Character(std::sync::Arc::from("world"))
+            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Character(arcstr::ArcStr::from("world"))).unwrap(),
+            SqlValue::Character(arcstr::ArcStr::from("world"))
         );
         // Empty strings
         assert_eq!(
-            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Varchar(std::sync::Arc::from(""))).unwrap(),
-            SqlValue::Varchar(std::sync::Arc::from(""))
+            eval_unary_op(&UnaryOperator::Plus, &SqlValue::Varchar(arcstr::ArcStr::from(""))).unwrap(),
+            SqlValue::Varchar(arcstr::ArcStr::from(""))
         );
     }
 }

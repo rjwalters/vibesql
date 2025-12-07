@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```text
-//! let params = &[SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("hello"))];
+//! let params = &[SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("hello"))];
 //! let evaluator = ArenaExpressionEvaluator::new(schema, params);
 //! let result = evaluator.eval(&arena_expr, &row)?;
 //! ```
@@ -641,7 +641,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         s.trim_matches(|c| remove_chars.contains(c))
                     }
                 };
-                Ok(SqlValue::Varchar(std::sync::Arc::from(result)))
+                Ok(SqlValue::Varchar(arcstr::ArcStr::from(result)))
             }
             _ => Err(ExecutorError::TypeError(format!(
                 "TRIM requires string operand, got {:?}",
@@ -774,7 +774,7 @@ mod tests {
         let schema = make_schema();
         let params = vec![];
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
+        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
 
         let expr = ArenaExpression::Literal(SqlValue::Integer(42));
         let result = evaluator.eval(&expr, &row).unwrap();
@@ -786,9 +786,9 @@ mod tests {
         let arena = Bump::new();
         let interner = ArenaInterner::new(&arena);
         let schema = make_schema();
-        let params = vec![SqlValue::Integer(100), SqlValue::Varchar(std::sync::Arc::from("test"))];
+        let params = vec![SqlValue::Integer(100), SqlValue::Varchar(arcstr::ArcStr::from("test"))];
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
+        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
 
         // First placeholder (index 0)
         let expr = ArenaExpression::Placeholder(0);
@@ -798,7 +798,7 @@ mod tests {
         // Second placeholder (index 1)
         let expr = ArenaExpression::Placeholder(1);
         let result = evaluator.eval(&expr, &row).unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("test")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("test")));
     }
 
     #[test]
@@ -813,7 +813,7 @@ mod tests {
         let name_sym = interner.intern("NAME");
 
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(std::sync::Arc::from("Bob"))]);
+        let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
 
         let expr = ArenaExpression::ColumnRef { table: None, column: id_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
@@ -821,7 +821,7 @@ mod tests {
 
         let expr = ArenaExpression::ColumnRef { table: None, column: name_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
-        assert_eq!(result, SqlValue::Varchar(std::sync::Arc::from("Bob")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     }
 
     #[test]

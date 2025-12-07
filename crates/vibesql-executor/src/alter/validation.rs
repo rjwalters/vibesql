@@ -145,12 +145,12 @@ pub(super) fn convert_value(
             // Convert anything to string
             match value {
                 SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(SqlValue::Varchar(s)),
-                SqlValue::Integer(i) => Ok(SqlValue::Varchar(std::sync::Arc::from(i.to_string()))),
-                SqlValue::Bigint(b) => Ok(SqlValue::Varchar(std::sync::Arc::from(b.to_string()))),
-                SqlValue::Smallint(s) => Ok(SqlValue::Varchar(std::sync::Arc::from(s.to_string()))),
-                SqlValue::Numeric(d) => Ok(SqlValue::Varchar(std::sync::Arc::from(d.to_string()))),
-                SqlValue::Boolean(b) => Ok(SqlValue::Varchar(std::sync::Arc::from(b.to_string()))),
-                _ => Ok(SqlValue::Varchar(std::sync::Arc::from(format!("{:?}", value)))),
+                SqlValue::Integer(i) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string()))),
+                SqlValue::Bigint(b) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(b.to_string()))),
+                SqlValue::Smallint(s) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.to_string()))),
+                SqlValue::Numeric(d) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(d.to_string()))),
+                SqlValue::Boolean(b) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(b.to_string()))),
+                _ => Ok(SqlValue::Varchar(arcstr::ArcStr::from(format!("{:?}", value)))),
             }
         }
         _ => Err(ExecutorError::TypeConversionError {

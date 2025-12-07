@@ -394,22 +394,22 @@ impl ExpressionEvaluator<'_> {
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         // Evaluate the search string
         let search_value = self.eval(search_modifier, row)?;
-        let search_string: std::sync::Arc<str> = match search_value {
+        let search_string: arcstr::ArcStr = match search_value {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s,
             SqlValue::Null => return Ok(SqlValue::Boolean(false)),
-            other => std::sync::Arc::from(other.to_string()),
+            other => arcstr::ArcStr::from(other.to_string().as_str()),
         };
 
         // Collect text values from the specified columns
-        let mut text_values: Vec<std::sync::Arc<str>> = Vec::new();
+        let mut text_values: Vec<arcstr::ArcStr> = Vec::new();
         for column_name in columns {
             match self.eval_column_ref(None, column_name, row) {
                 Ok(SqlValue::Varchar(s)) | Ok(SqlValue::Character(s)) => text_values.push(s),
                 Ok(SqlValue::Null) => {
                     // NULL values are treated as empty strings in MATCH
-                    text_values.push(std::sync::Arc::from(""));
+                    text_values.push(arcstr::ArcStr::from(""));
                 }
-                Ok(other) => text_values.push(std::sync::Arc::from(other.to_string())),
+                Ok(other) => text_values.push(arcstr::ArcStr::from(other.to_string().as_str())),
                 Err(_) => {
                     // Column not found - return false for this match
                     return Ok(SqlValue::Boolean(false));

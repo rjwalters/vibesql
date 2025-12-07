@@ -125,8 +125,8 @@ mod tests {
     #[test]
     fn test_string_column() {
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
             Row::new(vec![SqlValue::Null]),
         ];
 
@@ -166,12 +166,12 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Double(3.14),
-                SqlValue::Varchar(std::sync::Arc::from("Alice")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Null,
-                SqlValue::Varchar(std::sync::Arc::from("Bob")),
+                SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             ]),
             Row::new(vec![SqlValue::Integer(3), SqlValue::Double(2.71), SqlValue::Null]),
         ];
@@ -246,7 +246,7 @@ mod tests {
                     1 => "N",
                     _ => "R",
                 };
-                Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(flag))])
+                Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(flag))])
             })
             .collect();
 
@@ -309,11 +309,11 @@ mod tests {
     fn test_string_interning_values_preserved() {
         // Test that interning preserves the actual string values
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("active"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("pending"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("active"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("completed"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("pending"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("active"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("pending"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("active"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("completed"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("pending"))]),
         ];
 
         let column_names = vec!["status".to_string()];
@@ -321,18 +321,18 @@ mod tests {
 
         // Verify values are correctly stored
         let col = columnar.get_column("status").unwrap();
-        assert_eq!(col.get(0), SqlValue::Varchar(std::sync::Arc::from("active")));
-        assert_eq!(col.get(1), SqlValue::Varchar(std::sync::Arc::from("pending")));
-        assert_eq!(col.get(2), SqlValue::Varchar(std::sync::Arc::from("active")));
-        assert_eq!(col.get(3), SqlValue::Varchar(std::sync::Arc::from("completed")));
-        assert_eq!(col.get(4), SqlValue::Varchar(std::sync::Arc::from("pending")));
+        assert_eq!(col.get(0), SqlValue::Varchar(arcstr::ArcStr::from("active")));
+        assert_eq!(col.get(1), SqlValue::Varchar(arcstr::ArcStr::from("pending")));
+        assert_eq!(col.get(2), SqlValue::Varchar(arcstr::ArcStr::from("active")));
+        assert_eq!(col.get(3), SqlValue::Varchar(arcstr::ArcStr::from("completed")));
+        assert_eq!(col.get(4), SqlValue::Varchar(arcstr::ArcStr::from("pending")));
 
         // Round trip should preserve values
         let reconstructed = columnar.to_rows();
         assert_eq!(reconstructed.len(), 5);
 
         if let Some(SqlValue::Varchar(v)) = reconstructed[0].get(0) {
-            assert_eq!(v.as_ref(), "active");
+            assert_eq!(v.as_str(), "active");
         } else {
             panic!("Expected Varchar");
         }
@@ -344,7 +344,7 @@ mod tests {
         let rows: Vec<Row> = (0..500)
             .map(|i| {
                 let status = if i % 2 == 0 { "O" } else { "F" };
-                Row::new(vec![SqlValue::Varchar(std::sync::Arc::from(status))])
+                Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(status))])
             })
             .collect();
 

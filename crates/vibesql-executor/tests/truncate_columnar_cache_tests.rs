@@ -6,7 +6,6 @@
 //!
 //! Related: #3915, #3932
 
-use std::sync::Arc;
 use vibesql_ast::{TruncateCascadeOption, TruncateTableStmt};
 use vibesql_catalog::{ColumnSchema, ForeignKeyConstraint, ReferentialAction, TableSchema};
 use vibesql_executor::{InsertExecutor, TruncateTableExecutor};
@@ -38,7 +37,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: None,
@@ -258,7 +257,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("Electronics"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

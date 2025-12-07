@@ -6,7 +6,6 @@
 //!
 //! Related: #3884, #3890, #3891
 
-use std::sync::Arc;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::InsertExecutor;
 use vibesql_storage::Database;
@@ -33,7 +32,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: None,
@@ -49,7 +48,7 @@ fn replace_product(db: &mut Database, id: i64, name: &str, price: i64) {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
@@ -205,7 +204,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from(name))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(score)),
             ]]),
             conflict_clause: None,
@@ -226,7 +225,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)), // Different id
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(Arc::from("alice"))), // Same name
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice"))), // Same name
             vibesql_ast::Expression::Literal(SqlValue::Integer(999)), // New score
         ]]),
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),

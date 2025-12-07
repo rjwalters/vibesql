@@ -639,10 +639,10 @@ fn test_count_star_in_simple_case_expression() {
                     conditions: vec![vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Integer(3),
                     )],
-                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("three"))),
+                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three"))),
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("other")),
+                    vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("other")),
                 ))),
             },
             alias: None,
@@ -662,7 +662,7 @@ fn test_count_star_in_simple_case_expression() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("three")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three")));
 }
 
 #[test]
@@ -707,10 +707,10 @@ fn test_count_star_in_searched_case_expression() {
                             vibesql_types::SqlValue::Integer(2),
                         )),
                     }],
-                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("many"))),
+                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("many"))),
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("few")),
+                    vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("few")),
                 ))),
             },
             alias: None,
@@ -730,7 +730,7 @@ fn test_count_star_in_searched_case_expression() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("many")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("many")));
 }
 
 #[test]
@@ -913,14 +913,14 @@ fn test_count_star_in_nested_case_expression() {
                                 )),
                             }],
                             result: vibesql_ast::Expression::Literal(
-                                vibesql_types::SqlValue::Varchar(std::sync::Arc::from("two")),
+                                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("two")),
                             ),
                         }],
                         else_result: None,
                     },
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
-                    vibesql_types::SqlValue::Varchar(std::sync::Arc::from("other")),
+                    vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("other")),
                 ))),
             },
             alias: None,
@@ -940,5 +940,5 @@ fn test_count_star_in_nested_case_expression() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("two")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("two")));
 }

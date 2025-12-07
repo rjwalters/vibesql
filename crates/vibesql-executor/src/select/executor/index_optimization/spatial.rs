@@ -343,7 +343,7 @@ fn apply_full_spatial_predicate(
         }
 
         // Convert query geometry to SqlValue for predicate functions
-        let query_geom_wkt = SqlValue::Varchar(std::sync::Arc::from(spatial_usage.query_geometry.to_wkt()));
+        let query_geom_wkt = SqlValue::Varchar(arcstr::ArcStr::from(spatial_usage.query_geometry.to_wkt()));
 
         // Apply the appropriate spatial predicate
         let predicate_result = match &spatial_usage.predicate {
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_extract_geometry_from_wkt_literal() {
-        let expr = Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("POINT(5 10)")));
+        let expr = Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(5 10)")));
         let geom = extract_geometry_from_expr(&expr).unwrap();
         assert!(geom.is_some());
         if let Some(Geometry::Point { x, y }) = geom {

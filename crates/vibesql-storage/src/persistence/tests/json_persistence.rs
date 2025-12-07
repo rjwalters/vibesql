@@ -32,21 +32,21 @@ fn test_json_roundtrip_basic() {
     table
         .insert(crate::Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
             SqlValue::Boolean(true),
         ]))
         .unwrap();
     table
         .insert(crate::Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
             SqlValue::Boolean(false),
         ]))
         .unwrap();
     table
         .insert(crate::Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -75,15 +75,15 @@ fn test_json_roundtrip_basic() {
 
     // Verify data
     assert_eq!(rows[0].values[0], SqlValue::Integer(1));
-    assert_eq!(rows[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(rows[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
     assert_eq!(rows[0].values[2], SqlValue::Boolean(true));
 
     assert_eq!(rows[1].values[0], SqlValue::Integer(2));
-    assert_eq!(rows[1].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+    assert_eq!(rows[1].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     assert_eq!(rows[1].values[2], SqlValue::Boolean(false));
 
     assert_eq!(rows[2].values[0], SqlValue::Integer(3));
-    assert_eq!(rows[2].values[1], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
+    assert_eq!(rows[2].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
     assert_eq!(rows[2].values[2], SqlValue::Null);
 
     // Cleanup
@@ -124,7 +124,7 @@ fn test_json_roundtrip_all_types() {
             SqlValue::Integer(42),
             SqlValue::Bigint(999999),
             SqlValue::Float(3.14),
-            SqlValue::Varchar(std::sync::Arc::from("test")),
+            SqlValue::Varchar(arcstr::ArcStr::from("test")),
             SqlValue::Boolean(true),
             SqlValue::Numeric(123.45),
         ]))
@@ -136,7 +136,7 @@ fn test_json_roundtrip_all_types() {
             SqlValue::Null,
             SqlValue::Null,
             SqlValue::Null,
-            SqlValue::Varchar(std::sync::Arc::from("not_null")),
+            SqlValue::Varchar(arcstr::ArcStr::from("not_null")),
             SqlValue::Boolean(false),
             SqlValue::Null,
         ]))
@@ -159,13 +159,13 @@ fn test_json_roundtrip_all_types() {
     // Verify first row data types and values
     assert_eq!(rows[0].values[0], SqlValue::Integer(42));
     assert_eq!(rows[0].values[1], SqlValue::Bigint(999999));
-    assert_eq!(rows[0].values[3], SqlValue::Varchar(std::sync::Arc::from("test")));
+    assert_eq!(rows[0].values[3], SqlValue::Varchar(arcstr::ArcStr::from("test")));
     assert_eq!(rows[0].values[4], SqlValue::Boolean(true));
     assert_eq!(rows[0].values[5], SqlValue::Numeric(123.45));
 
     // Verify second row has NULLs and non-null values
     assert_eq!(rows[1].values[0], SqlValue::Null);
-    assert_eq!(rows[1].values[3], SqlValue::Varchar(std::sync::Arc::from("not_null")));
+    assert_eq!(rows[1].values[3], SqlValue::Varchar(arcstr::ArcStr::from("not_null")));
     assert_eq!(rows[1].values[4], SqlValue::Boolean(false));
 
     // Cleanup
@@ -758,7 +758,7 @@ fn test_json_large_dataset() {
         table
             .insert(crate::Row::new(vec![
                 SqlValue::Integer(i as i64),
-                SqlValue::Varchar(std::sync::Arc::from(format!("data_value_{}", i))),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data_value_{}", i))),
                 SqlValue::Float((i as f32) * 1.5),
             ]))
             .unwrap();
@@ -794,10 +794,10 @@ fn test_json_large_dataset() {
 
     // Spot check some rows
     assert_eq!(rows[0].values[0], SqlValue::Integer(0));
-    assert_eq!(rows[0].values[1], SqlValue::Varchar(std::sync::Arc::from("data_value_0")));
+    assert_eq!(rows[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("data_value_0")));
 
     assert_eq!(rows[9999].values[0], SqlValue::Integer(9999));
-    assert_eq!(rows[9999].values[1], SqlValue::Varchar(std::sync::Arc::from("data_value_9999")));
+    assert_eq!(rows[9999].values[1], SqlValue::Varchar(arcstr::ArcStr::from("data_value_9999")));
 
     // Cleanup
     std::fs::remove_file(path).ok();

@@ -168,10 +168,10 @@ pub fn coerce_value(
             } else {
                 format!("{:width$}", s, width = length) // Pad with spaces
             };
-            Ok(SqlValue::Character(std::sync::Arc::from(s)))
+            Ok(SqlValue::Character(arcstr::ArcStr::from(s)))
         }
         (SqlValue::Character(s), DataType::Varchar { .. }) => {
-            Ok(SqlValue::Varchar(std::sync::Arc::from(s.trim_end()))) // Remove trailing spaces
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))) // Remove trailing spaces
         }
 
         // Type mismatch

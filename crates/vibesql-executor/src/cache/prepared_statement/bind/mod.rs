@@ -154,13 +154,13 @@ mod tests {
         let sql = "INSERT INTO users (id, name) VALUES (?, ?)";
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
 
-        let params = vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))];
+        let params = vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))];
         let bound = bind_parameters(&stmt, &params);
 
         if let Statement::Insert(insert) = bound {
             if let InsertSource::Values(rows) = &insert.source {
                 assert_eq!(rows[0][0], Expression::Literal(SqlValue::Integer(1)));
-                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice"))));
+                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))));
             } else {
                 panic!("Expected VALUES insert source");
             }
@@ -219,7 +219,7 @@ mod tests {
         let sql = "SELECT * FROM users WHERE id = $1 AND name = $2";
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
 
-        let params = vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))];
+        let params = vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))];
         let bound = bind_parameters(&stmt, &params);
 
         if let Statement::Select(select) = bound {
@@ -232,7 +232,7 @@ mod tests {
                 if let Expression::BinaryOp { right: right_right, .. } = right.as_ref() {
                     assert_eq!(
                         **right_right,
-                        Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice")))
+                        Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))
                     );
                 }
             } else {
@@ -251,7 +251,7 @@ mod tests {
 
         let params = vec![
             SqlValue::Integer(42),                // $1
-            SqlValue::Varchar(std::sync::Arc::from("Bob")), // $2
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")), // $2
         ];
         let bound = bind_parameters(&stmt, &params);
 
@@ -261,7 +261,7 @@ mod tests {
                 if let Expression::BinaryOp { right: left_right, .. } = left.as_ref() {
                     assert_eq!(
                         **left_right,
-                        Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Bob")))
+                        Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob")))
                     );
                 }
                 // right is: id = $1 (should be 42)
@@ -349,7 +349,7 @@ mod tests {
 
         let mut params = std::collections::HashMap::new();
         params.insert("user_id".to_string(), SqlValue::Integer(1));
-        params.insert("user_name".to_string(), SqlValue::Varchar(std::sync::Arc::from("Alice")));
+        params.insert("user_name".to_string(), SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
 
         let bound = bind_parameters_named(&stmt, &params);
 
@@ -361,7 +361,7 @@ mod tests {
                 if let Expression::BinaryOp { right: right_right, .. } = right.as_ref() {
                     assert_eq!(
                         **right_right,
-                        Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Alice")))
+                        Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))
                     );
                 }
             }

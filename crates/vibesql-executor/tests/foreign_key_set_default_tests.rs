@@ -113,8 +113,8 @@ fn test_on_delete_set_default_literal_string() {
     // Child row should now reference parent_code = 'NONE' (the default)
     let rows = get_all_rows(&db, "child");
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0], vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("A"))]);
-    assert_eq!(rows[1], vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("NONE"))]);
+    assert_eq!(rows[0], vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]);
+    assert_eq!(rows[1], vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("NONE"))]);
 }
 
 #[test]

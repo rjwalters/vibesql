@@ -98,7 +98,7 @@ pub(in crate::evaluator::functions) fn substring(
         s[start_idx..].to_string()
     };
 
-    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
+    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
 }
 
 /// LEFT(string, n) - Leftmost n characters
@@ -121,11 +121,11 @@ pub(in crate::evaluator::functions) fn left(
             vibesql_types::SqlValue::Integer(n),
         ) => {
             if *n < 0 {
-                Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")))
+                Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))
             } else {
                 let n_usize = *n as usize;
                 let result: String = s.chars().take(n_usize).collect();
-                Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
+                Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
             }
         }
         (a, b) => Err(ExecutorError::UnsupportedFeature(format!(
@@ -155,7 +155,7 @@ pub(in crate::evaluator::functions) fn right(
             vibesql_types::SqlValue::Integer(n),
         ) => {
             if *n < 0 {
-                Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from("")))
+                Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))
             } else {
                 let n_usize = *n as usize;
                 let char_count = s.chars().count();
@@ -164,7 +164,7 @@ pub(in crate::evaluator::functions) fn right(
                 } else {
                     let skip_count = char_count - n_usize;
                     let result: String = s.chars().skip(skip_count).collect();
-                    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
+                    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
                 }
             }
         }

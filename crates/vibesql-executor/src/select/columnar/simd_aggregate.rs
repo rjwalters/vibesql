@@ -536,8 +536,8 @@ mod tests {
 
         // String column (not SIMD-compatible)
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("hello"))]),
-            Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("world"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("hello"))]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("world"))]),
         ];
         let scan = ColumnarScan::new(&rows);
         assert_eq!(can_use_simd_for_column(&scan, 0), None);

@@ -38,7 +38,7 @@ pub fn format(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             };
 
             let formatted = format_number(num, decimals);
-            Ok(SqlValue::Varchar(std::sync::Arc::from(formatted)))
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         (number, decimals) => Err(ExecutorError::UnsupportedFeature(format!(
             "FORMAT requires (number, integer) arguments, got {:?} and {:?}",

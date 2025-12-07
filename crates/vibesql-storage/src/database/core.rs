@@ -361,8 +361,8 @@ impl Database {
     ///
     /// ```rust,ignore
     /// let rows = vec![
-    ///     Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
-    ///     Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+    ///     Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+    ///     Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
     /// ];
     /// let count = db.insert_rows_batch("users", rows)?;
     /// ```
@@ -497,7 +497,7 @@ impl Database {
     /// let updated = db.update_row_by_pk(
     ///     "users",
     ///     SqlValue::Integer(5),
-    ///     vec![("name", SqlValue::Varchar(std::sync::Arc::from("Alice")))],
+    ///     vec![("name", SqlValue::Varchar(arcstr::ArcStr::from("Alice")))],
     /// )?;
     /// ```
     pub fn update_row_by_pk(
@@ -1090,7 +1090,7 @@ mod tests {
         let sql_mode_var = db.get_session_variable("SQL_MODE");
         assert!(sql_mode_var.is_some());
         if let Some(SqlValue::Varchar(mode_str)) = sql_mode_var {
-            assert_eq!(mode_str.as_ref(), "SQLITE");
+            assert_eq!(mode_str.as_str(), "SQLITE");
         } else {
             panic!("Expected SQL_MODE to be a Varchar");
         }
@@ -1200,7 +1200,7 @@ mod tests {
 
         // Insert a row
         let row =
-            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
+            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         db.insert_row("users", row).unwrap();
 
         // Verify change event was emitted
@@ -1240,9 +1240,9 @@ mod tests {
 
         // Insert batch of rows
         let rows = vec![
-            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Product A"))]),
-            crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Product B"))]),
-            crate::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Product C"))]),
+            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Product A"))]),
+            crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Product B"))]),
+            crate::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Product C"))]),
         ];
         db.insert_rows_batch("products", rows).unwrap();
 
@@ -1278,7 +1278,7 @@ mod tests {
 
         // Insert a row
         let row =
-            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
+            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         db.insert_row("users", row).unwrap();
 
         // Now enable change events and update
@@ -1287,7 +1287,7 @@ mod tests {
         db.update_row_by_pk(
             "users",
             SqlValue::Integer(1),
-            vec![("name", SqlValue::Varchar(std::sync::Arc::from("Alice Smith")))],
+            vec![("name", SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")))],
         )
         .unwrap();
 
@@ -1435,8 +1435,8 @@ mod tests {
         db.create_table(schema).unwrap();
 
         // Insert rows
-        let row1 = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
-        let row2 = crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]);
+        let row1 = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row2 = crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
         db.insert_row("users", row1).unwrap();
         db.insert_row("users", row2).unwrap();
 

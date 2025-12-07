@@ -343,9 +343,9 @@ impl Table {
     ///
     /// ```rust,ignore
     /// let rows = vec![
-    ///     Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
-    ///     Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
-    ///     Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
+    ///     Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+    ///     Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+    ///     Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]),
     /// ];
     /// let count = table.insert_batch(rows)?;
     /// assert_eq!(count, 3);
@@ -1140,7 +1140,7 @@ mod tests {
     }
 
     fn create_row(id: i64, name: &str) -> Row {
-        Row::from_vec(vec![SqlValue::Integer(id), SqlValue::Varchar(std::sync::Arc::from(name))])
+        Row::from_vec(vec![SqlValue::Integer(id), SqlValue::Varchar(arcstr::ArcStr::from(name))])
     }
 
     #[test]
@@ -1301,7 +1301,7 @@ mod tests {
 
         // Try to batch insert with one invalid row (wrong column count)
         let rows = vec![
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
             Row::new(vec![SqlValue::Integer(3)]), // Invalid - missing column
         ];
 

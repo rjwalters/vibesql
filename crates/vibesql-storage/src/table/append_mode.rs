@@ -220,10 +220,10 @@ mod tests {
     fn test_string_primary_keys() {
         let mut tracker = AppendModeTracker::new();
 
-        tracker.update(&[SqlValue::Varchar(std::sync::Arc::from("Alice"))]);
-        tracker.update(&[SqlValue::Varchar(std::sync::Arc::from("Bob"))]);
-        tracker.update(&[SqlValue::Varchar(std::sync::Arc::from("Charlie"))]);
-        tracker.update(&[SqlValue::Varchar(std::sync::Arc::from("David"))]);
+        tracker.update(&[SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        tracker.update(&[SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
+        tracker.update(&[SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]);
+        tracker.update(&[SqlValue::Varchar(arcstr::ArcStr::from("David"))]);
 
         assert!(tracker.is_active());
     }

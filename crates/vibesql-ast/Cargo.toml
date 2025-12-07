@@ -14,3 +14,4 @@ vibesql-types = { version = "0.1.2", path = "../vibesql-types" }
 bumpalo = { version = "3.16", features = ["collections"] }
 
 [dev-dependencies]
+arcstr = "1.2"

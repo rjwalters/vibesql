@@ -175,10 +175,10 @@ mod tests {
     fn test_hash_join_indices_columnar_multi_with_non_integer() {
         // Build rows with string column (should fall back to None)
         let build_rows =
-            vec![Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("a")), SqlValue::Integer(10)])];
+            vec![Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("a")), SqlValue::Integer(10)])];
 
         let probe_rows =
-            vec![Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("a")), SqlValue::Integer(10)])];
+            vec![Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("a")), SqlValue::Integer(10)])];
 
         // Should return None because not all columns are integers
         let result = hash_join_indices_columnar_multi(&build_rows, &probe_rows, &[0, 1], &[0, 1]);

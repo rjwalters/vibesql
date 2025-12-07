@@ -22,7 +22,7 @@ fn test_substring_comma_syntax() {
                 if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
                     &args[0]
                 {
-                    assert_eq!(s.as_ref(), "hello");
+                    assert_eq!(s.as_str(), "hello");
                 } else {
                     panic!("Expected string literal");
                 }
@@ -91,7 +91,7 @@ fn test_substring_from_syntax() {
                 if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
                     &args[0]
                 {
-                    assert_eq!(s.as_ref(), "hello");
+                    assert_eq!(s.as_str(), "hello");
                 } else {
                     panic!("Expected string literal");
                 }
@@ -133,7 +133,7 @@ fn test_substring_from_for_syntax() {
                 if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
                     &args[0]
                 {
-                    assert_eq!(s.as_ref(), "hello");
+                    assert_eq!(s.as_str(), "hello");
                 } else {
                     panic!("Expected string literal");
                 }
@@ -236,7 +236,7 @@ fn test_trim_from_without_char() {
                 if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) =
                     string.as_ref()
                 {
-                    assert_eq!(s.as_ref(), "  foo  ");
+                    assert_eq!(s.as_str(), "  foo  ");
                 } else {
                     panic!("Expected string literal");
                 }
@@ -329,7 +329,7 @@ fn test_trim_with_char_still_works() {
                     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(c)) =
                         boxed_expr.as_ref()
                     {
-                        assert_eq!(c.as_ref(), "x");
+                        assert_eq!(c.as_str(), "x");
                     } else {
                         panic!("Expected string literal for removal char");
                     }

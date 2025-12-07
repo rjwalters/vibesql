@@ -1099,8 +1099,8 @@ fn load_region_vibesql(db: &mut VibeDB) {
     for (i, &name) in REGIONS.iter().enumerate() {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(std::sync::Arc::from(name)),
-            SqlValue::Varchar(std::sync::Arc::from("comment")),
+            SqlValue::Varchar(arcstr::ArcStr::from(name)),
+            SqlValue::Varchar(arcstr::ArcStr::from("comment")),
         ]);
         db.insert_row("REGION", row).unwrap();
     }
@@ -1146,9 +1146,9 @@ fn load_nation_vibesql(db: &mut VibeDB) {
     for (i, &(name, region_key)) in NATIONS.iter().enumerate() {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
-            SqlValue::Varchar(std::sync::Arc::from(name)),
+            SqlValue::Varchar(arcstr::ArcStr::from(name)),
             SqlValue::Integer(region_key as i64),
-            SqlValue::Varchar(std::sync::Arc::from("comment")),
+            SqlValue::Varchar(arcstr::ArcStr::from("comment")),
         ]);
         db.insert_row("NATION", row).unwrap();
     }
@@ -1191,13 +1191,13 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
         let acctbal = (i as f64 * 17.3) % 10000.0 - 999.99;
         let row = Row::new(vec![
             SqlValue::Integer(i as i64 + 1),
-            SqlValue::Varchar(std::sync::Arc::from(format!("Customer#{:09}", i + 1))),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(40))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Customer#{:09}", i + 1))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(40))),
             SqlValue::Integer(nation_key as i64),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_phone(nation_key))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_phone(nation_key))),
             SqlValue::Numeric(acctbal),
-            SqlValue::Varchar(std::sync::Arc::from(SEGMENTS[i % SEGMENTS.len()])),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(117))),
+            SqlValue::Varchar(arcstr::ArcStr::from(SEGMENTS[i % SEGMENTS.len()])),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(117))),
         ]);
         rows.push(row);
 
@@ -1269,12 +1269,12 @@ fn load_supplier_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
         let acctbal = (i as f64 * 13.7) % 10000.0 - 999.99;
         let row = Row::new(vec![
             SqlValue::Integer(i as i64 + 1),
-            SqlValue::Varchar(std::sync::Arc::from(format!("Supplier#{:09}", i + 1))),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(40))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Supplier#{:09}", i + 1))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(40))),
             SqlValue::Integer(nation_key as i64),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_phone(nation_key))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_phone(nation_key))),
             SqlValue::Numeric(acctbal),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(101))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(101))),
         ]);
         rows.push(row);
 
@@ -1347,14 +1347,14 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
         let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
         let row = Row::new(vec![
             SqlValue::Integer(i as i64 + 1),
-            SqlValue::Varchar(std::sync::Arc::from(p_name)),
-            SqlValue::Varchar(std::sync::Arc::from(format!("Manufacturer#{}", (i % 5) + 1))),
-            SqlValue::Varchar(std::sync::Arc::from(format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1))),
-            SqlValue::Varchar(std::sync::Arc::from(TYPES[i % TYPES.len()].to_string())),
+            SqlValue::Varchar(arcstr::ArcStr::from(p_name)),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Manufacturer#{}", (i % 5) + 1))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1))),
+            SqlValue::Varchar(arcstr::ArcStr::from(TYPES[i % TYPES.len()].to_string())),
             SqlValue::Integer(((i % 50) + 1) as i64),
-            SqlValue::Varchar(std::sync::Arc::from(CONTAINERS[i % CONTAINERS.len()].to_string())),
+            SqlValue::Varchar(arcstr::ArcStr::from(CONTAINERS[i % CONTAINERS.len()].to_string())),
             SqlValue::Numeric(retailprice),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(23))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(23))),
         ]);
         rows.push(row);
 
@@ -1447,7 +1447,7 @@ fn load_partsupp_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 SqlValue::Integer(supp_key as i64),
                 SqlValue::Integer(availqty as i64),
                 SqlValue::Numeric(supplycost),
-                SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(199))),
+                SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(199))),
             ]);
             rows.push(row);
 
@@ -1533,13 +1533,13 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64 + 1),
             SqlValue::Integer(cust_key as i64),
-            SqlValue::Varchar(std::sync::Arc::from(["O", "F", "P"][i % 3])),
+            SqlValue::Varchar(arcstr::ArcStr::from(["O", "F", "P"][i % 3])),
             SqlValue::Numeric(totalprice),
             SqlValue::Date(Date::from_str(&order_date).unwrap()),
-            SqlValue::Varchar(std::sync::Arc::from(PRIORITIES[i % PRIORITIES.len()].to_string())),
-            SqlValue::Varchar(std::sync::Arc::from(format!("Clerk#{:09}", (i * 7) % 1000 + 1))),
+            SqlValue::Varchar(arcstr::ArcStr::from(PRIORITIES[i % PRIORITIES.len()].to_string())),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Clerk#{:09}", (i * 7) % 1000 + 1))),
             SqlValue::Integer(0),
-            SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(79))),
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(79))),
         ]);
         rows.push(row);
 
@@ -1653,14 +1653,14 @@ fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 SqlValue::Numeric(extendedprice),
                 SqlValue::Numeric(discount),
                 SqlValue::Numeric(tax),
-                SqlValue::Varchar(std::sync::Arc::from(["N", "R", "A"][line_id % 3])),
-                SqlValue::Varchar(std::sync::Arc::from(["O", "F"][line_id % 2])),
+                SqlValue::Varchar(arcstr::ArcStr::from(["N", "R", "A"][line_id % 3])),
+                SqlValue::Varchar(arcstr::ArcStr::from(["O", "F"][line_id % 2])),
                 SqlValue::Date(Date::from_str(&ship_date).unwrap()),
                 SqlValue::Date(Date::from_str(&commit_date).unwrap()),
                 SqlValue::Date(Date::from_str(&receipt_date).unwrap()),
-                SqlValue::Varchar(std::sync::Arc::from("DELIVER IN PERSON")),
-                SqlValue::Varchar(std::sync::Arc::from(SHIP_MODES[line_id % SHIP_MODES.len()].to_string())),
-                SqlValue::Varchar(std::sync::Arc::from(data.random_varchar(44))),
+                SqlValue::Varchar(arcstr::ArcStr::from("DELIVER IN PERSON")),
+                SqlValue::Varchar(arcstr::ArcStr::from(SHIP_MODES[line_id % SHIP_MODES.len()].to_string())),
+                SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(44))),
             ]);
             rows.push(row);
 

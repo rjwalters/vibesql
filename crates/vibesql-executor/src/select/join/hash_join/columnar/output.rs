@@ -295,7 +295,7 @@ pub(crate) fn gather_column_with_nulls(
 
             for &idx in indices {
                 if idx == u32::MAX {
-                    gathered.push(std::sync::Arc::from(""));
+                    gathered.push(Arc::from(""));
                     nulls.push(true);
                 } else {
                     gathered.push(values[idx as usize].clone());
@@ -311,7 +311,7 @@ pub(crate) fn gather_column_with_nulls(
 
             for &idx in indices {
                 if idx == u32::MAX {
-                    gathered.push(std::sync::Arc::from(""));
+                    gathered.push(Arc::from(""));
                     nulls.push(true);
                 } else {
                     gathered.push(values[idx as usize].clone());

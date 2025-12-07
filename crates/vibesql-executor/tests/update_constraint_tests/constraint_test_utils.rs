@@ -138,10 +138,10 @@ pub fn insert_user_row(
     name: &str,
     email: Option<&str>,
 ) -> Result<(), vibesql_storage::StorageError> {
-    let email_value = email.map(|e| SqlValue::Varchar(std::sync::Arc::from(e))).unwrap_or(SqlValue::Null);
+    let email_value = email.map(|e| SqlValue::Varchar(arcstr::ArcStr::from(e))).unwrap_or(SqlValue::Null);
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(std::sync::Arc::from(name)), email_value]),
+        Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(arcstr::ArcStr::from(name)), email_value]),
     )
 }
 
@@ -153,7 +153,7 @@ pub fn insert_user_row_simple(
 ) -> Result<(), vibesql_storage::StorageError> {
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(std::sync::Arc::from(name))]),
+        Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(arcstr::ArcStr::from(name))]),
     )
 }
 

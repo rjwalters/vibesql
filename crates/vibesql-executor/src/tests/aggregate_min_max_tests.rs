@@ -188,7 +188,7 @@ fn test_min_max_on_strings() {
         "names",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Zebra")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Zebra")),
         ]),
     )
     .unwrap();
@@ -196,7 +196,7 @@ fn test_min_max_on_strings() {
         "names",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Apple")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Apple")),
         ]),
     )
     .unwrap();
@@ -204,7 +204,7 @@ fn test_min_max_on_strings() {
         "names",
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(3),
-            vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Mango")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Mango")),
         ]),
     )
     .unwrap();
@@ -244,7 +244,7 @@ fn test_min_max_on_strings() {
 
     let result = executor.execute(&stmt_min).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Apple")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Apple")));
 
     // Test MAX
     let stmt_max = vibesql_ast::SelectStmt {
@@ -279,5 +279,5 @@ fn test_min_max_on_strings() {
 
     let result = executor.execute(&stmt_max).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("Zebra")));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Zebra")));
 }

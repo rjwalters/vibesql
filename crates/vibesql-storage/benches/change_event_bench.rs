@@ -22,7 +22,7 @@ use vibesql_types::{DataType, SqlValue};
 fn make_row(id: i64) -> Row {
     Row::new(vec![
         SqlValue::Integer(id),
-        SqlValue::Varchar(std::sync::Arc::from(format!("name_{}", id))),
+        SqlValue::Varchar(arcstr::ArcStr::from(format!("name_{}", id))),
         SqlValue::Double((id as f64) * 100.0),
     ])
 }

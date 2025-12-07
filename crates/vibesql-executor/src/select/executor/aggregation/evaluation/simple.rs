@@ -262,7 +262,7 @@ pub(super) fn evaluate(
             let removal_val = if let Some(rc) = removal_char {
                 executor.evaluate_with_aggregates(rc, group_rows, group_key, evaluator)?
             } else {
-                vibesql_types::SqlValue::Varchar(std::sync::Arc::from(" "))
+                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(" "))
             };
 
             // Delegate to standard evaluator logic
@@ -282,7 +282,7 @@ pub(super) fn evaluate(
                             s.trim_start_matches(&**rem).trim_end_matches(&**rem)
                         }
                     };
-                    Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(trimmed)))
+                    Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(trimmed)))
                 }
                 _ => Err(ExecutorError::TypeMismatch {
                     left: string_val,

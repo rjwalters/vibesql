@@ -317,7 +317,7 @@ impl ColumnArray {
                 }
                 values
                     .get(index)
-                    .map(|v| SqlValue::Varchar(v.clone()))
+                    .map(|v| SqlValue::Varchar(arcstr::ArcStr::from(v.as_ref())))
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
@@ -369,7 +369,7 @@ impl ColumnArray {
                 }
                 values
                     .get(index)
-                    .map(|v| SqlValue::Character(v.clone()))
+                    .map(|v| SqlValue::Character(arcstr::ArcStr::from(v.as_ref())))
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
 
@@ -551,11 +551,11 @@ mod tests {
     fn test_deduplicate_with_duplicates() {
         // Create batch with duplicate rows
         let rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("A"))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("B"))]),
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("A"))]), // duplicate
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("C"))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("B"))]), // duplicate
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("B"))]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]), // duplicate
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("C"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("B"))]), // duplicate
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -567,11 +567,11 @@ mod tests {
         // Verify the first occurrences are kept in order
         let result_rows = deduped.to_rows().unwrap();
         assert_eq!(result_rows[0].get(0), Some(&SqlValue::Integer(1)));
-        assert_eq!(result_rows[0].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("A"))));
+        assert_eq!(result_rows[0].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("A"))));
         assert_eq!(result_rows[1].get(0), Some(&SqlValue::Integer(2)));
-        assert_eq!(result_rows[1].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("B"))));
+        assert_eq!(result_rows[1].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("B"))));
         assert_eq!(result_rows[2].get(0), Some(&SqlValue::Integer(3)));
-        assert_eq!(result_rows[2].get(1), Some(&SqlValue::Varchar(std::sync::Arc::from("C"))));
+        assert_eq!(result_rows[2].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("C"))));
     }
 
     #[test]
@@ -593,9 +593,9 @@ mod tests {
     fn test_deduplicate_with_nulls() {
         // Test NULL handling: NULL == NULL for DISTINCT purposes
         let rows = vec![
-            Row::new(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("A"))]),
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("B"))]),
-            Row::new(vec![SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("A"))]), // duplicate
+            Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("A"))]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("B"))]),
+            Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("A"))]), // duplicate
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -614,10 +614,10 @@ mod tests {
     #[test]
     fn test_select_rows() {
         let rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("A"))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("B"))]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("C"))]),
-            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("D"))]),
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("B"))]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("C"))]),
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from("D"))]),
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();

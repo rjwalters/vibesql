@@ -51,7 +51,7 @@ fn test_compile_when_equals_then_column() {
     // CASE WHEN day_name = 'Sunday' THEN sales_price ELSE NULL END
     let expr = create_simple_case_expression(
         "day_name",
-        SqlValue::Varchar(std::sync::Arc::from("Sunday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Sunday")),
         "sales_price",
     );
 
@@ -65,7 +65,7 @@ fn test_compile_when_equals_then_column() {
             result_col_idx,
         } => {
             assert_eq!(condition_col_idx, 0, "day_name is at index 0");
-            assert_eq!(condition_value, SqlValue::Varchar(std::sync::Arc::from("Sunday")));
+            assert_eq!(condition_value, SqlValue::Varchar(arcstr::ArcStr::from("Sunday")));
             assert_eq!(result_col_idx, 1, "sales_price is at index 1");
         }
         _ => panic!("Expected WhenEqualsThenColumn variant"),
@@ -86,7 +86,7 @@ fn test_compile_when_equals_then_literal() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
             }],
             result: Expression::Literal(SqlValue::Integer(1)),
         }],
@@ -103,7 +103,7 @@ fn test_compile_when_equals_then_literal() {
             result_value,
         } => {
             assert_eq!(condition_col_idx, 0);
-            assert_eq!(condition_value, SqlValue::Varchar(std::sync::Arc::from("Sunday")));
+            assert_eq!(condition_value, SqlValue::Varchar(arcstr::ArcStr::from("Sunday")));
             assert_eq!(result_value, SqlValue::Integer(1));
         }
         _ => panic!("Expected WhenEqualsThenLiteral variant"),
@@ -115,7 +115,7 @@ fn test_evaluate_when_condition_matches() {
     let schema = create_test_schema();
     let expr = create_simple_case_expression(
         "day_name",
-        SqlValue::Varchar(std::sync::Arc::from("Sunday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Sunday")),
         "sales_price",
     );
 
@@ -123,7 +123,7 @@ fn test_evaluate_when_condition_matches() {
 
     // Row where day_name = 'Sunday', sales_price = 9999
     let row = Row::new(vec![
-        SqlValue::Varchar(std::sync::Arc::from("Sunday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Sunday")),
         SqlValue::Integer(9999),
         SqlValue::Integer(10),
     ]);
@@ -137,7 +137,7 @@ fn test_evaluate_when_condition_does_not_match() {
     let schema = create_test_schema();
     let expr = create_simple_case_expression(
         "day_name",
-        SqlValue::Varchar(std::sync::Arc::from("Sunday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Sunday")),
         "sales_price",
     );
 
@@ -145,7 +145,7 @@ fn test_evaluate_when_condition_does_not_match() {
 
     // Row where day_name = 'Monday' (not Sunday)
     let row = Row::new(vec![
-        SqlValue::Varchar(std::sync::Arc::from("Monday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Monday")),
         SqlValue::Integer(9999),
         SqlValue::Integer(10),
     ]);
@@ -168,7 +168,7 @@ fn test_evaluate_literal_result() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
             }],
             result: Expression::Literal(SqlValue::Integer(1)),
         }],
@@ -179,7 +179,7 @@ fn test_evaluate_literal_result() {
 
     // Row where day_name = 'Sunday'
     let row_match = Row::new(vec![
-        SqlValue::Varchar(std::sync::Arc::from("Sunday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Sunday")),
         SqlValue::Null,
         SqlValue::Integer(10),
     ]);
@@ -187,7 +187,7 @@ fn test_evaluate_literal_result() {
 
     // Row where day_name = 'Monday'
     let row_no_match = Row::new(vec![
-        SqlValue::Varchar(std::sync::Arc::from("Monday")),
+        SqlValue::Varchar(arcstr::ArcStr::from("Monday")),
         SqlValue::Null,
         SqlValue::Integer(10),
     ]);
@@ -205,7 +205,7 @@ fn test_does_not_compile_simple_case_with_operand() {
             column: "day_name".to_string(),
         })),
         when_clauses: vec![CaseWhen {
-            conditions: vec![Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))],
+            conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))],
             result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: None,
@@ -230,7 +230,7 @@ fn test_does_not_compile_multiple_when_clauses() {
                         column: "day_name".to_string(),
                     }),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
                 }],
                 result: Expression::Literal(SqlValue::Integer(1)),
             },
@@ -241,7 +241,7 @@ fn test_does_not_compile_multiple_when_clauses() {
                         column: "day_name".to_string(),
                     }),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Monday")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Monday")))),
                 }],
                 result: Expression::Literal(SqlValue::Integer(2)),
             },
@@ -267,7 +267,7 @@ fn test_does_not_compile_non_null_else() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
             }],
             result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
@@ -317,7 +317,7 @@ fn test_does_not_compile_complex_result() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
             }],
             result: Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
@@ -349,7 +349,7 @@ fn test_compiles_with_absent_else() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
             }],
             result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
@@ -369,7 +369,7 @@ fn test_literal_on_left_side_of_equality() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::Literal(SqlValue::Varchar(std::sync::Arc::from("Sunday")))),
+                left: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::ColumnRef {
                     table: None,

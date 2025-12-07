@@ -163,7 +163,7 @@ impl ColumnData {
         match self {
             ColumnData::Int64 { values, .. } => SqlValue::Integer(values[index]),
             ColumnData::Float64 { values, .. } => SqlValue::Double(values[index]),
-            ColumnData::String { values, .. } => SqlValue::Varchar(values[index].clone()),
+            ColumnData::String { values, .. } => SqlValue::Varchar(arcstr::ArcStr::from(values[index].as_ref())),
             ColumnData::Bool { values, .. } => SqlValue::Boolean(values[index]),
             ColumnData::Date { values, .. } => SqlValue::Date(values[index]),
             ColumnData::Time { values, .. } => SqlValue::Time(values[index]),

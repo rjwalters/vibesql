@@ -41,11 +41,11 @@ fn test_st_union_polygons() {
         vec![
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
             ),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))")))],
             ),
         ],
     );
@@ -69,7 +69,7 @@ fn test_st_union_null_handling() {
         vec![
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
             ),
             literal(SqlValue::Null),
         ],
@@ -87,11 +87,11 @@ fn test_st_intersection_overlapping_polygons() {
         vec![
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
             ),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))")))],
             ),
         ],
     );
@@ -113,7 +113,7 @@ fn test_st_intersection_null_handling() {
             literal(SqlValue::Null),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
             ),
         ],
     );
@@ -132,11 +132,11 @@ fn test_st_difference_polygons() {
             vec![
                 function_call(
                     "ST_GEOMFROMTEXT",
-                    vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
+                    vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
                 ),
                 function_call(
                     "ST_GEOMFROMTEXT",
-                    vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))")))],
+                    vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))")))],
                 ),
             ],
         )],
@@ -162,7 +162,7 @@ fn test_st_difference_null_handling() {
         vec![
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
             ),
             literal(SqlValue::Null),
         ],
@@ -182,11 +182,11 @@ fn test_st_symdifference_polygons() {
             vec![
                 function_call(
                     "ST_GEOMFROMTEXT",
-                    vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
+                    vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
                 ),
                 function_call(
                     "ST_GEOMFROMTEXT",
-                    vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))")))],
+                    vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))")))],
                 ),
             ],
         )],
@@ -209,7 +209,7 @@ fn test_st_symdifference_null_handling() {
             literal(SqlValue::Null),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")))],
             ),
         ],
     );
@@ -227,7 +227,7 @@ fn test_st_boundary_polygon() {
             "ST_BOUNDARY",
             vec![function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))")))],
             )],
         )],
     );
@@ -254,7 +254,7 @@ fn test_st_boundary_linestring() {
             "ST_BOUNDARY",
             vec![function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("LINESTRING(0 0, 1 1, 2 0)")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 1, 2 0)")))],
             )],
         )],
     );
@@ -288,11 +288,11 @@ fn test_st_hausdorff_distance_points() {
         vec![
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POINT(0 0)")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(0 0)")))],
             ),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POINT(3 4)")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(3 4)")))],
             ),
         ],
     );
@@ -315,7 +315,7 @@ fn test_st_hausdorff_distance_null_handling() {
             literal(SqlValue::Null),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POINT(0 0)")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(0 0)")))],
             ),
         ],
     );
@@ -332,11 +332,11 @@ fn test_st_hausdorff_distance_same_geometry() {
         vec![
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
             ),
             function_call(
                 "ST_GEOMFROMTEXT",
-                vec![literal(SqlValue::Varchar(std::sync::Arc::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
+                vec![literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))")))],
             ),
         ],
     );

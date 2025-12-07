@@ -163,7 +163,7 @@ pub fn json_to_sql_value(val: &JsonValue) -> Result<SqlValue, String> {
                 Err("Invalid number".to_string())
             }
         }
-        JsonValue::String(s) => Ok(SqlValue::Varchar(std::sync::Arc::from(s.clone()))),
+        JsonValue::String(s) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.clone()))),
         JsonValue::Array(_) => Err("Arrays not yet supported".to_string()),
         JsonValue::Object(_) => Err("Objects not yet supported".to_string()),
     }

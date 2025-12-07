@@ -91,12 +91,12 @@ mod tests {
             Row::new(vec![
                 SqlValue::Integer(1),
                 SqlValue::Double(10.5),
-                SqlValue::Varchar(std::sync::Arc::from("A")),
+                SqlValue::Varchar(arcstr::ArcStr::from("A")),
             ]),
             Row::new(vec![
                 SqlValue::Integer(2),
                 SqlValue::Double(20.5),
-                SqlValue::Varchar(std::sync::Arc::from("B")),
+                SqlValue::Varchar(arcstr::ArcStr::from("B")),
             ]),
         ];
 

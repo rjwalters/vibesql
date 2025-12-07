@@ -236,7 +236,7 @@ impl ExpressionEvaluator<'_> {
             }
         };
 
-        Ok(vibesql_types::SqlValue::Varchar(std::sync::Arc::from(result)))
+        Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
     }
 
     /// Evaluate EXTRACT expression

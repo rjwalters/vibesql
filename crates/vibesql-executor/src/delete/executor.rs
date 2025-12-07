@@ -52,12 +52,12 @@ impl DeleteExecutor {
     /// // Insert rows
     /// db.insert_row(
     ///     "users",
-    ///     vibesql_storage::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+    ///     vibesql_storage::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     /// )
     /// .unwrap();
     /// db.insert_row(
     ///     "users",
-    ///     vibesql_storage::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+    ///     vibesql_storage::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
     /// )
     /// .unwrap();
     ///

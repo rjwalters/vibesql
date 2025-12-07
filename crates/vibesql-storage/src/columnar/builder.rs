@@ -151,13 +151,15 @@ impl ColumnBuilder {
             // String handling - use interner for deduplication
             (ColumnTypeClass::String, SqlValue::Varchar(v)) => {
                 // Use intern_arc to potentially deduplicate the string
-                let interned = self.string_interner.intern_arc(v.clone());
+                // Convert ArcStr to Arc<str> for the interner
+                let interned = self.string_interner.intern_arc(Arc::from(v.as_str()));
                 self.string_values.push(interned);
                 self.nulls.push(false);
             }
             (ColumnTypeClass::String, SqlValue::Character(v)) => {
                 // Use intern_arc to potentially deduplicate the string
-                let interned = self.string_interner.intern_arc(v.clone());
+                // Convert ArcStr to Arc<str> for the interner
+                let interned = self.string_interner.intern_arc(Arc::from(v.as_str()));
                 self.string_values.push(interned);
                 self.nulls.push(false);
             }

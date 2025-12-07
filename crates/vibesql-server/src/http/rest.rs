@@ -680,7 +680,7 @@ async fn subscribe_stream(
             let val = if let Ok(i) = s.trim().parse::<i64>() {
                 SqlValue::Integer(i)
             } else {
-                SqlValue::Varchar(std::sync::Arc::from(s.trim()))
+                SqlValue::Varchar(arcstr::ArcStr::from(s.trim()))
             };
             values.push(val);
         }
