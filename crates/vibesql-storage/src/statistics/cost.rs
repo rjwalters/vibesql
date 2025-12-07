@@ -186,7 +186,7 @@ pub fn estimate_type_size(data_type: &DataType) -> usize {
         DataType::BinaryLargeObject => 128, // BLOB: heuristic average
         DataType::Bit { length } => {
             match length {
-                Some(len) => (*len + 7) / 8, // Convert bits to bytes
+                Some(len) => (*len).div_ceil(8), // Convert bits to bytes
                 None => 1, // Default BIT(1)
             }
         }
@@ -1013,8 +1013,8 @@ mod tests {
     fn test_wal_cost_dominant_in_delete() {
         // Per profiling (#3862), WAL is 56% of DELETE time
         let estimator = CostEstimator::default();
-        let table_stats = create_test_table_stats(1000);
-        let index_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
+        let _table_stats = create_test_table_stats(1000);
+        let _index_info = TableIndexInfo::new(1, 0, false, 0.0, 64);
 
         // Calculate components
         let rows = 100.0;
