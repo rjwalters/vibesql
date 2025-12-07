@@ -15,7 +15,9 @@ import { encodeSubscribe, encodeUnsubscribe } from '../protocol/encoder';
 import {
   SubscriptionDataMessage,
   SubscriptionErrorMessage,
+  SubscriptionPartialDataMessage,
   QueryRow,
+  ColumnDescription,
 } from '../protocol/messages';
 
 /**
@@ -28,6 +30,8 @@ interface ActiveSubscription<T> {
   callbacks: SubscriptionCallbacks<T>;
   currentRows?: T[];
   previousRows?: T[];
+  columns?: ColumnDescription[];
+  cachedRowValues?: Map<number, (any | null)[]>;
 }
 
 /**
@@ -46,6 +50,13 @@ export class SubscriptionManager {
     this.connection.on('subscriptionError', (msg: SubscriptionErrorMessage) => {
       this.handleSubscriptionError(msg);
     });
+
+    this.connection.on(
+      'subscriptionPartialData',
+      (msg: SubscriptionPartialDataMessage) => {
+        this.handleSubscriptionPartialData(msg);
+      }
+    );
   }
 
   /**
@@ -174,12 +185,29 @@ export class SubscriptionManager {
     }
 
     try {
+      // Store column metadata if provided
+      if (msg.columns) {
+        subscription.columns = msg.columns;
+      }
+
       // Parse rows
       const newRows = msg.rows as any[];
 
       if (msg.updateType === 'full') {
         // Full result set
         subscription.currentRows = newRows;
+
+        // Initialize cached row values for partial updates
+        subscription.cachedRowValues = new Map();
+        if (subscription.columns) {
+          for (let i = 0; i < newRows.length; i++) {
+            const rowValues = subscription.columns.map(
+              col => newRows[i][col.name]
+            );
+            subscription.cachedRowValues.set(i, rowValues);
+          }
+        }
+
         subscription.callbacks.onData(newRows);
       } else if (msg.updateType === 'delta_insert') {
         // Incremental insert
@@ -263,6 +291,95 @@ export class SubscriptionManager {
 
     if (subscription.callbacks.onError) {
       subscription.callbacks.onError(new SubscriptionError(msg.error));
+    }
+  }
+
+  /**
+   * Handle subscription partial data message (selective column updates)
+   * Merges partial row updates with cached state to reconstruct full rows
+   */
+  private handleSubscriptionPartialData(
+    msg: SubscriptionPartialDataMessage
+  ): void {
+    const subscriptionKey = msg.subscriptionId.toString('hex');
+    const subscription = this.subscriptions.get(subscriptionKey);
+
+    if (!subscription) {
+      console.warn(
+        `Received partial data for unknown subscription: ${subscriptionKey}`
+      );
+      return;
+    }
+
+    try {
+      // Ensure we have cached state to merge with
+      if (!subscription.cachedRowValues) {
+        subscription.cachedRowValues = new Map();
+      }
+
+      if (!subscription.columns) {
+        console.warn(
+          `Received partial data without column metadata for subscription: ${subscriptionKey}`
+        );
+        return;
+      }
+
+      if (!subscription.currentRows) {
+        subscription.currentRows = [];
+      }
+
+      // Process each partial row
+      for (let rowIndex = 0; rowIndex < msg.rows.length; rowIndex++) {
+        const partialRow = msg.rows[rowIndex];
+
+        // Get or initialize cached values for this row
+        let cachedValues = subscription.cachedRowValues.get(rowIndex);
+        if (!cachedValues) {
+          // Initialize with nulls if this is the first update for this row
+          cachedValues = new Array(partialRow.totalColumns).fill(null);
+          subscription.cachedRowValues.set(rowIndex, cachedValues);
+        }
+
+        // Apply partial updates to cached values
+        for (let i = 0; i < partialRow.presentColumns.length; i++) {
+          const colIndex = partialRow.presentColumns[i];
+          cachedValues[colIndex] = partialRow.values[i];
+        }
+
+        // Reconstruct full row object from cached values
+        const fullRow: QueryRow = {};
+        for (let i = 0; i < subscription.columns.length; i++) {
+          const column = subscription.columns[i];
+          fullRow[column.name] = cachedValues[i];
+        }
+
+        // Store old row for delta notification
+        const oldRow =
+          subscription.currentRows[rowIndex] !== undefined
+            ? { ...subscription.currentRows[rowIndex] }
+            : undefined;
+
+        // Update current rows
+        subscription.currentRows[rowIndex] = fullRow;
+
+        // Emit delta callback if registered
+        if (subscription.callbacks.onDelta && oldRow) {
+          subscription.callbacks.onDelta({
+            type: 'update',
+            oldRow,
+            newRow: fullRow,
+          });
+        }
+      }
+
+      // Emit full data callback with updated rows
+      subscription.callbacks.onData(subscription.currentRows);
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : String(error);
+      if (subscription.callbacks.onError) {
+        subscription.callbacks.onError(new SubscriptionError(errorMsg));
+      }
     }
   }
 
