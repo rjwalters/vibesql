@@ -120,7 +120,7 @@ export class Connection extends EventEmitter {
         return [];
       }
 
-      const queryResult = this.currentQuery;
+      const queryResult = this.currentQuery as QueryResult;  // Type assertion after null check
       return queryResult.rows.map((row: QueryRow) =>
         this.parseRow<T>(row, queryResult.columns)
       );
