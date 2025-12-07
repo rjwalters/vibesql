@@ -453,6 +453,7 @@ async fn test_multiple_subscribers_same_query() {
         .expect("Failed to insert data");
 
     // Both clients should receive update notification
+    // Client1 receives the response directly (same-connection notification)
     let data1 = client1
         .read_until_message_type(MSG_READY_FOR_QUERY)
         .await
@@ -460,15 +461,21 @@ async fn test_multiple_subscribers_same_query() {
     let messages1 = parse_backend_messages(&data1);
     let has_update1 = messages1.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
 
+    // Client2 receives a cross-connection notification, which requires the server
+    // to poll and process the broadcast. Use a longer timeout (10s) to handle
+    // high-load scenarios where polling may be delayed.
     let data2 = client2
-        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .read_until_message_type_timeout(
+            MSG_SUBSCRIPTION_DATA,
+            std::time::Duration::from_secs(10),
+        )
         .await
-        .expect("Failed to read after insert");
+        .expect("Failed to read cross-connection notification");
     let messages2 = parse_backend_messages(&data2);
     let has_update2 = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
 
     assert!(has_update1, "Client1 should receive SubscriptionData update");
-    assert!(has_update2, "Client2 should receive SubscriptionData update");
+    assert!(has_update2, "Client2 should receive SubscriptionData update (cross-connection)");
 
     client1.send_terminate().await.expect("Failed to send terminate");
     client2.send_terminate().await.expect("Failed to send terminate");
