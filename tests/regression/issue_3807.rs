@@ -25,7 +25,7 @@ fn execute(db: &mut Database, sql: &str) -> Result<Vec<Vec<SqlValue>>, String> {
         vibesql_ast::Statement::Select(select_stmt) => {
             let executor = SelectExecutor::new(db);
             let rows = executor.execute(&select_stmt).map_err(|e| format!("Execution error: {}", e))?;
-            Ok(rows.into_iter().map(|r| r.values).collect())
+            Ok(rows.into_iter().map(|r| r.values.into_vec()).collect())
         }
         vibesql_ast::Statement::CreateTable(create_stmt) => {
             CreateTableExecutor::execute(&create_stmt, db)

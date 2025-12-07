@@ -32,7 +32,8 @@ fn create_populated_table(db: &mut Database) {
             SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(30),
             SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
-        ],
+        ]
+        .into(),
     };
     table.insert(row1).expect("Failed to insert row");
 
@@ -42,7 +43,8 @@ fn create_populated_table(db: &mut Database) {
             SqlValue::Varchar(std::sync::Arc::from("Bob")),
             SqlValue::Integer(25),
             SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
-        ],
+        ]
+        .into(),
     };
     table.insert(row2).expect("Failed to insert row");
 }
@@ -285,7 +287,8 @@ fn test_set_not_null_with_nulls_error() {
             SqlValue::Varchar(std::sync::Arc::from("Alice")),
             SqlValue::Integer(30),
             SqlValue::Null, // NULL email
-        ],
+        ]
+        .into(),
     };
     table.insert(row).expect("Failed to insert row");
 
