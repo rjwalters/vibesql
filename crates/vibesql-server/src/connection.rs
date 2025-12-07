@@ -315,8 +315,15 @@ impl ConnectionHandler {
                 match self.handle_client_message(msg).await? {
                     ClientMessageResult::Continue => {}
                     ClientMessageResult::Terminate => {
-                        self.subscription_manager
+                        let (_total, selective_eligible) = self.subscription_manager
                             .unsubscribe_all_for_connection(&self.connection_id);
+                        if selective_eligible > 0 {
+                            if let Some(metrics) = self.observability.metrics() {
+                                for _ in 0..selective_eligible {
+                                    metrics.decrement_selective_eligible();
+                                }
+                            }
+                        }
                         return Ok(());
                     }
                 }
@@ -368,8 +375,15 @@ impl ConnectionHandler {
         }
 
         // Clean up subscriptions when connection closes
-        self.subscription_manager
+        let (_total, selective_eligible) = self.subscription_manager
             .unsubscribe_all_for_connection(&self.connection_id);
+        if selective_eligible > 0 {
+            if let Some(metrics) = self.observability.metrics() {
+                for _ in 0..selective_eligible {
+                    metrics.decrement_selective_eligible();
+                }
+            }
+        }
 
         Ok(())
     }
@@ -391,7 +405,12 @@ impl ConnectionHandler {
 
             FrontendMessage::Unsubscribe { subscription_id } => {
                 debug!("Unsubscribe: {:?}", subscription_id);
-                self.subscription_manager.unsubscribe_by_wire_id(&subscription_id);
+                let was_selective_eligible = self.subscription_manager.unsubscribe_by_wire_id(&subscription_id);
+                if was_selective_eligible {
+                    if let Some(metrics) = self.observability.metrics() {
+                        metrics.decrement_selective_eligible();
+                    }
+                }
                 // No response needed per protocol spec
                 Ok(ClientMessageResult::Continue)
             }
@@ -800,10 +819,17 @@ impl ConnectionHandler {
         }
 
         // Store detected PK columns in the subscription for selective updates
-        self.subscription_manager.update_pk_columns_by_wire_id(
+        // Track selective-eligible subscriptions in metrics
+        let newly_eligible = self.subscription_manager.update_pk_columns_with_eligibility_by_wire_id(
             &wire_subscription_id,
             pk_detection.pk_column_indices.clone(),
+            pk_detection.confident,
         );
+        if newly_eligible {
+            if let Some(metrics) = self.observability.metrics() {
+                metrics.increment_selective_eligible();
+            }
+        }
 
         // Execute the query to get initial data
         match session.execute(query).await {
@@ -850,7 +876,12 @@ impl ConnectionHandler {
             }
             Ok(_) => {
                 // Non-SELECT query - send error and remove subscription
-                self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                let was_selective_eligible = self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                if was_selective_eligible {
+                    if let Some(metrics) = self.observability.metrics() {
+                        metrics.decrement_selective_eligible();
+                    }
+                }
                 self.send_subscription_error(
                     &wire_subscription_id,
                     "Only SELECT queries can be subscribed to",
@@ -859,7 +890,12 @@ impl ConnectionHandler {
             }
             Err(e) => {
                 // Query execution failed - remove subscription and send error
-                self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                let was_selective_eligible = self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                if was_selective_eligible {
+                    if let Some(metrics) = self.observability.metrics() {
+                        metrics.decrement_selective_eligible();
+                    }
+                }
                 self.send_subscription_error(&wire_subscription_id, &format!("Execution error: {}", e))
                     .await?;
             }

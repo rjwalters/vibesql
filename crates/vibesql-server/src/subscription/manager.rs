@@ -324,9 +324,15 @@ impl SubscriptionManager {
     /// # Arguments
     ///
     /// * `id` - The subscription ID to remove
-    pub fn unsubscribe(&self, id: SubscriptionId) {
+    ///
+    /// # Returns
+    ///
+    /// `true` if the removed subscription was selective-eligible, `false` otherwise
+    pub fn unsubscribe(&self, id: SubscriptionId) -> bool {
         if let Some((_, subscription)) = self.subscriptions.remove(&id) {
             debug!(subscription_id = %id, "Removing subscription");
+
+            let was_selective_eligible = subscription.selective_eligible;
 
             // Decrement the atomic counter
             self.subscription_count_atomic.fetch_sub(1, Ordering::Release);
@@ -353,7 +359,10 @@ impl SubscriptionManager {
             if let Some(wire_id) = subscription.wire_subscription_id {
                 self.wire_id_index.remove(&wire_id);
             }
+
+            return was_selective_eligible;
         }
+        false
     }
 
     /// Remove a subscription by its wire protocol ID
@@ -366,11 +375,11 @@ impl SubscriptionManager {
     ///
     /// # Returns
     ///
-    /// `true` if the subscription was found and removed, `false` otherwise
+    /// `true` if the removed subscription was selective-eligible, `false` otherwise.
+    /// Returns `false` if the subscription was not found.
     pub fn unsubscribe_by_wire_id(&self, wire_id: &[u8; 16]) -> bool {
         if let Some((_, id)) = self.wire_id_index.remove(wire_id) {
-            self.unsubscribe(id);
-            true
+            self.unsubscribe(id)
         } else {
             false
         }
@@ -387,14 +396,14 @@ impl SubscriptionManager {
     ///
     /// # Returns
     ///
-    /// Number of subscriptions removed
-    pub fn unsubscribe_all_for_connection(&self, connection_id: &str) -> usize {
+    /// A tuple of (total_removed, selective_eligible_removed)
+    pub fn unsubscribe_all_for_connection(&self, connection_id: &str) -> (usize, usize) {
         let subscription_ids: Vec<SubscriptionId> = if let Some((_, ids)) =
             self.connection_index.remove(connection_id)
         {
             ids.into_iter().collect()
         } else {
-            return 0;
+            return (0, 0);
         };
 
         let count = subscription_ids.len();
@@ -404,16 +413,19 @@ impl SubscriptionManager {
             "Removing all subscriptions for connection"
         );
 
+        let mut selective_eligible_count = 0;
         for id in subscription_ids {
             // Note: unsubscribe will try to remove from connection_index again,
             // but it will be a no-op since we already removed it
-            self.unsubscribe(id);
+            if self.unsubscribe(id) {
+                selective_eligible_count += 1;
+            }
         }
 
         // Clean up the per-connection count entry
         self.connection_subscription_counts.remove(connection_id);
 
-        count
+        (count, selective_eligible_count)
     }
 
     /// Find a subscription by its wire protocol ID
@@ -563,6 +575,26 @@ impl SubscriptionManager {
                 sub.pk_columns = pk_columns;
             }
         }
+    }
+
+    /// Update PK columns with eligibility tracking
+    ///
+    /// Sets the PK columns and marks whether the subscription is eligible
+    /// for selective column updates (based on confident PK detection).
+    ///
+    /// Returns `true` if the subscription is newly marked as selective-eligible.
+    pub fn update_pk_columns_with_eligibility_by_wire_id(
+        &self,
+        wire_id: &[u8; 16],
+        pk_columns: Vec<usize>,
+        confident: bool,
+    ) -> bool {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                return sub.set_pk_columns_with_eligibility(pk_columns, confident);
+            }
+        }
+        false
     }
 
     /// Get the primary key columns for a subscription by wire ID

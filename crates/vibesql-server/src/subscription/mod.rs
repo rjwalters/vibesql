@@ -335,6 +335,9 @@ pub struct Subscription {
     /// Used for selective column updates to always include PK columns
     /// Default: [0] (assumes first column is PK if not detected)
     pub pk_columns: Vec<usize>,
+    /// Whether this subscription is eligible for selective column updates
+    /// True when PK columns were confidently detected
+    pub selective_eligible: bool,
 }
 
 impl Subscription {
@@ -371,6 +374,7 @@ impl Subscription {
             wire_subscription_id: None,
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
+            selective_eligible: false,
         }
     }
 
@@ -398,6 +402,7 @@ impl Subscription {
             wire_subscription_id: None,
             filter: None,
             pk_columns: vec![0], // default: assume first column is PK
+            selective_eligible: false,
         }
     }
 
@@ -458,6 +463,7 @@ impl Subscription {
             wire_subscription_id: Some(wire_subscription_id),
             filter,
             pk_columns,
+            selective_eligible: false,
         }
     }
 
@@ -466,6 +472,22 @@ impl Subscription {
     /// Used after detection to update the subscription with actual PK columns.
     pub fn set_pk_columns(&mut self, pk_columns: Vec<usize>) {
         self.pk_columns = pk_columns;
+    }
+
+    /// Set both PK columns and selective eligibility
+    ///
+    /// Used after PK detection to update the subscription.
+    /// Returns true if the subscription is newly marked as selective-eligible.
+    pub fn set_pk_columns_with_eligibility(
+        &mut self,
+        pk_columns: Vec<usize>,
+        confident: bool,
+    ) -> bool {
+        self.pk_columns = pk_columns;
+        let was_eligible = self.selective_eligible;
+        self.selective_eligible = confident;
+        // Return true if newly eligible (wasn't before, is now)
+        !was_eligible && confident
     }
 }
 
