@@ -217,35 +217,39 @@ impl UpdateExecutor {
         // Estimate DML cost for query analysis and optimization decisions
         if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {
             if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
-                if let Some(table_stats) = table.get_statistics() {
-                    // Estimate the ratio of indexes affected based on columns being updated
-                    // This is a heuristic: assume columns are distributed evenly across indexes
-                    let total_columns = schema.columns.len();
-                    let changed_columns = stmt.assignments.len();
-                    let indexes_affected_ratio = if total_columns > 0 {
-                        (changed_columns as f64 / total_columns as f64).min(1.0)
-                    } else {
-                        1.0 // Conservative estimate if no columns
-                    };
+                // Get table statistics for cost estimation (use cached if available, or fallback to estimate)
+                let table_stats = table
+                    .get_statistics()
+                    .cloned()
+                    .unwrap_or_else(|| vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count()));
 
-                    let cost_estimator = CostEstimator::default();
-                    let estimated_cost = cost_estimator.estimate_update(
-                        candidate_rows.len(),
-                        table_stats,
-                        &index_info,
-                        indexes_affected_ratio,
-                    );
-                    eprintln!(
-                        "DML_COST_DEBUG: UPDATE {} rows in {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {}, affected_ratio: {:.2})",
-                        candidate_rows.len(),
-                        stmt.table_name,
-                        estimated_cost,
-                        index_info.hash_index_count,
-                        index_info.btree_index_count,
-                        index_info.is_native_columnar,
-                        indexes_affected_ratio
-                    );
-                }
+                // Estimate the ratio of indexes affected based on columns being updated
+                // This is a heuristic: assume columns are distributed evenly across indexes
+                let total_columns = schema.columns.len();
+                let changed_columns = stmt.assignments.len();
+                let indexes_affected_ratio = if total_columns > 0 {
+                    (changed_columns as f64 / total_columns as f64).min(1.0)
+                } else {
+                    1.0 // Conservative estimate if no columns
+                };
+
+                let cost_estimator = CostEstimator::default();
+                let estimated_cost = cost_estimator.estimate_update(
+                    candidate_rows.len(),
+                    &table_stats,
+                    &index_info,
+                    indexes_affected_ratio,
+                );
+                eprintln!(
+                    "DML_COST_DEBUG: UPDATE {} rows in {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {}, affected_ratio: {:.2})",
+                    candidate_rows.len(),
+                    stmt.table_name,
+                    estimated_cost,
+                    index_info.hash_index_count,
+                    index_info.btree_index_count,
+                    index_info.is_native_columnar,
+                    indexes_affected_ratio
+                );
             }
         }
 

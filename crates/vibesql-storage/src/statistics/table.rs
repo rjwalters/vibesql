@@ -222,6 +222,37 @@ impl TableStatistics {
         )
     }
 
+    /// Create estimated statistics from table metadata without full ANALYZE
+    ///
+    /// This provides a fallback for cost estimation when detailed statistics
+    /// aren't available (i.e., ANALYZE hasn't been run). It uses the table's
+    /// row count and provides conservative defaults for other fields.
+    ///
+    /// # Use Cases
+    /// - DML cost estimation when ANALYZE hasn't been run
+    /// - Quick cost comparisons before detailed statistics are available
+    ///
+    /// # Limitations
+    /// - No per-column statistics (empty columns map)
+    /// - No histogram data
+    /// - Marked as stale to indicate these are estimates
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let table_stats = table.get_statistics()
+    ///     .cloned()
+    ///     .unwrap_or_else(|| TableStatistics::estimate_from_row_count(table.row_count()));
+    /// ```
+    pub fn estimate_from_row_count(row_count: usize) -> Self {
+        TableStatistics {
+            row_count,
+            columns: HashMap::new(), // No per-column stats without ANALYZE
+            last_updated: SystemTime::now(),
+            is_stale: true, // Mark as stale since these are estimates
+            sample_metadata: None,
+        }
+    }
+
     /// Mark statistics as stale after significant data changes
     pub fn mark_stale(&mut self) {
         self.is_stale = true;
@@ -378,5 +409,26 @@ mod tests {
         // Even with 0 rows, should have at least 1 distinct value estimate
         let id_stats = stats.columns.get("id").unwrap();
         assert!(id_stats.n_distinct >= 1);
+    }
+
+    #[test]
+    fn test_estimate_from_row_count() {
+        // Test the fallback statistics method
+        let stats = TableStatistics::estimate_from_row_count(1000);
+
+        assert_eq!(stats.row_count, 1000);
+        assert!(stats.columns.is_empty()); // No per-column stats without ANALYZE
+        assert!(stats.is_stale); // Marked as stale since these are estimates
+        assert!(stats.sample_metadata.is_none());
+        assert!(stats.needs_refresh()); // Should indicate refresh is needed
+    }
+
+    #[test]
+    fn test_estimate_from_row_count_zero_rows() {
+        // Test with empty table
+        let stats = TableStatistics::estimate_from_row_count(0);
+
+        assert_eq!(stats.row_count, 0);
+        assert!(stats.is_stale);
     }
 }

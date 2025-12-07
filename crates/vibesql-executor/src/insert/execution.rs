@@ -101,22 +101,24 @@ fn execute_insert_internal(
     // This helps with profiling and can inform future batch size decisions
     if std::env::var("DML_COST_DEBUG").is_ok() {
         if let Some(index_info) = db.get_table_index_info(&stmt.table_name) {
-            // Get table statistics for cost estimation (use cached if available)
+            // Get table statistics for cost estimation (use cached if available, or fallback to estimate)
             if let Some(table) = db.get_table(&stmt.table_name) {
-                if let Some(table_stats) = table.get_statistics() {
-                    let cost_estimator = CostEstimator::default();
-                    let estimated_cost =
-                        cost_estimator.estimate_insert(rows_to_insert.len(), table_stats, &index_info);
-                    eprintln!(
-                        "DML_COST_DEBUG: INSERT {} rows into {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {})",
-                        rows_to_insert.len(),
-                        stmt.table_name,
-                        estimated_cost,
-                        index_info.hash_index_count,
-                        index_info.btree_index_count,
-                        index_info.is_native_columnar
-                    );
-                }
+                let table_stats = table
+                    .get_statistics()
+                    .cloned()
+                    .unwrap_or_else(|| vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count()));
+                let cost_estimator = CostEstimator::default();
+                let estimated_cost =
+                    cost_estimator.estimate_insert(rows_to_insert.len(), &table_stats, &index_info);
+                eprintln!(
+                    "DML_COST_DEBUG: INSERT {} rows into {} - estimated_cost: {:.2} (hash_indexes: {}, btree_indexes: {}, columnar: {})",
+                    rows_to_insert.len(),
+                    stmt.table_name,
+                    estimated_cost,
+                    index_info.hash_index_count,
+                    index_info.btree_index_count,
+                    index_info.is_native_columnar
+                );
             }
         }
     }
