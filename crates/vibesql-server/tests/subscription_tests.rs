@@ -3,7 +3,9 @@
 //! Tests the SessionSubscriptionManager for per-connection subscription tracking.
 
 use std::collections::HashSet;
-use vibesql_server::subscription::{SessionSubscriptionManager, SubscriptionConfig};
+use vibesql_server::subscription::{
+    SessionSubscriptionManager, SubscriptionConfig, TablePkInfo,
+};
 
 #[test]
 fn test_subscription_manager_basic_subscribe() {
@@ -12,7 +14,9 @@ fn test_subscription_manager_basic_subscribe() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
+    let id = manager
+        .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, TablePkInfo::default())
+        .unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
     assert!(manager.get(&id).is_some());
@@ -42,6 +46,7 @@ fn test_subscription_manager_with_params() {
             params.clone(),
             deps,
             None,
+            TablePkInfo::default(),
         )
         .unwrap();
 
@@ -59,7 +64,9 @@ fn test_subscription_manager_unsubscribe() {
     let mut deps = HashSet::new();
     deps.insert("users".to_string());
 
-    let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps, None).unwrap();
+    let id = manager
+        .subscribe("SELECT * FROM users".to_string(), vec![], deps, None, TablePkInfo::default())
+        .unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
 
@@ -79,7 +86,9 @@ fn test_subscription_manager_table_index() {
     // Subscribe to users table
     let mut deps1 = HashSet::new();
     deps1.insert("users".to_string());
-    let id1 = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps1, None).unwrap();
+    let id1 = manager
+        .subscribe("SELECT * FROM users".to_string(), vec![], deps1, None, TablePkInfo::default())
+        .unwrap();
 
     // Subscribe to users and orders tables
     let mut deps2 = HashSet::new();
@@ -91,6 +100,7 @@ fn test_subscription_manager_table_index() {
             vec![],
             deps2,
             None,
+            TablePkInfo::default(),
         )
         .unwrap();
 
@@ -120,12 +130,32 @@ fn test_subscription_manager_clear() {
     deps.insert("users".to_string());
 
     manager
-        .subscribe("SELECT * FROM users WHERE id = 1".to_string(), vec![], deps.clone(), None)
+        .subscribe(
+            "SELECT * FROM users WHERE id = 1".to_string(),
+            vec![],
+            deps.clone(),
+            None,
+            TablePkInfo::default(),
+        )
         .unwrap();
     manager
-        .subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps.clone(), None)
+        .subscribe(
+            "SELECT * FROM users WHERE id = 2".to_string(),
+            vec![],
+            deps.clone(),
+            None,
+            TablePkInfo::default(),
+        )
         .unwrap();
-    manager.subscribe("SELECT * FROM users WHERE id = 3".to_string(), vec![], deps, None).unwrap();
+    manager
+        .subscribe(
+            "SELECT * FROM users WHERE id = 3".to_string(),
+            vec![],
+            deps,
+            None,
+            TablePkInfo::default(),
+        )
+        .unwrap();
 
     assert_eq!(manager.subscription_count(), 3);
 
@@ -154,8 +184,15 @@ fn test_subscription_manager_unique_ids() {
     // Create multiple subscriptions and ensure they get unique IDs
     let mut ids = Vec::new();
     for i in 0..100 {
-        let id =
-            manager.subscribe(format!("SELECT {} FROM test", i), vec![], deps.clone(), None).unwrap();
+        let id = manager
+            .subscribe(
+                format!("SELECT {} FROM test", i),
+                vec![],
+                deps.clone(),
+                None,
+                TablePkInfo::default(),
+            )
+            .unwrap();
         ids.push(id);
     }
 
@@ -169,7 +206,9 @@ fn test_subscription_manager_empty_table_dependencies() {
     let mut manager = SessionSubscriptionManager::new();
 
     // Subscribe with no table dependencies (e.g., SELECT 1)
-    let id = manager.subscribe("SELECT 1".to_string(), vec![], HashSet::new(), None).unwrap();
+    let id = manager
+        .subscribe("SELECT 1".to_string(), vec![], HashSet::new(), None, TablePkInfo::default())
+        .unwrap();
 
     assert_eq!(manager.subscription_count(), 1);
 
@@ -188,9 +227,15 @@ fn test_subscription_manager_all_subscription_ids() {
 
     let deps = HashSet::new();
 
-    let id1 = manager.subscribe("SELECT 1".to_string(), vec![], deps.clone(), None).unwrap();
-    let id2 = manager.subscribe("SELECT 2".to_string(), vec![], deps.clone(), None).unwrap();
-    let id3 = manager.subscribe("SELECT 3".to_string(), vec![], deps, None).unwrap();
+    let id1 = manager
+        .subscribe("SELECT 1".to_string(), vec![], deps.clone(), None, TablePkInfo::default())
+        .unwrap();
+    let id2 = manager
+        .subscribe("SELECT 2".to_string(), vec![], deps.clone(), None, TablePkInfo::default())
+        .unwrap();
+    let id3 = manager
+        .subscribe("SELECT 3".to_string(), vec![], deps, None, TablePkInfo::default())
+        .unwrap();
 
     let all_ids = manager.all_subscription_ids();
     assert_eq!(all_ids.len(), 3);
