@@ -1043,11 +1043,17 @@ impl Database {
         // Check if table uses native columnar storage
         let is_native_columnar = table.is_native_columnar();
 
+        // Estimate average row size from schema
+        let column_types: Vec<_> =
+            table.schema.columns.iter().map(|col| col.data_type.clone()).collect();
+        let avg_row_size = crate::statistics::estimate_row_size(&column_types);
+
         Some(crate::statistics::TableIndexInfo::new(
             hash_index_count,
             btree_index_count,
             is_native_columnar,
             deleted_ratio,
+            avg_row_size,
         ))
     }
 }
