@@ -123,7 +123,7 @@ impl BenchmarkMetrics {
         sorted.sort();
 
         let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 0 {
+        if sorted.len().is_multiple_of(2) {
             // Even number of elements - average the two middle values
             let sum_nanos = sorted[mid - 1].as_nanos() + sorted[mid].as_nanos();
             Duration::from_nanos((sum_nanos / 2) as u64)

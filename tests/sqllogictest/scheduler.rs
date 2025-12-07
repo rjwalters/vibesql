@@ -187,7 +187,7 @@ fn partition_files(files: &[PathBuf], worker_id: usize, total_workers: usize) ->
         return files.to_vec();
     }
 
-    let chunk_size = (files.len() + total_workers - 1) / total_workers; // Ceiling division
+    let chunk_size = files.len().div_ceil(total_workers);
     let start = (worker_id - 1) * chunk_size;
     let end = start + chunk_size;
 

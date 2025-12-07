@@ -13,7 +13,7 @@ use vibesql_storage::Database;
 // This avoids the overhead of creating a new Database for each test file (622 files in full suite).
 // Each worker thread gets its own cached Database that is reset between files.
 thread_local! {
-    static DB_POOL: RefCell<Option<Database>> = RefCell::new(None);
+    static DB_POOL: RefCell<Option<Database>> = const { RefCell::new(None) };
 }
 
 /// Get a reset Database from the thread-local pool.

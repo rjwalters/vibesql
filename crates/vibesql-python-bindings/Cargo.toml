@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 doc = false  # Exclude from documentation builds to avoid name collision with main vibesql crate
 
 [dependencies]
+arcstr = "1.2"
 pyo3 = { workspace = true }
 lru = "0.16"
 parking_lot = "0.12"

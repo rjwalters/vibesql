@@ -187,20 +187,17 @@ SELECT 1
         let file_name = "test_timeout.test";
         let test_result = run_test_file_with_timeout_impl(slow_test, file_name, 1).await;
 
-        // Check if result is ok or timeout
+        // Check if result is ok or timeout - all outcomes are acceptable for this test
         match test_result.result {
             Ok(()) => {
                 // Test completed successfully within timeout
-                assert!(true, "Test completed within timeout");
             }
             Err(TestError::Timeout { .. }) => {
                 // Timeout occurred - also acceptable for this test
-                assert!(true, "Timeout occurred as expected");
             }
             Err(TestError::Execution(e)) => {
                 // This is ok too - test might have execution error
                 println!("Execution error: {}", e);
-                assert!(true, "Execution error occurred");
             }
         }
     }

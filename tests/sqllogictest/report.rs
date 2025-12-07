@@ -193,8 +193,8 @@ impl ComparisonReport {
 
         // Header
         output.push_str(&format!(
-            "\n{}\n{}\n",
-            format!("Performance Comparison: {}", self.test_name),
+            "\nPerformance Comparison: {}\n{}\n",
+            self.test_name,
             "=".repeat(50)
         ));
 
