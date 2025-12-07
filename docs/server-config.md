@@ -250,18 +250,6 @@ min_changed_columns = 1
 max_changed_columns_ratio = 0.5
 ```
 
-## Environment Variables
-
-Configuration values can also be set via environment variables with the `VIBESQL_` prefix:
-
-| Environment Variable | Config Path |
-|---------------------|-------------|
-| `VIBESQL_SERVER_HOST` | `server.host` |
-| `VIBESQL_SERVER_PORT` | `server.port` |
-| `VIBESQL_LOG_LEVEL` | `logging.level` |
-
-Environment variables take precedence over configuration file values.
-
 ## Related Documentation
 
 - [HTTP API](http-api.md) - REST API and SSE endpoints
