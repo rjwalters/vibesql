@@ -57,10 +57,8 @@ async fn test_sse_initial_results_received() {
     let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Now try to subscribe via HTTP SSE
-    // Note: This will work once the HTTP server properly binds
-    let tcp_port = server.addr().port();
-    let http_port = tcp_port + 1000; // Default offset in test config
-    let http_url = format!("http://127.0.0.1:{}/api/subscribe", http_port);
+    let http_addr = server.http_addr().expect("HTTP server should be enabled");
+    let http_url = format!("http://{}/api/subscribe", http_addr);
 
     let client = reqwest::Client::new();
 
@@ -128,9 +126,8 @@ async fn test_sse_error_on_invalid_query() {
     let server = start_test_server_with_config(config).await;
 
     // Try to subscribe to a non-existent table
-    let tcp_port = server.addr().port();
-    let http_port = tcp_port + 1000;
-    let http_url = format!("http://127.0.0.1:{}/api/subscribe", http_port);
+    let http_addr = server.http_addr().expect("HTTP server should be enabled");
+    let http_url = format!("http://{}/api/subscribe", http_addr);
     let client = reqwest::Client::new();
 
     // Try to send request
@@ -189,9 +186,8 @@ async fn test_sse_non_select_query_error() {
     let server = start_test_server_with_config(config).await;
 
     // Try to subscribe to an INSERT query (should fail)
-    let tcp_port = server.addr().port();
-    let http_port = tcp_port + 1000;
-    let http_url = format!("http://127.0.0.1:{}/api/subscribe", http_port);
+    let http_addr = server.http_addr().expect("HTTP server should be enabled");
+    let http_url = format!("http://{}/api/subscribe", http_addr);
     let client = reqwest::Client::new();
 
     match tokio::time::timeout(
@@ -267,9 +263,8 @@ async fn test_sse_empty_result_set() {
     let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Subscribe to empty table
-    let tcp_port = server.addr().port();
-    let http_port = tcp_port + 1000;
-    let http_url = format!("http://127.0.0.1:{}/api/subscribe", http_port);
+    let http_addr = server.http_addr().expect("HTTP server should be enabled");
+    let http_url = format!("http://{}/api/subscribe", http_addr);
     let client = reqwest::Client::new();
 
     match tokio::time::timeout(
@@ -351,9 +346,8 @@ async fn test_sse_with_query_parameters() {
     let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Subscribe with a simple parameterized query
-    let tcp_port = server.addr().port();
-    let http_port = tcp_port + 1000;
-    let http_url = format!("http://127.0.0.1:{}/api/subscribe", http_port);
+    let http_addr = server.http_addr().expect("HTTP server should be enabled");
+    let http_url = format!("http://{}/api/subscribe", http_addr);
     let client = reqwest::Client::new();
 
     match tokio::time::timeout(
@@ -420,9 +414,8 @@ async fn test_sse_client_disconnect_unsubscribes() {
     let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
 
     // Connect via HTTP SSE
-    let tcp_port = server.addr().port();
-    let http_port = tcp_port + 1000;
-    let http_url = format!("http://127.0.0.1:{}/api/subscribe", http_port);
+    let http_addr = server.http_addr().expect("HTTP server should be enabled");
+    let http_url = format!("http://{}/api/subscribe", http_addr);
     let client = reqwest::Client::new();
 
     match tokio::time::timeout(

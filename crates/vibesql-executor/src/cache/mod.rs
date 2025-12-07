@@ -15,7 +15,7 @@ pub use integration::{CacheManager, CachedQueryContext};
 pub use parameterized::{LiteralExtractor, LiteralValue, ParameterPosition, ParameterizedPlan};
 pub use prepared_statement::{
     arena_prepared::{ArenaBindError, ArenaParseError, ArenaPreparedStatement},
-    CachedPlan, ColumnProjection, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
+    CachedPlan, ColumnProjection, PkDeletePlan, PkPointLookupPlan, PreparedStatement, PreparedStatementCache,
     PreparedStatementCacheStats, PreparedStatementError, ProjectionPlan, ResolvedProjection,
     SimpleFastPathPlan,
 };

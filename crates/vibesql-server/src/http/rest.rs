@@ -84,14 +84,14 @@ pub fn create_http_router(
         .route("/api/query", post(execute_query))
         .route("/api/subscribe", get(subscribe_stream))
         .route("/api/tables", get(list_tables))
-        .route("/api/tables/:table_name", get(get_table_info))
+        .route("/api/tables/{table_name}", get(get_table_info))
         // CRUD endpoints for auto-generated RESTful access
-        .route("/api/tables/:table_name/rows", get(super::crud::list_rows))
-        .route("/api/tables/:table_name/rows", post(super::crud::create_row))
-        .route("/api/tables/:table_name/rows/:id", get(super::crud::get_row))
-        .route("/api/tables/:table_name/rows/:id", put(super::crud::update_row))
-        .route("/api/tables/:table_name/rows/:id", patch(super::crud::patch_row))
-        .route("/api/tables/:table_name/rows/:id", delete(super::crud::delete_row))
+        .route("/api/tables/{table_name}/rows", get(super::crud::list_rows))
+        .route("/api/tables/{table_name}/rows", post(super::crud::create_row))
+        .route("/api/tables/{table_name}/rows/{id}", get(super::crud::get_row))
+        .route("/api/tables/{table_name}/rows/{id}", put(super::crud::update_row))
+        .route("/api/tables/{table_name}/rows/{id}", patch(super::crud::patch_row))
+        .route("/api/tables/{table_name}/rows/{id}", delete(super::crud::delete_row))
         // GraphQL endpoint
         .route("/api/graphql", post(graphql_handler))
         .with_state(state);
@@ -762,7 +762,7 @@ async fn subscribe_stream(
     let stream = async_stream::stream! {
         while let Some(update) = rx.recv().await {
             match update {
-                SubscriptionUpdate::Full { rows } => {
+                SubscriptionUpdate::Full { rows, .. } => {
                     // Convert rows to JSON
                     let row_values: Vec<Vec<serde_json::Value>> = rows
                         .iter()
@@ -788,7 +788,7 @@ async fn subscribe_stream(
                         Event::default().event("update").data(event_data)
                     );
                 }
-                SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+                SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                     let insert_rows: Vec<Vec<serde_json::Value>> = inserts
                         .iter()
                         .map(|r| r.values.iter().map(super::types::sql_value_to_json).collect())
@@ -825,7 +825,7 @@ async fn subscribe_stream(
                         Event::default().event("delta").data(event_data)
                     );
                 }
-                SubscriptionUpdate::Error { message } => {
+                SubscriptionUpdate::Error { message, .. } => {
                     let event_data = match serde_json::to_string(&SseEvent {
                         event_type: "error".to_string(),
                         columns: None,

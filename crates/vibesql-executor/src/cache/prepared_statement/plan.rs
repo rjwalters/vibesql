@@ -34,7 +34,7 @@
 //! - Indexes are added/removed
 
 use std::sync::{Arc, OnceLock};
-use vibesql_ast::{Expression, FromClause, SelectItem, SelectStmt, Statement};
+use vibesql_ast::{DeleteStmt, Expression, FromClause, SelectItem, SelectStmt, Statement, WhereClause};
 
 /// Cached execution plan for a prepared statement
 #[derive(Debug, Clone)]
@@ -47,6 +47,10 @@ pub enum CachedPlan {
     /// Caches the result of is_simple_point_query() check to avoid
     /// recomputing it on every execution.
     SimpleFastPath(SimpleFastPathPlan),
+
+    /// Simple primary key DELETE
+    /// DELETE FROM table WHERE pk_col = ? [AND pk_col2 = ? ...]
+    PkDelete(PkDeletePlan),
 
     /// Query doesn't match any fast-path pattern
     /// Fall back to standard execution
@@ -199,10 +203,71 @@ pub struct ColumnProjection {
     pub alias: Option<String>,
 }
 
+/// Cached plan for primary key DELETE statements
+/// DELETE FROM table WHERE pk_col = ? [AND pk_col2 = ? ...]
+///
+/// This plan bypasses:
+/// - AST cloning during parameter binding
+/// - Schema cloning during execution
+/// - Re-checking the DELETE pattern on every execution
+///
+/// At execution time, we extract PK values directly from params and call delete_by_pk_fast.
+#[derive(Debug, Clone)]
+pub struct PkDeletePlan {
+    /// Table name (normalized to uppercase for case-insensitive matching)
+    pub table_name: String,
+
+    /// Primary key column names in order (for validation)
+    pub pk_columns: Vec<String>,
+
+    /// Mapping from parameter index (0-based) to PK column index
+    /// e.g., for `WHERE id = ?`, this would be [(0, 0)]
+    pub param_to_pk_col: Vec<(usize, usize)>,
+
+    /// Cached validation result: true = fast path is valid (no triggers/FKs)
+    /// Uses Arc<OnceLock> so the cache survives Clone
+    fast_path_valid: Arc<OnceLock<bool>>,
+}
+
+impl PkDeletePlan {
+    /// Create a new PkDeletePlan
+    pub fn new(table_name: String, pk_columns: Vec<String>, param_to_pk_col: Vec<(usize, usize)>) -> Self {
+        Self {
+            table_name,
+            pk_columns,
+            param_to_pk_col,
+            fast_path_valid: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Build the PK values array from parameters
+    pub fn build_pk_values(&self, params: &[vibesql_types::SqlValue]) -> Vec<vibesql_types::SqlValue> {
+        let mut pk_values = vec![vibesql_types::SqlValue::Null; self.pk_columns.len()];
+        for &(param_idx, pk_col_idx) in &self.param_to_pk_col {
+            if param_idx < params.len() && pk_col_idx < pk_values.len() {
+                pk_values[pk_col_idx] = params[param_idx].clone();
+            }
+        }
+        pk_values
+    }
+
+    /// Get cached validation result, if available
+    pub fn is_fast_path_valid(&self) -> Option<bool> {
+        self.fast_path_valid.get().copied()
+    }
+
+    /// Set validation result (can only be called once)
+    /// Returns the cached value (either newly set or existing)
+    pub fn set_fast_path_valid(&self, valid: bool) -> bool {
+        *self.fast_path_valid.get_or_init(|| valid)
+    }
+}
+
 /// Analyze a prepared statement and create a cached plan if possible
 pub fn analyze_for_plan(stmt: &Statement) -> CachedPlan {
     match stmt {
         Statement::Select(select) => analyze_select(select),
+        Statement::Delete(delete) => analyze_delete(delete),
         _ => CachedPlan::Standard,
     }
 }
@@ -225,6 +290,35 @@ fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
     }
 
     CachedPlan::Standard
+}
+
+/// Analyze a DELETE statement for PK delete optimization
+fn analyze_delete(stmt: &DeleteStmt) -> CachedPlan {
+    // Must have a WHERE clause
+    let where_clause = match &stmt.where_clause {
+        Some(WhereClause::Condition(expr)) => expr,
+        _ => return CachedPlan::Standard,
+    };
+
+    // Extract parameter-to-column mappings from WHERE clause
+    let param_mappings = match extract_pk_param_mappings(&where_clause) {
+        Some(mappings) if !mappings.is_empty() => mappings,
+        _ => return CachedPlan::Standard,
+    };
+
+    // Build the plan
+    let pk_columns: Vec<String> = param_mappings.iter().map(|(_, col)| col.clone()).collect();
+    let param_to_pk_col: Vec<(usize, usize)> = param_mappings
+        .iter()
+        .enumerate()
+        .map(|(pk_idx, (param_idx, _))| (*param_idx, pk_idx))
+        .collect();
+
+    CachedPlan::PkDelete(PkDeletePlan::new(
+        stmt.table_name.to_uppercase(),
+        pk_columns,
+        param_to_pk_col,
+    ))
 }
 
 /// Try to analyze a SELECT for PK point lookup optimization
@@ -487,5 +581,24 @@ mod tests {
         // but they do get SimpleFastPath since they pass is_simple_point_query()
         let plan = parse_to_plan("SELECT * FROM users WHERE id = 1");
         assert!(matches!(plan, CachedPlan::SimpleFastPath(_)));
+    }
+
+    #[test]
+    fn test_delete_pk_lookup() {
+        let plan = parse_to_plan("DELETE FROM sbtest1 WHERE id = ?");
+        match plan {
+            CachedPlan::PkDelete(p) => {
+                assert_eq!(p.table_name, "SBTEST1");
+                assert_eq!(p.pk_columns, vec!["ID"]);
+                assert_eq!(p.param_to_pk_col, vec![(0, 0)]);
+            }
+            other => panic!("Expected PkDelete, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_delete_without_where_not_fast_path() {
+        let plan = parse_to_plan("DELETE FROM users");
+        assert!(matches!(plan, CachedPlan::Standard));
     }
 }

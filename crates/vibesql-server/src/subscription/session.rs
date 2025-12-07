@@ -1,4 +1,11 @@
-//! Session-level subscription management
+//! Session-level subscription management (deprecated)
+//!
+//! **DEPRECATED**: This module is deprecated. Use `SubscriptionManager` with
+//! connection tracking methods instead:
+//! - `subscribe_for_connection()` - Subscribe for a specific connection
+//! - `unsubscribe_by_wire_id()` - Unsubscribe by wire protocol ID
+//! - `unsubscribe_all_for_connection()` - Clean up all subscriptions for a connection
+//! - `connection_subscription_count()` - Get subscription count for a connection
 //!
 //! This module provides a per-connection subscription manager that tracks
 //! subscriptions for a single client session. Unlike the global SubscriptionManager,
@@ -9,6 +16,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use super::{SubscriptionConfig, SubscriptionError};
+use crate::Row;
 
 /// Unique identifier for a subscription (UUID bytes)
 pub type SessionSubscriptionId = [u8; 16];
@@ -24,9 +32,23 @@ pub struct SessionSubscription {
     pub params: Vec<Option<Vec<u8>>>,
     /// Tables that this subscription depends on (for invalidation)
     pub table_dependencies: HashSet<String>,
+    /// Hash of the last result set (for change detection)
+    pub last_result_hash: u64,
+    /// Last result set (for delta computation)
+    /// This stores the previous result to enable computing deltas on change.
+    pub last_result: Option<Vec<Row>>,
+    /// Whether updates are currently paused for this subscription
+    pub paused: bool,
 }
 
 /// Manages subscriptions for a single connection/session
+///
+/// **DEPRECATED**: Use `SubscriptionManager` with connection tracking methods instead.
+/// See module documentation for migration guide.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use SubscriptionManager with subscribe_for_connection() instead"
+)]
 #[derive(Debug)]
 pub struct SessionSubscriptionManager {
     /// Active subscriptions by ID
@@ -89,6 +111,9 @@ impl SessionSubscriptionManager {
             query,
             params,
             table_dependencies: table_dependencies.clone(),
+            last_result_hash: 0,
+            last_result: None,
+            paused: false,
         };
 
         // Update table -> subscription index (normalize to lowercase for case-insensitive matching)
@@ -185,6 +210,61 @@ impl SessionSubscriptionManager {
     #[allow(dead_code)]
     pub fn get(&self, subscription_id: &SessionSubscriptionId) -> Option<&SessionSubscription> {
         self.subscriptions.get(subscription_id)
+    }
+
+    /// Get a mutable reference to a subscription by ID
+    pub fn get_mut(
+        &mut self,
+        subscription_id: &SessionSubscriptionId,
+    ) -> Option<&mut SessionSubscription> {
+        self.subscriptions.get_mut(subscription_id)
+    }
+
+    /// Update the stored result for a subscription (for delta computation)
+    ///
+    /// This should be called after sending subscription data to store the result
+    /// for computing deltas on the next update.
+    pub fn update_result(
+        &mut self,
+        subscription_id: &SessionSubscriptionId,
+        result_hash: u64,
+        result: Vec<Row>,
+    ) {
+        if let Some(sub) = self.subscriptions.get_mut(subscription_id) {
+            sub.last_result_hash = result_hash;
+            sub.last_result = Some(result);
+        }
+    }
+
+    /// Pause a subscription - it will stop receiving updates until resumed
+    ///
+    /// Returns true if the subscription was found and paused, false if not found
+    pub fn pause(&mut self, subscription_id: &SessionSubscriptionId) -> bool {
+        if let Some(subscription) = self.subscriptions.get_mut(subscription_id) {
+            subscription.paused = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Resume a paused subscription - it will start receiving updates again
+    ///
+    /// Returns true if the subscription was found and resumed, false if not found
+    pub fn resume(&mut self, subscription_id: &SessionSubscriptionId) -> bool {
+        if let Some(subscription) = self.subscriptions.get_mut(subscription_id) {
+            subscription.paused = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a subscription is paused
+    ///
+    /// Returns None if subscription not found, Some(paused) otherwise
+    pub fn is_paused(&self, subscription_id: &SessionSubscriptionId) -> Option<bool> {
+        self.subscriptions.get(subscription_id).map(|s| s.paused)
     }
 
     /// Get the number of active subscriptions
@@ -390,5 +470,128 @@ mod tests {
         let result =
             manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), vec![], deps);
         assert!(matches!(result, Err(SubscriptionError::RateLimited { .. })));
+    }
+
+    #[test]
+    fn test_update_result_stores_data() {
+        use vibesql_types::SqlValue;
+
+        let mut manager = SessionSubscriptionManager::new();
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Initially no result stored
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 0);
+        assert!(sub.last_result.is_none());
+
+        // Store a result
+        let rows = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+        manager.update_result(&id, 12345, rows.clone());
+
+        // Verify result is stored
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 12345);
+        assert!(sub.last_result.is_some());
+        assert_eq!(sub.last_result.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_get_mut_allows_modification() {
+        let mut manager = SessionSubscriptionManager::new();
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Get mutable reference and modify
+        let sub = manager.get_mut(&id).unwrap();
+        sub.last_result_hash = 99999;
+
+        // Verify modification persisted
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 99999);
+    }
+
+    #[test]
+    fn test_subscription_preserves_result_across_queries() {
+        use vibesql_types::SqlValue;
+
+        let mut manager = SessionSubscriptionManager::new();
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Store initial result
+        let initial_rows = vec![crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        }];
+        manager.update_result(&id, 11111, initial_rows);
+
+        // Verify initial result
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 11111);
+        assert_eq!(sub.last_result.as_ref().unwrap().len(), 1);
+
+        // Update with new result
+        let new_rows = vec![
+            crate::Row {
+                values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+            },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
+            },
+        ];
+        manager.update_result(&id, 22222, new_rows);
+
+        // Verify new result
+        let sub = manager.get(&id).unwrap();
+        assert_eq!(sub.last_result_hash, 22222);
+        assert_eq!(sub.last_result.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_pause_resume() {
+        let mut manager = SessionSubscriptionManager::new();
+
+        let mut deps = HashSet::new();
+        deps.insert("users".to_string());
+
+        let id = manager.subscribe("SELECT * FROM users".to_string(), vec![], deps).unwrap();
+
+        // Initially not paused
+        assert_eq!(manager.is_paused(&id), Some(false));
+        assert!(!manager.get(&id).unwrap().paused);
+
+        // Pause the subscription
+        assert!(manager.pause(&id));
+        assert_eq!(manager.is_paused(&id), Some(true));
+        assert!(manager.get(&id).unwrap().paused);
+
+        // Resume the subscription
+        assert!(manager.resume(&id));
+        assert_eq!(manager.is_paused(&id), Some(false));
+        assert!(!manager.get(&id).unwrap().paused);
+    }
+
+    #[test]
+    fn test_pause_resume_nonexistent() {
+        let mut manager = SessionSubscriptionManager::new();
+        let fake_id = [0u8; 16];
+
+        // Pause/resume of nonexistent subscription returns false
+        assert!(!manager.pause(&fake_id));
+        assert!(!manager.resume(&fake_id));
+        assert_eq!(manager.is_paused(&fake_id), None);
     }
 }

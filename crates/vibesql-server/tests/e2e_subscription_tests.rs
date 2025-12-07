@@ -11,6 +11,7 @@ use common::{parse_backend_messages, start_test_server, TestClient};
 
 /// Message type constants for subscription protocol
 const MSG_SUBSCRIPTION_DATA: u8 = 0xF2;
+const MSG_SUBSCRIPTION_PARTIAL_DATA: u8 = 0xF7;
 const MSG_READY_FOR_QUERY: u8 = b'Z';
 
 /// Helper to send a subscription request for a query
@@ -204,9 +205,11 @@ async fn test_update_triggers_subscription_update() {
         .expect("Failed to read after update");
     let messages = parse_backend_messages(&data);
 
-    // Should include SubscriptionData message (0xF2) with the update
-    let has_subscription_update = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
-    assert!(has_subscription_update, "Expected SubscriptionData update after UPDATE");
+    // Should include SubscriptionData (0xF2) or SubscriptionPartialData (0xF7) with the update
+    let has_subscription_update = messages
+        .iter()
+        .any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA || m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    assert!(has_subscription_update, "Expected subscription update after UPDATE");
 
     client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();

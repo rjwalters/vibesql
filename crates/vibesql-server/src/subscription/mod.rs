@@ -64,6 +64,9 @@ pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
 // SubscriptionMetrics is defined inline in this module and exported directly
 
+// Re-export selective column update types (defined later in this file)
+// SelectiveColumnConfig, ColumnDiff, compute_column_diff, should_use_selective_update, create_partial_row_update
+
 // ============================================================================
 // Subscription Configuration
 // ============================================================================
@@ -306,6 +309,12 @@ pub struct Subscription {
     pub channel_buffer_size: usize,
     /// Slow consumer threshold percentage
     pub slow_consumer_threshold_percent: u8,
+    /// Optional connection/session ID that owns this subscription
+    /// Used for connection-level subscription tracking and cleanup
+    pub connection_id: Option<String>,
+    /// Optional wire protocol subscription ID (UUID bytes)
+    /// Used to bridge between wire protocol IDs and internal SubscriptionId
+    pub wire_subscription_id: Option<[u8; 16]>,
 }
 
 impl Subscription {
@@ -338,6 +347,8 @@ impl Subscription {
             updates_dropped: 0,
             channel_buffer_size: 64, // default buffer size
             slow_consumer_threshold_percent: 80,
+            connection_id: None,
+            wire_subscription_id: None,
         }
     }
 
@@ -361,6 +372,38 @@ impl Subscription {
             updates_dropped: 0,
             channel_buffer_size: config.channel_buffer_size,
             slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
+            connection_id: None,
+            wire_subscription_id: None,
+        }
+    }
+
+    /// Create a new subscription for a specific connection (wire protocol)
+    ///
+    /// This associates the subscription with a connection ID for tracking
+    /// and cleanup when the connection closes.
+    pub fn for_connection(
+        query: String,
+        tables: HashSet<String>,
+        notify_tx: mpsc::Sender<SubscriptionUpdate>,
+        connection_id: String,
+        wire_subscription_id: [u8; 16],
+        config: &SubscriptionConfig,
+    ) -> Self {
+        Self {
+            id: SubscriptionId::new(),
+            query,
+            tables,
+            last_result_hash: 0,
+            last_result: None,
+            notify_tx,
+            retry_policy: SubscriptionRetryPolicy::default(),
+            retry_count: 0,
+            updates_sent: 0,
+            updates_dropped: 0,
+            channel_buffer_size: config.channel_buffer_size,
+            slow_consumer_threshold_percent: config.slow_consumer_threshold_percent,
+            connection_id: Some(connection_id),
+            wire_subscription_id: Some(wire_subscription_id),
         }
     }
 }
@@ -381,6 +424,8 @@ pub enum SubscriptionUpdate {
     /// - A new subscription is created (initial results)
     /// - The results have changed and delta calculation isn't available
     Full {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
         /// All rows in the result set
         rows: Vec<crate::Row>,
     },
@@ -391,6 +436,8 @@ pub enum SubscriptionUpdate {
     /// for large result sets with small changes. Sent when the change
     /// can be expressed as a set of inserts, updates, and deletes.
     Delta {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
         /// Newly inserted rows (in new result, not in previous)
         inserts: Vec<crate::Row>,
         /// Updated rows (old value, new value) - rows with same identity but different content
@@ -404,9 +451,22 @@ pub enum SubscriptionUpdate {
     /// Sent when the subscription query fails to execute, typically due to
     /// schema changes that invalidate the query.
     Error {
+        /// The subscription ID this update is for
+        subscription_id: SubscriptionId,
         /// Error message describing what went wrong
         message: String,
     },
+}
+
+impl SubscriptionUpdate {
+    /// Get the subscription ID this update is for
+    pub fn subscription_id(&self) -> SubscriptionId {
+        match self {
+            SubscriptionUpdate::Full { subscription_id, .. } => *subscription_id,
+            SubscriptionUpdate::Delta { subscription_id, .. } => *subscription_id,
+            SubscriptionUpdate::Error { subscription_id, .. } => *subscription_id,
+        }
+    }
 }
 
 // ============================================================================
@@ -533,7 +593,11 @@ fn hash_row(row: &crate::Row) -> u64 {
 ///
 /// Returns `Some(SubscriptionUpdate::Delta)` if there are changes,
 /// or `None` if the result sets are identical.
-pub fn compute_delta(old: &[crate::Row], new: &[crate::Row]) -> Option<SubscriptionUpdate> {
+pub fn compute_delta(
+    subscription_id: SubscriptionId,
+    old: &[crate::Row],
+    new: &[crate::Row],
+) -> Option<SubscriptionUpdate> {
     use std::collections::HashMap;
 
     // Build hash maps for efficient lookup
@@ -588,7 +652,187 @@ pub fn compute_delta(old: &[crate::Row], new: &[crate::Row]) -> Option<Subscript
     // This is semantically correct, just not optimal for clients that could patch in place
     let updates = Vec::new();
 
-    Some(SubscriptionUpdate::Delta { inserts, updates, deletes })
+    Some(SubscriptionUpdate::Delta { subscription_id, inserts, updates, deletes })
+}
+
+// ============================================================================
+// Selective Column Updates
+// ============================================================================
+
+/// Configuration for selective column updates
+#[derive(Debug, Clone)]
+pub struct SelectiveColumnConfig {
+    /// Enable selective column updates
+    pub enabled: bool,
+    /// Column indices that are primary key columns (always included)
+    pub pk_columns: Vec<usize>,
+    /// Minimum columns that must change to use selective update
+    /// If fewer columns change, send full row instead
+    pub min_changed_columns: usize,
+    /// Maximum columns that can change before falling back to full row
+    /// If more columns change, send full row instead (more efficient)
+    pub max_changed_columns_ratio: f64,
+}
+
+impl Default for SelectiveColumnConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pk_columns: vec![0], // Assume first column is PK by default
+            min_changed_columns: 1,
+            max_changed_columns_ratio: 0.5, // If >50% of columns changed, send full row
+        }
+    }
+}
+
+/// Result of column-level diff computation
+#[derive(Debug, Clone)]
+pub struct ColumnDiff {
+    /// Indices of columns that changed
+    pub changed_columns: Vec<usize>,
+    /// Indices of columns to include (PK + changed)
+    pub included_columns: Vec<usize>,
+}
+
+/// Compute which columns differ between two rows
+///
+/// # Arguments
+/// * `old_row` - The previous row values
+/// * `new_row` - The current row values
+/// * `pk_columns` - Indices of primary key columns (always included even if unchanged)
+///
+/// # Returns
+/// * `Some(ColumnDiff)` if rows have same column count and some columns differ
+/// * `None` if rows have different column counts or are identical
+pub fn compute_column_diff(
+    old_row: &crate::Row,
+    new_row: &crate::Row,
+    pk_columns: &[usize],
+) -> Option<ColumnDiff> {
+    // Rows must have same number of columns
+    if old_row.values.len() != new_row.values.len() {
+        return None;
+    }
+
+    let mut changed_columns = Vec::new();
+
+    // Compare each column
+    for (idx, (old_val, new_val)) in old_row.values.iter().zip(new_row.values.iter()).enumerate() {
+        if old_val != new_val {
+            changed_columns.push(idx);
+        }
+    }
+
+    // If no columns changed, return None
+    if changed_columns.is_empty() {
+        return None;
+    }
+
+    // Build included columns: PK columns + changed columns
+    let mut included_columns: Vec<usize> = pk_columns.to_vec();
+    for &idx in &changed_columns {
+        if !included_columns.contains(&idx) {
+            included_columns.push(idx);
+        }
+    }
+    included_columns.sort_unstable();
+
+    Some(ColumnDiff { changed_columns, included_columns })
+}
+
+/// Determine if selective update should be used based on configuration
+///
+/// Returns true if:
+/// - Selective updates are enabled
+/// - Number of changed columns meets minimum threshold
+/// - Changed column ratio doesn't exceed maximum
+pub fn should_use_selective_update(
+    diff: &ColumnDiff,
+    total_columns: usize,
+    config: &SelectiveColumnConfig,
+) -> bool {
+    if !config.enabled {
+        return false;
+    }
+
+    // Check minimum changed columns
+    if diff.changed_columns.len() < config.min_changed_columns {
+        return false;
+    }
+
+    // Check maximum ratio
+    let changed_ratio = diff.changed_columns.len() as f64 / total_columns as f64;
+    if changed_ratio > config.max_changed_columns_ratio {
+        return false;
+    }
+
+    true
+}
+
+/// Create a partial row update from old and new rows
+///
+/// # Arguments
+/// * `old_row` - The previous row values (wire format)
+/// * `new_row` - The current row values (wire format)
+/// * `pk_columns` - Primary key column indices
+/// * `config` - Selective column configuration
+///
+/// # Returns
+/// * `Some(PartialRowUpdate)` if selective update should be used
+/// * `None` if full row should be sent instead
+pub fn create_partial_row_update(
+    old_row: &[Option<Vec<u8>>],
+    new_row: &[Option<Vec<u8>>],
+    pk_columns: &[usize],
+    config: &SelectiveColumnConfig,
+) -> Option<crate::protocol::messages::PartialRowUpdate> {
+    // Rows must have same number of columns
+    if old_row.len() != new_row.len() {
+        return None;
+    }
+
+    let total_columns = new_row.len();
+    let mut changed_columns = Vec::new();
+
+    // Compare each column
+    for (idx, (old_val, new_val)) in old_row.iter().zip(new_row.iter()).enumerate() {
+        if old_val != new_val {
+            changed_columns.push(idx);
+        }
+    }
+
+    // If no columns changed, return None
+    if changed_columns.is_empty() {
+        return None;
+    }
+
+    // Check if we should use selective update
+    let changed_ratio = changed_columns.len() as f64 / total_columns as f64;
+    if !config.enabled || changed_ratio > config.max_changed_columns_ratio {
+        return None;
+    }
+
+    // Build included columns: PK columns + changed columns, sorted
+    let mut included_columns: Vec<usize> = pk_columns.to_vec();
+    for &idx in &changed_columns {
+        if !included_columns.contains(&idx) {
+            included_columns.push(idx);
+        }
+    }
+    included_columns.sort_unstable();
+
+    // Extract values for included columns
+    let values: Vec<Option<Vec<u8>>> =
+        included_columns.iter().map(|&idx| new_row[idx].clone()).collect();
+
+    // Convert to u16 for protocol
+    let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
+
+    Some(crate::protocol::messages::PartialRowUpdate::new(
+        total_columns as u16,
+        &present_columns,
+        values,
+    ))
 }
 
 #[cfg(test)]
@@ -674,7 +918,8 @@ mod tests {
         ];
 
         // Same old and new should return None
-        let delta = compute_delta(&rows, &rows);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &rows, &rows);
         assert!(delta.is_none());
     }
 
@@ -693,11 +938,12 @@ mod tests {
             crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(inserts[0].values[0], SqlValue::Integer(2));
                 assert_eq!(inserts[0].values[1], SqlValue::Varchar("Bob".to_string()));
@@ -723,11 +969,12 @@ mod tests {
             values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
         }];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 1);
@@ -749,11 +996,12 @@ mod tests {
             values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())],
         }];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 1);
                 assert_eq!(deletes.len(), 1);
                 assert!(updates.is_empty());
@@ -777,11 +1025,12 @@ mod tests {
             crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar("Bob".to_string())] },
         ];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert_eq!(inserts.len(), 2);
                 assert!(updates.is_empty());
                 assert!(deletes.is_empty());
@@ -802,11 +1051,12 @@ mod tests {
         ];
         let new: Vec<crate::Row> = vec![];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 assert!(inserts.is_empty());
                 assert!(updates.is_empty());
                 assert_eq!(deletes.len(), 2);
@@ -831,11 +1081,12 @@ mod tests {
             crate::Row { values: vec![SqlValue::Integer(1)] },
         ];
 
-        let delta = compute_delta(&old, &new);
+        let test_id = SubscriptionId::new();
+        let delta = compute_delta(test_id, &old, &new);
         assert!(delta.is_some());
 
         match delta.unwrap() {
-            SubscriptionUpdate::Delta { inserts, updates, deletes } => {
+            SubscriptionUpdate::Delta { inserts, updates, deletes, .. } => {
                 // One additional duplicate row was inserted
                 assert_eq!(inserts.len(), 1);
                 assert!(updates.is_empty());
@@ -843,5 +1094,225 @@ mod tests {
             }
             _ => panic!("Expected Delta update"),
         }
+    }
+
+    // ========================================================================
+    // Tests for Selective Column Updates
+    // ========================================================================
+
+    #[test]
+    fn test_compute_column_diff_no_changes() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+
+        let diff = compute_column_diff(&old, &new, &[0]);
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn test_compute_column_diff_single_column_change() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Bob".to_string())],
+        };
+
+        let diff = compute_column_diff(&old, &new, &[0]).unwrap();
+        assert_eq!(diff.changed_columns, vec![1]);
+        // Included columns should be PK (0) + changed (1)
+        assert_eq!(diff.included_columns, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_compute_column_diff_multiple_columns_change() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("active".to_string()),
+            ],
+        };
+        let new = crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Integer(100),
+                SqlValue::Varchar("inactive".to_string()),
+            ],
+        };
+
+        let diff = compute_column_diff(&old, &new, &[0]).unwrap();
+        assert_eq!(diff.changed_columns, vec![1, 3]);
+        // Included columns should be PK (0) + changed (1, 3)
+        assert_eq!(diff.included_columns, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn test_compute_column_diff_pk_column_changed() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new = crate::Row {
+            values: vec![SqlValue::Integer(2), SqlValue::Varchar("Alice".to_string())],
+        };
+
+        let diff = compute_column_diff(&old, &new, &[0]).unwrap();
+        assert_eq!(diff.changed_columns, vec![0]);
+        // PK is already changed, so included = just [0]
+        assert_eq!(diff.included_columns, vec![0]);
+    }
+
+    #[test]
+    fn test_compute_column_diff_null_handling() {
+        use vibesql_types::SqlValue;
+
+        let old = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar("Alice".to_string())],
+        };
+        let new = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Null] };
+
+        let diff = compute_column_diff(&old, &new, &[0]).unwrap();
+        assert_eq!(diff.changed_columns, vec![1]);
+        assert_eq!(diff.included_columns, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_should_use_selective_update_enabled() {
+        let diff = ColumnDiff { changed_columns: vec![1], included_columns: vec![0, 1] };
+
+        let config =
+            SelectiveColumnConfig { enabled: true, pk_columns: vec![0], ..Default::default() };
+
+        assert!(should_use_selective_update(&diff, 10, &config));
+    }
+
+    #[test]
+    fn test_should_use_selective_update_disabled() {
+        let diff = ColumnDiff { changed_columns: vec![1], included_columns: vec![0, 1] };
+
+        let config =
+            SelectiveColumnConfig { enabled: false, pk_columns: vec![0], ..Default::default() };
+
+        assert!(!should_use_selective_update(&diff, 10, &config));
+    }
+
+    #[test]
+    fn test_should_use_selective_update_too_many_changes() {
+        // 6 columns changed out of 10 = 60%, exceeds 50% threshold
+        let diff = ColumnDiff {
+            changed_columns: vec![1, 2, 3, 4, 5, 6],
+            included_columns: vec![0, 1, 2, 3, 4, 5, 6],
+        };
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0],
+            max_changed_columns_ratio: 0.5,
+            ..Default::default()
+        };
+
+        assert!(!should_use_selective_update(&diff, 10, &config));
+    }
+
+    #[test]
+    fn test_create_partial_row_update() {
+        let old_row =
+            vec![Some(b"1".to_vec()), Some(b"Alice".to_vec()), Some(b"100".to_vec())];
+        let new_row =
+            vec![Some(b"1".to_vec()), Some(b"Bob".to_vec()), Some(b"100".to_vec())];
+
+        let config = SelectiveColumnConfig {
+            enabled: true,
+            pk_columns: vec![0],
+            max_changed_columns_ratio: 0.5,
+            ..Default::default()
+        };
+
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config).unwrap();
+
+        assert_eq!(partial.total_columns, 3);
+        // Should include columns 0 (PK) and 1 (changed)
+        assert!(partial.is_column_present(0));
+        assert!(partial.is_column_present(1));
+        assert!(!partial.is_column_present(2));
+        assert_eq!(partial.present_column_count(), 2);
+        // Values should be the new values for included columns
+        assert_eq!(partial.values.len(), 2);
+        assert_eq!(partial.values[0], Some(b"1".to_vec()));
+        assert_eq!(partial.values[1], Some(b"Bob".to_vec()));
+    }
+
+    #[test]
+    fn test_create_partial_row_update_null_change() {
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec())];
+        let new_row = vec![Some(b"1".to_vec()), None];
+
+        let config =
+            SelectiveColumnConfig { enabled: true, pk_columns: vec![0], ..Default::default() };
+
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config).unwrap();
+
+        assert_eq!(partial.total_columns, 2);
+        assert!(partial.is_column_present(0));
+        assert!(partial.is_column_present(1));
+        assert_eq!(partial.values.len(), 2);
+        assert_eq!(partial.values[0], Some(b"1".to_vec()));
+        assert_eq!(partial.values[1], None); // NULL value
+    }
+
+    #[test]
+    fn test_create_partial_row_update_no_changes() {
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec())];
+        let new_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec())];
+
+        let config =
+            SelectiveColumnConfig { enabled: true, pk_columns: vec![0], ..Default::default() };
+
+        let partial = create_partial_row_update(&old_row, &new_row, &[0], &config);
+        assert!(partial.is_none());
+    }
+
+    #[test]
+    fn test_partial_row_update_column_mask() {
+        use crate::protocol::messages::PartialRowUpdate;
+
+        // Test with 10 columns, columns 0, 3, 7 present
+        let partial = PartialRowUpdate::new(
+            10,
+            &[0, 3, 7],
+            vec![Some(b"a".to_vec()), Some(b"b".to_vec()), Some(b"c".to_vec())],
+        );
+
+        assert_eq!(partial.total_columns, 10);
+        assert_eq!(partial.column_mask.len(), 2); // ceil(10/8) = 2 bytes
+
+        // Check column presence
+        assert!(partial.is_column_present(0));
+        assert!(!partial.is_column_present(1));
+        assert!(!partial.is_column_present(2));
+        assert!(partial.is_column_present(3));
+        assert!(!partial.is_column_present(4));
+        assert!(!partial.is_column_present(5));
+        assert!(!partial.is_column_present(6));
+        assert!(partial.is_column_present(7));
+        assert!(!partial.is_column_present(8));
+        assert!(!partial.is_column_present(9));
+        assert!(!partial.is_column_present(10)); // Out of range
+
+        assert_eq!(partial.present_column_count(), 3);
     }
 }

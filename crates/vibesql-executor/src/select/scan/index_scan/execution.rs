@@ -234,10 +234,58 @@ pub(crate) fn execute_index_scan(
                 // This avoids:
                 // - Allocating Vec<usize> for all matching indices
                 // - Sorting the indices (not needed without ORDER BY)
-                let rows: Vec<Row> = streaming_iter
-                    .filter_map(|idx| table.get_row(idx))
-                    .cloned()
-                    .collect();
+
+                // Profiling: Measure time spent in each phase when RANGE_SCAN_PROFILE=1
+                let profile = std::env::var("RANGE_SCAN_PROFILE").is_ok();
+
+                let rows: Vec<Row> = if profile {
+                    use std::time::Instant;
+                    let mut index_time = std::time::Duration::ZERO;
+                    let mut lookup_time = std::time::Duration::ZERO;
+                    let mut clone_time = std::time::Duration::ZERO;
+                    let mut rows = Vec::new();
+                    let mut row_count = 0usize;
+                    let mut streaming_iter = streaming_iter;
+
+                    loop {
+                        let t0 = Instant::now();
+                        let idx = streaming_iter.next();
+                        index_time += t0.elapsed();
+
+                        let Some(idx) = idx else { break };
+
+                        let t1 = Instant::now();
+                        if let Some(row_ref) = table.get_row(idx) {
+                            lookup_time += t1.elapsed();
+
+                            let t2 = Instant::now();
+                            rows.push(row_ref.clone());
+                            clone_time += t2.elapsed();
+
+                            row_count += 1;
+                        } else {
+                            lookup_time += t1.elapsed();
+                        }
+                    }
+
+                    // Only print summary at end to avoid per-row overhead
+                    static PROFILE_COUNT: std::sync::atomic::AtomicUsize =
+                        std::sync::atomic::AtomicUsize::new(0);
+                    let count = PROFILE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if count % 1000 == 0 {
+                        eprintln!(
+                            "[RangeScan Profile] rows={}, index={:?}, lookup={:?}, clone={:?}",
+                            row_count, index_time, lookup_time, clone_time
+                        );
+                    }
+
+                    rows
+                } else {
+                    streaming_iter
+                        .filter_map(|idx| table.get_row(idx))
+                        .cloned()
+                        .collect()
+                };
 
                 // Build schema and return result
                 let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());

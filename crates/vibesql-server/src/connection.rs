@@ -2,11 +2,17 @@ use crate::auth::PasswordStore;
 use crate::config::Config;
 use crate::observability::ObservabilityProvider;
 use crate::protocol::{
-    BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
+    BackendMessage, FieldDescription, FrontendMessage, PartialRowUpdate, SubscriptionUpdateType,
+    TransactionStatus,
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
-use crate::subscription::{extract_table_refs, SessionSubscriptionManager, SubscriptionManager};
+use crate::subscription::{
+    compute_delta, create_partial_row_update, extract_table_refs, hash_rows,
+    SelectiveColumnConfig, SessionSubscriptionManager, SubscriptionId, SubscriptionManager,
+    SubscriptionUpdate,
+};
+use crate::Row;
 use anyhow::Result;
 use bytes::BytesMut;
 use std::collections::{HashMap, HashSet};
@@ -15,6 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
@@ -30,7 +37,10 @@ pub struct TableMutationNotification {
 
 /// Connection handler for a single client
 pub struct ConnectionHandler {
-    stream: TcpStream,
+    /// Read half of the TCP stream (split for async select! usage)
+    read_half: OwnedReadHalf,
+    /// Write half of the TCP stream (split for async select! usage)
+    write_half: OwnedWriteHalf,
     peer_addr: SocketAddr,
     config: Arc<Config>,
     observability: Arc<ObservabilityProvider>,
@@ -42,15 +52,22 @@ pub struct ConnectionHandler {
     active_connections: Arc<AtomicUsize>,
     /// Database registry for shared database instances across connections
     database_registry: DatabaseRegistry,
-    /// Session-level subscription manager for real-time query subscriptions
-    subscription_manager: SessionSubscriptionManager,
-    /// Global subscription manager for processing storage change events
-    #[allow(dead_code)]
-    global_subscription_manager: Arc<SubscriptionManager>,
+    /// Unique identifier for this connection (for subscription tracking)
+    connection_id: String,
+    /// Global subscription manager for processing storage change events and tracking subscriptions
+    subscription_manager: Arc<SubscriptionManager>,
     /// Broadcast sender for notifying other connections about mutations
     mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     /// Broadcast receiver for receiving mutation notifications from other connections
     mutation_broadcast_rx: broadcast::Receiver<TableMutationNotification>,
+}
+
+/// Result of handling a client message
+enum ClientMessageResult {
+    /// Continue processing messages
+    Continue,
+    /// Client requested termination
+    Terminate,
 }
 
 impl ConnectionHandler {
@@ -64,13 +81,22 @@ impl ConnectionHandler {
         password_store: Option<Arc<PasswordStore>>,
         active_connections: Arc<AtomicUsize>,
         database_registry: DatabaseRegistry,
-        global_subscription_manager: Arc<SubscriptionManager>,
+        subscription_manager: Arc<SubscriptionManager>,
         mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     ) -> Self {
+        // Split the TCP stream for async select! usage
+        // This allows us to wait on both client messages and broadcast notifications simultaneously
+        let (read_half, write_half) = stream.into_split();
+
         // Subscribe to the broadcast channel to receive notifications from other connections
         let mutation_broadcast_rx = mutation_broadcast_tx.subscribe();
+
+        // Generate a unique connection ID for subscription tracking
+        let connection_id = uuid::Uuid::new_v4().to_string();
+
         Self {
-            stream,
+            read_half,
+            write_half,
             peer_addr,
             config,
             observability,
@@ -81,8 +107,8 @@ impl ConnectionHandler {
             connection_start: Instant::now(),
             active_connections,
             database_registry,
-            subscription_manager: SessionSubscriptionManager::new(),
-            global_subscription_manager,
+            connection_id,
+            subscription_manager,
             mutation_broadcast_tx,
             mutation_broadcast_rx,
         }
@@ -112,8 +138,8 @@ impl ConnectionHandler {
             Some(FrontendMessage::SSLRequest) => {
                 debug!("Received SSL request");
                 // We don't support SSL yet, send 'N'
-                self.stream.write_u8(b'N').await?;
-                self.stream.flush().await?;
+                self.write_half.write_u8(b'N').await?;
+                self.write_half.flush().await?;
 
                 // Read actual startup message after SSL rejection
                 self.read_buf.clear();
@@ -279,103 +305,123 @@ impl ConnectionHandler {
     ///
     /// This enables cross-connection subscription notifications: when connection A
     /// mutates a table, connection B's subscriptions on that table are notified.
+    ///
+    /// Uses `tokio::select!` to wait on both sources simultaneously with near-zero
+    /// latency, avoiding the previous 100ms polling approach.
     async fn process_queries(&mut self) -> Result<()> {
         loop {
-            // First, drain any pending broadcast notifications without blocking
-            // This ensures we process notifications that arrived while handling previous messages
-            loop {
-                match self.mutation_broadcast_rx.try_recv() {
-                    Ok(notification) => {
-                        if self.subscription_manager.subscription_count() > 0 {
-                            self.handle_cross_connection_notification(&notification.affected_tables)
-                                .await;
-                        }
-                    }
-                    Err(broadcast::error::TryRecvError::Empty) => break,
-                    Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                        debug!("Missed {} broadcast notifications (lagged)", n);
-                    }
-                    Err(broadcast::error::TryRecvError::Closed) => {
-                        warn!("Mutation broadcast channel closed");
-                        break;
+            // First, process any complete messages already in the buffer
+            // This handles cases where multiple messages arrived in a single TCP read
+            while let Some(msg) = FrontendMessage::decode(&mut self.read_buf)? {
+                match self.handle_client_message(msg).await? {
+                    ClientMessageResult::Continue => {}
+                    ClientMessageResult::Terminate => {
+                        self.subscription_manager
+                            .unsubscribe_all_for_connection(&self.connection_id);
+                        return Ok(());
                     }
                 }
             }
 
-            // Now wait for the next event: either a client message or a broadcast notification
-            // We use a short timeout on the client read to periodically check for broadcasts
-            let msg_result = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                self.read_complete_message(),
-            )
-            .await;
+            // No complete message in buffer - wait for either:
+            // 1. More data from the client TCP stream
+            // 2. Broadcast notifications from other connections
+            //
+            // Using select! provides near-zero latency for cross-connection notifications
+            // compared to the previous 100ms timeout polling approach.
+            tokio::select! {
+                biased;  // Prioritize broadcast notifications for lower latency
 
-            match msg_result {
-                Ok(Ok(msg)) => {
-                    // Process the client message
-                    match msg {
-                        FrontendMessage::Query { query } => {
-                            debug!("Query: {}", query);
-                            self.execute_query(&query).await?;
+                // Check for cross-connection mutation notifications
+                notification = self.mutation_broadcast_rx.recv() => {
+                    match notification {
+                        Ok(n) => {
+                            if self.subscription_manager.connection_subscription_count(&self.connection_id) > 0 {
+                                self.handle_cross_connection_notification(&n.affected_tables).await;
+                            }
                         }
-
-                        FrontendMessage::Subscribe { query, params } => {
-                            debug!("Subscribe: {}", query);
-                            self.handle_subscribe(&query, params).await?;
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            debug!("Missed {} broadcast notifications (lagged)", n);
                         }
-
-                        FrontendMessage::Unsubscribe { subscription_id } => {
-                            debug!("Unsubscribe: {:?}", subscription_id);
-                            self.subscription_manager.unsubscribe(&subscription_id);
-                            // No response needed per protocol spec
+                        Err(broadcast::error::RecvError::Closed) => {
+                            warn!("Mutation broadcast channel closed");
                         }
+                    }
+                }
 
-                        FrontendMessage::Terminate => {
-                            debug!("Client requested termination");
+                // Read more data from the client
+                read_result = self.read_half.read_buf(&mut self.read_buf) => {
+                    match read_result {
+                        Ok(0) => {
+                            // Connection closed by client
+                            debug!("Connection closed by client");
                             break;
                         }
-
-                        msg => {
-                            warn!("Unexpected message: {:?}", msg);
+                        Ok(_) => {
+                            // Data received - loop back to decode and process messages
+                        }
+                        Err(e) => {
+                            return Err(e.into());
                         }
                     }
-                }
-                Ok(Err(e)) => {
-                    // Error reading from client
-                    let err_str = e.to_string();
-                    if err_str.contains("Connection closed") {
-                        debug!("Connection closed by client");
-                        break;
-                    }
-                    return Err(e);
-                }
-                Err(_elapsed) => {
-                    // Timeout - no client message, loop back to check for broadcasts
-                    // This is the normal case when client is idle
-                    continue;
                 }
             }
         }
 
         // Clean up subscriptions when connection closes
-        self.subscription_manager.clear();
+        self.subscription_manager
+            .unsubscribe_all_for_connection(&self.connection_id);
 
         Ok(())
+    }
+
+    /// Handle a single client message
+    async fn handle_client_message(&mut self, msg: FrontendMessage) -> Result<ClientMessageResult> {
+        match msg {
+            FrontendMessage::Query { query } => {
+                debug!("Query: {}", query);
+                self.execute_query(&query).await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Subscribe { query, params } => {
+                debug!("Subscribe: {}", query);
+                self.handle_subscribe(&query, params).await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Unsubscribe { subscription_id } => {
+                debug!("Unsubscribe: {:?}", subscription_id);
+                self.subscription_manager.unsubscribe_by_wire_id(&subscription_id);
+                // No response needed per protocol spec
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Terminate => {
+                debug!("Client requested termination");
+                Ok(ClientMessageResult::Terminate)
+            }
+
+            msg => {
+                warn!("Unexpected message: {:?}", msg);
+                Ok(ClientMessageResult::Continue)
+            }
+        }
     }
 
     /// Handle a cross-connection notification about table mutations
     ///
     /// When another connection mutates tables, this method is called to
     /// check if any of our subscriptions are affected and send updates.
+    /// This method supports delta updates to reduce network bandwidth when
+    /// only a small portion of the result set has changed.
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
-        // Collect subscriptions that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String)> = affected_tables
+        // Collect subscriptions for THIS connection that need updating
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
             .iter()
             .flat_map(|table| {
                 self.subscription_manager
-                    .get_subscriptions_for_table_with_details(table)
-                    .map(|(id, sub)| (*id, sub.query.clone()))
-                    .collect::<Vec<_>>()
+                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
             })
             .collect();
 
@@ -387,7 +433,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _)| seen.insert(*id))
+            .filter(|(id, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -397,32 +443,130 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
                     Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert rows to wire format
-                        let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
-                            .iter()
-                            .map(|row| {
-                                row.values
-                                    .iter()
-                                    .map(|v| Some(v.to_string().as_bytes().to_vec()))
-                                    .collect()
-                            })
-                            .collect();
+                        // Convert to our Row format for delta computation
+                        let new_rows: Vec<Row> =
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
 
-                        // Send full update
-                        if let Err(e) = self
-                            .send_subscription_data(
-                                &subscription_id,
-                                SubscriptionUpdateType::Full,
-                                wire_rows,
-                            )
-                            .await
-                        {
-                            warn!("Failed to send cross-connection subscription update: {}", e);
+                        // Compute hash for change detection
+                        let new_hash = hash_rows(&new_rows);
+
+                        // Skip if results haven't changed
+                        if new_hash == last_hash {
+                            debug!(
+                                "Cross-connection update: results unchanged for subscription {:?}",
+                                subscription_id
+                            );
+                            continue;
                         }
+
+                        // Determine update strategy: selective > delta > full
+                        if let Some(ref old_rows) = last_result {
+                            // Try selective column updates first (for row updates with few changed columns)
+                            match self
+                                .try_send_selective_updates(&subscription_id, old_rows, &new_rows)
+                                .await
+                            {
+                                Ok(true) => {
+                                    // Selective updates sent successfully
+                                    debug!(
+                                        "Cross-connection selective update sent for subscription {:?}",
+                                        subscription_id
+                                    );
+                                }
+                                Ok(false) => {
+                                    // Selective not applicable, try delta
+                                    if let Some(delta) =
+                                        compute_delta(SubscriptionId::default(), old_rows, &new_rows)
+                                    {
+                                        if let Err(e) =
+                                            self.send_delta_updates(&subscription_id, &delta).await
+                                        {
+                                            warn!(
+                                                "Failed to send cross-connection delta update: {}",
+                                                e
+                                            );
+                                        }
+
+                                        if let SubscriptionUpdate::Delta {
+                                            ref inserts,
+                                            ref updates,
+                                            ref deletes,
+                                            ..
+                                        } = delta
+                                        {
+                                            debug!(
+                                                "Cross-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
+                                                inserts.len(),
+                                                updates.len(),
+                                                deletes.len(),
+                                                subscription_id
+                                            );
+                                        }
+                                    } else {
+                                        // No delta computed - send full update
+                                        let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                        if let Err(e) = self
+                                            .send_subscription_data(
+                                                &subscription_id,
+                                                SubscriptionUpdateType::Full,
+                                                wire_rows,
+                                            )
+                                            .await
+                                        {
+                                            warn!(
+                                                "Failed to send cross-connection full update: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Error trying selective updates, falling back to full: {}",
+                                        e
+                                    );
+                                    let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                    if let Err(e) = self
+                                        .send_subscription_data(
+                                            &subscription_id,
+                                            SubscriptionUpdateType::Full,
+                                            wire_rows,
+                                        )
+                                        .await
+                                    {
+                                        warn!("Failed to send cross-connection full update: {}", e);
+                                    }
+                                }
+                            }
+                        } else {
+                            // No previous results - send full update
+                            debug!(
+                                "Cross-connection update: no previous result, sending full update for subscription {:?}",
+                                subscription_id
+                            );
+                            let wire_rows = Self::rows_to_wire_format(&new_rows);
+                            if let Err(e) = self
+                                .send_subscription_data(
+                                    &subscription_id,
+                                    SubscriptionUpdateType::Full,
+                                    wire_rows,
+                                )
+                                .await
+                            {
+                                warn!("Failed to send cross-connection full update: {}", e);
+                            }
+                        }
+
+                        // Update stored result for next delta computation
+                        self.subscription_manager.update_result_by_wire_id(
+                            &subscription_id,
+                            new_hash,
+                            new_rows,
+                        );
                     }
                     Ok(_) => {
                         // Non-SELECT result - shouldn't happen for a subscription query
@@ -442,22 +586,167 @@ impl ConnectionHandler {
         }
     }
 
-    /// Read a complete frontend message, looping until enough data is available
+    /// Send delta updates to a subscription
     ///
-    /// This is critical for proper PostgreSQL wire protocol handling. TCP may deliver
-    /// messages in fragments, so we must continue reading until we have a complete
-    /// message. Previously, partial reads were incorrectly interpreted as connection
-    /// closure, causing connections to drop after ~150-190 queries.
-    async fn read_complete_message(&mut self) -> Result<FrontendMessage> {
-        loop {
-            // Try to decode a message from the existing buffer
-            if let Some(msg) = FrontendMessage::decode(&mut self.read_buf)? {
-                return Ok(msg);
+    /// The wire protocol sends separate messages for inserts, updates, and deletes.
+    async fn send_delta_updates(
+        &mut self,
+        subscription_id: &[u8; 16],
+        delta: &SubscriptionUpdate,
+    ) -> Result<()> {
+        if let SubscriptionUpdate::Delta { inserts, updates, deletes, .. } = delta {
+            // Send deletes first (so clients can remove before adding)
+            if !deletes.is_empty() {
+                let wire_rows = Self::rows_to_wire_format(deletes);
+                self.send_subscription_data(
+                    subscription_id,
+                    SubscriptionUpdateType::DeltaDelete,
+                    wire_rows,
+                )
+                .await?;
             }
 
-            // Need more data - read from the stream
-            self.read_message().await?;
+            // Send updates
+            // Note: The current delta computation doesn't detect updates (they appear as delete+insert)
+            // but we support the wire format for future enhancements
+            if !updates.is_empty() {
+                // For updates, we send the new values
+                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = updates
+                    .iter()
+                    .map(|(_, new_row)| {
+                        new_row
+                            .values
+                            .iter()
+                            .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                            .collect()
+                    })
+                    .collect();
+                self.send_subscription_data(
+                    subscription_id,
+                    SubscriptionUpdateType::DeltaUpdate,
+                    wire_rows,
+                )
+                .await?;
+            }
+
+            // Send inserts last
+            if !inserts.is_empty() {
+                let wire_rows = Self::rows_to_wire_format(inserts);
+                self.send_subscription_data(
+                    subscription_id,
+                    SubscriptionUpdateType::DeltaInsert,
+                    wire_rows,
+                )
+                .await?;
+            }
         }
+        Ok(())
+    }
+
+    /// Convert rows to wire format for sending over the protocol
+    fn rows_to_wire_format(rows: &[Row]) -> Vec<Vec<Option<Vec<u8>>>> {
+        rows.iter()
+            .map(|row| {
+                row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
+            })
+            .collect()
+    }
+
+    /// Try to send selective column updates for row changes
+    ///
+    /// This method attempts to identify rows that have been updated (same primary key,
+    /// different values) and sends only the changed columns using SubscriptionPartialData.
+    ///
+    /// Returns Ok(true) if selective updates were sent, Ok(false) if we should fall back
+    /// to full updates.
+    async fn try_send_selective_updates(
+        &mut self,
+        subscription_id: &[u8; 16],
+        old_rows: &[Row],
+        new_rows: &[Row],
+    ) -> Result<bool> {
+        // Skip if row counts differ significantly (likely not just updates)
+        if old_rows.len() != new_rows.len() {
+            return Ok(false);
+        }
+
+        // Skip for small result sets (not worth the overhead)
+        if new_rows.is_empty() {
+            return Ok(false);
+        }
+
+        // Skip if rows have no columns
+        let total_columns = new_rows.first().map(|r| r.values.len()).unwrap_or(0);
+        if total_columns < 2 {
+            // Need at least 2 columns for selective to be useful (PK + data)
+            return Ok(false);
+        }
+
+        // Default config: assume first column is PK
+        let config = SelectiveColumnConfig::default();
+
+        // Convert to wire format for comparison
+        let old_wire = Self::rows_to_wire_format(old_rows);
+        let new_wire = Self::rows_to_wire_format(new_rows);
+
+        // Build a map of old rows by their first column (PK) for matching
+        let mut old_by_pk: HashMap<Vec<u8>, &Vec<Option<Vec<u8>>>> = HashMap::new();
+        for row in &old_wire {
+            if let Some(Some(pk)) = row.first() {
+                old_by_pk.insert(pk.clone(), row);
+            }
+        }
+
+        // Try to create partial updates for each new row
+        let mut partial_updates = Vec::new();
+        let mut all_selective = true;
+
+        for new_row in &new_wire {
+            // Get the PK value from the new row
+            let pk = match new_row.first() {
+                Some(Some(pk)) => pk,
+                _ => {
+                    all_selective = false;
+                    break;
+                }
+            };
+
+            // Find matching old row
+            if let Some(old_row) = old_by_pk.get(pk) {
+                // Try to create a partial update
+                if let Some(partial) =
+                    create_partial_row_update(old_row, new_row, &config.pk_columns, &config)
+                {
+                    partial_updates.push(partial);
+                } else {
+                    // Row is identical or full update needed
+                    // Check if rows are identical (no update needed)
+                    if old_row != &new_row {
+                        // Rows differ but selective not beneficial
+                        all_selective = false;
+                        break;
+                    }
+                    // Rows are identical - no partial update needed for this row
+                }
+            } else {
+                // New row with no matching old row - can't use selective
+                all_selective = false;
+                break;
+            }
+        }
+
+        // Only send selective updates if all rows could be handled
+        if all_selective && !partial_updates.is_empty() {
+            debug!(
+                "Sending {} selective column updates for subscription {:?}",
+                partial_updates.len(),
+                subscription_id
+            );
+            self.send_subscription_partial_data(subscription_id, partial_updates).await?;
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     /// Execute a SQL query
@@ -547,7 +836,7 @@ impl ConnectionHandler {
     ///
     /// Parses the query, extracts table dependencies, executes the query,
     /// registers the subscription, and sends the initial data to the client.
-    async fn handle_subscribe(&mut self, query: &str, params: Vec<Option<Vec<u8>>>) -> Result<()> {
+    async fn handle_subscribe(&mut self, query: &str, _params: Vec<Option<Vec<u8>>>) -> Result<()> {
         let session = self.session.as_mut().ok_or_else(|| anyhow::anyhow!("No session"))?;
 
         // Parse the query to extract table dependencies
@@ -564,24 +853,42 @@ impl ConnectionHandler {
         // Extract table dependencies from the query
         let table_dependencies = table_extractor::extract_tables_from_statement(&parsed);
 
-        // Register the subscription first (to get the ID)
-        let subscription_id = match self.subscription_manager.subscribe(
+        // Generate a wire subscription ID (UUID) for the wire protocol
+        let wire_subscription_id = *uuid::Uuid::new_v4().as_bytes();
+
+        // Create a dummy channel - wire protocol sends data directly through TCP socket,
+        // not through the subscription manager's channel-based notification system
+        let (notify_tx, _notify_rx) = tokio::sync::mpsc::channel(1);
+
+        // Register the subscription with the global subscription manager
+        if let Err(e) = self.subscription_manager.subscribe_for_connection(
             query.to_string(),
-            params,
-            table_dependencies,
+            notify_tx,
+            self.connection_id.clone(),
+            wire_subscription_id,
+            table_dependencies.clone(),
         ) {
-            Ok(id) => id,
-            Err(e) => {
-                // Send subscription error with a dummy subscription ID (subscription failed before registration)
-                let error_id = [0u8; 16];
-                self.send_subscription_error(&error_id, &format!("{}", e)).await?;
-                return Ok(());
-            }
-        };
+            // Send subscription error with a dummy subscription ID (subscription failed before registration)
+            let error_id = [0u8; 16];
+            self.send_subscription_error(&error_id, &format!("{}", e)).await?;
+            return Ok(());
+        }
 
         // Execute the query to get initial data
         match session.execute(query).await {
             Ok(ExecutionResult::Select { rows, .. }) => {
+                // Convert rows to our Row format for delta computation
+                let result_rows: Vec<Row> =
+                    rows.iter().map(|r| Row { values: r.values.clone() }).collect();
+
+                // Compute hash and store result for future delta computation
+                let result_hash = hash_rows(&result_rows);
+                self.subscription_manager.update_result_by_wire_id(
+                    &wire_subscription_id,
+                    result_hash,
+                    result_rows.clone(),
+                );
+
                 // Convert rows to wire format
                 let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
                     .iter()
@@ -592,7 +899,7 @@ impl ConnectionHandler {
 
                 // Send initial subscription data
                 self.send_subscription_data(
-                    &subscription_id,
+                    &wire_subscription_id,
                     SubscriptionUpdateType::Full,
                     wire_rows,
                 )
@@ -600,17 +907,17 @@ impl ConnectionHandler {
             }
             Ok(_) => {
                 // Non-SELECT query - send error and remove subscription
-                self.subscription_manager.unsubscribe(&subscription_id);
+                self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
                 self.send_subscription_error(
-                    &subscription_id,
+                    &wire_subscription_id,
                     "Only SELECT queries can be subscribed to",
                 )
                 .await?;
             }
             Err(e) => {
                 // Query execution failed - remove subscription and send error
-                self.subscription_manager.unsubscribe(&subscription_id);
-                self.send_subscription_error(&subscription_id, &format!("Execution error: {}", e))
+                self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                self.send_subscription_error(&wire_subscription_id, &format!("Execution error: {}", e))
                     .await?;
             }
         }
@@ -623,6 +930,7 @@ impl ConnectionHandler {
     /// This method parses the mutation query to extract the affected table,
     /// finds all subscriptions that depend on that table, re-executes their
     /// queries, and sends updated results to the client.
+    /// Supports delta updates to reduce network bandwidth.
     async fn notify_affected_subscriptions(&mut self, mutation_query: &str) {
         // Parse the mutation query to extract affected tables
         let affected_tables = match vibesql_parser::Parser::parse_sql(mutation_query) {
@@ -637,15 +945,12 @@ impl ConnectionHandler {
             return;
         }
 
-        // Collect subscriptions that need updating
-        // We collect (subscription_id, query) pairs to avoid borrowing issues
-        let subscriptions_to_update: Vec<([u8; 16], String)> = affected_tables
+        // Collect subscriptions for THIS connection that need updating
+        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>)> = affected_tables
             .iter()
             .flat_map(|table| {
                 self.subscription_manager
-                    .get_subscriptions_for_table_with_details(table)
-                    .map(|(id, sub)| (*id, sub.query.clone()))
-                    .collect::<Vec<_>>()
+                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
             })
             .collect();
 
@@ -657,7 +962,7 @@ impl ConnectionHandler {
         let mut seen = std::collections::HashSet::new();
         let unique_subscriptions: Vec<_> = subscriptions_to_update
             .into_iter()
-            .filter(|(id, _)| seen.insert(*id))
+            .filter(|(id, _, _, _)| seen.insert(*id))
             .collect();
 
         debug!(
@@ -667,32 +972,126 @@ impl ConnectionHandler {
         );
 
         // Re-execute each subscription query and send updates
-        for (subscription_id, query) in unique_subscriptions {
+        for (subscription_id, query, last_hash, last_result) in unique_subscriptions {
             if let Some(session) = &mut self.session {
                 match session.execute(&query).await {
                     Ok(ExecutionResult::Select { rows, .. }) => {
-                        // Convert rows to wire format
-                        let wire_rows: Vec<Vec<Option<Vec<u8>>>> = rows
-                            .iter()
-                            .map(|row| {
-                                row.values
-                                    .iter()
-                                    .map(|v| Some(v.to_string().as_bytes().to_vec()))
-                                    .collect()
-                            })
-                            .collect();
+                        // Convert to our Row format for delta computation
+                        let new_rows: Vec<Row> =
+                            rows.iter().map(|r| Row { values: r.values.clone() }).collect();
 
-                        // Send full update (could optimize to send delta in the future)
-                        if let Err(e) = self
-                            .send_subscription_data(
-                                &subscription_id,
-                                SubscriptionUpdateType::Full,
-                                wire_rows,
-                            )
-                            .await
-                        {
-                            warn!("Failed to send subscription update: {}", e);
+                        // Compute hash for change detection
+                        let new_hash = hash_rows(&new_rows);
+
+                        // Skip if results haven't changed
+                        if new_hash == last_hash {
+                            debug!(
+                                "Same-connection update: results unchanged for subscription {:?}",
+                                subscription_id
+                            );
+                            continue;
                         }
+
+                        // Determine update strategy: selective > delta > full
+                        if let Some(ref old_rows) = last_result {
+                            // Try selective column updates first (for row updates with few changed columns)
+                            match self
+                                .try_send_selective_updates(&subscription_id, old_rows, &new_rows)
+                                .await
+                            {
+                                Ok(true) => {
+                                    // Selective updates sent successfully
+                                    debug!(
+                                        "Same-connection selective update sent for subscription {:?}",
+                                        subscription_id
+                                    );
+                                }
+                                Ok(false) => {
+                                    // Selective not applicable, try delta
+                                    if let Some(delta) =
+                                        compute_delta(SubscriptionId::default(), old_rows, &new_rows)
+                                    {
+                                        if let Err(e) =
+                                            self.send_delta_updates(&subscription_id, &delta).await
+                                        {
+                                            warn!(
+                                                "Failed to send same-connection delta update: {}",
+                                                e
+                                            );
+                                        }
+
+                                        if let SubscriptionUpdate::Delta {
+                                            ref inserts,
+                                            ref updates,
+                                            ref deletes,
+                                            ..
+                                        } = delta
+                                        {
+                                            debug!(
+                                                "Same-connection delta update sent: {} inserts, {} updates, {} deletes for subscription {:?}",
+                                                inserts.len(),
+                                                updates.len(),
+                                                deletes.len(),
+                                                subscription_id
+                                            );
+                                        }
+                                    } else {
+                                        // No delta computed - send full update
+                                        let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                        if let Err(e) = self
+                                            .send_subscription_data(
+                                                &subscription_id,
+                                                SubscriptionUpdateType::Full,
+                                                wire_rows,
+                                            )
+                                            .await
+                                        {
+                                            warn!(
+                                                "Failed to send same-connection full update: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Error trying selective updates, falling back to full: {}",
+                                        e
+                                    );
+                                    let wire_rows = Self::rows_to_wire_format(&new_rows);
+                                    if let Err(e) = self
+                                        .send_subscription_data(
+                                            &subscription_id,
+                                            SubscriptionUpdateType::Full,
+                                            wire_rows,
+                                        )
+                                        .await
+                                    {
+                                        warn!("Failed to send same-connection full update: {}", e);
+                                    }
+                                }
+                            }
+                        } else {
+                            // No previous results - send full update
+                            let wire_rows = Self::rows_to_wire_format(&new_rows);
+                            if let Err(e) = self
+                                .send_subscription_data(
+                                    &subscription_id,
+                                    SubscriptionUpdateType::Full,
+                                    wire_rows,
+                                )
+                                .await
+                            {
+                                warn!("Failed to send same-connection full update: {}", e);
+                            }
+                        }
+
+                        // Update stored result for next delta computation
+                        self.subscription_manager.update_result_by_wire_id(
+                            &subscription_id,
+                            new_hash,
+                            new_rows,
+                        );
                     }
                     Ok(_) => {
                         // Non-SELECT result - shouldn't happen for a subscription query
@@ -976,10 +1375,24 @@ impl ConnectionHandler {
         self.flush_write_buffer().await
     }
 
+    /// Send subscription partial data message (selective column updates)
+    ///
+    /// Used when only a subset of columns have changed in a row update,
+    /// reducing network bandwidth for wide tables.
+    async fn send_subscription_partial_data(
+        &mut self,
+        subscription_id: &[u8; 16],
+        rows: Vec<PartialRowUpdate>,
+    ) -> Result<()> {
+        BackendMessage::SubscriptionPartialData { subscription_id: *subscription_id, rows }
+            .encode(&mut self.write_buf);
+        self.flush_write_buffer().await
+    }
+
     // I/O methods
 
     async fn read_message(&mut self) -> Result<()> {
-        let n = self.stream.read_buf(&mut self.read_buf).await?;
+        let n = self.read_half.read_buf(&mut self.read_buf).await?;
         if n == 0 {
             return Err(anyhow::anyhow!("Connection closed"));
         }
@@ -987,8 +1400,8 @@ impl ConnectionHandler {
     }
 
     async fn flush_write_buffer(&mut self) -> Result<()> {
-        self.stream.write_all(&self.write_buf).await?;
-        self.stream.flush().await?;
+        self.write_half.write_all(&self.write_buf).await?;
+        self.write_half.flush().await?;
         self.write_buf.clear();
         Ok(())
     }
