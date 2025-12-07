@@ -34,6 +34,71 @@ pub enum SubscriptionUpdateType {
     DeltaInsert = 1,
     DeltaUpdate = 2,
     DeltaDelete = 3,
+    /// Selective column update - only changed columns are sent
+    /// Used with SubscriptionPartialData message
+    SelectiveUpdate = 4,
+}
+
+/// A partial row update containing only changed columns
+///
+/// Used for selective column updates to reduce bandwidth when only
+/// a few columns change in a wide table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartialRowUpdate {
+    /// Total number of columns in the full row (for bitmap sizing)
+    pub total_columns: u16,
+    /// Bitmap indicating which columns are present (1 bit per column)
+    /// Bit 0 = column 0, Bit 1 = column 1, etc.
+    /// A set bit means the column value is included in `values`
+    pub column_mask: Vec<u8>,
+    /// Values for columns with set bits in column_mask, in column order
+    /// None = NULL, Some(bytes) = value data
+    pub values: Vec<Option<Vec<u8>>>,
+}
+
+impl PartialRowUpdate {
+    /// Create a new partial row update
+    ///
+    /// # Arguments
+    /// * `total_columns` - Total number of columns in the full row
+    /// * `present_columns` - Indices of columns that are present in this update
+    /// * `values` - Values for the present columns, in same order as present_columns
+    pub fn new(total_columns: u16, present_columns: &[u16], values: Vec<Option<Vec<u8>>>) -> Self {
+        debug_assert_eq!(present_columns.len(), values.len());
+
+        // Create bitmap
+        let bitmap_bytes = (total_columns as usize + 7) / 8;
+        let mut column_mask = vec![0u8; bitmap_bytes];
+
+        for &col_idx in present_columns {
+            if (col_idx as usize) < total_columns as usize {
+                let byte_idx = col_idx as usize / 8;
+                let bit_idx = col_idx as usize % 8;
+                column_mask[byte_idx] |= 1 << bit_idx;
+            }
+        }
+
+        Self { total_columns, column_mask, values }
+    }
+
+    /// Check if a column is present in this update
+    pub fn is_column_present(&self, col_idx: u16) -> bool {
+        if col_idx >= self.total_columns {
+            return false;
+        }
+        let byte_idx = col_idx as usize / 8;
+        let bit_idx = col_idx as usize % 8;
+        if byte_idx < self.column_mask.len() {
+            (self.column_mask[byte_idx] & (1 << bit_idx)) != 0
+        } else {
+            false
+        }
+    }
+
+    /// Get the number of present columns
+    pub fn present_column_count(&self) -> usize {
+        self.column_mask.iter().map(|b| b.count_ones() as usize).sum()
+    }
 }
 
 /// Backend message types (server -> client)
@@ -84,12 +149,35 @@ pub enum BackendMessage {
     /// Subscription error (0xF3) - subscription error notification
     SubscriptionError { subscription_id: [u8; 16], message: String },
 
-    /// Subscription acknowledgment (0xF4) - confirms subscription registration
+/// Subscription acknowledgment (0xF4) - confirms subscription registration
     /// Sent immediately after a subscription is registered, before initial data
     SubscriptionAck {
         subscription_id: [u8; 16],
         /// Number of table dependencies the subscription monitors
         table_count: u16,
+    },
+
+    /// Subscription partial data (0xF7) - selective column update
+    ///
+    /// Used for sending only changed columns in row updates, reducing bandwidth
+    /// for wide tables where only a few columns change frequently.
+    ///
+    /// Wire format:
+    /// - 1 byte: Message type (0xF7)
+    /// - 4 bytes: Length (big-endian)
+    /// - 16 bytes: Subscription ID
+    /// - 1 byte: Update type (always SelectiveUpdate = 4)
+    /// - 4 bytes: Row count (big-endian)
+    /// - For each row:
+    ///   - 2 bytes: Total column count (big-endian)
+    ///   - N bytes: Column presence bitmap (ceil(total_columns / 8) bytes)
+    ///   - For each present column (bit=1):
+    ///     - 4 bytes: Value length (-1 for NULL)
+    ///     - M bytes: Value data (if length >= 0)
+    SubscriptionPartialData {
+        subscription_id: [u8; 16],
+        /// Partial row updates with column bitmaps
+        rows: Vec<PartialRowUpdate>,
     },
 }
 
@@ -323,7 +411,7 @@ impl BackendMessage {
                 put_cstring(buf, message);
             }
 
-            BackendMessage::SubscriptionAck { subscription_id, table_count } => {
+BackendMessage::SubscriptionAck { subscription_id, table_count } => {
                 buf.put_u8(0xF4); // SubscriptionAck
 
                 let len = 4 + 16 + 2; // length + subscription_id + table_count
@@ -331,6 +419,46 @@ impl BackendMessage {
                 buf.put_i32(len as i32);
                 buf.put_slice(subscription_id);
                 buf.put_u16(*table_count);
+            }
+
+            BackendMessage::SubscriptionPartialData { subscription_id, rows } => {
+                buf.put_u8(0xF7); // SubscriptionPartialData
+
+                // Calculate total length
+                // 4 (length field) + 16 (subscription_id) + 1 (update_type) + 4 (row count)
+                let mut len = 4 + 16 + 1 + 4;
+                for row in rows {
+                    // 2 (total_columns) + bitmap bytes + values
+                    len += 2;
+                    len += row.column_mask.len();
+                    for value in &row.values {
+                        len += 4; // value length field
+                        if let Some(v) = value {
+                            len += v.len();
+                        }
+                    }
+                }
+
+                buf.put_i32(len as i32);
+                buf.put_slice(subscription_id);
+                buf.put_u8(SubscriptionUpdateType::SelectiveUpdate as u8);
+                buf.put_i32(rows.len() as i32);
+
+                for row in rows {
+                    buf.put_i16(row.total_columns as i16);
+                    buf.put_slice(&row.column_mask);
+                    for value in &row.values {
+                        match value {
+                            Some(v) => {
+                                buf.put_i32(v.len() as i32);
+                                buf.put_slice(v);
+                            }
+                            None => {
+                                buf.put_i32(-1); // NULL value
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -695,6 +823,103 @@ mod tests {
             Some(FrontendMessage::SubscriptionResume { subscription_id })
             if subscription_id == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         ));
+    }
+
+    #[test]
+    fn test_subscription_partial_data_encoding() {
+        let mut buf = BytesMut::new();
+        let subscription_id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+        // Create a partial row update with 4 columns, columns 0 and 2 present
+        let partial_row = PartialRowUpdate::new(
+            4,
+            &[0, 2],
+            vec![Some(b"id1".to_vec()), Some(b"value".to_vec())],
+        );
+
+        let msg = BackendMessage::SubscriptionPartialData {
+            subscription_id,
+            rows: vec![partial_row],
+        };
+        msg.encode(&mut buf);
+
+        // Verify message type (0xF7)
+        assert_eq!(buf[0], 0xF7);
+
+        // Verify subscription_id is at bytes 5-20
+        assert_eq!(&buf[5..21], subscription_id.as_ref());
+
+        // Verify update type is SelectiveUpdate (4)
+        assert_eq!(buf[21], 4);
+
+        // Verify row count is 1
+        let row_count = i32::from_be_bytes([buf[22], buf[23], buf[24], buf[25]]);
+        assert_eq!(row_count, 1);
+
+        // Verify total columns is 4
+        let total_cols = i16::from_be_bytes([buf[26], buf[27]]);
+        assert_eq!(total_cols, 4);
+
+        // Verify column bitmap (1 byte for 4 columns)
+        // Columns 0 and 2: binary 0101 = 5
+        assert_eq!(buf[28], 0b00000101);
+    }
+
+    #[test]
+    fn test_subscription_partial_data_encoding_with_null() {
+        let mut buf = BytesMut::new();
+        let subscription_id = [0u8; 16];
+
+        // Create a partial row update with NULL value
+        let partial_row = PartialRowUpdate::new(
+            3,
+            &[0, 1],
+            vec![Some(b"1".to_vec()), None], // Column 1 is NULL
+        );
+
+        let msg = BackendMessage::SubscriptionPartialData {
+            subscription_id,
+            rows: vec![partial_row],
+        };
+        msg.encode(&mut buf);
+
+        assert_eq!(buf[0], 0xF7);
+
+        // After subscription_id (16 bytes), update_type (1 byte), row_count (4 bytes)
+        // total_columns (2 bytes), column_mask (1 byte for 3 columns)
+        // First value: length (4) + data (1)
+        // Second value: length (-1) for NULL
+
+        // Find the position of the NULL value length (-1)
+        // Position: 1 (type) + 4 (len) + 16 (id) + 1 (update_type) + 4 (row_count)
+        //         + 2 (total_cols) + 1 (bitmap) + 4 (val1_len) + 1 (val1_data) = 34
+        let null_pos = 34;
+        let null_len = i32::from_be_bytes([buf[null_pos], buf[null_pos + 1], buf[null_pos + 2], buf[null_pos + 3]]);
+        assert_eq!(null_len, -1);
+    }
+
+    #[test]
+    fn test_partial_row_update_new() {
+        // Test with 16 columns to verify multi-byte bitmap
+        let partial = PartialRowUpdate::new(
+            16,
+            &[0, 8, 15],
+            vec![Some(b"a".to_vec()), Some(b"b".to_vec()), Some(b"c".to_vec())],
+        );
+
+        assert_eq!(partial.total_columns, 16);
+        assert_eq!(partial.column_mask.len(), 2); // ceil(16/8) = 2 bytes
+
+        // Byte 0: bit 0 set (column 0) = 0x01
+        // Byte 1: bit 0 set (column 8), bit 7 set (column 15) = 0x81
+        assert_eq!(partial.column_mask[0], 0b00000001);
+        assert_eq!(partial.column_mask[1], 0b10000001);
+
+        assert!(partial.is_column_present(0));
+        assert!(!partial.is_column_present(1));
+        assert!(partial.is_column_present(8));
+        assert!(partial.is_column_present(15));
+        assert!(!partial.is_column_present(16)); // Out of range
     }
 
     // =====================================================================

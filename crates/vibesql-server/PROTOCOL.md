@@ -22,17 +22,18 @@ Standard PostgreSQL clients (psql, libpq, etc.) work normally with VibeSQL serve
 
 ## Message Overview
 
-VibeSQL adds subscription message types in the custom range (0xF0-0xF6), chosen to avoid collision with PostgreSQL protocol messages (which use ASCII letters):
+VibeSQL adds subscription message types in the custom range (0xF0-0xF7), chosen to avoid collision with PostgreSQL protocol messages (which use ASCII letters):
 
 | Code | Direction | Name | Description |
 |------|-----------|------|-------------|
 | `0xF0` (240) | Frontend | Subscribe | Subscribe to query updates |
 | `0xF1` (241) | Frontend | Unsubscribe | Cancel subscription |
-| `0xF2` (242) | Backend | SubscriptionData | Query result update |
+| `0xF2` (242) | Backend | SubscriptionData | Query result update (full rows) |
 | `0xF3` (243) | Backend | SubscriptionError | Subscription error |
 | `0xF4` (244) | Backend | SubscriptionAck | Acknowledge subscription creation |
 | `0xF5` (245) | Frontend | SubscriptionPause | Temporarily pause updates |
 | `0xF6` (246) | Frontend | SubscriptionResume | Resume paused subscription |
+| `0xF7` (247) | Backend | SubscriptionPartialData | Selective column update |
 
 ## Protocol Messages
 
@@ -432,6 +433,109 @@ Breakdown:
   29 3a 4b 5c 6d 7e 8f 90                - Subscription ID bytes 8-15
 ```
 
+### SubscriptionPartialData (0xF7) - Backend Message
+
+Sends selective column updates to the client. This is an optimization for wide tables where only a few columns change frequently. Instead of sending all columns, only changed columns (plus primary key columns for row identification) are included.
+
+**When to Use:**
+- Wide tables with many columns
+- Updates that typically affect only a few columns
+- Bandwidth-constrained environments
+
+**Byte-Level Format:**
+```
+┌──────────┬──────────────┬─────────────────┬─────────────┬───────────┬───────────────────┐
+│  Type    │   Length     │ Subscription ID │ Update Type │ Row Count │ Partial Rows...   │
+│   1B     │   4B (BE)    │    16B (UUID)   │    1B       │  4B (BE)  │    variable       │
+└──────────┴──────────────┴─────────────────┴─────────────┴───────────┴───────────────────┘
+     ↓            ↓               ↓               ↓             ↓              ↓
+   0xF7     Total length     Identifies     SelectiveUpdate  Number      Partial row
+            after type       subscription     (always 4)     of rows     data (below)
+```
+
+**Field Details:**
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | Message Type | `u8` | `0xF7` (SubscriptionPartialData) |
+| 1-4 | Length | `i32` BE | Total length after type byte |
+| 5-20 | Subscription ID | `[u8; 16]` | UUID identifying this subscription |
+| 21 | Update Type | `u8` | Always `4` (SelectiveUpdate) |
+| 22-25 | Row Count | `i32` BE | Number of partial row updates |
+| 26+ | Partial Rows | Array | Partial row data (see below) |
+
+**Partial Row Encoding:**
+
+Each partial row contains a column presence bitmap followed by values for only the present columns:
+
+```
+┌──────────────────┬─────────────────────────┬──────────────────────────────┐
+│  Total Columns   │    Column Bitmap        │     Present Column Values    │
+│    2B (BE)       │  ceil(columns/8) bytes  │          variable            │
+└──────────────────┴─────────────────────────┴──────────────────────────────┘
+```
+
+- **Total Columns**: The total number of columns in the full schema (for bitmap sizing)
+- **Column Bitmap**: One bit per column. Bit 0 = column 0, Bit 1 = column 1, etc.
+  - Bit = 0: Column not present (unchanged)
+  - Bit = 1: Column present in this update
+- **Present Column Values**: Values for columns with bit=1, in column order
+  - Encoded same as regular column values (4-byte length + data, or -1 for NULL)
+
+**Distinguishing Unchanged from NULL:**
+- Bit = 0: Column unchanged (not sent)
+- Bit = 1, Length = -1: Column changed to NULL
+- Bit = 1, Length >= 0: Column has new value
+
+**Primary Key Handling:**
+Server implementations should always include primary key columns (even if unchanged) to allow clients to identify which row is being updated.
+
+**Example** - Partial update for a 5-column table, updating columns 0 (PK) and 3:
+```
+Byte:  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16
+       ─────────────────────────────────────────────────────────────────────
+Hex:   F7 00 00 00 2A a1 b2 c3 d4 e5 f6 07 18 29 3a 4b 5c 6d 7e 8f 90 04 00
+       ↑  └────┬────┘ └───────────────────────────┬────────────────┘  ↑  └┬─
+       │       │                                  │                   │   │
+      Type   Length                        Subscription ID         Update Row
+      0xF7    42                             (16 bytes)             Type  Count
+                                                                   4=Sel   1
+
+Hex (continued):
+       17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29
+       ────────────────────────────────────────────────────────────
+       00 01 00 05 09 00 00 00 01 31 00 00 00 05 76 61 6C 75 65
+       └──┬──┘ ↑  └─┬─┘ └────┬────┘ ↑  └────┬────┘ └──────┬──────┘
+          │   │    │        │      │       │             │
+       Total Bitmap ID Len  "1"  Val Len  "value"
+       Cols=5 09=0b1001     1      5
+             (cols 0,3)
+
+Full Breakdown:
+  F7                                     - Message type: SubscriptionPartialData
+  00 00 00 2A                            - Length: 42 bytes
+  a1 b2 c3 d4 e5 f6 07 18                - Subscription ID bytes 0-7
+  29 3a 4b 5c 6d 7e 8f 90                - Subscription ID bytes 8-15
+  04                                     - Update type: SelectiveUpdate (4)
+  00 00 00 01                            - Row count: 1
+  00 05                                  - Total columns: 5
+  09                                     - Bitmap: 0b00001001 (columns 0 and 3 present)
+  00 00 00 01                            - Column 0 length: 1 byte
+  31                                     - Column 0 value: "1" (PK)
+  00 00 00 05                            - Column 3 length: 5 bytes
+  76 61 6C 75 65                         - Column 3 value: "value"
+```
+
+**Example** - Partial update with NULL:
+```
+Hex:   ... 00 03 05 00 00 00 01 31 FF FF FF FF
+            └┬─┘ ↑  └────┬────┘ ↑  └────┬────┘
+             │   │       │      │       │
+          Total Bitmap  ID Len "1"   NULL (-1)
+          Cols=3 05=0b101       1    (column 2 is NULL)
+                (cols 0,2)
+```
+
 ## Subscription Lifecycle
 
 ### Successful Subscription Flow
@@ -736,6 +840,5 @@ To use subscriptions, a client must:
 
 Potential future enhancements:
 - Filtering expressions for deltas (client-side filters to reduce network traffic)
-- Selective column updates (don't send unchanged columns in SubscriptionData)
 - Delta compression (send only changed rows instead of full result set)
 - Subscription batching (combine multiple subscriptions into single updates)
