@@ -337,7 +337,11 @@ impl UpdateExecutor {
             database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, index, Some(&changed_columns));
         }
 
-        // Invalidate columnar cache since table data has changed
+        // Invalidate the database-level columnar cache since table data changed.
+        // Note: Table-level cache is invalidated by update_row_fast()/update_row_selective().
+        // Both invalidations are necessary because they manage separate caches:
+        // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+        // - Database-level cache: used by Database::get_columnar() for cached access
         if update_count > 0 {
             database.invalidate_columnar_cache(&stmt.table_name);
         }

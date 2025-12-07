@@ -299,7 +299,11 @@ impl DeleteExecutor {
             database.rebuild_indexes(&stmt.table_name);
         }
 
-        // Invalidate columnar cache since table data has changed
+        // Invalidate the database-level columnar cache since table data changed.
+        // Note: The table-level cache is already invalidated by delete_by_indices().
+        // Both invalidations are necessary because they manage separate caches:
+        // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
+        // - Database-level cache: used by Database::get_columnar() for cached access
         if delete_result.deleted_count > 0 {
             database.invalidate_columnar_cache(&stmt.table_name);
         }
@@ -426,9 +430,12 @@ fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usize, 
     let row_count = table.row_count();
 
     // Clear all data at once (O(1) operation)
+    // Note: table.clear() invalidates the table-level columnar cache internally
     table.clear();
 
-    // Invalidate columnar cache since table data has changed
+    // Invalidate the database-level columnar cache since table data changed.
+    // Both the table-level (via clear()) and database-level invalidations are
+    // necessary because they manage separate caches at different levels.
     if row_count > 0 {
         database.invalidate_columnar_cache(table_name);
     }
