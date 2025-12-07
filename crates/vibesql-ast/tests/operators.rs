@@ -1,6 +1,5 @@
-use arcstr::ArcStr;
 use vibesql_ast::*;
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlValue, StringValue};
 
 // ============================================================================
 // BinaryOperator Tests - All SQL operators
@@ -50,8 +49,8 @@ fn test_modulo_operator() {
 fn test_concat_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Concat,
-        left: Box::new(Expression::Literal(SqlValue::Varchar(ArcStr::from("Hello")))),
-        right: Box::new(Expression::Literal(SqlValue::Varchar(ArcStr::from("World")))),
+        left: Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("Hello")))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("World")))),
     };
     match expr {
         Expression::BinaryOp { op: BinaryOperator::Concat, .. } => {} // Success
@@ -64,7 +63,7 @@ fn test_not_equal_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::NotEqual,
         left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-        right: Box::new(Expression::Literal(SqlValue::Varchar(ArcStr::from("active")))),
+        right: Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("active")))),
     };
     match expr {
         Expression::BinaryOp { op: BinaryOperator::NotEqual, .. } => {} // Success

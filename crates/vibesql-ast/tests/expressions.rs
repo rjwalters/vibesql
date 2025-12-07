@@ -1,6 +1,5 @@
-use arcstr::ArcStr;
 use vibesql_ast::*;
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlValue, StringValue};
 
 // ============================================================================
 // Expression Tests - SQL expressions
@@ -17,7 +16,7 @@ fn test_literal_integer_expression() {
 
 #[test]
 fn test_literal_string_expression() {
-    let expr = Expression::Literal(SqlValue::Varchar(ArcStr::from("hello")));
+    let expr = Expression::Literal(SqlValue::Varchar(StringValue::from("hello")));
     match expr {
         Expression::Literal(SqlValue::Varchar(s)) if &*s == "hello" => {} // Success
         _ => panic!("Expected string literal"),

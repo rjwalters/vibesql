@@ -1,6 +1,5 @@
-use arcstr::ArcStr;
 use vibesql_ast::*;
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlValue, StringValue};
 
 // ============================================================================
 // Complex Expression Tests
@@ -16,14 +15,14 @@ fn test_case_expression_simple() {
         when_clauses: vec![
             CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
-                result: Expression::Literal(SqlValue::Varchar(ArcStr::from("active"))),
+                result: Expression::Literal(SqlValue::Varchar(StringValue::from("active"))),
             },
             CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(2))],
-                result: Expression::Literal(SqlValue::Varchar(ArcStr::from("inactive"))),
+                result: Expression::Literal(SqlValue::Varchar(StringValue::from("inactive"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(ArcStr::from("unknown"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("unknown"))))),
     };
     match expr {
         Expression::Case { .. } => {} // Success
@@ -41,9 +40,9 @@ fn test_case_expression_searched() {
                 left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }],
-            result: Expression::Literal(SqlValue::Varchar(ArcStr::from("adult"))),
+            result: Expression::Literal(SqlValue::Varchar(StringValue::from("adult"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(ArcStr::from("minor"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("minor"))))),
     };
     match expr {
         Expression::Case { operand: None, .. } => {} // Success
