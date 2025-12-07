@@ -2331,3 +2331,360 @@ async fn test_table_without_pk_falls_back_to_full_data() {
     client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
 }
+
+// ============================================================================
+// CROSS-CONNECTION SELECTIVE UPDATE THRESHOLD EDGE CASE TESTS
+// ============================================================================
+
+/// test_cross_connection_exactly_at_threshold_uses_partial_data
+///
+/// Tests threshold edge case with cross-connection broadcast:
+/// - Table with 4 columns (id PK + 3 data columns)
+/// - Update 2 of 4 columns = 50%, exactly at threshold
+/// - Verify client2 receives 0xF7 (partial data), not 0xF2
+/// - The threshold uses > comparison, so 50% == 0.5 is NOT > 0.5, allowing selective update
+///
+/// Related: Issue #3979 - Cross-connection 0xF7 threshold edge cases
+#[tokio::test]
+async fn test_cross_connection_exactly_at_threshold_uses_partial_data() {
+    let server = start_test_server().await;
+
+    // Connect first client (the updater)
+    let mut client1 = TestClient::connect(server.addr()).await.expect("Failed to connect client 1");
+    client1.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Connect second client (the subscriber)
+    let mut client2 = TestClient::connect(server.addr()).await.expect("Failed to connect client 2");
+    client2.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Create shared test table on client1 with 4 columns total (id + 3 data columns)
+    let table_name = "cross_at_threshold_test";
+    client1
+        .send_query(&format!("DROP TABLE IF EXISTS {}", table_name))
+        .await
+        .expect("Failed to drop table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read drop response");
+
+    client1
+        .send_query(&format!(
+            "CREATE TABLE {} (
+                id INT PRIMARY KEY,
+                col1 VARCHAR,
+                col2 VARCHAR,
+                col3 VARCHAR
+            )",
+            table_name
+        ))
+        .await
+        .expect("Failed to create table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    // Insert initial data on client1
+    client1
+        .send_query(&format!("INSERT INTO {} VALUES (1, 'a', 'b', 'c')", table_name))
+        .await
+        .expect("Failed to insert data");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Client2 subscribes to the table
+    let query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client2, &query).await.expect("Failed to send subscribe from client2");
+    let _ = client2
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+
+    // Client1 updates exactly 2 of 4 columns = 50%, AT the threshold
+    // Since threshold uses >, 50% <= 50% allows selective update, so 0xF7 is sent
+    client1
+        .send_query(&format!(
+            "UPDATE {} SET col1 = 'x', col2 = 'y' WHERE id = 1",
+            table_name
+        ))
+        .await
+        .expect("Failed to update data");
+
+    // Client1 receives same-connection notification (may include SubscriptionData/PartialData before ReadyForQuery)
+    let _ = client1
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after update");
+
+    // Client2 receives cross-connection notification with longer timeout
+    let data2 = client2
+        .read_until_message_type_timeout(
+            MSG_SUBSCRIPTION_PARTIAL_DATA,
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .expect("Failed to read cross-connection notification");
+    let messages2 = parse_backend_messages(&data2);
+
+    // At exactly 50% threshold, the > comparison means 0.5 is NOT > 0.5
+    // So selective update (0xF7) should be used, not full data (0xF2)
+    let has_partial_data = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full_data = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    assert!(
+        has_partial_data,
+        "Client2 should receive SubscriptionPartialData (0xF7) at exactly 50% threshold (0.5 is NOT > 0.5)"
+    );
+    assert!(
+        !has_full_data,
+        "Client2 should NOT receive SubscriptionData (0xF2) at exactly 50% threshold"
+    );
+
+    // Verify the column mask is correct
+    if let Some((total_columns, mask)) = parse_partial_data_column_mask(&messages2) {
+        assert_eq!(total_columns, 4, "Table should have 4 columns");
+
+        // Column 0 (id/PK) should always be present
+        assert!(is_column_present_in_mask(&mask, 0), "PK column 0 should be present");
+
+        // Columns 1 and 2 were changed, should be present
+        assert!(is_column_present_in_mask(&mask, 1), "Changed column 1 (col1) should be present");
+        assert!(is_column_present_in_mask(&mask, 2), "Changed column 2 (col2) should be present");
+
+        // Column 3 was NOT changed, should NOT be present
+        assert!(
+            !is_column_present_in_mask(&mask, 3),
+            "Unchanged column 3 (col3) should NOT be present"
+        );
+    }
+
+    client1.send_terminate().await.expect("Failed to send terminate");
+    client2.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
+
+/// test_cross_connection_well_below_threshold_uses_partial_data
+///
+/// Tests threshold edge case with cross-connection broadcast:
+/// - Table with 5 columns (id PK + 4 data columns)
+/// - Update 2 of 5 columns = 40%, WELL BELOW the 50% threshold
+/// - Verify client2 receives 0xF7 (partial data), not 0xF2
+///
+/// Related: Issue #3979 - Cross-connection 0xF7 threshold edge cases
+#[tokio::test]
+async fn test_cross_connection_well_below_threshold_uses_partial_data() {
+    let server = start_test_server().await;
+
+    // Connect first client (the updater)
+    let mut client1 = TestClient::connect(server.addr()).await.expect("Failed to connect client 1");
+    client1.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Connect second client (the subscriber)
+    let mut client2 = TestClient::connect(server.addr()).await.expect("Failed to connect client 2");
+    client2.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Create shared test table on client1 with 5 columns total (id + 4 data columns)
+    let table_name = "cross_below_threshold_test";
+    client1
+        .send_query(&format!("DROP TABLE IF EXISTS {}", table_name))
+        .await
+        .expect("Failed to drop table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read drop response");
+
+    client1
+        .send_query(&format!(
+            "CREATE TABLE {} (
+                id INT PRIMARY KEY,
+                col1 VARCHAR,
+                col2 VARCHAR,
+                col3 VARCHAR,
+                col4 VARCHAR
+            )",
+            table_name
+        ))
+        .await
+        .expect("Failed to create table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    // Insert initial data on client1
+    client1
+        .send_query(&format!("INSERT INTO {} VALUES (1, 'a', 'b', 'c', 'd')", table_name))
+        .await
+        .expect("Failed to insert data");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Client2 subscribes to the table
+    let query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client2, &query).await.expect("Failed to send subscribe from client2");
+    let _ = client2
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+
+    // Client1 updates 2 of 5 columns = 40%, WELL BELOW the 50% threshold
+    // This should trigger 0xF7 (partial data), NOT 0xF2
+    client1
+        .send_query(&format!(
+            "UPDATE {} SET col1 = 'x', col2 = 'y' WHERE id = 1",
+            table_name
+        ))
+        .await
+        .expect("Failed to update data");
+
+    // Client1 receives same-connection notification (may include SubscriptionData/PartialData before ReadyForQuery)
+    let _ = client1
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after update");
+
+    // Client2 receives cross-connection notification with longer timeout
+    let data2 = client2
+        .read_until_message_type_timeout(
+            MSG_SUBSCRIPTION_PARTIAL_DATA,
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .expect("Failed to read cross-connection notification");
+    let messages2 = parse_backend_messages(&data2);
+
+    // At 40% threshold (well below 50%), should use partial data (0xF7), not full (0xF2)
+    let has_partial_data = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full_data = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    assert!(
+        has_partial_data,
+        "Client2 should receive SubscriptionPartialData (0xF7) when 40% < 50% threshold"
+    );
+    assert!(
+        !has_full_data,
+        "Client2 should NOT receive SubscriptionData (0xF2) when 40% < 50% threshold"
+    );
+
+    // Verify the column mask is correct
+    if let Some((total_columns, mask)) = parse_partial_data_column_mask(&messages2) {
+        assert_eq!(total_columns, 5, "Table should have 5 columns");
+
+        // Column 0 (id/PK) should always be present
+        assert!(is_column_present_in_mask(&mask, 0), "PK column 0 should be present");
+
+        // Columns 1 and 2 were changed, should be present
+        assert!(is_column_present_in_mask(&mask, 1), "Changed column 1 (col1) should be present");
+        assert!(is_column_present_in_mask(&mask, 2), "Changed column 2 (col2) should be present");
+
+        // Columns 3 and 4 were NOT changed, should NOT be present
+        assert!(
+            !is_column_present_in_mask(&mask, 3),
+            "Unchanged column 3 (col3) should NOT be present"
+        );
+        assert!(
+            !is_column_present_in_mask(&mask, 4),
+            "Unchanged column 4 (col4) should NOT be present"
+        );
+    }
+
+    client1.send_terminate().await.expect("Failed to send terminate");
+    client2.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
+
+/// test_cross_connection_above_threshold_uses_full_data
+///
+/// Tests threshold edge case with cross-connection broadcast:
+/// - Table with 5 columns (id PK + 4 data columns)
+/// - Update 3 of 5 columns = 60%, ABOVE the 50% threshold
+/// - Verify client2 receives 0xF2 (full data), not 0xF7
+///
+/// Related: Issue #3979 - Cross-connection 0xF7 threshold edge cases
+#[tokio::test]
+async fn test_cross_connection_above_threshold_uses_full_data() {
+    let server = start_test_server().await;
+
+    // Connect first client (the updater)
+    let mut client1 = TestClient::connect(server.addr()).await.expect("Failed to connect client 1");
+    client1.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Connect second client (the subscriber)
+    let mut client2 = TestClient::connect(server.addr()).await.expect("Failed to connect client 2");
+    client2.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client2.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Create shared test table on client1 with 5 columns total (id + 4 data columns)
+    let table_name = "cross_above_threshold_test";
+    client1
+        .send_query(&format!("DROP TABLE IF EXISTS {}", table_name))
+        .await
+        .expect("Failed to drop table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read drop response");
+
+    client1
+        .send_query(&format!(
+            "CREATE TABLE {} (
+                id INT PRIMARY KEY,
+                col1 VARCHAR,
+                col2 VARCHAR,
+                col3 VARCHAR,
+                col4 VARCHAR
+            )",
+            table_name
+        ))
+        .await
+        .expect("Failed to create table");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    // Insert initial data on client1
+    client1
+        .send_query(&format!("INSERT INTO {} VALUES (1, 'a', 'b', 'c', 'd')", table_name))
+        .await
+        .expect("Failed to insert data");
+    let _ = client1.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Client2 subscribes to the table
+    let query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client2, &query).await.expect("Failed to send subscribe from client2");
+    let _ = client2
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+
+    // Client1 updates 3 of 5 columns = 60%, ABOVE the 50% threshold
+    // This should trigger 0xF2 (full data), NOT 0xF7
+    client1
+        .send_query(&format!(
+            "UPDATE {} SET col1 = 'x', col2 = 'y', col3 = 'z' WHERE id = 1",
+            table_name
+        ))
+        .await
+        .expect("Failed to update data");
+
+    // Client1 receives same-connection notification (may include SubscriptionData/PartialData before ReadyForQuery)
+    let _ = client1
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after update");
+
+    // Client2 receives cross-connection notification with longer timeout
+    let data2 = client2
+        .read_until_message_type_timeout(
+            MSG_SUBSCRIPTION_DATA,
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .expect("Failed to read cross-connection notification");
+    let messages2 = parse_backend_messages(&data2);
+
+    // At 60% threshold (above 50%), should use full data (0xF2), not partial (0xF7)
+    let has_partial_data = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_full_data = messages2.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+
+    assert!(
+        has_full_data,
+        "Client2 should receive SubscriptionData (0xF2) when 60% > 50% threshold"
+    );
+    assert!(
+        !has_partial_data,
+        "Client2 should NOT receive SubscriptionPartialData (0xF7) when 60% > 50% threshold"
+    );
+
+    client1.send_terminate().await.expect("Failed to send terminate");
+    client2.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
