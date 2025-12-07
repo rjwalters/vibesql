@@ -1789,4 +1789,130 @@ mod tests {
 
         assert_eq!(partial.present_column_count(), 3);
     }
+
+    #[test]
+    fn test_delta_updates_produce_partial_row_updates() {
+        use vibesql_types::SqlValue;
+
+        // Test that delta computation with updates can produce partial row updates
+        // This verifies the integration between compute_delta_with_pk and create_partial_row_update
+
+        let test_id = SubscriptionId::new();
+
+        // Create old and new rows where only one column changes
+        // Row format: [id, name, balance]
+        // id=1: name unchanged, balance changes from 100 to 150
+        let old = vec![crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(100),
+            ],
+        }];
+        let new = vec![crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Integer(150),
+            ],
+        }];
+
+        let pk_columns = vec![0]; // First column is PK
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+
+        // Verify we got an update (not delete+insert)
+        if let SubscriptionUpdate::Delta { updates, inserts, deletes, .. } = delta.unwrap() {
+            assert!(inserts.is_empty(), "Should not have inserts");
+            assert!(deletes.is_empty(), "Should not have deletes");
+            assert_eq!(updates.len(), 1, "Should have one update");
+
+            // Now verify that create_partial_row_update works with this update
+            let (old_row, new_row) = &updates[0];
+
+            // Convert to wire format (as connection.rs does)
+            let old_wire: Vec<Option<Vec<u8>>> =
+                old_row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect();
+            let new_wire: Vec<Option<Vec<u8>>> =
+                new_row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect();
+
+            let config =
+                SelectiveColumnConfig { enabled: true, pk_columns: vec![0], ..Default::default() };
+
+            let partial = create_partial_row_update(&old_wire, &new_wire, &[0], &config);
+
+            // Should produce a partial update since only 1 of 3 columns changed
+            assert!(partial.is_some(), "Should produce partial row update");
+
+            let partial = partial.unwrap();
+            assert_eq!(partial.total_columns, 3);
+
+            // Should include PK (column 0) and changed column (column 2)
+            assert!(partial.is_column_present(0), "PK column should be present");
+            assert!(!partial.is_column_present(1), "Unchanged column should not be present");
+            assert!(partial.is_column_present(2), "Changed column should be present");
+
+            // Verify values
+            assert_eq!(partial.values.len(), 2); // PK + changed column
+            assert_eq!(partial.values[0], Some(b"1".to_vec())); // PK value
+            assert_eq!(partial.values[1], Some(b"150".to_vec())); // New balance
+        } else {
+            panic!("Expected Delta, got something else");
+        }
+    }
+
+    #[test]
+    fn test_delta_updates_fallback_to_full_row_when_too_many_changes() {
+        use vibesql_types::SqlValue;
+
+        // Test that when too many columns change, create_partial_row_update returns None
+
+        let test_id = SubscriptionId::new();
+
+        // Create old and new rows where most non-PK columns change
+        // Row format: [id, name, email]
+        let old = vec![crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Alice".to_string()),
+                SqlValue::Varchar("alice@old.com".to_string()),
+            ],
+        }];
+        let new = vec![crate::Row {
+            values: vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar("Bob".to_string()),
+                SqlValue::Varchar("bob@new.com".to_string()),
+            ],
+        }];
+
+        let pk_columns = vec![0];
+        let delta = compute_delta_with_pk(test_id, &old, &new, &pk_columns);
+
+        if let SubscriptionUpdate::Delta { updates, .. } = delta.unwrap() {
+            assert_eq!(updates.len(), 1);
+
+            let (old_row, new_row) = &updates[0];
+
+            let old_wire: Vec<Option<Vec<u8>>> =
+                old_row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect();
+            let new_wire: Vec<Option<Vec<u8>>> =
+                new_row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect();
+
+            // Use config with low threshold (max 30% of columns can change)
+            let config = SelectiveColumnConfig {
+                enabled: true,
+                pk_columns: vec![0],
+                max_changed_columns_ratio: 0.3,
+                ..Default::default()
+            };
+
+            // 2 of 3 columns changed (66%), which exceeds 30% threshold
+            let partial = create_partial_row_update(&old_wire, &new_wire, &[0], &config);
+
+            // Should NOT produce partial update due to too many changes
+            assert!(partial.is_none(), "Should fall back to full row when too many columns change");
+        } else {
+            panic!("Expected Delta");
+        }
+    }
 }

@@ -6,10 +6,11 @@ use crate::protocol::{
 };
 use crate::registry::DatabaseRegistry;
 use crate::session::{ExecutionResult, Session};
+use crate::protocol::PartialRowUpdate;
 use crate::subscription::{
-    compute_delta_with_pk, detect_pk_columns_from_stmt, extract_table_refs,
-    filter::SubscriptionFilter, hash_rows, SubscriptionId, SubscriptionManager,
-    SubscriptionUpdate,
+    compute_delta_with_pk, create_partial_row_update, detect_pk_columns_from_stmt,
+    extract_table_refs, filter::SubscriptionFilter, hash_rows, SelectiveColumnConfig,
+    SubscriptionId, SubscriptionManager, SubscriptionUpdate,
 };
 use crate::Row;
 use anyhow::Result;
@@ -578,6 +579,8 @@ impl ConnectionHandler {
     /// Send delta updates to a subscription
     ///
     /// The wire protocol sends separate messages for inserts, updates, and deletes.
+    /// For UPDATE operations, we use PartialRowUpdate to send only changed columns
+    /// plus PK columns, reducing wire traffic for wide tables.
     async fn send_delta_updates(
         &mut self,
         subscription_id: &[u8; 16],
@@ -595,27 +598,60 @@ impl ConnectionHandler {
                 .await?;
             }
 
-            // Send updates
-            // Note: The current delta computation doesn't detect updates (they appear as delete+insert)
-            // but we support the wire format for future enhancements
+            // Send updates using partial row format when beneficial
             if !updates.is_empty() {
-                // For updates, we send the new values
-                let wire_rows: Vec<Vec<Option<Vec<u8>>>> = updates
-                    .iter()
-                    .map(|(_, new_row)| {
-                        new_row
-                            .values
-                            .iter()
-                            .map(|v| Some(v.to_string().as_bytes().to_vec()))
-                            .collect()
-                    })
-                    .collect();
-                self.send_subscription_data(
-                    subscription_id,
-                    SubscriptionUpdateType::DeltaUpdate,
-                    wire_rows,
-                )
-                .await?;
+                // Get PK columns for this subscription
+                let pk_columns = self.subscription_manager.get_pk_columns_by_wire_id(subscription_id);
+
+                // Create config for selective column updates
+                let config = SelectiveColumnConfig {
+                    enabled: true,
+                    pk_columns: pk_columns.clone(),
+                    ..Default::default()
+                };
+
+                // Separate updates into partial and full based on threshold
+                let mut partial_updates: Vec<PartialRowUpdate> = Vec::new();
+                let mut full_updates: Vec<Vec<Option<Vec<u8>>>> = Vec::new();
+
+                for (old_row, new_row) in updates {
+                    // Convert rows to wire format
+                    let old_wire: Vec<Option<Vec<u8>>> = old_row
+                        .values
+                        .iter()
+                        .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                        .collect();
+                    let new_wire: Vec<Option<Vec<u8>>> = new_row
+                        .values
+                        .iter()
+                        .map(|v| Some(v.to_string().as_bytes().to_vec()))
+                        .collect();
+
+                    // Try to create a partial update
+                    if let Some(partial) =
+                        create_partial_row_update(&old_wire, &new_wire, &pk_columns, &config)
+                    {
+                        partial_updates.push(partial);
+                    } else {
+                        // Fall back to full row update
+                        full_updates.push(new_wire);
+                    }
+                }
+
+                // Send partial updates via SubscriptionPartialData (0xF7)
+                if !partial_updates.is_empty() {
+                    self.send_subscription_partial_data(subscription_id, partial_updates).await?;
+                }
+
+                // Send any full updates via regular DeltaUpdate
+                if !full_updates.is_empty() {
+                    self.send_subscription_data(
+                        subscription_id,
+                        SubscriptionUpdateType::DeltaUpdate,
+                        full_updates,
+                    )
+                    .await?;
+                }
             }
 
             // Send inserts last
@@ -1298,6 +1334,25 @@ impl ConnectionHandler {
         }
 
         BackendMessage::SubscriptionData { subscription_id: *subscription_id, update_type, rows }
+            .encode(&mut self.write_buf);
+        self.flush_write_buffer().await
+    }
+
+    /// Send subscription partial data message (for selective column updates)
+    ///
+    /// Uses the SubscriptionPartialData (0xF7) message format to send only
+    /// changed columns plus primary key columns, reducing wire traffic.
+    async fn send_subscription_partial_data(
+        &mut self,
+        subscription_id: &[u8; 16],
+        rows: Vec<PartialRowUpdate>,
+    ) -> Result<()> {
+        // Record subscription update metrics
+        if let Some(metrics) = self.observability.metrics() {
+            metrics.record_subscription_update("selective", rows.len() as u64);
+        }
+
+        BackendMessage::SubscriptionPartialData { subscription_id: *subscription_id, rows }
             .encode(&mut self.write_buf);
         self.flush_write_buffer().await
     }
