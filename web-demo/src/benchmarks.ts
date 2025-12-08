@@ -522,8 +522,8 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         ]),
       },
       {
-        title: t('bench-sysbench-emb-disc-duckdb-title'),
-        content: pI18n('bench-sysbench-emb-disc-duckdb'),
+        title: t('bench-sysbench-emb-disc-architecture-title'),
+        content: pI18n('bench-sysbench-emb-disc-architecture'),
       },
     ]),
   },
@@ -777,6 +777,9 @@ interface TPCDSResults {
     scale_factor: string;
     total_queries: number;
     passed_queries: number;
+    vibesql_queries?: number;
+    sqlite_queries?: number;
+    duckdb_queries?: number;
   };
 }
 
@@ -2063,7 +2066,9 @@ function renderTPCDSTable(data: TPCDSResults): void {
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
-    opsTestedEl.textContent = `${sortedQueries.length}`;
+    // Show VibeSQL query count from metadata, fallback to sorted queries length
+    const vibesqlQueryCount = data.metadata.vibesql_queries ?? sortedQueries.length;
+    opsTestedEl.textContent = `${vibesqlQueryCount}`;
   }
 
   // Update last updated timestamp
@@ -2312,6 +2317,12 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
 
         renderResultsTable(benchmarkResults, suite);
         renderChart(benchmarkResults, suite);
+
+        // Override ops-tested to show VibeSQL query count from metadata
+        const opsTestedEl = document.getElementById('ops-tested');
+        if (opsTestedEl && data.metadata.vibesql_queries) {
+          opsTestedEl.textContent = `${data.metadata.vibesql_queries}`;
+        }
       } else {
         // Fall back to VibeSQL-only rendering
         renderTPCDSTable(data);
