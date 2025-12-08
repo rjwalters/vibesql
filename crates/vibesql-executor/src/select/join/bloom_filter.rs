@@ -91,7 +91,7 @@ impl BloomFilter {
 
         // Ensure at least 64 bits and round up to next u64 boundary
         let num_bits = m.max(64);
-        let num_words = (num_bits + 63) / 64;
+        let num_words = num_bits.div_ceil(64);
         let num_bits = num_words * 64;
 
         // Optimal number of hash functions: k = (m/n) * ln(2)
@@ -112,7 +112,7 @@ impl BloomFilter {
     #[allow(dead_code)]
     pub fn with_params(num_bits: usize, num_hashes: u8) -> Self {
         let num_bits = num_bits.max(64);
-        let num_words = (num_bits + 63) / 64;
+        let num_words = num_bits.div_ceil(64);
         let num_bits = num_words * 64;
         let num_hashes = num_hashes.clamp(1, 16);
 
@@ -123,6 +123,7 @@ impl BloomFilter {
     ///
     /// After insertion, `might_contain` will always return `true` for this value.
     #[inline]
+    #[allow(dead_code)]
     pub fn insert<T: Hash>(&mut self, value: &T) {
         let hash = self.compute_hash(value);
         self.insert_hash(hash);
@@ -149,6 +150,7 @@ impl BloomFilter {
     /// - `false` if the value is definitely NOT in the set (no false negatives)
     /// - `true` if the value MIGHT be in the set (possible false positive)
     #[inline]
+    #[allow(dead_code)]
     pub fn might_contain<T: Hash>(&self, value: &T) -> bool {
         let hash = self.compute_hash(value);
         self.might_contain_hash(hash)
@@ -215,6 +217,7 @@ impl BloomFilter {
 
 /// Statistics about Bloom filter effectiveness during a join operation.
 #[derive(Debug, Default, Clone)]
+#[allow(dead_code)]
 pub struct BloomFilterStats {
     /// Number of rows checked against the Bloom filter
     pub rows_checked: u64,
@@ -224,6 +227,7 @@ pub struct BloomFilterStats {
     pub rows_passed: u64,
 }
 
+#[allow(dead_code)]
 impl BloomFilterStats {
     /// Create new empty statistics.
     pub fn new() -> Self {

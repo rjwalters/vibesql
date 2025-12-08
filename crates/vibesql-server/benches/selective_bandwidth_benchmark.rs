@@ -9,7 +9,9 @@
 //! Run with: cargo bench --bench selective_bandwidth_benchmark
 
 use bytes::BytesMut;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 use vibesql_server::protocol::messages::{BackendMessage, PartialRowUpdate, SubscriptionUpdateType};
 use vibesql_server::subscription::{

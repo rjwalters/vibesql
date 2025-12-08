@@ -27,14 +27,14 @@ fn setup_simple_pk_table(db: &mut Database) {
     db.create_table(schema).unwrap();
 
     // Insert test data
-    for i in 1..=3 {
+    for i in 1..=3i64 {
         db.insert_row(
             "items",
             Row::new(vec![
                 SqlValue::Integer(i),
                 SqlValue::Varchar(arcstr::ArcStr::from(format!("Item {}", i))),
-                SqlValue::Integer(100 * i as i64),
-                SqlValue::Integer(10 * i as i64),
+                SqlValue::Integer(100 * i),
+                SqlValue::Integer(10 * i),
             ]),
         )
         .unwrap();

@@ -1175,7 +1175,7 @@ impl IndexData {
     pub fn skip_scan_equality(&self, filter_column_idx: usize, filter_value: &SqlValue) -> Vec<usize> {
         if filter_column_idx == 0 {
             // Not a skip-scan - use regular prefix lookup
-            return self.prefix_multi_lookup(&[filter_value.clone()]);
+            return self.prefix_multi_lookup(std::slice::from_ref(filter_value));
         }
 
         let normalized_filter = normalize_for_comparison(filter_value);

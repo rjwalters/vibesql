@@ -387,7 +387,7 @@ mod tests {
     fn test_json_value_formatting() {
         assert_eq!(JsonValue::String("test".to_string()).to_json(), "\"test\"");
         assert_eq!(JsonValue::Int(42).to_json(), "42");
-        assert_eq!(JsonValue::Number(3.14).to_json(), "3.14");
+        assert_eq!(JsonValue::Number(3.5).to_json(), "3.5");
         assert_eq!(JsonValue::Bool(true).to_json(), "true");
         assert_eq!(JsonValue::Null.to_json(), "null");
 
