@@ -63,104 +63,10 @@ jobs:
           df -h
 
   # ============================================================================
-  # TPC-H Quick Benchmarks
-  # Runs in parallel with other benchmarks (no dependency on test job)
+  # TPC-DS Validation (correctness check against DuckDB)
+  # Validates query results match DuckDB - catches SQL correctness regressions
   # ============================================================================
-  tpch:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/free-disk-space
-
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust
-        with:
-          cache-key-suffix: ci
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Setup Python with uv
-        run: uv python install 3.11
-
-      - name: Run TPC-H benchmarks (quick mode)
-        run: |
-          uv run --python 3.11 scripts/run_tpch_benchmarks.py --quick --output tpch_results.json
-
-      - name: Display TPC-H results
-        if: always()
-        run: |
-          echo "## TPC-H Benchmark Results (Quick Mode)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f tpch_results.json ]; then
-            echo "TPC-H Q6 benchmark completed successfully" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "No results file generated" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  # ============================================================================
-  # Sysbench Quick Benchmarks
-  # Runs in parallel with other benchmarks (no dependency on test job)
-  # ============================================================================
-  sysbench:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/free-disk-space
-
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust
-        with:
-          cache-key-suffix: ci
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Setup Python with uv
-        run: uv python install 3.11
-
-      - name: Run Sysbench benchmarks (quick mode)
-        run: |
-          uv run --python 3.11 scripts/run_sysbench_benchmarks.py --quick --output sysbench_results.json
-
-      - name: Display Sysbench results
-        if: always()
-        run: |
-          echo "## Sysbench Results (Quick Mode)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f sysbench_results.json ]; then
-            uv run --python 3.11 - << 'PYEOF' >> $GITHUB_STEP_SUMMARY
-          import json
-          with open('sysbench_results.json') as f:
-              data = json.load(f)
-          print('| Workload | Database | Latency |')
-          print('|----------|----------|---------|')
-          for b in data.get('benchmarks', []):
-              name_parts = b['name'].split('_')
-              db = name_parts[-1]
-              workload = '_'.join(name_parts[1:-1])
-              latency_us = b['stats']['mean'] * 1_000_000
-              print(f'| {workload} | {db} | {latency_us:.2f} us |')
-          PYEOF
-          else
-            echo "No results file generated" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  # ============================================================================
-  # TPC-DS Quick Benchmark with Validation
-  # Runs in parallel with other benchmarks (no dependency on test job)
-  # ============================================================================
-  tpcds:
+  tpcds-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
@@ -213,7 +119,7 @@ jobs:
 
   # ============================================================================
   # SQLLogicTest Sample (fast feedback on SQL correctness)
-  # Runs in parallel with other benchmarks (no dependency on test job)
+  # Runs a representative sample of the 7.4M test suite for quick validation
   # ============================================================================
   sqllogictest:
     runs-on: ubuntu-latest
@@ -254,67 +160,4 @@ jobs:
             else
               echo "Status: Some tests failed (see logs)" >> $GITHUB_STEP_SUMMARY
             fi
-          fi
-
-  # ============================================================================
-  # Python Benchmarks (pytest-based micro-benchmarks)
-  # Runs in parallel with other benchmarks (no dependency on test job)
-  # ============================================================================
-  python-benchmarks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/free-disk-space
-
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust
-        with:
-          cache-key-suffix: ci
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Setup Python with uv
-        run: uv python install 3.11
-
-      - name: Build and install Python bindings
-        run: |
-          uv venv .venv
-          source .venv/bin/activate
-          uv pip install maturin
-          cd crates/vibesql-python-bindings
-          maturin build --release
-          uv pip install ../../target/wheels/vibesql-*.whl
-
-      - name: Install benchmark dependencies
-        run: |
-          source .venv/bin/activate
-          grep -v "^vibesql" benchmarks/requirements.txt > /tmp/requirements-ci.txt
-          uv pip install -r /tmp/requirements-ci.txt
-
-      - name: Run quick benchmarks (1k tests only)
-        working-directory: benchmarks
-        run: |
-          source ../.venv/bin/activate
-          pytest test_insert.py test_update.py test_delete.py test_select.py test_aggregates.py \
-            --benchmark-only \
-            --benchmark-json=../benchmark_results.json \
-            --benchmark-min-rounds=3 \
-            --benchmark-warmup=off
-
-      - name: Display benchmark summary
-        if: always()
-        run: |
-          echo "## Python Benchmark Results (1k tests)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f benchmark_results.json ]; then
-            source .venv/bin/activate
-            python benchmarks/format_results.py benchmark_results.json >> $GITHUB_STEP_SUMMARY
-          else
-            echo "No benchmark results generated" >> $GITHUB_STEP_SUMMARY
           fi
