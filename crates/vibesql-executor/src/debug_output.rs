@@ -32,19 +32,14 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Output format for debug messages
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum DebugFormat {
     /// Human-readable text output (default)
+    #[default]
     Text = 0,
     /// Machine-parseable JSON output
     Json = 1,
-}
-
-impl Default for DebugFormat {
-    fn default() -> Self {
-        DebugFormat::Text
-    }
 }
 
 /// Global format setting (0 = Text, 1 = Json)
