@@ -210,25 +210,51 @@ pub(crate) fn execute_table_scan(
     }
 
     // Check if we should use an index scan (with cost-based selection)
-    if let Some((index_name, sorted_columns)) =
-        super::index_scan::cost_based_index_selection(table_name, where_clause, order_by, database)
+    // This now includes skip-scan as a fallback option when regular index scan isn't available
+    if let Some(scan_choice) =
+        super::index_scan::select_index_scan_method(table_name, where_clause, order_by, database)
     {
-        // Use index scan for potentially better performance
-        if crate::profiling::is_scan_debug_enabled() {
-            eprintln!("[SCAN_PATH] Using index scan: table={}, index={}", table_name, index_name);
+        match scan_choice {
+            super::index_scan::IndexScanChoice::Regular { index_name, sorted_columns } => {
+                // Use regular index scan for potentially better performance
+                if crate::profiling::is_scan_debug_enabled() {
+                    eprintln!("[SCAN_PATH] Using index scan: table={}, index={}", table_name, index_name);
+                }
+                // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
+                // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+                return super::index_scan::execute_index_scan(
+                    table_name,
+                    &index_name,
+                    alias,
+                    where_clause,
+                    sorted_columns,
+                    limit,
+                    database,
+                    cte_results,
+                );
+            }
+            super::index_scan::IndexScanChoice::SkipScan { index_name, skip_scan_info } => {
+                // Use skip-scan for non-prefix column filtering
+                if crate::profiling::is_scan_debug_enabled() {
+                    eprintln!(
+                        "[SCAN_PATH] Using skip-scan: table={}, index={}, filter_col={}",
+                        table_name, index_name, skip_scan_info.filter_column
+                    );
+                }
+                // Skip-scan requires a WHERE clause (guaranteed by selection)
+                if let Some(where_expr) = where_clause {
+                    return super::index_scan::execute_skip_scan(
+                        table_name,
+                        &index_name,
+                        alias,
+                        where_expr,
+                        &skip_scan_info,
+                        database,
+                        cte_results,
+                    );
+                }
+            }
         }
-        // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
-        // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
-        return super::index_scan::execute_index_scan(
-            table_name,
-            &index_name,
-            alias,
-            where_clause,
-            sorted_columns,
-            limit,
-            database,
-            cte_results,
-        );
     }
 
     // Debug: Log when table scan is used instead of index
