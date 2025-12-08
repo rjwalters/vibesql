@@ -41,7 +41,7 @@ impl BTreeIndex {
     /// - All row IDs for the key are removed regardless of count
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// use vibesql_types::SqlValue;
     ///
     /// // Insert duplicate keys
@@ -183,7 +183,7 @@ impl BTreeIndex {
     /// - Batch delete: O(n + log m) for sorted keys in same/adjacent leaves
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// use vibesql_types::SqlValue;
     ///
     /// // Delete multiple index entries in batch

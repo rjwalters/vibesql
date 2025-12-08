@@ -28,7 +28,7 @@ const AVAILABLE_LOCALES: &[&str] = &["en-US", "es", "pt-BR", "zh-CN", "ja", "de"
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_l10n::detect_locale;
 ///
 /// let locale = detect_locale();

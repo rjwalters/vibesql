@@ -26,7 +26,7 @@ impl BTreeIndex {
     /// - Total: O(log n + k)
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// use vibesql_types::SqlValue;
     ///
     /// // Insert duplicate keys
@@ -118,7 +118,7 @@ impl BTreeIndex {
     /// - Total: O(log n + m + k)
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// use vibesql_types::SqlValue;
     ///
     /// // Insert some data with duplicates
@@ -233,7 +233,7 @@ impl BTreeIndex {
     /// O(log n) - only finds the first leaf and returns immediately
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// // TPC-C Delivery: find oldest new_order for a district
     /// // Only returns the first (minimum) order ID
     /// let first = index.range_scan_first(

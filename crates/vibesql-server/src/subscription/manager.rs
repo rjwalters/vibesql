@@ -121,7 +121,7 @@ impl SubscriptionManager {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// let manager = SubscriptionManager::new();
     /// let (tx, mut rx) = mpsc::channel(16);
     ///

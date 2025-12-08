@@ -53,7 +53,7 @@ impl IndexData {
     /// optimal but correct).
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (w_id, d_id, o_id) - 3 columns
     /// // Find all rows where w_id=1 AND d_id=5 in DESCENDING o_id order
     /// let rows = index_data.prefix_scan_reverse(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
@@ -176,7 +176,7 @@ impl IndexData {
     /// returns after finding just the first (highest) matching key.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Find the most recent order for customer (w_id=1, d_id=2, c_id=3)
     /// // Index on (o_w_id, o_d_id, o_c_id, o_id) - composite index
     /// let rows = index_data.prefix_scan_reverse_limit(

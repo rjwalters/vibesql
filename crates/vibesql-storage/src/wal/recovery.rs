@@ -745,7 +745,7 @@ fn parse_data_type(s: &str) -> Result<vibesql_types::DataType, StorageError> {
 /// A tuple of (Database, RecoveryStats) on success
 ///
 /// # Example
-/// ```rust,ignore
+/// ```text
 /// use vibesql_storage::wal::recovery::recover;
 ///
 /// let (db, stats) = recover("/path/to/checkpoints", Some("/path/to/wal.log"))?;

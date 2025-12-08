@@ -308,7 +308,7 @@ impl CostEstimator {
     /// * `table_stats` - Statistics for the table being scanned
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let cost = estimator.estimate_table_scan(&table_stats);
     /// // For 1000 rows: (10 pages * 1.0) + (1000 * 0.01) = 20.0
     /// ```
@@ -397,7 +397,7 @@ impl CostEstimator {
     /// * `index_info` - Information about table indexes
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let cost = estimator.estimate_insert(100, &table_stats, &index_info);
     /// // For 100 rows with 1 PK and 2 B-tree indexes:
     /// // (100 * 0.1) + (100 * 1 * 0.05) + (100 * 2 * 0.15) + WAL = ~57
@@ -458,7 +458,7 @@ impl CostEstimator {
     ///   Use 1.0 if all indexed columns might change, or a lower value for selective updates
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Full update (all columns may change)
     /// let cost = estimator.estimate_update(50, &table_stats, &index_info, 1.0);
     ///
@@ -532,7 +532,7 @@ impl CostEstimator {
     /// * `index_info` - Information about table indexes
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let cost = estimator.estimate_delete(100, &table_stats, &index_info);
     /// // Compaction multiplier is applied if deleted_ratio would exceed 50%
     /// ```

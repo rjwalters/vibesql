@@ -124,7 +124,7 @@ pub fn try_increment_sqlvalue(value: &SqlValue) -> Option<SqlValue> {
 /// we scan from `[prefix]` to `[prefix_incremented]` (exclusive).
 ///
 /// # Example
-/// ```rust,ignore
+/// ```text
 /// // Find all keys starting with [1, 2]
 /// // We scan from Included([1, 2]) to Excluded([1, 3])
 /// let upper = try_increment_sqlvalue_prefix(&vec![SqlValue::Integer(1), SqlValue::Integer(2)]);

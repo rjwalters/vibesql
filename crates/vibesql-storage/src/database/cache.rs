@@ -27,7 +27,7 @@ impl Database {
     /// * `Err(StorageError)` - Conversion failed
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// if let Some(columnar) = db.get_columnar("lineitem")? {
     ///     // Use columnar data for SIMD operations
     /// }
@@ -108,7 +108,7 @@ impl Database {
     /// * `Err(StorageError)` - Conversion failed for a table
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // After loading TPC-H data
     /// let warmed = db.pre_warm_columnar_cache(&["lineitem", "orders"])?;
     /// eprintln!("Pre-warmed {} tables", warmed);
@@ -140,7 +140,7 @@ impl Database {
     /// * `Err(StorageError)` - Conversion failed for a table
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // After loading all benchmark data
     /// let warmed = db.pre_warm_all_columnar()?;
     /// eprintln!("Pre-warmed {} tables", warmed);

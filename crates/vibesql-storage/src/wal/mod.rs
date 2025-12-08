@@ -36,7 +36,7 @@
 //
 // ## Usage
 //
-// ```rust,ignore
+// ```text
 // use vibesql_storage::wal::{WalWriter, WalReader, WalEntry, WalOp};
 // use std::io::Cursor;
 //

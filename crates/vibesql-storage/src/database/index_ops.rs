@@ -490,7 +490,7 @@ impl Database {
     /// - Uses direct B+ tree lookup on the index
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Single-column index lookup
     /// let rows = db.lookup_by_index("idx_users_pk", &[SqlValue::Integer(42)])?;
     ///
@@ -608,7 +608,7 @@ impl Database {
     /// * `Err(StorageError)` - Index not found or other error
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Batch lookup multiple items
     /// let results = db.lookup_by_index_batch("idx_items_pk", &[
     ///     vec![SqlValue::Integer(1)],
@@ -733,7 +733,7 @@ impl Database {
     /// Uses efficient B+ tree range scan: O(log n + k) where n is total keys, k is matches.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (warehouse_id, district_id, order_id) - 3 columns
     /// // Find all orders for warehouse 1, district 5 (2-column prefix)
     /// let rows = db.lookup_by_index_prefix("idx_orders_pk", &[
@@ -788,7 +788,7 @@ impl Database {
     /// * `Err(StorageError)` - Index not found or other error
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (w_id, d_id, o_id) - find new orders for all 10 districts
     /// let prefixes: Vec<Vec<SqlValue>> = (1..=10)
     ///     .map(|d| vec![SqlValue::Integer(w_id), SqlValue::Integer(d)])
@@ -873,7 +873,7 @@ impl Database {
     /// Note: WAL logging is handled internally by this method.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Fast delete by PK
     /// let deleted = db.delete_by_pk_fast("users", &[SqlValue::Integer(42)])?;
     /// if deleted {
@@ -1021,7 +1021,7 @@ impl Database {
     /// * `None` - If table doesn't exist
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let info = db.get_table_index_info("users")?;
     /// let insert_cost = cost_estimator.estimate_insert(&info);
     /// ```
