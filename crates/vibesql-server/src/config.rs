@@ -235,6 +235,8 @@ impl Config {
     /// | `VIBESQL_HTTP_HOST` | `http.host` |
     /// | `VIBESQL_HTTP_PORT` | `http.port` |
     /// | `VIBESQL_HTTP_AUTH_ENABLED` | `http.auth.enabled` |
+    /// | `VIBESQL_HTTP_AUTH_METHODS` | `http.auth.methods` |
+    /// | `VIBESQL_HTTP_AUTH_API_KEYS` | `http.auth.api_keys.keys` |
     /// | `VIBESQL_HTTP_AUTH_JWT_SECRET` | `http.auth.jwt.secret` |
     /// | `VIBESQL_HTTP_AUTH_JWT_ISSUER` | `http.auth.jwt.issuer` |
     /// | `VIBESQL_HTTP_AUTH_JWT_AUDIENCE` | `http.auth.jwt.audience` |
@@ -296,6 +298,30 @@ impl Config {
         // HTTP Auth configuration
         if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_ENABLED") {
             self.http.auth.enabled = parse_bool(&val);
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_METHODS") {
+            let methods: Vec<HttpAuthMethod> = val
+                .split(',')
+                .filter_map(|s| match s.trim().to_lowercase().as_str() {
+                    "api_key" => Some(HttpAuthMethod::ApiKey),
+                    "basic" => Some(HttpAuthMethod::Basic),
+                    "jwt" => Some(HttpAuthMethod::Jwt),
+                    _ => None,
+                })
+                .collect();
+            if !methods.is_empty() {
+                self.http.auth.methods = methods;
+            }
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_API_KEYS") {
+            let keys: Vec<String> = val
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !keys.is_empty() {
+                self.http.auth.api_keys.keys = keys;
+            }
         }
 
         // JWT configuration
@@ -657,6 +683,148 @@ enabled = false
         config.apply_env_overrides();
         assert!(!config.http.auth.enabled);
         env::remove_var("VIBESQL_HTTP_AUTH_ENABLED");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_methods() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        // Default methods are api_key and basic
+        assert_eq!(config.http.auth.methods.len(), 2);
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::ApiKey));
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::Basic));
+
+        env::set_var("VIBESQL_HTTP_AUTH_METHODS", "jwt,api_key");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.methods.len(), 2);
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::Jwt));
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::ApiKey));
+        assert!(!config.http.auth.methods.contains(&HttpAuthMethod::Basic));
+        env::remove_var("VIBESQL_HTTP_AUTH_METHODS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_methods_case_insensitive() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+
+        env::set_var("VIBESQL_HTTP_AUTH_METHODS", "JWT, API_KEY, BASIC");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.methods.len(), 3);
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::Jwt));
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::ApiKey));
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::Basic));
+        env::remove_var("VIBESQL_HTTP_AUTH_METHODS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_methods_invalid_ignored() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+
+        // Invalid methods should be silently ignored
+        env::set_var("VIBESQL_HTTP_AUTH_METHODS", "jwt,invalid_method,basic,unknown");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.methods.len(), 2);
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::Jwt));
+        assert!(config.http.auth.methods.contains(&HttpAuthMethod::Basic));
+        env::remove_var("VIBESQL_HTTP_AUTH_METHODS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_methods_empty_preserves_default() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        let original_methods = config.http.auth.methods.clone();
+
+        // Empty value should preserve default
+        env::set_var("VIBESQL_HTTP_AUTH_METHODS", "");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.methods, original_methods);
+        env::remove_var("VIBESQL_HTTP_AUTH_METHODS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_methods_all_invalid_preserves_default() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        let original_methods = config.http.auth.methods.clone();
+
+        // All invalid values should preserve default
+        env::set_var("VIBESQL_HTTP_AUTH_METHODS", "invalid,unknown,bad");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.methods, original_methods);
+        env::remove_var("VIBESQL_HTTP_AUTH_METHODS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_api_keys() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(config.http.auth.api_keys.keys.is_empty());
+
+        env::set_var("VIBESQL_HTTP_AUTH_API_KEYS", "key1,key2,key3");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.api_keys.keys.len(), 3);
+        assert!(config.http.auth.api_keys.keys.contains(&"key1".to_string()));
+        assert!(config.http.auth.api_keys.keys.contains(&"key2".to_string()));
+        assert!(config.http.auth.api_keys.keys.contains(&"key3".to_string()));
+        env::remove_var("VIBESQL_HTTP_AUTH_API_KEYS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_api_keys_trims_whitespace() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+
+        env::set_var("VIBESQL_HTTP_AUTH_API_KEYS", " key1 , key2 , key3 ");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.api_keys.keys.len(), 3);
+        assert!(config.http.auth.api_keys.keys.contains(&"key1".to_string()));
+        assert!(config.http.auth.api_keys.keys.contains(&"key2".to_string()));
+        assert!(config.http.auth.api_keys.keys.contains(&"key3".to_string()));
+        env::remove_var("VIBESQL_HTTP_AUTH_API_KEYS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_api_keys_empty_values_ignored() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+
+        // Empty values between commas should be ignored
+        env::set_var("VIBESQL_HTTP_AUTH_API_KEYS", "key1,,key2,  ,key3");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.api_keys.keys.len(), 3);
+        assert!(config.http.auth.api_keys.keys.contains(&"key1".to_string()));
+        assert!(config.http.auth.api_keys.keys.contains(&"key2".to_string()));
+        assert!(config.http.auth.api_keys.keys.contains(&"key3".to_string()));
+        env::remove_var("VIBESQL_HTTP_AUTH_API_KEYS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_api_keys_empty_preserves_default() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        // Pre-populate with a key
+        config.http.auth.api_keys.keys = vec!["original-key".to_string()];
+
+        // Empty value should preserve existing keys
+        env::set_var("VIBESQL_HTTP_AUTH_API_KEYS", "");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.api_keys.keys, vec!["original-key".to_string()]);
+        env::remove_var("VIBESQL_HTTP_AUTH_API_KEYS");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_api_keys_single_key() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+
+        env::set_var("VIBESQL_HTTP_AUTH_API_KEYS", "single-key");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.api_keys.keys.len(), 1);
+        assert_eq!(config.http.auth.api_keys.keys[0], "single-key");
+        env::remove_var("VIBESQL_HTTP_AUTH_API_KEYS");
     }
 
     #[test]
