@@ -24,6 +24,17 @@ pub struct TableStatistics {
     /// Sampling metadata (Phase 5.2)
     /// None if no sampling was used (small table)
     pub sample_metadata: Option<SampleMetadata>,
+
+    /// Average row size in bytes (computed from sampled data)
+    ///
+    /// This provides actual row size measurements that account for:
+    /// - Real string/varchar fill ratios (not heuristic estimates)
+    /// - Actual NULL prevalence
+    /// - True BLOB/CLOB sizes
+    ///
+    /// Used by DML cost estimation to scale WAL write costs.
+    /// None if statistics were estimated from schema (no actual data sampled).
+    pub avg_row_bytes: Option<f64>,
 }
 
 impl TableStatistics {
@@ -124,6 +135,7 @@ impl TableStatistics {
             last_updated: SystemTime::now(),
             is_stale: true, // Clearly marked as estimates
             sample_metadata: None,
+            avg_row_bytes: None, // No actual data sampled
         }
     }
 
@@ -181,12 +193,22 @@ impl TableStatistics {
             columns.insert(column.name.clone(), col_stats);
         }
 
+        // Compute average row size from sampled data
+        let avg_row_bytes = if sampled_rows.is_empty() {
+            None
+        } else {
+            let total_bytes: usize =
+                sampled_rows.iter().map(|row| row.estimated_size_bytes()).sum();
+            Some(total_bytes as f64 / sampled_rows.len() as f64)
+        };
+
         TableStatistics {
             row_count: total_rows,
             columns,
             last_updated: SystemTime::now(),
             is_stale: false,
             sample_metadata,
+            avg_row_bytes,
         }
     }
 
@@ -250,6 +272,7 @@ impl TableStatistics {
             last_updated: SystemTime::now(),
             is_stale: true, // Mark as stale since these are estimates
             sample_metadata: None,
+            avg_row_bytes: None, // No actual data sampled
         }
     }
 
@@ -430,5 +453,122 @@ mod tests {
 
         assert_eq!(stats.row_count, 0);
         assert!(stats.is_stale);
+    }
+
+    // ============================================================================
+    // avg_row_bytes Tests (Issue #3980)
+    // ============================================================================
+
+    #[test]
+    fn test_avg_row_bytes_computed_from_actual_data() {
+        let schema = TableSchema::new(
+            "test_table".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+            ],
+        );
+
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]),
+        ];
+
+        let stats = TableStatistics::compute(&rows, &schema);
+
+        // avg_row_bytes should be computed from actual data
+        assert!(stats.avg_row_bytes.is_some());
+        let avg_bytes = stats.avg_row_bytes.unwrap();
+        // Should be positive and reasonable (Row struct + values)
+        assert!(avg_bytes > 0.0, "avg_row_bytes should be positive: {}", avg_bytes);
+    }
+
+    #[test]
+    fn test_avg_row_bytes_none_for_schema_estimates() {
+        let schema = TableSchema::new(
+            "test_table".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+            ],
+        );
+
+        // estimate_from_schema should NOT have avg_row_bytes (no actual data)
+        let stats = TableStatistics::estimate_from_schema(1000, &schema);
+        assert!(
+            stats.avg_row_bytes.is_none(),
+            "estimate_from_schema should not have avg_row_bytes"
+        );
+
+        // estimate_from_row_count should NOT have avg_row_bytes
+        let stats = TableStatistics::estimate_from_row_count(1000);
+        assert!(
+            stats.avg_row_bytes.is_none(),
+            "estimate_from_row_count should not have avg_row_bytes"
+        );
+    }
+
+    #[test]
+    fn test_avg_row_bytes_none_for_empty_table() {
+        let schema = TableSchema::new(
+            "empty_table".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+
+        // Empty table should have avg_row_bytes = None
+        let stats = TableStatistics::compute(&[], &schema);
+        assert!(
+            stats.avg_row_bytes.is_none(),
+            "Empty table should have avg_row_bytes = None"
+        );
+    }
+
+    #[test]
+    fn test_avg_row_bytes_varies_with_string_length() {
+        let schema = TableSchema::new(
+            "test_table".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "data".to_string(),
+                    DataType::Varchar { max_length: Some(1000) },
+                    false,
+                ),
+            ],
+        );
+
+        // Short strings
+        let short_rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("a"))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("b"))]),
+        ];
+        let short_stats = TableStatistics::compute(&short_rows, &schema);
+
+        // Long strings
+        let long_string = "x".repeat(500);
+        let long_rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from(&long_string))]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from(&long_string))]),
+        ];
+        let long_stats = TableStatistics::compute(&long_rows, &schema);
+
+        // Long strings should result in larger avg_row_bytes
+        let short_avg = short_stats.avg_row_bytes.unwrap();
+        let long_avg = long_stats.avg_row_bytes.unwrap();
+        assert!(
+            long_avg > short_avg,
+            "Long strings ({}) should have larger avg_row_bytes than short strings ({})",
+            long_avg,
+            short_avg
+        );
     }
 }
