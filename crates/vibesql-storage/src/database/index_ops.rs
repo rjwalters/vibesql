@@ -1043,10 +1043,24 @@ impl Database {
         // Check if table uses native columnar storage
         let is_native_columnar = table.is_native_columnar();
 
-        // Estimate average row size from schema
-        let column_types: Vec<_> =
-            table.schema.columns.iter().map(|col| col.data_type.clone()).collect();
-        let avg_row_size = crate::statistics::estimate_row_size(&column_types);
+        // Get average row size: prefer actual statistics over schema-based heuristics
+        //
+        // When statistics are available (from ANALYZE), use the actual avg_row_bytes
+        // which accounts for real string fill ratios, NULL prevalence, and actual
+        // BLOB sizes. This provides more accurate WAL cost estimation.
+        //
+        // Fall back to schema-based estimation when no statistics are available.
+        // See issue #3980 for details.
+        let avg_row_size = table
+            .get_statistics()
+            .and_then(|stats| stats.avg_row_bytes)
+            .map(|bytes| bytes as usize)
+            .unwrap_or_else(|| {
+                // Fall back to schema-based estimation
+                let column_types: Vec<_> =
+                    table.schema.columns.iter().map(|col| col.data_type.clone()).collect();
+                crate::statistics::estimate_row_size(&column_types)
+            });
 
         Some(crate::statistics::TableIndexInfo::new(
             hash_index_count,
@@ -1230,5 +1244,134 @@ mod tests {
 
         // Should have 3 hash indexes: 1 PK + 2 unique constraints
         assert_eq!(info.hash_index_count, 3);
+    }
+
+    // ============================================================================
+    // avg_row_size Statistics Tests (Issue #3980)
+    // ============================================================================
+
+    #[test]
+    fn test_get_table_index_info_uses_schema_estimate_without_stats() {
+        let mut db = Database::new();
+
+        // Create a table with VARCHAR columns
+        let schema = TableSchema::with_primary_key(
+            "items".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+            ],
+            vec!["id".to_string()],
+        );
+        db.create_table(schema).unwrap();
+
+        // Without ANALYZE, should use schema-based estimation
+        let info = db.get_table_index_info("items").unwrap();
+
+        // avg_row_size should be computed from schema heuristics
+        // INTEGER (4) + VARCHAR(100) estimate (32) + overhead (8) = 44, min 64
+        assert!(
+            info.avg_row_size >= 64,
+            "Schema-based avg_row_size should be at least base size: {}",
+            info.avg_row_size
+        );
+    }
+
+    #[test]
+    fn test_get_table_index_info_prefers_actual_statistics() {
+        let mut db = Database::new();
+
+        // Create a table with VARCHAR columns
+        let schema = TableSchema::with_primary_key(
+            "items".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "description".to_string(),
+                    DataType::Varchar { max_length: Some(1000) },
+                    false,
+                ),
+            ],
+            vec!["id".to_string()],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert rows with LONG strings (filling the VARCHAR)
+        for i in 0..10 {
+            let long_description = "x".repeat(800); // Much longer than schema heuristic
+            let row = Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(long_description.into()),
+            ]);
+            db.insert_row("items", row).unwrap();
+        }
+
+        // Get info WITHOUT statistics - uses schema heuristic
+        let info_without_stats = db.get_table_index_info("items").unwrap();
+        let schema_estimate = info_without_stats.avg_row_size;
+
+        // Run ANALYZE to compute actual statistics
+        db.get_table_mut("items").unwrap().analyze();
+
+        // Get info WITH statistics - should prefer actual avg_row_bytes
+        let info_with_stats = db.get_table_index_info("items").unwrap();
+        let actual_estimate = info_with_stats.avg_row_size;
+
+        // Actual statistics should show larger row size due to long strings
+        // Schema heuristic: VARCHAR(1000) → min(500, 32) = 32 bytes
+        // Actual data: 800 bytes per string
+        assert!(
+            actual_estimate > schema_estimate,
+            "Actual statistics ({}) should show larger row size than schema heuristic ({}) for long strings",
+            actual_estimate,
+            schema_estimate
+        );
+    }
+
+    #[test]
+    fn test_get_table_index_info_statistics_vs_schema_short_strings() {
+        let mut db = Database::new();
+
+        // Create a table with VARCHAR columns
+        let schema = TableSchema::with_primary_key(
+            "items".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "code".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+            ],
+            vec!["id".to_string()],
+        );
+        db.create_table(schema).unwrap();
+
+        // Insert rows with SHORT strings (much shorter than heuristic)
+        for i in 0..10 {
+            let short_code = format!("A{}", i); // 2-3 chars, much shorter than 32-byte heuristic
+            let row = Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(short_code.into()),
+            ]);
+            db.insert_row("items", row).unwrap();
+        }
+
+        // Run ANALYZE to compute actual statistics
+        db.get_table_mut("items").unwrap().analyze();
+
+        // Get info WITH statistics
+        let info = db.get_table_index_info("items").unwrap();
+
+        // Should have valid avg_row_size (from actual statistics)
+        assert!(
+            info.avg_row_size > 0,
+            "avg_row_size should be positive: {}",
+            info.avg_row_size
+        );
     }
 }
