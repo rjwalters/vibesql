@@ -2,6 +2,8 @@
 
 This guide shows how to use vibesql's built-in profiling tools to understand performance characteristics.
 
+> **Looking for CPU profiling?** See [CPU_PROFILING.md](CPU_PROFILING.md) for samply-based flame graph profiling of Rust code.
+
 ## Quick Start
 
 ```python
@@ -319,5 +321,6 @@ SELECT       ~50µs     ~126µs (2.5x)        ~55µs (1.1x)        2.3x faster  
 
 ## See Also
 
+- [CPU_PROFILING.md](CPU_PROFILING.md) - CPU profiling with samply (flame graphs)
 - [Performance Analysis](PERFORMANCE_ANALYSIS.md) - Detailed breakdown of performance characteristics
 - [Benchmarking Guide](../benchmarks/README.md) - How to run comprehensive benchmarks
