@@ -889,6 +889,10 @@ async fn subscribe_stream(
                         is_first_event = false;
                         "initial"
                     } else {
+                        // Record full update sent for efficiency stats (non-initial updates only)
+                        if let Some(ref metrics) = state.metrics {
+                            metrics.record_full_update_sent();
+                        }
                         "update"
                     };
 
@@ -949,6 +953,11 @@ async fn subscribe_stream(
                     );
                 }
                 SubscriptionUpdate::Partial { updates, .. } => {
+                    // Record partial update sent for efficiency stats
+                    if let Some(ref metrics) = state.metrics {
+                        metrics.record_partial_update_sent();
+                    }
+
                     // Send partial updates (only changed columns + PK columns)
                     let partial_updates: Vec<serde_json::Value> = updates
                         .iter()
