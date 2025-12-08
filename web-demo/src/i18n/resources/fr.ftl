@@ -251,6 +251,7 @@ bench-no-wasm-data = Aucune donnée WASM disponible
 
 # En-têtes de tableau
 bench-table-operation = Opération
+bench-table-query = Query
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite
@@ -379,6 +380,8 @@ bench-tpcc-disc-btree = Structure d'index construite sur mesure optimisée pour 
 bench-tpcc-disc-prepared = Les plans de requêtes sont compilés une fois et réutilisés
 bench-tpcc-disc-scaling-title = Passage à l'Échelle
 bench-tpcc-disc-scaling = Les résultats actuels sont mono-thread. L'architecture de VibeSQL supporte le traitement transactionnel multi-thread, et nous nous attendons à un passage à l'échelle quasi-linéaire à mesure que nous ajoutons le support d'exécution parallèle. Notre objectif est d'atteindre plus de 500K TPS sur du matériel multi-cœur moderne.
+bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
+bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
 
 # Sysbench Embarqué spécifique
 bench-sysbench-embedded-name = Sysbench (Embarqué)

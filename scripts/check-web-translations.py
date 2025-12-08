@@ -123,11 +123,11 @@ def parse_ftl_file(file_path: Path) -> Dict[str, MessageInfo]:
             messages[current_msg_id].variables.update(var_pattern.findall(line))
             continue
 
-        # Check for continuation line (starts with whitespace)
-        if line.startswith(" ") or line.startswith("\t"):
-            if current_msg_id and current_msg_id in messages:
-                # Add variables from continuation line
-                messages[current_msg_id].variables.update(var_pattern.findall(line))
+        # Check for continuation line (any non-message, non-attribute line while we have a current message)
+        # This includes lines starting with whitespace, or lines like "} ({ $var })" that continue a select expression
+        if current_msg_id and current_msg_id in messages:
+            # Add variables from continuation line
+            messages[current_msg_id].variables.update(var_pattern.findall(line))
 
     return messages
 
