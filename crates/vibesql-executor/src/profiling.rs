@@ -18,7 +18,6 @@
 //! - `JOIN_REORDER_VERBOSE` - Join reorder decisions and costs
 //! - `SUBQUERY_TRANSFORM_VERBOSE` - Subquery-to-join transformations
 //! - `TABLE_ELIM_VERBOSE` - Table elimination decisions
-//! - `DML_COST_DEBUG` - DML cost model reasoning
 //! - `SCAN_PATH_VERBOSE` - Scan path selection (index vs table scan)
 //! - `INDEX_SELECT_DEBUG` - Index selection decisions
 //!
@@ -29,15 +28,26 @@
 //! - `RANGE_SCAN_PROFILE` - Range scan phase timing
 
 use instant::Instant;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::LazyLock;
 
-/// Global flag to enable/disable profiling (disabled by default)
-/// Set VIBESQL_PROFILE=1 environment variable to enable
-static PROFILING_ENABLED: AtomicBool = AtomicBool::new(false);
+/// Debug level from VIBESQL_DEBUG environment variable (lazily initialized)
+/// 0 = disabled, 1 = all, 2 = optimizer, 3 = scan, 4 = dml
+static DEBUG_LEVEL: LazyLock<u8> = LazyLock::new(|| {
+    std::env::var("VIBESQL_DEBUG")
+        .ok()
+        .and_then(|v| match v.to_lowercase().as_str() {
+            "1" | "true" | "all" => Some(1),
+            "optimizer" => Some(2),
+            "scan" => Some(3),
+            "dml" => Some(4),
+            _ => v.parse().ok(),
+        })
+        .unwrap_or(0)
+});
 
-/// Debug level from VIBESQL_DEBUG environment variable
-/// 0 = disabled, 1 = all, other values for specific categories
-static DEBUG_LEVEL: AtomicU8 = AtomicU8::new(0);
+/// Profiling enabled flag (lazily initialized from VIBESQL_PROFILE)
+static PROFILING_ENABLED: LazyLock<bool> =
+    LazyLock::new(|| std::env::var("VIBESQL_PROFILE").is_ok());
 
 /// Debug categories enabled via VIBESQL_DEBUG
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -59,48 +69,14 @@ thread_local! {
     static SCAN_PATH_VERBOSE_ENABLED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
 
-/// Initialize profiling and debug flags based on environment variables
-pub fn init() {
-    // Initialize VIBESQL_PROFILE
-    if std::env::var("VIBESQL_PROFILE").is_ok() {
-        PROFILING_ENABLED.store(true, Ordering::Relaxed);
-        eprintln!("[PROFILE] Profiling enabled");
-    }
-
-    // Initialize VIBESQL_DEBUG
-    if let Ok(value) = std::env::var("VIBESQL_DEBUG") {
-        let level = match value.to_lowercase().as_str() {
-            "1" | "true" | "all" => 1,
-            "optimizer" => 2,
-            "scan" => 3,
-            "dml" => 4,
-            _ => {
-                // Try parsing as number
-                value.parse::<u8>().unwrap_or(0)
-            }
-        };
-        DEBUG_LEVEL.store(level, Ordering::Relaxed);
-        if level > 0 {
-            let category = match level {
-                1 => "all",
-                2 => "optimizer",
-                3 => "scan",
-                4 => "dml",
-                _ => "custom",
-            };
-            eprintln!("[DEBUG] VibeSQL debug enabled: category={}", category);
-        }
-    }
-}
-
 /// Check if profiling is enabled
 pub fn is_enabled() -> bool {
-    PROFILING_ENABLED.load(Ordering::Relaxed)
+    *PROFILING_ENABLED
 }
 
 /// Get the current debug category
 pub fn debug_category() -> DebugCategory {
-    match DEBUG_LEVEL.load(Ordering::Relaxed) {
+    match *DEBUG_LEVEL {
         0 => DebugCategory::None,
         1 => DebugCategory::All,
         2 => DebugCategory::Optimizer,
@@ -116,16 +92,8 @@ pub fn is_debug_enabled(category: DebugCategory) -> bool {
     current == DebugCategory::All || current == category
 }
 
-/// Check if optimizer debug logging is enabled
-/// Returns true if VIBESQL_DEBUG=1, VIBESQL_DEBUG=optimizer, or individual flag is set
-#[inline]
-pub fn is_optimizer_debug_enabled() -> bool {
-    is_debug_enabled(DebugCategory::Optimizer)
-}
-
 /// Check if scan path debug logging is enabled
-/// Returns true if VIBESQL_DEBUG=1, VIBESQL_DEBUG=scan, SCAN_PATH_VERBOSE=1,
-/// or legacy TABLE_SCAN_DEBUG/COLUMNAR_DEBUG flags
+/// Returns true if VIBESQL_DEBUG=1, VIBESQL_DEBUG=scan, or SCAN_PATH_VERBOSE=1
 #[inline]
 pub fn is_scan_debug_enabled() -> bool {
     // Use thread-local cache to avoid repeated env var lookups
@@ -134,21 +102,12 @@ pub fn is_scan_debug_enabled() -> bool {
             return enabled;
         }
 
-        let enabled = is_debug_enabled(DebugCategory::Scan)
-            || std::env::var("SCAN_PATH_VERBOSE").is_ok()
-            || std::env::var("TABLE_SCAN_DEBUG").is_ok()
-            || std::env::var("COLUMNAR_DEBUG").is_ok();
+        let enabled =
+            is_debug_enabled(DebugCategory::Scan) || std::env::var("SCAN_PATH_VERBOSE").is_ok();
 
         cache.set(Some(enabled));
         enabled
     })
-}
-
-/// Check if DML debug logging is enabled
-/// Returns true if VIBESQL_DEBUG=1, VIBESQL_DEBUG=dml, or DML_COST_DEBUG is set
-#[inline]
-pub fn is_dml_debug_enabled() -> bool {
-    is_debug_enabled(DebugCategory::Dml) || std::env::var("DML_COST_DEBUG").is_ok()
 }
 
 /// A profiling timer that logs elapsed time when dropped

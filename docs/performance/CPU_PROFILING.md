@@ -322,10 +322,6 @@ Shows index vs table scan selection (enabled by `VIBESQL_DEBUG=scan` or individu
 | `SCAN_PATH_VERBOSE=1` | Log scan path selection (index vs table scan) |
 | `INDEX_SELECT_DEBUG=1` | Log index selection decisions with selectivity |
 
-Legacy aliases (still work for backwards compatibility):
-- `TABLE_SCAN_DEBUG=1` → same as `SCAN_PATH_VERBOSE=1`
-- `COLUMNAR_DEBUG=1` → same as `SCAN_PATH_VERBOSE=1`
-
 ### Phase Timing
 
 Structured timing breakdowns that samply cannot replicate:
