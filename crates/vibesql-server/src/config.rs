@@ -234,6 +234,11 @@ impl Config {
     /// | `VIBESQL_HTTP_ENABLED` | `http.enabled` |
     /// | `VIBESQL_HTTP_HOST` | `http.host` |
     /// | `VIBESQL_HTTP_PORT` | `http.port` |
+    /// | `VIBESQL_HTTP_AUTH_ENABLED` | `http.auth.enabled` |
+    /// | `VIBESQL_HTTP_AUTH_JWT_SECRET` | `http.auth.jwt.secret` |
+    /// | `VIBESQL_HTTP_AUTH_JWT_ISSUER` | `http.auth.jwt.issuer` |
+    /// | `VIBESQL_HTTP_AUTH_JWT_AUDIENCE` | `http.auth.jwt.audience` |
+    /// | `VIBESQL_HTTP_AUTH_JWT_EXPIRATION` | `http.auth.jwt.expiration_secs` |
     pub fn apply_env_overrides(&mut self) {
         // Server configuration
         if let Ok(val) = env::var("VIBESQL_SERVER_HOST") {
@@ -285,6 +290,27 @@ impl Config {
         if let Ok(val) = env::var("VIBESQL_HTTP_PORT") {
             if let Ok(port) = val.parse() {
                 self.http.port = port;
+            }
+        }
+
+        // HTTP Auth configuration
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_ENABLED") {
+            self.http.auth.enabled = parse_bool(&val);
+        }
+
+        // JWT configuration
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_JWT_SECRET") {
+            self.http.auth.jwt.secret = val;
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_JWT_ISSUER") {
+            self.http.auth.jwt.issuer = Some(val);
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_JWT_AUDIENCE") {
+            self.http.auth.jwt.audience = Some(val);
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_JWT_EXPIRATION") {
+            if let Ok(secs) = val.parse() {
+                self.http.auth.jwt.expiration_secs = secs;
             }
         }
     }
@@ -607,5 +633,90 @@ enabled = false
         env::remove_var("VIBESQL_AUTH_METHOD");
         env::remove_var("VIBESQL_LOG_LEVEL");
         env::remove_var("VIBESQL_HTTP_PORT");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_enabled() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(!config.http.auth.enabled);
+
+        env::set_var("VIBESQL_HTTP_AUTH_ENABLED", "true");
+        config.apply_env_overrides();
+        assert!(config.http.auth.enabled);
+        env::remove_var("VIBESQL_HTTP_AUTH_ENABLED");
+    }
+
+    #[test]
+    fn test_env_override_http_auth_enabled_false() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        config.http.auth.enabled = true;
+
+        env::set_var("VIBESQL_HTTP_AUTH_ENABLED", "false");
+        config.apply_env_overrides();
+        assert!(!config.http.auth.enabled);
+        env::remove_var("VIBESQL_HTTP_AUTH_ENABLED");
+    }
+
+    #[test]
+    fn test_env_override_jwt_secret() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.auth.jwt.secret, "");
+
+        env::set_var("VIBESQL_HTTP_AUTH_JWT_SECRET", "my-super-secret-key");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.jwt.secret, "my-super-secret-key");
+        env::remove_var("VIBESQL_HTTP_AUTH_JWT_SECRET");
+    }
+
+    #[test]
+    fn test_env_override_jwt_issuer() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.auth.jwt.issuer, Some("vibesql".to_string()));
+
+        env::set_var("VIBESQL_HTTP_AUTH_JWT_ISSUER", "custom-issuer");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.jwt.issuer, Some("custom-issuer".to_string()));
+        env::remove_var("VIBESQL_HTTP_AUTH_JWT_ISSUER");
+    }
+
+    #[test]
+    fn test_env_override_jwt_audience() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.auth.jwt.audience, Some("vibesql-api".to_string()));
+
+        env::set_var("VIBESQL_HTTP_AUTH_JWT_AUDIENCE", "custom-audience");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.jwt.audience, Some("custom-audience".to_string()));
+        env::remove_var("VIBESQL_HTTP_AUTH_JWT_AUDIENCE");
+    }
+
+    #[test]
+    fn test_env_override_jwt_expiration() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.auth.jwt.expiration_secs, 3600);
+
+        env::set_var("VIBESQL_HTTP_AUTH_JWT_EXPIRATION", "7200");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.jwt.expiration_secs, 7200);
+        env::remove_var("VIBESQL_HTTP_AUTH_JWT_EXPIRATION");
+    }
+
+    #[test]
+    fn test_env_override_jwt_expiration_invalid() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.auth.jwt.expiration_secs, 3600);
+
+        // Invalid expiration should be ignored
+        env::set_var("VIBESQL_HTTP_AUTH_JWT_EXPIRATION", "not_a_number");
+        config.apply_env_overrides();
+        assert_eq!(config.http.auth.jwt.expiration_secs, 3600);
+        env::remove_var("VIBESQL_HTTP_AUTH_JWT_EXPIRATION");
     }
 }
