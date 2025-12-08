@@ -449,6 +449,26 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
                 matches
             }
         }
+        ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } => {
+            // Column-to-column comparison
+            let left_val = row.get(*left_column_idx);
+            let right_val = row.get(*right_column_idx);
+            match (left_val, right_val) {
+                (Some(l), Some(r)) => {
+                    use std::cmp::Ordering;
+                    let cmp = compare_values(l, r);
+                    match op {
+                        filter::CompareOp::LessThan => cmp == Ordering::Less,
+                        filter::CompareOp::GreaterThan => cmp == Ordering::Greater,
+                        filter::CompareOp::LessThanOrEqual => cmp != Ordering::Greater,
+                        filter::CompareOp::GreaterThanOrEqual => cmp != Ordering::Less,
+                        filter::CompareOp::Equal => cmp == Ordering::Equal,
+                        filter::CompareOp::NotEqual => cmp != Ordering::Equal,
+                    }
+                }
+                _ => false, // NULL comparison returns false
+            }
+        }
     }
 }
 

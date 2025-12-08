@@ -181,6 +181,15 @@ pub fn evaluate_predicate_i64_simd(
             }
             result
         }
+
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Int64".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -302,6 +311,15 @@ pub fn evaluate_predicate_i32_simd(
             }
             result
         }
+
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Date".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -421,6 +439,15 @@ pub fn evaluate_predicate_f64_simd(
                 result.iter_mut().for_each(|v| *v = !*v);
             }
             result
+        }
+
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Float64".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
         }
     };
 
@@ -610,6 +637,15 @@ pub fn evaluate_predicate_i64_packed(
             }
             result
         }
+
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Int64".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
+        }
     };
 
     // Apply NULL mask: NULLs always fail predicates
@@ -729,6 +765,15 @@ pub fn evaluate_predicate_i32_packed(
             }
             result
         }
+
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Date".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
+        }
     };
 
     // Apply NULL mask
@@ -846,6 +891,15 @@ pub fn evaluate_predicate_f64_packed(
                 result = result.not();
             }
             result
+        }
+
+        // ColumnCompare is handled at higher level in simd_filter/mod.rs
+        ColumnPredicate::ColumnCompare { .. } => {
+            return Err(ExecutorError::ColumnarTypeMismatch {
+                operation: "column-to-column comparison".to_string(),
+                left_type: "Float64".to_string(),
+                right_type: Some("Should be handled in simd_filter/mod.rs".to_string()),
+            });
         }
     };
 

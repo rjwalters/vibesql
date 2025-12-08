@@ -1,5 +1,5 @@
 use super::comparison::compare_values;
-use super::predicates::{ColumnPredicate, PredicateTree};
+use super::predicates::{ColumnPredicate, CompareOp, PredicateTree};
 use vibesql_types::SqlValue;
 
 /// Evaluate a predicate tree on a row
@@ -49,6 +49,15 @@ where
             false
         }
         PredicateTree::Leaf(predicate) => {
+            // Handle ColumnCompare specially - needs two column values
+            if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } =
+                predicate
+            {
+                let left_val = get_value(*left_column_idx);
+                let right_val = get_value(*right_column_idx);
+                return evaluate_column_compare(*op, left_val, right_val);
+            }
+
             // Get the column value and evaluate the leaf predicate
             let column_idx = match predicate {
                 ColumnPredicate::LessThan { column_idx, .. }
@@ -60,6 +69,7 @@ where
                 | ColumnPredicate::Between { column_idx, .. }
                 | ColumnPredicate::Like { column_idx, .. }
                 | ColumnPredicate::InList { column_idx, .. } => *column_idx,
+                ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
             };
 
             if let Some(value) = get_value(column_idx) {
@@ -69,6 +79,40 @@ where
                 false
             }
         }
+    }
+}
+
+/// Evaluate a column-to-column comparison
+///
+/// Returns true if left op right is satisfied.
+/// Returns false if either value is NULL (per SQL standard).
+pub fn evaluate_column_compare(
+    op: CompareOp,
+    left: Option<&SqlValue>,
+    right: Option<&SqlValue>,
+) -> bool {
+    use std::cmp::Ordering;
+
+    // NULL handling: any comparison with NULL returns false
+    let (left_val, right_val) = match (left, right) {
+        (Some(l), Some(r)) => (l, r),
+        _ => return false,
+    };
+
+    // Both values are NULL
+    if matches!(left_val, SqlValue::Null) || matches!(right_val, SqlValue::Null) {
+        return false;
+    }
+
+    let cmp_result = compare_values(left_val, right_val);
+
+    match op {
+        CompareOp::LessThan => cmp_result.equals(Ordering::Less),
+        CompareOp::GreaterThan => cmp_result.equals(Ordering::Greater),
+        CompareOp::LessThanOrEqual => cmp_result.matches(&[Ordering::Less, Ordering::Equal]),
+        CompareOp::GreaterThanOrEqual => cmp_result.matches(&[Ordering::Greater, Ordering::Equal]),
+        CompareOp::Equal => cmp_result.equals(Ordering::Equal),
+        CompareOp::NotEqual => cmp_result.matches(&[Ordering::Less, Ordering::Greater]),
     }
 }
 
@@ -133,6 +177,13 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             } else {
                 matches
             }
+        }
+        // ColumnCompare should be handled by evaluate_column_compare, not here
+        // This case is included for exhaustiveness but shouldn't be reached in normal use
+        ColumnPredicate::ColumnCompare { .. } => {
+            // Cannot evaluate column-to-column with single value
+            // Return false as fallback (this path shouldn't be hit)
+            false
         }
     }
 }
