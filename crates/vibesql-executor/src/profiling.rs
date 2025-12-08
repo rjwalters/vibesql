@@ -1,5 +1,10 @@
 //! Performance profiling utilities for understanding bottlenecks
+//!
+//! This module provides profiling infrastructure that integrates with the
+//! structured debug output system. When `VIBESQL_DEBUG_FORMAT=json`, profiling
+//! output is emitted as JSON for machine parsing.
 
+use crate::debug_output::{self, Category, DebugEvent};
 use instant::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -7,11 +12,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Set VIBESQL_PROFILE=1 environment variable to enable
 static PROFILING_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Initialize profiling based on environment variable
+/// Initialize profiling based on environment variable.
+/// Also initializes the debug output format.
 pub fn init() {
+    // Initialize debug output format first
+    debug_output::init();
+
     if std::env::var("VIBESQL_PROFILE").is_ok() {
         PROFILING_ENABLED.store(true, Ordering::Relaxed);
-        eprintln!("[PROFILE] Profiling enabled");
+        debug_output::debug_event(Category::Profile, "init", "PROFILE")
+            .text("Profiling enabled")
+            .field_bool("enabled", true)
+            .emit();
     }
 }
 
@@ -39,12 +51,17 @@ impl Drop for ProfileTimer {
     fn drop(&mut self) {
         if self.enabled {
             let elapsed = self.start.elapsed();
-            eprintln!(
-                "[PROFILE] {} took {:.3}ms ({:.0}µs)",
-                self.label,
-                elapsed.as_secs_f64() * 1000.0,
-                elapsed.as_micros()
-            );
+            DebugEvent::new(Category::Profile, "timer", "PROFILE")
+                .text(format!(
+                    "{} took {:.3}ms ({:.0}µs)",
+                    self.label,
+                    elapsed.as_secs_f64() * 1000.0,
+                    elapsed.as_micros()
+                ))
+                .field_str("label", self.label)
+                .field_duration_ms("duration_ms", elapsed)
+                .field_duration_us("duration_us", elapsed)
+                .emit();
         }
     }
 }
