@@ -1077,6 +1077,260 @@ impl IndexData {
             _ => Vec::new(),
         }
     }
+
+    /// Skip-scan: Get distinct values of the first column in the index
+    ///
+    /// This is the first step of skip-scan optimization. It returns all distinct
+    /// values of the first index column, which are then used as prefixes for
+    /// targeted lookups.
+    ///
+    /// # Performance
+    /// O(k) where k is the number of distinct first-column values.
+    /// For BTreeMap, this iterates through all keys and collects unique first elements.
+    ///
+    /// # Returns
+    /// Vector of distinct values for the first index column
+    ///
+    /// # Example
+    /// ```text
+    /// // Index on (region, date, id) with data:
+    /// // [East, 2024-01-01, 1], [East, 2024-01-02, 2], [West, 2024-01-01, 3]
+    /// let prefixes = index_data.get_distinct_first_column_values();
+    /// // Returns: [East, West]
+    /// ```
+    pub fn get_distinct_first_column_values(&self) -> Vec<SqlValue> {
+        match self {
+            IndexData::InMemory { data, .. } => {
+                let mut distinct_values = Vec::new();
+                let mut last_first_col: Option<SqlValue> = None;
+
+                for key in data.keys() {
+                    if let Some(first_val) = key.first() {
+                        let is_new = match &last_first_col {
+                            None => true,
+                            Some(last) => first_val != last,
+                        };
+                        if is_new {
+                            distinct_values.push(first_val.clone());
+                            last_first_col = Some(first_val.clone());
+                        }
+                    }
+                }
+
+                distinct_values
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                // For disk-backed indexes, we need to scan all keys
+                // This is less efficient but maintains correctness
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => {
+                        guard.get_distinct_first_column_values().unwrap_or_else(|_| vec![])
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in get_distinct_first_column_values: {}",
+                            e
+                        );
+                        vec![]
+                    }
+                }
+            }
+            IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                // Vector indexes don't support skip-scan
+                vec![]
+            }
+        }
+    }
+
+    /// Skip-scan: Lookup rows matching a non-prefix column filter
+    ///
+    /// This implements the skip-scan optimization for queries that filter on
+    /// non-prefix columns of a composite index. Instead of a full table scan,
+    /// it:
+    /// 1. Gets distinct values of the prefix column(s)
+    /// 2. For each prefix value, seeks to (prefix, filter_value) in the index
+    /// 3. Returns matching rows
+    ///
+    /// # Arguments
+    /// * `filter_column_idx` - Index of the column being filtered (1 = second column, etc.)
+    /// * `filter_value` - Value to filter on (equality predicate)
+    ///
+    /// # Returns
+    /// Vector of row indices matching the filter across all prefix values
+    ///
+    /// # Example
+    /// ```text
+    /// // Index on (region, date) - query: WHERE date = '2024-01-01'
+    /// // Skip-scan visits each region and looks up '2024-01-01' entries
+    /// let rows = index_data.skip_scan_equality(1, &SqlValue::Varchar("2024-01-01".into()));
+    /// ```
+    ///
+    /// # Performance
+    /// Cost = O(prefix_cardinality * log(n) + k) where:
+    /// - prefix_cardinality = number of distinct prefix values
+    /// - n = total index entries
+    /// - k = matching rows
+    ///
+    /// This is beneficial when prefix_cardinality is low and the filter is selective.
+    pub fn skip_scan_equality(&self, filter_column_idx: usize, filter_value: &SqlValue) -> Vec<usize> {
+        if filter_column_idx == 0 {
+            // Not a skip-scan - use regular prefix lookup
+            return self.prefix_multi_lookup(&[filter_value.clone()]);
+        }
+
+        let normalized_filter = normalize_for_comparison(filter_value);
+
+        match self {
+            IndexData::InMemory { data, pending_deletions } => {
+                let mut matching_rows = Vec::new();
+
+                // Group keys by their prefix and find those matching the filter
+                for (key, row_indices) in data.iter() {
+                    // Check if the filter column exists and matches
+                    if key.len() > filter_column_idx {
+                        let key_filter_val = &key[filter_column_idx];
+                        if *key_filter_val == normalized_filter {
+                            matching_rows.extend(row_indices);
+                        }
+                    }
+                }
+
+                // Apply pending deletions adjustment
+                if !pending_deletions.is_empty() {
+                    for row_idx in &mut matching_rows {
+                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
+                        *row_idx -= decrement;
+                    }
+                }
+
+                matching_rows
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => {
+                        guard.skip_scan_equality(filter_column_idx, &normalized_filter)
+                            .unwrap_or_else(|_| vec![])
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in skip_scan_equality: {}",
+                            e
+                        );
+                        vec![]
+                    }
+                }
+            }
+            IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                // Vector indexes don't support skip-scan
+                vec![]
+            }
+        }
+    }
+
+    /// Skip-scan with range filter on non-prefix column
+    ///
+    /// Similar to `skip_scan_equality` but supports range predicates
+    /// (>, >=, <, <=, BETWEEN) on the non-prefix column.
+    ///
+    /// # Arguments
+    /// * `filter_column_idx` - Index of the column being filtered
+    /// * `lower_bound` - Optional lower bound for the range
+    /// * `inclusive_lower` - Whether lower bound is inclusive
+    /// * `upper_bound` - Optional upper bound for the range
+    /// * `inclusive_upper` - Whether upper bound is inclusive
+    ///
+    /// # Returns
+    /// Vector of row indices matching the range filter across all prefix values
+    pub fn skip_scan_range(
+        &self,
+        filter_column_idx: usize,
+        lower_bound: Option<&SqlValue>,
+        inclusive_lower: bool,
+        upper_bound: Option<&SqlValue>,
+        inclusive_upper: bool,
+    ) -> Vec<usize> {
+        if filter_column_idx == 0 {
+            // Not a skip-scan - use regular range scan
+            return self.range_scan(lower_bound, upper_bound, inclusive_lower, inclusive_upper);
+        }
+
+        let normalized_lower = lower_bound.map(normalize_for_comparison);
+        let normalized_upper = upper_bound.map(normalize_for_comparison);
+
+        match self {
+            IndexData::InMemory { data, pending_deletions } => {
+                let mut matching_rows = Vec::new();
+
+                for (key, row_indices) in data.iter() {
+                    if key.len() > filter_column_idx {
+                        let key_filter_val = &key[filter_column_idx];
+
+                        // Check range bounds
+                        let passes_lower = match &normalized_lower {
+                            None => true,
+                            Some(lb) => {
+                                if inclusive_lower {
+                                    key_filter_val >= lb
+                                } else {
+                                    key_filter_val > lb
+                                }
+                            }
+                        };
+
+                        let passes_upper = match &normalized_upper {
+                            None => true,
+                            Some(ub) => {
+                                if inclusive_upper {
+                                    key_filter_val <= ub
+                                } else {
+                                    key_filter_val < ub
+                                }
+                            }
+                        };
+
+                        if passes_lower && passes_upper {
+                            matching_rows.extend(row_indices);
+                        }
+                    }
+                }
+
+                // Apply pending deletions adjustment
+                if !pending_deletions.is_empty() {
+                    for row_idx in &mut matching_rows {
+                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
+                        *row_idx -= decrement;
+                    }
+                }
+
+                matching_rows
+            }
+            IndexData::DiskBacked { btree, .. } => {
+                match acquire_btree_lock(btree) {
+                    Ok(guard) => {
+                        guard.skip_scan_range(
+                            filter_column_idx,
+                            normalized_lower.as_ref(),
+                            inclusive_lower,
+                            normalized_upper.as_ref(),
+                            inclusive_upper,
+                        )
+                        .unwrap_or_else(|_| vec![])
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "BTreeIndex lock acquisition failed in skip_scan_range: {}",
+                            e
+                        );
+                        vec![]
+                    }
+                }
+            }
+            IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
+                // Vector indexes don't support skip-scan
+                vec![]
+            }
+        }
+    }
 }
 
 /// Compute the exclusive upper bound for a prefix scan
@@ -1672,5 +1926,255 @@ mod tests {
         // LIMIT 10 but only 2 rows match
         let results = index.prefix_scan_limit(&[SqlValue::Integer(1)], Some(10), false);
         assert_eq!(results, vec![0, 1]); // All matching rows
+    }
+
+    // ========================================================================
+    // Skip-Scan Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_distinct_first_column_values() {
+        // Index on (region, date) with 3 regions
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("East")),
+                    SqlValue::Integer(20240101),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("East")),
+                    SqlValue::Integer(20240102),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("West")),
+                    SqlValue::Integer(20240101),
+                ],
+                vec![2],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("West")),
+                    SqlValue::Integer(20240103),
+                ],
+                vec![3],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("North")),
+                    SqlValue::Integer(20240102),
+                ],
+                vec![4],
+            ),
+        ]);
+
+        let distinct = index.get_distinct_first_column_values();
+
+        // Should have 3 distinct regions (East, North, West in sorted order)
+        assert_eq!(distinct.len(), 3);
+        // BTreeMap is sorted, so order depends on SqlValue ordering
+    }
+
+    #[test]
+    fn test_skip_scan_equality_basic() {
+        // Index on (region, date) - query: WHERE date = 20240101
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("East")),
+                    SqlValue::Integer(20240101),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("East")),
+                    SqlValue::Integer(20240102),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("West")),
+                    SqlValue::Integer(20240101),
+                ],
+                vec![2],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("West")),
+                    SqlValue::Integer(20240103),
+                ],
+                vec![3],
+            ),
+        ]);
+
+        // Skip-scan for date = 20240101 (column index 1)
+        let results = index.skip_scan_equality(1, &SqlValue::Integer(20240101));
+
+        // Should find rows 0 and 2 (East and West with date 20240101)
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&0));
+        assert!(results.contains(&2));
+    }
+
+    #[test]
+    fn test_skip_scan_equality_no_match() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(20)], vec![1]),
+        ]);
+
+        // Skip-scan for second column = 99 (no match)
+        let results = index.skip_scan_equality(1, &SqlValue::Integer(99));
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_skip_scan_range_basic() {
+        // Index on (category, price) - query: WHERE price BETWEEN 10 AND 20
+        let index = create_test_index_data(vec![
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
+                    SqlValue::Integer(5),
+                ],
+                vec![0],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
+                    SqlValue::Integer(15),
+                ],
+                vec![1],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("Books")),
+                    SqlValue::Integer(8),
+                ],
+                vec![2],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("Books")),
+                    SqlValue::Integer(12),
+                ],
+                vec![3],
+            ),
+            (
+                vec![
+                    SqlValue::Varchar(arcstr::ArcStr::from("Books")),
+                    SqlValue::Integer(25),
+                ],
+                vec![4],
+            ),
+        ]);
+
+        // Skip-scan for price BETWEEN 10 AND 20 (column index 1)
+        let results = index.skip_scan_range(
+            1,
+            Some(&SqlValue::Integer(10)),
+            true,  // inclusive lower
+            Some(&SqlValue::Integer(20)),
+            true, // inclusive upper
+        );
+
+        // Should find rows 1 (Electronics, 15) and 3 (Books, 12)
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&1));
+        assert!(results.contains(&3));
+    }
+
+    #[test]
+    fn test_skip_scan_range_exclusive_bounds() {
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(15)], vec![1]),
+            (vec![SqlValue::Integer(1), SqlValue::Integer(20)], vec![2]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(10)], vec![3]),
+            (vec![SqlValue::Integer(2), SqlValue::Integer(15)], vec![4]),
+        ]);
+
+        // Skip-scan for second column > 10 AND < 20 (exclusive)
+        let results = index.skip_scan_range(
+            1,
+            Some(&SqlValue::Integer(10)),
+            false, // exclusive lower
+            Some(&SqlValue::Integer(20)),
+            false, // exclusive upper
+        );
+
+        // Should find rows 1 and 4 (both with value 15)
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&1));
+        assert!(results.contains(&4));
+    }
+
+    #[test]
+    fn test_skip_scan_column_zero_falls_back() {
+        // When filter_column_idx is 0, should use regular lookup
+        let index = create_test_index_data(vec![
+            (vec![SqlValue::Integer(10), SqlValue::Integer(1)], vec![0]),
+            (vec![SqlValue::Integer(20), SqlValue::Integer(2)], vec![1]),
+        ]);
+
+        // Skip-scan on column 0 should fall back to regular lookup
+        let results = index.skip_scan_equality(0, &SqlValue::Integer(10));
+        assert_eq!(results.len(), 1);
+        assert!(results.contains(&0));
+    }
+
+    #[test]
+    fn test_skip_scan_tpcc_like_scenario() {
+        // Simulate TPC-C scenario: Index on (w_id, d_id, o_id)
+        // Query: WHERE d_id = 5 (filtering on second column)
+        let mut entries = Vec::new();
+        let mut row_idx = 0;
+
+        // Create data for 3 warehouses, 10 districts each
+        for w_id in 1..=3 {
+            for d_id in 1..=10 {
+                for o_id in 1..=5 {
+                    let key = vec![
+                        SqlValue::Integer(w_id),
+                        SqlValue::Integer(d_id),
+                        SqlValue::Integer(o_id),
+                    ];
+                    entries.push((key, vec![row_idx]));
+                    row_idx += 1;
+                }
+            }
+        }
+
+        let index = create_test_index_data(entries);
+
+        // Skip-scan for d_id = 5 (column index 1)
+        let results = index.skip_scan_equality(1, &SqlValue::Integer(5));
+
+        // Should find 15 rows (3 warehouses * 5 orders each for district 5)
+        assert_eq!(results.len(), 15);
+
+        // Verify the pattern: rows for (1,5,*), (2,5,*), (3,5,*)
+        // Each warehouse has orders 1-5 for district 5
+        // Row indices: (w_id - 1) * 50 + (d_id - 1) * 5 + (o_id - 1)
+        // For d_id=5: w=1: 20-24, w=2: 70-74, w=3: 120-124
+        for w_id in 1..=3 {
+            for o_id in 1..=5 {
+                let expected_row = ((w_id - 1) * 50 + (5 - 1) * 5 + (o_id - 1)) as usize;
+                assert!(
+                    results.contains(&expected_row),
+                    "Expected row {} for w_id={}, d_id=5, o_id={}",
+                    expected_row,
+                    w_id,
+                    o_id
+                );
+            }
+        }
     }
 }

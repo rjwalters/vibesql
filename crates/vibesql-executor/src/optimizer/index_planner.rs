@@ -13,8 +13,10 @@
 //! - What predicate can be pushed down to the index
 //! - Whether the index fully satisfies the WHERE clause (optimization)
 //! - Estimated cost for cost-based decisions
+//! - Skip-scan optimization for non-prefix index usage
 
 use vibesql_ast::{Expression, OrderByItem};
+use vibesql_storage::statistics::CostEstimator;
 use vibesql_storage::Database;
 
 /// Centralized index planner for query optimization
@@ -68,6 +70,48 @@ pub struct IndexPlan {
     /// Represents what fraction of rows are expected to match the index predicate.
     /// Used for cost-based optimization decisions.
     pub estimated_selectivity: f64,
+
+    /// Whether this plan uses skip-scan strategy
+    ///
+    /// If true, the index is being used with skip-scan because the WHERE clause
+    /// filters on non-prefix columns. The skip_scan_info field contains details.
+    pub is_skip_scan: bool,
+
+    /// Skip-scan specific information (only set when is_skip_scan is true)
+    pub skip_scan_info: Option<SkipScanInfo>,
+}
+
+/// Information about a skip-scan optimization
+///
+/// Skip-scan enables using a composite index when the query doesn't filter on
+/// the prefix columns. It works by iterating through distinct values of the
+/// prefix columns and performing an index lookup for each.
+///
+/// # Example
+/// For an index on `(region, date)` and query `WHERE date = '2024-01-01'`:
+/// - `skip_columns` = 1 (skipping `region`)
+/// - `prefix_column` = "region"
+/// - `filter_column` = "date"
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SkipScanInfo {
+    /// Number of leading index columns being skipped
+    pub skip_columns: usize,
+
+    /// Name of the prefix column(s) being skipped
+    pub prefix_columns: Vec<String>,
+
+    /// Name of the column used for filtering
+    pub filter_column: String,
+
+    /// Estimated number of distinct values in the skipped prefix
+    ///
+    /// This determines how many seek operations will be performed.
+    /// Lower values mean skip-scan is more efficient.
+    pub prefix_cardinality: usize,
+
+    /// Estimated cost of the skip-scan operation
+    pub estimated_cost: f64,
 }
 
 #[allow(dead_code)]
@@ -139,7 +183,177 @@ impl<'a> IndexPlanner<'a> {
         // Estimate selectivity for cost-based decisions
         let estimated_selectivity = self.estimate_selectivity(&index_name, where_clause);
 
-        Some(IndexPlan { index_name, fully_satisfies_where, sorted_columns, estimated_selectivity })
+        Some(IndexPlan {
+            index_name,
+            fully_satisfies_where,
+            sorted_columns,
+            estimated_selectivity,
+            is_skip_scan: false,
+            skip_scan_info: None,
+        })
+    }
+
+    /// Plan skip-scan usage for a query
+    ///
+    /// Skip-scan enables using a composite index when the WHERE clause filters on
+    /// non-prefix columns. This is beneficial when:
+    /// - The prefix columns have low cardinality (few distinct values)
+    /// - The filter on non-prefix columns is selective
+    ///
+    /// # Arguments
+    /// * `table_name` - Name of the table being queried
+    /// * `where_clause` - WHERE clause predicate (required for skip-scan)
+    ///
+    /// # Returns
+    /// - `Some(IndexPlan)` with `is_skip_scan = true` if skip-scan is beneficial
+    /// - `None` if no beneficial skip-scan is found
+    ///
+    /// # Example
+    /// For an index on `(region, date)` and query `WHERE date = '2024-01-01'`:
+    /// - Regular index scan cannot be used (no filter on `region`)
+    /// - Skip-scan iterates through distinct `region` values
+    /// - For each region, seeks to that region's '2024-01-01' entries
+    pub fn plan_skip_scan(
+        &self,
+        table_name: &str,
+        where_clause: &Expression,
+    ) -> Option<IndexPlan> {
+        // Get table and statistics
+        let table = self.database.get_table(table_name)?;
+        let table_stats = table.get_statistics()?;
+
+        if table_stats.needs_refresh() {
+            return None; // Need fresh statistics for cost-based decisions
+        }
+
+        // Get all indexes for this table
+        let indexes = self.database.list_indexes_for_table(table_name);
+
+        let cost_estimator = CostEstimator::default();
+        let table_scan_cost = cost_estimator.estimate_table_scan(table_stats);
+
+        let mut best_skip_scan: Option<(String, SkipScanInfo, f64)> = None;
+
+        for index_name in &indexes {
+            if let Some(index_metadata) = self.database.get_index(index_name) {
+                // Skip single-column indexes (no prefix to skip)
+                if index_metadata.columns.len() < 2 {
+                    continue;
+                }
+
+                let first_col = &index_metadata.columns[0];
+
+                // Check if WHERE clause filters on the first column
+                // If yes, regular index scan should be used, not skip-scan
+                let filters_first_col =
+                    crate::select::scan::index_scan::selection::expression_filters_column(
+                        where_clause,
+                        &first_col.column_name,
+                    );
+
+                if filters_first_col {
+                    continue; // Regular index scan is better
+                }
+
+                // Check if WHERE clause filters on any non-first column
+                for (col_idx, index_col) in index_metadata.columns.iter().enumerate().skip(1) {
+                    let filters_this_col =
+                        crate::select::scan::index_scan::selection::expression_filters_column(
+                            where_clause,
+                            &index_col.column_name,
+                        );
+
+                    if !filters_this_col {
+                        continue;
+                    }
+
+                    // Found a potential skip-scan: filter on column at index col_idx
+                    // Need statistics for the prefix column to estimate cardinality
+                    let prefix_col_stats = table_stats.columns.get(&first_col.column_name)?;
+
+                    // Estimate filter selectivity on the non-prefix column
+                    let filter_col_stats = table_stats.columns.get(&index_col.column_name);
+                    let filter_selectivity = filter_col_stats
+                        .map(|stats| {
+                            crate::select::scan::index_scan::selection::estimate_selectivity(
+                                where_clause,
+                                &index_col.column_name,
+                                stats,
+                            )
+                        })
+                        .unwrap_or(0.33);
+
+                    // Calculate skip-scan cost
+                    let skip_scan_cost = cost_estimator.estimate_skip_scan_cost(
+                        table_stats,
+                        prefix_col_stats,
+                        filter_selectivity,
+                    );
+
+                    // Debug output
+                    if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+                        eprintln!(
+                            "[SKIP_SCAN] index={}, prefix_col={}, filter_col={}, prefix_n_distinct={}, filter_selectivity={:.4}, skip_scan_cost={:.2}, table_scan_cost={:.2}",
+                            index_name,
+                            first_col.column_name,
+                            index_col.column_name,
+                            prefix_col_stats.n_distinct,
+                            filter_selectivity,
+                            skip_scan_cost,
+                            table_scan_cost
+                        );
+                    }
+
+                    // Only consider if cheaper than table scan
+                    if skip_scan_cost >= table_scan_cost {
+                        continue;
+                    }
+
+                    // Track the best skip-scan option
+                    let is_better = match &best_skip_scan {
+                        None => true,
+                        Some((_, _, best_cost)) => skip_scan_cost < *best_cost,
+                    };
+
+                    if is_better {
+                        let prefix_columns: Vec<String> = index_metadata.columns[..col_idx]
+                            .iter()
+                            .map(|c| c.column_name.clone())
+                            .collect();
+
+                        let skip_info = SkipScanInfo {
+                            skip_columns: col_idx,
+                            prefix_columns,
+                            filter_column: index_col.column_name.clone(),
+                            prefix_cardinality: prefix_col_stats.n_distinct,
+                            estimated_cost: skip_scan_cost,
+                        };
+
+                        best_skip_scan = Some((index_name.clone(), skip_info, skip_scan_cost));
+                    }
+
+                    // Only consider first matching column for this index
+                    break;
+                }
+            }
+        }
+
+        // Return the best skip-scan plan if found
+        best_skip_scan.map(|(index_name, skip_info, _)| {
+            // Estimate overall selectivity
+            let estimated_selectivity = skip_info.prefix_cardinality as f64
+                / table_stats.row_count.max(1) as f64
+                * 0.33; // Rough estimate
+
+            IndexPlan {
+                index_name,
+                fully_satisfies_where: false, // Skip-scan doesn't fully satisfy WHERE
+                sorted_columns: None,         // Skip-scan doesn't preserve order
+                estimated_selectivity,
+                is_skip_scan: true,
+                skip_scan_info: Some(skip_info),
+            }
+        })
     }
 
     /// Estimate selectivity of index predicate

@@ -378,6 +378,108 @@ impl CostEstimator {
         index_traversal_cost + index_scan_cost + table_fetch_cost + cpu_cost
     }
 
+    /// Estimate cost of a skip-scan on a composite index
+    ///
+    /// Skip-scan enables using a composite index when the query doesn't filter on
+    /// the prefix columns. It works by iterating through distinct values of the
+    /// prefix columns and performing an index lookup for each.
+    ///
+    /// # How Skip-Scan Works
+    ///
+    /// For a composite index on `(a, b)` and query `WHERE b = 5`:
+    /// 1. Get distinct values of `a` from the index
+    /// 2. For each distinct `a` value, seek to `(a, 5)` in the index
+    /// 3. Return matching rows
+    ///
+    /// # Cost Model
+    ///
+    /// Cost = prefix_cardinality * (seek_cost + scan_cost_per_prefix)
+    ///
+    /// Where:
+    /// - `prefix_cardinality` = number of distinct values in skipped prefix columns
+    /// - `seek_cost` = random I/O cost to seek to each prefix value
+    /// - `scan_cost_per_prefix` = cost to scan rows within each prefix group
+    ///
+    /// # Arguments
+    /// * `table_stats` - Statistics for the table
+    /// * `prefix_col_stats` - Statistics for the prefix column(s) being skipped
+    /// * `filter_selectivity` - Selectivity of the filter on non-prefix columns (0.0 to 1.0)
+    ///
+    /// # Returns
+    /// Estimated cost in arbitrary units. Lower is better.
+    ///
+    /// # Example
+    /// ```text
+    /// // Index on (region, date), query: WHERE date = '2024-01-01'
+    /// // If region has 10 distinct values and date filter matches 1% of rows:
+    /// let cost = estimator.estimate_skip_scan_cost(&table_stats, &region_stats, 0.01);
+    /// ```
+    pub fn estimate_skip_scan_cost(
+        &self,
+        table_stats: &TableStatistics,
+        prefix_col_stats: &ColumnStatistics,
+        filter_selectivity: f64,
+    ) -> f64 {
+        let total_rows = table_stats.row_count as f64;
+        let prefix_cardinality = prefix_col_stats.n_distinct as f64;
+
+        // Rows per prefix value (assuming uniform distribution)
+        let rows_per_prefix = if prefix_cardinality > 0.0 {
+            total_rows / prefix_cardinality
+        } else {
+            total_rows
+        };
+
+        // Expected rows matching filter within each prefix group
+        let matching_rows_per_prefix = rows_per_prefix * filter_selectivity;
+
+        // 1. Seek cost: one random I/O per distinct prefix value
+        // This is the key benefit of skip-scan - we trade one seek per prefix
+        // for potentially many fewer index entries scanned
+        let seek_cost = prefix_cardinality * self.random_page_cost;
+
+        // 2. Index scan cost within each prefix group
+        // We scan index entries proportional to matching rows
+        let index_scan_cost = prefix_cardinality * matching_rows_per_prefix * self.cpu_index_tuple_cost;
+
+        // 3. Table fetch cost: estimate pages accessed for matched rows
+        // For skip-scan, the rows are scattered across different prefix groups,
+        // but within each prefix group they may be clustered.
+        // Assume moderate clustering - roughly sqrt(rows) pages accessed
+        let total_matching_rows = total_rows * filter_selectivity;
+        let estimated_pages = (total_matching_rows.sqrt()).max(1.0);
+        let table_fetch_cost = estimated_pages * self.random_page_cost;
+
+        // 4. CPU cost for processing matched rows
+        let cpu_cost = total_matching_rows * self.cpu_tuple_cost;
+
+        seek_cost + index_scan_cost + table_fetch_cost + cpu_cost
+    }
+
+    /// Determine if skip-scan is beneficial compared to a table scan
+    ///
+    /// Skip-scan is beneficial when:
+    /// - The prefix columns have low cardinality (few distinct values)
+    /// - The filter on non-prefix columns is selective
+    ///
+    /// # Arguments
+    /// * `table_stats` - Statistics for the table
+    /// * `prefix_col_stats` - Statistics for the prefix column(s) being skipped
+    /// * `filter_selectivity` - Selectivity of the filter on non-prefix columns
+    ///
+    /// # Returns
+    /// `true` if skip-scan is estimated to be cheaper than a table scan
+    pub fn should_use_skip_scan(
+        &self,
+        table_stats: &TableStatistics,
+        prefix_col_stats: &ColumnStatistics,
+        filter_selectivity: f64,
+    ) -> bool {
+        let skip_scan_cost = self.estimate_skip_scan_cost(table_stats, prefix_col_stats, filter_selectivity);
+        let table_scan_cost = self.estimate_table_scan(table_stats);
+        skip_scan_cost < table_scan_cost
+    }
+
     // ============================================================================
     // DML Cost Estimation
     // ============================================================================
@@ -1325,6 +1427,205 @@ mod tests {
             factor >= 9.0,
             "WAL size factor ratio ({}) should be at least 9x",
             factor
+        );
+    }
+
+    // ============================================================================
+    // Skip-Scan Cost Estimation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_skip_scan_cost_low_cardinality_prefix() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        // Low cardinality prefix (10 distinct values)
+        let prefix_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: Some(SqlValue::Integer(1)),
+            max_value: Some(SqlValue::Integer(10)),
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        // Selective filter (1% of rows match)
+        let cost = estimator.estimate_skip_scan_cost(&table_stats, &prefix_stats, 0.01);
+
+        // Should be cheaper than table scan with selective filter and low prefix cardinality
+        let table_scan_cost = estimator.estimate_table_scan(&table_stats);
+        assert!(
+            cost < table_scan_cost,
+            "Skip-scan cost ({}) should be cheaper than table scan ({}) with low prefix cardinality",
+            cost,
+            table_scan_cost
+        );
+    }
+
+    #[test]
+    fn test_skip_scan_cost_high_cardinality_prefix() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        // High cardinality prefix (1000 distinct values)
+        let prefix_stats = ColumnStatistics {
+            n_distinct: 1000,
+            null_count: 0,
+            min_value: Some(SqlValue::Integer(1)),
+            max_value: Some(SqlValue::Integer(1000)),
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        // Selective filter (1% of rows match)
+        let cost = estimator.estimate_skip_scan_cost(&table_stats, &prefix_stats, 0.01);
+
+        // High cardinality prefix makes skip-scan expensive due to many seeks
+        let table_scan_cost = estimator.estimate_table_scan(&table_stats);
+        assert!(
+            cost > table_scan_cost,
+            "Skip-scan cost ({}) should be more expensive than table scan ({}) with high prefix cardinality",
+            cost,
+            table_scan_cost
+        );
+    }
+
+    #[test]
+    fn test_skip_scan_cost_scales_with_prefix_cardinality() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        let low_card_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let high_card_stats = ColumnStatistics {
+            n_distinct: 100,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cost_low = estimator.estimate_skip_scan_cost(&table_stats, &low_card_stats, 0.01);
+        let cost_high = estimator.estimate_skip_scan_cost(&table_stats, &high_card_stats, 0.01);
+
+        // Higher prefix cardinality should mean higher skip-scan cost
+        assert!(
+            cost_high > cost_low,
+            "Skip-scan cost with high cardinality ({}) should exceed low cardinality cost ({})",
+            cost_high,
+            cost_low
+        );
+    }
+
+    #[test]
+    fn test_skip_scan_cost_scales_with_filter_selectivity() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        let prefix_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        // Very selective filter (0.1% of rows)
+        let cost_selective = estimator.estimate_skip_scan_cost(&table_stats, &prefix_stats, 0.001);
+
+        // Less selective filter (10% of rows)
+        let cost_broad = estimator.estimate_skip_scan_cost(&table_stats, &prefix_stats, 0.1);
+
+        // Higher selectivity (more rows match) should mean higher cost
+        assert!(
+            cost_broad > cost_selective,
+            "Skip-scan cost with broad filter ({}) should exceed selective filter cost ({})",
+            cost_broad,
+            cost_selective
+        );
+    }
+
+    #[test]
+    fn test_should_use_skip_scan_decision() {
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        // Low cardinality prefix - skip-scan should be beneficial
+        let low_card_stats = ColumnStatistics {
+            n_distinct: 5,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        assert!(
+            estimator.should_use_skip_scan(&table_stats, &low_card_stats, 0.01),
+            "Skip-scan should be chosen with low prefix cardinality and selective filter"
+        );
+
+        // High cardinality prefix - skip-scan should not be beneficial
+        let high_card_stats = ColumnStatistics {
+            n_distinct: 5000,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        assert!(
+            !estimator.should_use_skip_scan(&table_stats, &high_card_stats, 0.01),
+            "Skip-scan should NOT be chosen with high prefix cardinality"
+        );
+    }
+
+    #[test]
+    fn test_skip_scan_break_even_point() {
+        // Test to find approximately where skip-scan becomes beneficial
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        // With 10% filter selectivity, find the prefix cardinality threshold
+        let selectivity = 0.1;
+
+        // Skip-scan should be beneficial below some threshold cardinality
+        let mut threshold_cardinality = 0;
+        for cardinality in [5, 10, 25, 50, 100, 200, 500, 1000] {
+            let prefix_stats = ColumnStatistics {
+                n_distinct: cardinality,
+                null_count: 0,
+                min_value: None,
+                max_value: None,
+                most_common_values: vec![],
+                histogram: None,
+            };
+
+            if estimator.should_use_skip_scan(&table_stats, &prefix_stats, selectivity) {
+                threshold_cardinality = cardinality;
+            } else {
+                break;
+            }
+        }
+
+        // Verify we found a reasonable threshold
+        assert!(
+            threshold_cardinality > 0,
+            "Skip-scan should be beneficial for at least some low cardinalities"
+        );
+        assert!(
+            threshold_cardinality < 1000,
+            "Skip-scan should not be beneficial for very high cardinalities"
         );
     }
 }
