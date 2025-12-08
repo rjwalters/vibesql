@@ -10,11 +10,17 @@
 //!
 //! The `DmlOptimizer` provides methods to compute optimization hints based on estimated costs:
 //!
-//! ```rust,ignore
-//! let optimizer = DmlOptimizer::new(db, "table_name");
+//! ```rust,no_run
+//! use vibesql_executor::DmlOptimizer;
+//! use vibesql_storage::Database;
+//! use std::collections::HashSet;
+//!
+//! let db = Database::new();
+//! let optimizer = DmlOptimizer::new(&db, "table_name");
+//! let total_rows = 1000;
 //! let batch_size = optimizer.optimal_insert_batch_size(total_rows);
 //! let should_chunk = optimizer.should_chunk_delete(total_rows);
-//! let affected_ratio = optimizer.compute_indexes_affected_ratio(&changed_columns);
+//! // Note: compute_indexes_affected_ratio requires a TableSchema
 //! ```
 
 use vibesql_storage::{
@@ -115,6 +121,7 @@ impl<'a> DmlOptimizer<'a> {
             last_updated: instant::SystemTime::now(),
             is_stale: true, // Mark as stale since it's a fallback
             sample_metadata: None,
+            avg_row_bytes: None, // No actual data sampled
         }
     }
 

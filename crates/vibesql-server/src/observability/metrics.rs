@@ -33,12 +33,15 @@ pub struct ServerMetrics {
     subscription_updates_total: Counter<u64>,
     selective_update_columns_sent: Histogram<u64>,
     selective_update_changed_ratio: Histogram<f64>,
+    subscriptions_active: Gauge<u64>,
+    subscriptions_active_count: Arc<AtomicU64>,
     subscriptions_selective_eligible: Gauge<u64>,
     subscriptions_selective_eligible_count: Arc<AtomicU64>,
 
     // Partial update efficiency metrics
     partial_update_fallbacks_total: Counter<u64>,
     partial_update_bytes_saved: Histogram<u64>,
+    selective_update_bytes_saved_total: Counter<u64>,
     partial_update_efficiency: Gauge<f64>,
     partial_update_efficiency_numerator: Arc<AtomicU64>,
     partial_update_efficiency_denominator: Arc<AtomicU64>,
@@ -150,6 +153,13 @@ impl ServerMetrics {
             .with_unit("1")
             .build();
 
+        let subscriptions_active = meter
+            .u64_gauge("vibesql_subscriptions_active")
+            .with_description("Total number of active subscriptions")
+            .with_unit("{subscription}")
+            .build();
+        let subscriptions_active_count = Arc::new(AtomicU64::new(0));
+
         let subscriptions_selective_eligible = meter
             .u64_gauge("vibesql_subscriptions_selective_eligible")
             .with_description("Active subscriptions eligible for selective column updates")
@@ -167,6 +177,12 @@ impl ServerMetrics {
         let partial_update_bytes_saved = meter
             .u64_histogram("vibesql_partial_update_bytes_saved")
             .with_description("Estimated bytes saved per partial update compared to full row update")
+            .with_unit("By")
+            .build();
+
+        let selective_update_bytes_saved_total = meter
+            .u64_counter("vibesql_selective_update_bytes_saved_total")
+            .with_description("Total bytes saved by using selective column updates instead of full row updates")
             .with_unit("By")
             .build();
 
@@ -212,10 +228,13 @@ impl ServerMetrics {
             subscription_updates_total,
             selective_update_columns_sent,
             selective_update_changed_ratio,
+            subscriptions_active,
+            subscriptions_active_count,
             subscriptions_selective_eligible,
             subscriptions_selective_eligible_count,
             partial_update_fallbacks_total,
             partial_update_bytes_saved,
+            selective_update_bytes_saved_total,
             partial_update_efficiency,
             partial_update_efficiency_numerator,
             partial_update_efficiency_denominator,
@@ -330,6 +349,27 @@ impl ServerMetrics {
         );
     }
 
+    /// Increment the count of active subscriptions
+    ///
+    /// Called when a subscription is registered.
+    pub fn increment_subscriptions_active(&self) {
+        let new_value = self.subscriptions_active_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.subscriptions_active.record(new_value, &[]);
+    }
+
+    /// Decrement the count of active subscriptions
+    ///
+    /// Called when a subscription is unregistered.
+    pub fn decrement_subscriptions_active(&self) {
+        let new_value = self.subscriptions_active_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        self.subscriptions_active.record(new_value, &[]);
+    }
+
+    /// Get the current count of active subscriptions
+    pub fn subscriptions_active_count(&self) -> u64 {
+        self.subscriptions_active_count.load(Ordering::Relaxed)
+    }
+
     /// Increment the count of selective-eligible subscriptions
     ///
     /// Called when a subscription is registered with successfully detected PK columns.
@@ -388,7 +428,10 @@ impl ServerMetrics {
     /// # Arguments
     /// * `bytes_saved` - Estimated bytes saved (full_row_size - partial_update_size)
     pub fn record_partial_update_bytes_saved(&self, bytes_saved: u64) {
+        // Record per-update histogram for distribution analysis
         self.partial_update_bytes_saved.record(bytes_saved, &[]);
+        // Increment counter for cumulative tracking via OpenTelemetry
+        self.selective_update_bytes_saved_total.add(bytes_saved, &[]);
         // Also track cumulative bytes saved for HTTP stats endpoint
         self.total_bytes_saved_count.fetch_add(bytes_saved, Ordering::Relaxed);
     }
@@ -521,6 +564,30 @@ mod tests {
     }
 
     #[test]
+    fn test_subscriptions_active_increment_decrement() {
+        let metrics = create_test_metrics();
+
+        // Initially zero
+        assert_eq!(metrics.subscriptions_active_count(), 0);
+
+        // Increment
+        metrics.increment_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 1);
+
+        // Increment again
+        metrics.increment_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 2);
+
+        // Decrement
+        metrics.decrement_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 1);
+
+        // Decrement again
+        metrics.decrement_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 0);
+    }
+
+    #[test]
     fn test_selective_eligible_increment_decrement() {
         let metrics = create_test_metrics();
 
@@ -619,6 +686,10 @@ mod tests {
     #[test]
     fn test_partial_update_bytes_saved_recording() {
         // This test verifies the method exists and can be called without panicking.
+        // The method records to three places:
+        // 1. partial_update_bytes_saved histogram (per-update distribution)
+        // 2. selective_update_bytes_saved_total counter (cumulative OpenTelemetry metric)
+        // 3. total_bytes_saved_count AtomicU64 (for HTTP stats endpoint)
         let metrics = create_test_metrics();
 
         // Should not panic when recording bytes saved

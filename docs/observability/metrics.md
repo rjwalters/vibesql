@@ -37,6 +37,7 @@ VibeSQL exposes Prometheus-compatible metrics via OpenTelemetry for monitoring s
 | `vibesql_subscription_updates_total` | Counter | update | `type`, `row_count` | Subscription updates sent by type |
 | `vibesql_selective_update_columns_sent` | Histogram | column | - | Number of columns sent in selective updates |
 | `vibesql_selective_update_changed_ratio` | Histogram | ratio (0-1) | - | Ratio of changed columns to total columns |
+| `vibesql_subscriptions_active` | Gauge | subscription | - | Total number of active subscriptions |
 | `vibesql_subscriptions_selective_eligible` | Gauge | subscription | - | Active subscriptions eligible for selective updates |
 
 **Subscription Update Types** (`type` label values):
