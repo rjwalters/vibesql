@@ -72,3 +72,7 @@ benchmarks/suite/results/
 fuzz/target/
 fuzz/artifacts/
 fuzz/Cargo.lock
+
+# Profiling (samply output)
+profile-*.json.gz
+*.profile.json.gz
