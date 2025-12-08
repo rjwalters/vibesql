@@ -19,6 +19,9 @@
 //! - Configurable memory warning thresholds
 //! - Optional jemalloc allocator for better memory release
 //!
+//! Note: TPC-DS queries are executed sequentially to preserve accurate per-query
+//! memory tracking. For parallel execution of TPC-H queries, see tpch_profiling.rs.
+//!
 //! Validation Mode:
 //! When VALIDATE=1 is set (requires --features benchmark-comparison), the runner
 //! compares VibeSQL results against DuckDB as ground truth. This validates that
@@ -40,6 +43,7 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+mod memory_monitor;
 mod tpcds;
 
 use std::collections::{HashMap, HashSet};
@@ -52,6 +56,8 @@ use tpcds::schema::load_vibesql;
 use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::QueryBufferPool;
+
+use memory_monitor::compute_parallelism;
 
 #[cfg(feature = "duckdb-comparison")]
 use duckdb::Connection as DuckDBConn;
@@ -138,11 +144,16 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Compute parallelism level for informational purposes (TPC-DS runs sequentially for accurate memory tracking)
+    let parallelism = compute_parallelism();
+
     // Print configuration
     println!("Configuration:");
     println!("  Scale factor:    {}", scale_factor);
     println!("  Batch size:      {} queries", batch_size);
     println!("  Memory warning:  {:.0} MB", memory_warn_mb);
+    println!("  Execution:       sequential (TPC-DS requires per-query memory tracking)");
+    println!("  Available cores: {} (use tpch_profiling for parallel execution)", parallelism);
     println!("  Allocator:       {}", if is_jemalloc_enabled() { "jemalloc" } else { "system" });
     if skip_slow {
         println!("  Skipping:        {} known slow queries", SLOW_QUERIES.len());
