@@ -42,6 +42,8 @@ Configuration values are resolved in this order (highest to lowest priority):
 | `VIBESQL_HTTP_HOST` | `http.host` | `0.0.0.0` |
 | `VIBESQL_HTTP_PORT` | `http.port` | `8080` |
 | `VIBESQL_HTTP_AUTH_ENABLED` | `http.auth.enabled` | `true` |
+| `VIBESQL_HTTP_AUTH_METHODS` | `http.auth.methods` | `api_key,jwt,basic` |
+| `VIBESQL_HTTP_AUTH_API_KEYS` | `http.auth.api_keys.keys` | `key1,key2,key3` |
 | `VIBESQL_HTTP_AUTH_JWT_SECRET` | `http.auth.jwt.secret` | `your-secret-key` |
 | `VIBESQL_HTTP_AUTH_JWT_ISSUER` | `http.auth.jwt.issuer` | `vibesql` |
 | `VIBESQL_HTTP_AUTH_JWT_AUDIENCE` | `http.auth.jwt.audience` | `vibesql-api` |
@@ -53,6 +55,20 @@ Boolean environment variables accept the following values (case-insensitive):
 - **True**: `true`, `1`, `yes`, `on`
 - **False**: any other value (e.g., `false`, `0`, `no`, `off`)
 
+### List Values
+
+Some environment variables accept comma-separated lists:
+
+- **`VIBESQL_HTTP_AUTH_METHODS`**: Comma-separated list of authentication methods.
+  - Valid values: `api_key`, `basic`, `jwt` (case-insensitive)
+  - Invalid values are silently ignored
+  - Example: `api_key,jwt` or `API_KEY, JWT, BASIC`
+
+- **`VIBESQL_HTTP_AUTH_API_KEYS`**: Comma-separated list of valid API keys.
+  - Values are trimmed of whitespace
+  - Empty values are ignored
+  - Example: `secret-key-1,secret-key-2,secret-key-3`
+
 ### Example: Docker Deployment
 
 ```bash
@@ -63,6 +79,8 @@ docker run -d \
   -e VIBESQL_LOG_LEVEL=info \
   -e VIBESQL_HTTP_ENABLED=true \
   -e VIBESQL_HTTP_PORT=8080 \
+  -e VIBESQL_HTTP_AUTH_METHODS=api_key,jwt \
+  -e VIBESQL_HTTP_AUTH_API_KEYS=secret-key-1,secret-key-2 \
   vibesql-server
 ```
 
@@ -92,9 +110,15 @@ spec:
         configMapKeyRef:
           name: vibesql-config
           key: log-level
-    # JWT configuration - inject secrets securely
     - name: VIBESQL_HTTP_AUTH_ENABLED
       value: "true"
+    - name: VIBESQL_HTTP_AUTH_METHODS
+      value: "api_key,jwt"
+    - name: VIBESQL_HTTP_AUTH_API_KEYS
+      valueFrom:
+        secretKeyRef:
+          name: vibesql-secrets
+          key: api-keys
     - name: VIBESQL_HTTP_AUTH_JWT_SECRET
       valueFrom:
         secretKeyRef:
