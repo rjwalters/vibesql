@@ -282,39 +282,65 @@ cargo build --profile profiling --package vibesql-executor --bench tpch_profilin
 
 VibeSQL includes extensive built-in profiling via environment variables. These provide detailed timing and decision logging without external tools.
 
-### Query Execution Profiling
+### Umbrella Debug Flag
+
+The `VIBESQL_DEBUG` environment variable provides unified control over all semantic debug logging:
+
+| Value | Description |
+|-------|-------------|
+| `VIBESQL_DEBUG=1` | Enable ALL semantic logging (optimizer, scan, DML) |
+| `VIBESQL_DEBUG=optimizer` | Enable only optimizer-related logging |
+| `VIBESQL_DEBUG=scan` | Enable only scan path logging |
+| `VIBESQL_DEBUG=dml` | Enable only DML-related logging |
+
+Example:
+```bash
+# Enable all debug output
+VIBESQL_DEBUG=1 ./target/release/deps/tpch_profiling-* Q13
+
+# Enable only optimizer decisions
+VIBESQL_DEBUG=optimizer ./target/release/deps/tpch_profiling-* Q13
+```
+
+### Semantic Logging (Optimizer Decisions)
+
+These explain **WHY** the optimizer made decisions:
+
+| Variable | Description |
+|----------|-------------|
+| `JOIN_REORDER_VERBOSE=1` | Log join reordering decisions and costs |
+| `SUBQUERY_TRANSFORM_VERBOSE=1` | Log subquery-to-join transformations |
+| `TABLE_ELIM_VERBOSE=1` | Log table elimination decisions |
+| `DML_COST_DEBUG=1` | Log DML cost estimation decisions |
+
+### Scan Path Logging
+
+Shows index vs table scan selection (enabled by `VIBESQL_DEBUG=scan` or individual flags):
+
+| Variable | Description |
+|----------|-------------|
+| `SCAN_PATH_VERBOSE=1` | Log scan path selection (index vs table scan) |
+| `INDEX_SELECT_DEBUG=1` | Log index selection decisions with selectivity |
+
+### Phase Timing
+
+Structured timing breakdowns that samply cannot replicate:
 
 | Variable | Description |
 |----------|-------------|
 | `VIBESQL_PROFILE=1` | Enable general query profiling output |
 | `JOIN_PROFILE=1` | Profile join execution with timing breakdown |
-| `JOIN_REORDER_VERBOSE=1` | Log join reordering decisions and costs |
-| `TABLE_SCAN_DEBUG=1` | Log index vs table scan path selection |
-| `COLUMNAR_DEBUG=1` | Log columnar filter optimization decisions |
-
-### Index Operations
-
-| Variable | Description |
-|----------|-------------|
-| `INDEX_SELECT_DEBUG=1` | Log index selection decisions with selectivity |
 | `RANGE_SCAN_PROFILE=1` | Profile range scan timing |
 | `RANGE_QUERY_BREAKDOWN=1` | Detailed range query timing |
 
-### DML Operations
+### DML Profiling
 
 | Variable | Description |
 |----------|-------------|
-| `DELETE_PROFILE=1` | Collect delete timing statistics |
-| `DELETE_PROFILE_VERBOSE=1` | Per-delete timing breakdown |
-| `DELETE_PROFILE_SUMMARY=1` | Aggregate summary on thread exit |
-| `DML_COST_DEBUG=1` | Log DML cost estimation decisions |
+| `DELETE_PROFILE=1` | Enable timing collection + auto-print summary on thread exit |
+| `DELETE_PROFILE_VERBOSE=1` | Also print per-delete breakdown to stderr |
 
-### Query Optimization
-
-| Variable | Description |
-|----------|-------------|
-| `SUBQUERY_TRANSFORM_VERBOSE=1` | Log subquery-to-join transformations |
-| `TABLE_ELIM_VERBOSE=1` | Log table elimination decisions |
+Note: `DELETE_PROFILE=1` now automatically prints the aggregate summary when the thread exits. You no longer need to set `DELETE_PROFILE_SUMMARY=1` separately.
 
 ### Benchmark Controls
 
@@ -330,7 +356,12 @@ VibeSQL includes extensive built-in profiling via environment variables. These p
 ### Example: Debugging Join Performance
 
 ```bash
-# See why a join is slow
+# See why a join is slow (using umbrella flag)
+VIBESQL_DEBUG=optimizer JOIN_PROFILE=1 \
+  SCALE_FACTOR=0.01 QUERY_FILTER=Q13 \
+  ./target/release/deps/tpch_profiling-* Q13
+
+# Or use individual flags
 JOIN_PROFILE=1 JOIN_REORDER_VERBOSE=1 \
   SCALE_FACTOR=0.01 QUERY_FILTER=Q13 \
   ./target/release/deps/tpch_profiling-* Q13
@@ -344,7 +375,10 @@ INDEX_SELECT_DEBUG=1 \
 ### Example: Delete Performance Analysis
 
 ```bash
-# Profile delete operations with full breakdown
+# Profile delete operations (summary printed automatically)
+DELETE_PROFILE=1 cargo test delete_performance -- --nocapture
+
+# With per-operation verbose output
 DELETE_PROFILE=1 DELETE_PROFILE_VERBOSE=1 \
   cargo test delete_performance -- --nocapture
 ```
