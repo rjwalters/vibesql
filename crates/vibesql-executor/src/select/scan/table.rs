@@ -214,8 +214,8 @@ pub(crate) fn execute_table_scan(
         super::index_scan::cost_based_index_selection(table_name, where_clause, order_by, database)
     {
         // Use index scan for potentially better performance
-        if std::env::var("TABLE_SCAN_DEBUG").is_ok() {
-            eprintln!("[TABLE_SCAN] Using index scan: table={}, index={}", table_name, index_name);
+        if crate::profiling::is_scan_debug_enabled() {
+            eprintln!("[SCAN_PATH] Using index scan: table={}, index={}", table_name, index_name);
         }
         // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
         // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
@@ -232,10 +232,10 @@ pub(crate) fn execute_table_scan(
     }
 
     // Debug: Log when table scan is used instead of index
-    if std::env::var("TABLE_SCAN_DEBUG").is_ok() && where_clause.is_some() {
+    if crate::profiling::is_scan_debug_enabled() && where_clause.is_some() {
         let indexes = database.list_indexes_for_table(table_name);
         eprintln!(
-            "[TABLE_SCAN] Falling back to table scan: table={}, available_indexes={:?}, where={:?}",
+            "[SCAN_PATH] Falling back to table scan: table={}, available_indexes={:?}, where={:?}",
             table_name, indexes, where_clause
         );
     }
@@ -284,8 +284,8 @@ pub(crate) fn execute_table_scan(
             || predicate_plan.has_table_filters(table_name)
             || predicate_plan.has_table_filters(&table_name.to_lowercase());
 
-        if std::env::var("COLUMNAR_DEBUG").is_ok() {
-            eprintln!("[COLUMNAR_DEBUG] {} (alias={}) table: has_filters={} (effective_name={}, table_name={})",
+        if crate::profiling::is_scan_debug_enabled() {
+            eprintln!("[SCAN_PATH] {} (alias={}) table: has_filters={} (effective_name={}, table_name={})",
                 table_name, effective_name, has_filters,
                 predicate_plan.has_table_filters(&effective_name_lower),
                 predicate_plan.has_table_filters(&table_name.to_lowercase()));
@@ -297,9 +297,9 @@ pub(crate) fn execute_table_scan(
             if let Some(column_predicates) =
                 crate::select::columnar::extract_column_predicates(where_expr, &schema)
             {
-                if std::env::var("COLUMNAR_DEBUG").is_ok() {
+                if crate::profiling::is_scan_debug_enabled() {
                     eprintln!(
-                        "[COLUMNAR_DEBUG] {} table: extracted {} predicates for {} rows",
+                        "[SCAN_PATH] {} table: extracted {} columnar predicates for {} rows",
                         table_name,
                         column_predicates.len(),
                         live_rows.len()
@@ -324,8 +324,8 @@ pub(crate) fn execute_table_scan(
             }
 
             // extract_column_predicates returned None - fall back
-            if std::env::var("COLUMNAR_DEBUG").is_ok() {
-                eprintln!("[COLUMNAR_DEBUG] {} table: extract_column_predicates returned None, using generic path",
+            if crate::profiling::is_scan_debug_enabled() {
+                eprintln!("[SCAN_PATH] {} table: using generic predicate path (complex expression)",
                     table_name);
             }
             // Fall back to generic predicate evaluation for complex expressions

@@ -12,8 +12,14 @@ use vibesql_ast::IndexColumn;
 // ============================================================================
 
 /// Aggregate statistics for DELETE profiling.
-/// Use `DELETE_PROFILE=1` to enable per-delete output.
-/// Use `DELETE_PROFILE_SUMMARY=1` to print aggregate summary on drop.
+///
+/// # Environment Variables
+///
+/// - `DELETE_PROFILE=1` - Enable timing collection and print summary on thread exit
+/// - `DELETE_PROFILE_VERBOSE=1` - Also print per-delete breakdown to stderr
+///
+/// When `DELETE_PROFILE=1` is set, aggregate statistics are automatically printed
+/// when the thread-local stats are dropped (typically at thread exit).
 #[derive(Default)]
 pub struct DeleteProfileStats {
     pub count: u64,
@@ -84,7 +90,11 @@ impl DeleteProfileStats {
 
 impl Drop for DeleteProfileStats {
     fn drop(&mut self) {
-        if std::env::var("DELETE_PROFILE_SUMMARY").is_ok() && self.count > 0 {
+        // Print summary if DELETE_PROFILE=1 (auto-summary) or DELETE_PROFILE_SUMMARY=1 (explicit)
+        if self.count > 0
+            && (std::env::var("DELETE_PROFILE").is_ok()
+                || std::env::var("DELETE_PROFILE_SUMMARY").is_ok())
+        {
             self.print_summary();
         }
     }
@@ -849,9 +859,8 @@ impl Database {
     ///
     /// # Profiling
     /// Set environment variables to enable profiling:
-    /// - `DELETE_PROFILE=1` - Collect timing statistics (aggregated per-thread)
-    /// - `DELETE_PROFILE_VERBOSE=1` - Print per-delete breakdown to stderr
-    /// - `DELETE_PROFILE_SUMMARY=1` - Print aggregate summary on thread exit
+    /// - `DELETE_PROFILE=1` - Enable timing collection and auto-print summary on thread exit
+    /// - `DELETE_PROFILE_VERBOSE=1` - Also print per-delete breakdown to stderr
     ///
     /// Use `print_delete_profile_summary()` to manually print aggregate stats.
     /// Use `reset_delete_profile_stats()` to reset the stats before a benchmark.
