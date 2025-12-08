@@ -278,6 +278,87 @@ Ensure debug symbols are enabled:
 cargo build --profile profiling --package vibesql-executor --bench tpch_profiling
 ```
 
+## Built-in Debug Instrumentation
+
+VibeSQL includes extensive built-in profiling via environment variables. These provide detailed timing and decision logging without external tools.
+
+### Query Execution Profiling
+
+| Variable | Description |
+|----------|-------------|
+| `VIBESQL_PROFILE=1` | Enable general query profiling output |
+| `JOIN_PROFILE=1` | Profile join execution with timing breakdown |
+| `JOIN_REORDER_VERBOSE=1` | Log join reordering decisions and costs |
+| `TABLE_SCAN_DEBUG=1` | Debug table scan operations |
+| `COLUMNAR_DEBUG=1` | Debug columnar execution path |
+| `SIMD_DEBUG=1` | Debug SIMD vectorization |
+
+### Index Operations
+
+| Variable | Description |
+|----------|-------------|
+| `INDEX_SELECT_DEBUG=1` | Debug index selection decisions |
+| `RANGE_SCAN_PROFILE=1` | Profile range scan timing |
+| `RANGE_QUERY_BREAKDOWN=1` | Detailed range query timing |
+| `INL_DEBUG=1` | Debug index nested loop joins |
+| `JOIN_SCAN_DEBUG=1` | Debug join scan operations |
+
+### DML Operations
+
+| Variable | Description |
+|----------|-------------|
+| `DELETE_PROFILE=1` | Collect delete timing statistics |
+| `DELETE_PROFILE_VERBOSE=1` | Per-delete timing breakdown |
+| `DELETE_PROFILE_SUMMARY=1` | Aggregate summary on thread exit |
+| `DML_COST_DEBUG=1` | Log DML cost estimation |
+
+### Query Optimization
+
+| Variable | Description |
+|----------|-------------|
+| `SUBQUERY_TRANSFORM_VERBOSE=1` | Log subquery-to-join transformations |
+| `TABLE_ELIM_VERBOSE=1` | Log table elimination decisions |
+| `SEMI_JOIN_DEBUG=1` | Debug semi-join execution |
+
+### Benchmark Controls
+
+| Variable | Description |
+|----------|-------------|
+| `SCALE_FACTOR=0.01` | TPC-H/TPC-DS scale factor |
+| `PROFILING_ITERATIONS=3` | Number of benchmark iterations |
+| `QUERY_FILTER=Q6` | Run specific query only |
+| `QUERY_TIMEOUT_SECS=30` | Per-query timeout |
+| `SKIP_SLOW=1` | Skip known slow queries |
+| `VALIDATE=1` | Validate query results |
+
+### Example: Debugging Join Performance
+
+```bash
+# See why a join is slow
+JOIN_PROFILE=1 JOIN_REORDER_VERBOSE=1 \
+  SCALE_FACTOR=0.01 QUERY_FILTER=Q13 \
+  ./target/release/deps/tpch_profiling-* Q13
+
+# Debug index selection for TPC-C
+INDEX_SELECT_DEBUG=1 INL_DEBUG=1 \
+  TPCC_SCALE_FACTOR=1 TPCC_DURATION_SECS=5 \
+  ./target/release/deps/tpcc_benchmark-*
+```
+
+### Example: Delete Performance Analysis
+
+```bash
+# Profile delete operations with full breakdown
+DELETE_PROFILE=1 DELETE_PROFILE_VERBOSE=1 \
+  cargo test delete_performance -- --nocapture
+```
+
+Output shows per-operation timing:
+```
+DELETE_PROFILE: total=45.2µs | pk_lookup=12.1µs (27%) | value_clone=3.2µs (7%) |
+  wal=8.5µs (19%) | index_update=15.3µs (34%) | row_remove=4.8µs (11%) | cache=1.3µs (3%)
+```
+
 ## See Also
 
 - [PROFILING_GUIDE.md](PROFILING_GUIDE.md) - Python bindings profiling
