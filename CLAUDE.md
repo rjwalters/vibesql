@@ -522,6 +522,12 @@ which claude
 - **Scripts**: `.loom/scripts/` (helper scripts for worktrees, etc.)
 - **GitHub Labels**: `.github/labels.yml` (label definitions)
 
+### Performance Profiling
+
+When debugging performance issues, see **[docs/performance/CPU_PROFILING.md](docs/performance/CPU_PROFILING.md)** for a decision tree that helps you choose the right tool:
+- **samply** (`make profile-tpch Q=X`) for CPU profiling / flame graphs
+- **Environment variables** (`JOIN_REORDER_VERBOSE=1`, etc.) for optimizer decision logging
+
 ## Support
 
 For issues with Loom itself:
