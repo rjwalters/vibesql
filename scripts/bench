@@ -288,21 +288,23 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         args.sample_size = args.sample_size or 10
         args.measurement_time = args.measurement_time or 3
 
-    # Smoke test mode: ultra-minimal settings for pipeline validation (~30s total)
+    # Smoke test mode: ultra-minimal settings for pipeline validation
     # Purpose: Validate data collection, storage, and analysis pipeline
+    # Run just 1 query per benchmark type × all engines to verify the full matrix
     if args.smoke:
-        # Only default to vibesql if no engine was explicitly specified
+        # For smoke tests, run ALL engines to validate the full pipeline
+        # unless user explicitly specified a subset with --engine
         if args.engine == "vibesql":  # default value means not explicitly set
-            engines = ["vibesql"]
+            engines = ["vibesql", "sqlite", "duckdb", "mysql"]
         # else: keep the engines parsed from --engine flag
         args.timeout = args.timeout or 5      # 5s timeout per query
-        args.duration = args.duration or 3    # 3s duration for TPC-C/Sysbench
+        args.duration = args.duration or 2    # 2s duration for TPC-C/Sysbench (minimal)
         args.scale = args.scale or 0.001      # Minimal scale factor
-        args.sample_size = args.sample_size or 5
+        args.sample_size = args.sample_size or 10  # Criterion minimum is 10
         args.measurement_time = args.measurement_time or 1
-        # Limit to fastest queries unless explicitly specified
+        # Run only 1 query per benchmark - just enough to validate pipeline
         if not args.query:
-            args.query = "Q1,Q6"  # TPC-H fastest queries
+            args.query = "Q6"  # Single fastest TPC-H query
         test = "all" if args.all else test
         print("\n" + "=" * 60, flush=True)
         print("SMOKE TEST MODE - Pipeline Validation", flush=True)
@@ -312,7 +314,7 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         print(f"  Timeout:  {args.timeout}s per query", flush=True)
         print(f"  Duration: {args.duration}s (TPC-C/Sysbench)", flush=True)
         print(f"  Scale:    {args.scale}", flush=True)
-        print(f"  Queries:  {args.query}", flush=True)
+        print(f"  Query:    {args.query} (1 query per benchmark type)", flush=True)
         print("=" * 60 + "\n", flush=True)
 
     config = BenchConfig(
@@ -436,6 +438,7 @@ def run_tpch_criterion(config: BenchConfig) -> int:
     strip_quarantine()
 
     # Run the Criterion benchmark
+    # In smoke test mode, sample_size and measurement_time are already set to minimal values
     print(f"\nRunning TPC-H benchmarks (features: {features_str})...")
     cmd = [
         "cargo", "bench",
@@ -444,6 +447,12 @@ def run_tpch_criterion(config: BenchConfig) -> int:
         "--features", features_str,
         "--", "--noplot"
     ]
+
+    # Add Criterion settings
+    if config.sample_size:
+        cmd.append(f"--sample-size={config.sample_size}")
+    if config.measurement_time:
+        cmd.append(f"--measurement-time={config.measurement_time}")
 
     # Add query filter if specified
     if config.queries:
@@ -634,12 +643,13 @@ def run_sysbench(config: BenchConfig) -> int:
     print("\n" + "=" * 60)
     print("Sysbench OLTP Benchmark")
     print("=" * 60)
-    
+    print(f"Engines: {', '.join(config.engines)}")
+
     # Set up environment
     env = os.environ.copy()
-    
+
     # Try to start MySQL if needed
-    if "mysql" in config.engines or "vibesql" in config.engines:
+    if "mysql" in config.engines:
         print("Starting MySQL Docker container...")
         result = subprocess.run(
             ["./scripts/ensure-mysql-docker.sh"],
@@ -652,19 +662,37 @@ def run_sysbench(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
-    
-    # Run benchmark
-    print("Running Sysbench OLTP...")
+            # Remove MySQL from engines if Docker not available
+            config.engines = [e for e in config.engines if e != "mysql"]
+
+    # Build features based on selected engines
+    features = ["benchmark-comparison"]
+    if "duckdb" in config.engines:
+        features.append("duckdb-comparison")
+    if "mysql" in config.engines:
+        features.append("mysql-comparison")
+    features_str = ",".join(features)
+
+    # Run benchmark with Criterion
+    # In smoke test mode, sample_size and measurement_time are already set to minimal values
+    print(f"Running Sysbench OLTP (features: {features_str})...")
 
     # Build command with Criterion parameters
     cmd = [
         "cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_oltp",
-        "--features", "benchmark-comparison", "--", "--noplot"
+        "--features", features_str, "--", "--noplot"
     ]
 
-    # In fast mode (duration < 10), use minimal Criterion settings
-    if config.duration and config.duration < 10:
-        cmd.extend(["--sample-size", "5", "--measurement-time", "1"])
+    # Add Criterion settings if specified
+    if config.sample_size:
+        cmd.append(f"--sample-size={config.sample_size}")
+        print(f"  Using sample-size={config.sample_size}")
+    if config.measurement_time:
+        cmd.append(f"--measurement-time={config.measurement_time}")
+        print(f"  Using measurement-time={config.measurement_time}")
+    # Fallback: in fast mode (duration < 10), use minimal Criterion settings
+    elif config.duration and config.duration < 10:
+        cmd.extend(["--sample-size=5", "--measurement-time=1"])
         print(f"  Using fast Criterion settings (sample-size=5, measurement-time=1)")
 
     result = subprocess.run(
@@ -675,14 +703,14 @@ def run_sysbench(config: BenchConfig) -> int:
         stderr=subprocess.STDOUT,
         text=True
     )
-    
+
     # Save output
     with open("/tmp/sysbench_results.txt", "w") as f:
         f.write(result.stdout)
-    
+
     if result.returncode != 0:
         print("⚠ Sysbench benchmark completed with warnings")
-    
+
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
@@ -959,10 +987,11 @@ def run_all(config: BenchConfig) -> int:
     start_time = datetime.now()
 
     # Define benchmark list based on mode
-    # In smoke test mode, skip TPC-DS (no query filter support) and server benchmarks (too slow)
+    # In smoke test mode, include server benchmarks for fair MySQL comparison
+    # TPC-DS now supports QUERY_FILTER, so we include it for full pipeline validation
     if config.test_mode:
-        benchmarks = ["tpch", "tpcc", "sysbench"]
-        print("Note: Skipping TPC-DS, server benchmarks, and footprint in smoke test mode")
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server"]
+        print("Note: Skipping footprint in smoke test mode")
     else:
         # Full benchmark suite includes server sysbench and footprint
         benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "footprint"]
