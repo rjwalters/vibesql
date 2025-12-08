@@ -52,7 +52,7 @@ use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "mysql-comparison")]
 use mysql::prelude::*;
 #[cfg(feature = "mysql-comparison")]
-use mysql::Pool;
+use mysql::PooledConn;
 #[cfg(feature = "benchmark-comparison")]
 use rusqlite::Connection as SqliteConn;
 #[cfg(feature = "duckdb-comparison")]
@@ -171,21 +171,18 @@ fn run_duckdb_query(conn: &DuckDBConn, sql: &str) -> BenchResult {
 
 /// Run a query on MySQL and return the execution time
 #[cfg(feature = "mysql-comparison")]
-fn run_mysql_query(pool: &Pool, sql: &str) -> BenchResult {
+fn run_mysql_query(conn: &mut PooledConn, sql: &str) -> BenchResult {
     let start = Instant::now();
-    match pool.get_conn() {
-        Ok(mut conn) => match conn.query_iter(sql) {
-            Ok(result) => {
-                // Consume all rows to ensure complete execution
-                for row_result in result {
-                    if let Err(e) = row_result {
-                        return BenchResult::Error(format!("{}", e));
-                    }
+    match conn.query_iter(sql) {
+        Ok(result) => {
+            // Consume all rows to ensure complete execution
+            for row_result in result {
+                if let Err(e) = row_result {
+                    return BenchResult::Error(format!("{}", e));
                 }
-                BenchResult::Ok(start.elapsed())
             }
-            Err(e) => BenchResult::Error(format!("{}", e)),
-        },
+            BenchResult::Ok(start.elapsed())
+        }
         Err(e) => BenchResult::Error(format!("{}", e)),
     }
 }
@@ -322,12 +319,12 @@ fn main() {
     // ========================================
     #[cfg(feature = "mysql-comparison")]
     {
-        if let Some(pool) = load_mysql(scale_factor) {
+        if let Some(mut conn) = load_mysql(scale_factor) {
             let mut mysql_results = Vec::new();
             eprintln!("\n--- MySQL ---");
 
             for (name, sql) in &queries {
-                let stats = harness.run(name, || run_mysql_query(&pool, sql));
+                let stats = harness.run(name, || run_mysql_query(&mut conn, sql));
                 stats.print_compact();
                 mysql_results.push(stats);
             }

@@ -71,8 +71,8 @@ class BenchConfig:
     quick: bool = False                # Quick mode for CI (reduced iterations)
     json_export: bool = False          # Export results to JSON
     verbose: bool = False              # Verbose output
-    sample_size: Optional[int] = None  # Criterion sample size (iterations per query)
-    measurement_time: Optional[int] = None  # Criterion measurement time in seconds
+    sample_size: Optional[int] = None  # Iterations per query (legacy, unused)
+    measurement_time: Optional[int] = None  # Measurement time in seconds (legacy, unused)
 
 
 @dataclass
@@ -201,7 +201,7 @@ Transaction Filter (--txn):
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick mode for CI (~15-20 min instead of 2+ hours). Reduces Criterion iterations (sample_size=10, measurement_time=3s)"
+        help="Quick mode for CI (~15-20 min instead of 2+ hours). Reduces benchmark iterations."
     )
 
     parser.add_argument(
@@ -228,17 +228,17 @@ Transaction Filter (--txn):
         help="Verbose output with detailed timing information"
     )
 
-    # Criterion benchmark settings (for TPC-H/TPC-DS)
+    # Legacy benchmark settings (kept for compatibility, not used by custom harness)
     parser.add_argument(
         "--sample-size",
         type=int,
-        help="Number of iterations per query (Criterion sample size). Default: 100, --quick: 10"
+        help="(Legacy) Number of iterations per query. Use BENCHMARK_ITERATIONS env var instead."
     )
 
     parser.add_argument(
         "--measurement-time",
         type=int,
-        help="Measurement time per query in seconds (Criterion). Default: 5, --quick: 3"
+        help="(Legacy) Measurement time per query. Use BENCHMARK_TIMEOUT_SECS env var instead."
     )
 
     return parser
@@ -284,9 +284,6 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
     if args.quick:
         engines = ["vibesql"]
         args.timeout = args.timeout or 10  # Shorter timeout
-        # Reduced Criterion settings: 10 samples instead of 100, 3s instead of 5s
-        args.sample_size = args.sample_size or 10
-        args.measurement_time = args.measurement_time or 3
 
     # Smoke test mode: ultra-minimal settings for pipeline validation
     # Purpose: Validate data collection, storage, and analysis pipeline
@@ -300,8 +297,6 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
         args.timeout = args.timeout or 5      # 5s timeout per query
         args.duration = args.duration or 2    # 2s duration for TPC-C/Sysbench (minimal)
         args.scale = args.scale or 0.001      # Minimal scale factor
-        args.sample_size = args.sample_size or 10  # Criterion minimum is 10
-        args.measurement_time = args.measurement_time or 1
         # Run only 1 query per benchmark - just enough to validate pipeline
         if not args.query:
             args.query = "Q6"  # Single fastest TPC-H query
@@ -347,11 +342,11 @@ def run_tpch(config: BenchConfig) -> int:
 
     # Determine which benchmark to run based on engine selection
     # If only vibesql, use the profiling benchmark (faster, detailed timing)
-    # If multiple engines, use the Criterion benchmark with all engines
-    use_criterion = len(config.engines) > 1 or config.engines != ["vibesql"]
+    # If multiple engines, use the engine comparison benchmark
+    use_comparison = len(config.engines) > 1 or config.engines != ["vibesql"]
 
-    if use_criterion:
-        return run_tpch_criterion(config)
+    if use_comparison:
+        return run_tpch_comparison(config)
     else:
         return run_tpch_profiling(config, timeout)
 
@@ -387,9 +382,9 @@ def run_tpch_profiling(config: BenchConfig, timeout: int) -> int:
     return result.returncode
 
 
-def run_tpch_criterion(config: BenchConfig) -> int:
-    """Run TPC-H with Criterion benchmark (multi-engine comparison)."""
-    print(f"Mode: Criterion (engine comparison)")
+def run_tpch_comparison(config: BenchConfig) -> int:
+    """Run TPC-H with multi-engine comparison benchmark."""
+    print(f"Mode: Engine comparison")
     print(f"Engines: {', '.join(config.engines)}")
 
     # Set up environment
@@ -437,32 +432,30 @@ def run_tpch_criterion(config: BenchConfig) -> int:
 
     strip_quarantine()
 
-    # Run the Criterion benchmark
-    # In smoke test mode, sample_size and measurement_time are already set to minimal values
-    print(f"\nRunning TPC-H benchmarks (features: {features_str})...")
-    cmd = [
-        "cargo", "bench",
-        "--package", "vibesql-executor",
-        "--bench", "tpch_benchmark",
-        "--features", features_str,
-        "--", "--noplot"
-    ]
-
-    # Add Criterion settings
-    if config.sample_size:
-        cmd.append(f"--sample-size={config.sample_size}")
-    if config.measurement_time:
-        cmd.append(f"--measurement-time={config.measurement_time}")
-
-    # Add query filter if specified
+    # Set up environment for custom harness
     if config.queries:
-        # Use word boundaries to avoid q1 matching q10, q11, etc.
-        # Pattern: tpch_q1[_/] or tpch_q6[_/] to match exact query numbers
-        filters = "|".join([f"tpch_q{q.replace('Q', '')}[_/]" for q in config.queries])
-        cmd.append(filters)
+        env["QUERY_FILTER"] = ",".join(config.queries)
+        print(f"  Query filter: {env['QUERY_FILTER']}")
+    if config.scale:
+        env["SCALE_FACTOR"] = str(config.scale)
+        print(f"  Scale factor: {config.scale}")
+    if config.timeout:
+        env["BENCHMARK_TIMEOUT_SECS"] = str(config.timeout)
+        print(f"  Timeout: {config.timeout}s")
+
+    # Find and run the benchmark binary
+    print(f"\nRunning TPC-H benchmarks (features: {features_str})...")
+    import glob
+    binaries = sorted(glob.glob("target/release/deps/tpch_benchmark-*"),
+                      key=os.path.getmtime, reverse=True)
+    binaries = [b for b in binaries if not b.endswith('.d')]
+
+    if not binaries:
+        print("❌ Could not find tpch_benchmark binary")
+        return 1
 
     result = subprocess.run(
-        cmd,
+        [binaries[0]],
         cwd=Path(__file__).parent.parent,
         env=env
     )
@@ -593,14 +586,7 @@ def run_tpcds(config: BenchConfig) -> int:
         print(f"Query filter: {env['QUERY_FILTER']}")
     if config.scale:
         env["SCALE_FACTOR"] = str(config.scale)
-
-    # Pass Criterion settings for reduced iterations (--quick mode)
-    if config.sample_size:
-        env["CRITERION_SAMPLE_SIZE"] = str(config.sample_size)
-        print(f"Sample size: {config.sample_size}")
-    if config.measurement_time:
-        env["CRITERION_MEASUREMENT_TIME"] = str(config.measurement_time)
-        print(f"Measurement time: {config.measurement_time}s")
+        print(f"Scale factor: {config.scale}")
 
     # Start MySQL Docker container for MySQL comparison
     # Always try to start MySQL for TPC-DS - the isolated script handles it gracefully
@@ -673,30 +659,41 @@ def run_sysbench(config: BenchConfig) -> int:
         features.append("mysql-comparison")
     features_str = ",".join(features)
 
-    # Run benchmark with Criterion
-    # In smoke test mode, sample_size and measurement_time are already set to minimal values
-    print(f"Running Sysbench OLTP (features: {features_str})...")
+    # Build the benchmark binary
+    print(f"\nBuilding benchmark...")
+    build_result = subprocess.run(
+        ["cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_benchmark",
+         "--features", features_str, "--no-run"],
+        cwd=Path(__file__).parent.parent
+    )
 
-    # Build command with Criterion parameters
-    cmd = [
-        "cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_oltp",
-        "--features", features_str, "--", "--noplot"
-    ]
+    if build_result.returncode != 0:
+        print("❌ Build failed")
+        return 1
 
-    # Add Criterion settings if specified
-    if config.sample_size:
-        cmd.append(f"--sample-size={config.sample_size}")
-        print(f"  Using sample-size={config.sample_size}")
-    if config.measurement_time:
-        cmd.append(f"--measurement-time={config.measurement_time}")
-        print(f"  Using measurement-time={config.measurement_time}")
-    # Fallback: in fast mode (duration < 10), use minimal Criterion settings
-    elif config.duration and config.duration < 10:
-        cmd.extend(["--sample-size=5", "--measurement-time=1"])
-        print(f"  Using fast Criterion settings (sample-size=5, measurement-time=1)")
+    strip_quarantine()
+
+    # Set up environment for custom harness
+    if config.duration:
+        env["SYSBENCH_DURATION_SECS"] = str(config.duration)
+        print(f"  Duration: {config.duration}s")
+    if config.scale:
+        env["SYSBENCH_TABLE_SIZE"] = str(int(config.scale * 10000))  # scale 1.0 = 10000 rows
+        print(f"  Table size: {int(config.scale * 10000)} rows")
+
+    # Find and run the benchmark binary
+    print(f"\nRunning Sysbench OLTP (features: {features_str})...")
+    import glob
+    binaries = sorted(glob.glob("target/release/deps/sysbench_benchmark-*"),
+                      key=os.path.getmtime, reverse=True)
+    binaries = [b for b in binaries if not b.endswith('.d')]
+
+    if not binaries:
+        print("❌ Could not find sysbench_benchmark binary")
+        return 1
 
     result = subprocess.run(
-        cmd,
+        [binaries[0]],
         cwd=Path(__file__).parent.parent,
         env=env,
         stdout=subprocess.PIPE,
@@ -714,7 +711,7 @@ def run_sysbench(config: BenchConfig) -> int:
     # Process results
     print("\nProcessing results into database...")
     result = subprocess.run(
-        ["./scripts/process_results.py", "--type=sysbench", "--criterion-dir", "target/criterion"],
+        ["./scripts/process_results.py", "--type=sysbench", "--input", "/tmp/sysbench_results.txt"],
         cwd=Path(__file__).parent.parent
     )
 
