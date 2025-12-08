@@ -14,6 +14,7 @@ import {
   renderRunningTestsLocally,
 } from './conformance/section-renderers'
 import { initTimelineChart, updateChartTheme } from './conformance/timeline-chart'
+import { t, onI18nChange } from '../i18n'
 import type { Chart } from 'chart.js'
 
 /**
@@ -24,6 +25,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
   private dataProcessor = new DataProcessor()
   private timelineChart: Chart | null = null
   private themeObserver: MutationObserver | null = null
+  private i18nUnsubscribe: (() => void) | null = null
 
   constructor() {
     super('#conformance-content', {
@@ -35,6 +37,14 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
     })
     this.loadData()
     this.setupThemeObserver()
+    this.setupI18nListener()
+  }
+
+  private setupI18nListener(): void {
+    // Re-render when locale changes
+    this.i18nUnsubscribe = onI18nChange(() => {
+      this.render()
+    })
   }
 
   private setupThemeObserver(): void {
@@ -85,7 +95,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
       this.element.innerHTML = `
         <div class="text-center py-12">
           <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p class="mt-4 text-gray-600 dark:text-gray-400">Loading conformance report...</p>
+          <p class="mt-4 text-gray-600 dark:text-gray-400">${t('conformance-loading')}</p>
         </div>
       `
       return
@@ -94,7 +104,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
     if (error) {
       this.element.innerHTML = `
         <div class="text-center py-12">
-          <div class="text-red-600 dark:text-red-400 text-xl mb-4">Error Loading Report</div>
+          <div class="text-red-600 dark:text-red-400 text-xl mb-4">${t('conformance-error-loading')}</div>
           <p class="text-gray-600 dark:text-gray-400">${this.escapeHtml(error)}</p>
         </div>
       `
@@ -111,7 +121,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
     if (!data) {
       this.element.innerHTML = `
         <div class="text-center py-12">
-          <p class="text-gray-600 dark:text-gray-400">No conformance data available</p>
+          <p class="text-gray-600 dark:text-gray-400">${t('conformance-no-data')}</p>
         </div>
       `
       return
@@ -174,6 +184,10 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
     if (this.themeObserver) {
       this.themeObserver.disconnect()
       this.themeObserver = null
+    }
+    if (this.i18nUnsubscribe) {
+      this.i18nUnsubscribe()
+      this.i18nUnsubscribe = null
     }
   }
 }

@@ -499,3 +499,50 @@ bench-bullet-modular = Modular builds
 bench-bullet-streaming = Streaming compilation
 bench-bullet-indexeddb = IndexedDB persistence
 bench-bullet-worker = Worker thread support
+
+# =============================================================================
+# Conformance Page
+# =============================================================================
+
+# Overview section
+conformance-sql-conformance = SQL Conformance
+conformance-testing-against = Testing against SQLLogicTest - the industry standard SQL test suite
+conformance-full-pass-rate = 100% File Pass Rate Achieved!
+conformance-tests-passing = Tests Passing
+conformance-files-passing = Files Passing
+conformance-loading = Loading conformance report...
+conformance-error-loading = Error Loading Report
+conformance-no-data = No conformance data available
+
+# Category breakdown
+conformance-category-title = Test Coverage by Category
+conformance-category-header = Category
+conformance-pass-rate-header = Pass Rate
+conformance-progress-header = Progress
+conformance-tests-header = Tests
+conformance-cat-select = SELECT Queries
+conformance-cat-aggregates = Aggregates
+conformance-cat-joins = JOINs
+conformance-cat-expressions = Expressions
+conformance-cat-subqueries = Subqueries
+conformance-cat-index = Index Operations
+conformance-cat-ddl = DDL Statements
+conformance-cat-evidence = Evidence Tests
+conformance-cat-random = Random Tests
+conformance-cat-other = Other Tests
+
+# Timeline
+conformance-timeline-title = Pass Rate History
+conformance-timeline-desc = Conformance progress over the last 90 days
+conformance-timeline-loading = Loading chart data...
+
+# Milestones
+conformance-milestones-title = Milestones
+
+# Running tests locally
+conformance-running-locally-title = Running Tests Locally
+conformance-run-sqltest = # Run SQL:1999 conformance tests
+conformance-run-sqllogictest = # Run SQLLogicTest suite (takes hours)
+conformance-generate-coverage = # Generate coverage report
+conformance-open-coverage = # Open coverage report
+

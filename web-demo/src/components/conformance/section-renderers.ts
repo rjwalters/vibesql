@@ -6,6 +6,7 @@ import type {
   DashboardMilestone,
 } from './types'
 import { getStatusColor, getStatusText, escapeHtml } from './render-utils'
+import { t } from '../../i18n'
 
 /**
  * Format large numbers with commas for readability
@@ -24,9 +25,9 @@ export function renderConformanceOverview(conformance: DashboardConformance): st
 
   return `
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
-      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">SQL Conformance</h2>
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">${t('conformance-sql-conformance')}</h2>
       <p class="text-gray-600 dark:text-gray-400 mb-8">
-        Testing against SQLLogicTest - the industry standard SQL test suite
+        ${t('conformance-testing-against')}
       </p>
 
       <!-- Hero Pass Rate Display -->
@@ -35,7 +36,7 @@ export function renderConformanceOverview(conformance: DashboardConformance): st
           <div class="text-7xl font-bold ${isFullyPassing ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'} mb-2">
             ${passRateFormatted}%
           </div>
-          ${isFullyPassing ? '<div class="text-green-600 dark:text-green-400 font-semibold text-lg mb-4">100% File Pass Rate Achieved!</div>' : ''}
+          ${isFullyPassing ? `<div class="text-green-600 dark:text-green-400 font-semibold text-lg mb-4">${t('conformance-full-pass-rate')}</div>` : ''}
         </div>
       </div>
 
@@ -52,13 +53,13 @@ export function renderConformanceOverview(conformance: DashboardConformance): st
       <!-- Stats Row -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-center">
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Tests Passing</div>
+          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">${t('conformance-tests-passing')}</div>
           <div class="text-2xl font-bold text-gray-900 dark:text-white">
             ${formatNumber(summary.tests_passing)} / ${formatNumber(summary.tests_total)}
           </div>
         </div>
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Files Passing</div>
+          <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">${t('conformance-files-passing')}</div>
           <div class="text-2xl font-bold ${isFullyPassing ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}">
             ${formatNumber(summary.files_passing)} / ${formatNumber(summary.files_total)}
             ${isFullyPassing ? ' (100%)' : ''}
@@ -70,28 +71,35 @@ export function renderConformanceOverview(conformance: DashboardConformance): st
 }
 
 /**
+ * Get localized category name
+ */
+function getCategoryName(key: string): string {
+  const categoryKeys: Record<string, string> = {
+    select: 'conformance-cat-select',
+    aggregates: 'conformance-cat-aggregates',
+    joins: 'conformance-cat-joins',
+    expressions: 'conformance-cat-expressions',
+    subqueries: 'conformance-cat-subqueries',
+    index: 'conformance-cat-index',
+    ddl: 'conformance-cat-ddl',
+    evidence: 'conformance-cat-evidence',
+    random: 'conformance-cat-random',
+    other: 'conformance-cat-other',
+  }
+  const i18nKey = categoryKeys[key]
+  return i18nKey ? t(i18nKey) : key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+/**
  * Render category breakdown table
  */
 export function renderCategoryBreakdown(
   categories: Record<string, { total: number; passing: number; pass_rate: number }>
 ): string {
-  const categoryNames: Record<string, string> = {
-    select: 'SELECT Queries',
-    aggregates: 'Aggregates',
-    joins: 'JOINs',
-    expressions: 'Expressions',
-    subqueries: 'Subqueries',
-    index: 'Index Operations',
-    ddl: 'DDL Statements',
-    evidence: 'Evidence Tests',
-    random: 'Random Tests',
-    other: 'Other Tests',
-  }
-
   const rows = Object.entries(categories)
     .sort((a, b) => b[1].total - a[1].total) // Sort by total tests descending
     .map(([key, cat]) => {
-      const name = categoryNames[key] || key.charAt(0).toUpperCase() + key.slice(1)
+      const name = getCategoryName(key)
       const passRate = cat.pass_rate.toFixed(1)
       const isComplete = cat.pass_rate === 100
 
@@ -128,16 +136,16 @@ export function renderCategoryBreakdown(
 
   return `
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
-      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Test Coverage by Category</h2>
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">${t('conformance-category-title')}</h2>
 
       <div class="overflow-x-auto">
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700 text-left text-sm text-gray-600 dark:text-gray-400">
-              <th class="py-3 px-4 font-medium">Category</th>
-              <th class="py-3 px-4 font-medium">Pass Rate</th>
-              <th class="py-3 px-4 font-medium">Progress</th>
-              <th class="py-3 px-4 font-medium text-right">Tests</th>
+              <th class="py-3 px-4 font-medium">${t('conformance-category-header')}</th>
+              <th class="py-3 px-4 font-medium">${t('conformance-pass-rate-header')}</th>
+              <th class="py-3 px-4 font-medium">${t('conformance-progress-header')}</th>
+              <th class="py-3 px-4 font-medium text-right">${t('conformance-tests-header')}</th>
             </tr>
           </thead>
           <tbody>
@@ -156,15 +164,15 @@ export function renderCategoryBreakdown(
 export function renderConformanceTimeline(): string {
   return `
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
-      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Pass Rate History</h2>
-      <p class="text-gray-600 dark:text-gray-400 mb-6">Conformance progress over the last 90 days</p>
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">${t('conformance-timeline-title')}</h2>
+      <p class="text-gray-600 dark:text-gray-400 mb-6">${t('conformance-timeline-desc')}</p>
 
       <div class="h-64 md:h-80">
         <canvas id="conformance-timeline-chart"></canvas>
       </div>
 
       <div id="timeline-loading" class="text-center py-12 text-gray-500 dark:text-gray-400">
-        Loading chart data...
+        ${t('conformance-timeline-loading')}
       </div>
     </div>
   `
@@ -209,7 +217,7 @@ export function renderMilestones(milestones: DashboardMilestone[]): string {
 
   return `
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-8">
-      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">Milestones</h2>
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-6">${t('conformance-milestones-title')}</h2>
       <div>
         ${milestoneItems}
       </div>
@@ -543,17 +551,17 @@ export function renderSQLLogicTestResults(sltData: SQLLogicTestData): string {
 export function renderRunningTestsLocally(): string {
   return `
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-8">
-      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Running Tests Locally</h2>
+      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">${t('conformance-running-locally-title')}</h2>
 
       <div class="bg-gray-100 dark:bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
         <div class="text-gray-700 dark:text-gray-300">
-          <div class="text-green-600 dark:text-green-400"># Run SQL:1999 conformance tests</div>
+          <div class="text-green-600 dark:text-green-400">${t('conformance-run-sqltest')}</div>
           <div>cargo test --test sqltest_conformance -- --nocapture</div>
-          <div class="mt-4 text-green-600 dark:text-green-400"># Run SQLLogicTest suite (takes hours)</div>
+          <div class="mt-4 text-green-600 dark:text-green-400">${t('conformance-run-sqllogictest')}</div>
           <div>cargo test --test sqllogictest_suite -- --nocapture</div>
-          <div class="mt-4 text-green-600 dark:text-green-400"># Generate coverage report</div>
+          <div class="mt-4 text-green-600 dark:text-green-400">${t('conformance-generate-coverage')}</div>
           <div>cargo coverage</div>
-          <div class="mt-2 text-green-600 dark:text-green-400"># Open coverage report</div>
+          <div class="mt-2 text-green-600 dark:text-green-400">${t('conformance-open-coverage')}</div>
           <div>open target/llvm-cov/html/index.html</div>
         </div>
       </div>

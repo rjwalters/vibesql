@@ -500,3 +500,121 @@ bench-bullet-modular = Modular builds
 bench-bullet-streaming = Streaming compilation
 bench-bullet-indexeddb = IndexedDB persistence
 bench-bullet-worker = Worker thread support
+
+# =============================================================================
+# Conformance Page
+# =============================================================================
+
+# Overview section
+conformance-sql-conformance = SQL Conformance
+conformance-testing-against = Testing against SQLLogicTest - the industry standard SQL test suite
+conformance-full-pass-rate = 100% File Pass Rate Achieved!
+conformance-tests-passing = Tests Passing
+conformance-files-passing = Files Passing
+conformance-loading = Loading conformance report...
+conformance-error-loading = Error Loading Report
+conformance-no-data = No conformance data available
+
+# Category breakdown
+conformance-category-title = Test Coverage by Category
+conformance-category-header = Category
+conformance-pass-rate-header = Pass Rate
+conformance-progress-header = Progress
+conformance-tests-header = Tests
+conformance-cat-select = SELECT Queries
+conformance-cat-aggregates = Aggregates
+conformance-cat-joins = JOINs
+conformance-cat-expressions = Expressions
+conformance-cat-subqueries = Subqueries
+conformance-cat-index = Index Operations
+conformance-cat-ddl = DDL Statements
+conformance-cat-evidence = Evidence Tests
+conformance-cat-random = Random Tests
+conformance-cat-other = Other Tests
+
+# Timeline
+conformance-timeline-title = Pass Rate History
+conformance-timeline-desc = Conformance progress over the last 90 days
+conformance-timeline-loading = Loading chart data...
+
+# Milestones
+conformance-milestones-title = Milestones
+
+# Running tests locally
+conformance-running-locally-title = Running Tests Locally
+conformance-run-sqltest = # Run SQL:1999 conformance tests
+conformance-run-sqllogictest = # Run SQLLogicTest suite (takes hours)
+conformance-generate-coverage = # Generate coverage report
+conformance-open-coverage = # Open coverage report
+
+# Legacy sqltest section
+conformance-sqltest-title = sqltest Results
+conformance-sqltest-desc = Results from <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">sqltest</a> - a community-maintained BNF-driven conformance test suite derived from the SQL:1999 standard, containing 739 tests covering Core and Foundation features.
+conformance-overall-pass-rate = Overall Pass Rate
+conformance-tests-of-passing = { $passed } of { $total } tests passing
+conformance-passed = Passed
+conformance-failed = Failed
+conformance-errors = Errors
+conformance-test-coverage = Test Coverage
+conformance-core-features = Core Features (E-Series)
+conformance-additional-features = Additional Features
+
+# Feature codes
+conformance-e011 = Numeric data types
+conformance-e021 = Character string types
+conformance-e031 = Identifiers
+conformance-e051 = Basic query specification
+conformance-e061 = Basic predicates and search conditions
+conformance-e071 = Basic query expressions
+conformance-e081 = Basic privileges
+conformance-e091 = Set functions
+conformance-e101 = Basic data manipulation
+conformance-e111 = Single row SELECT statement
+conformance-e121 = Basic cursor support
+conformance-e131 = Null value support
+conformance-e141 = Basic integrity constraints
+conformance-e151 = Transaction support
+conformance-e161 = SQL comments
+conformance-f031 = Basic schema manipulation
+
+# SQLLogicTest section
+conformance-slt-title = SQLLogicTest Results
+conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
+conformance-files-of-passing = { $passed } of { $total } test files passing
+conformance-test-categories = Test Categories
+conformance-slt-select = SELECT Tests
+conformance-slt-evidence = Evidence Tests
+conformance-slt-index = Index Tests
+conformance-slt-random = Random Tests
+conformance-slt-ddl = DDL Tests
+conformance-slt-other = Other Tests
+conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
+
+# Explanation section
+conformance-explanation-title = Understanding Our Test Suites
+conformance-what-is-sqltest = What is sqltest?
+conformance-sqltest-explanation = <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">sqltest</a> is a community-maintained test suite by Elliot Chance that provides BNF-driven conformance tests derived from the SQL:1999 standard. It contains 739 tests covering Core and Foundation features across E-series and F-series test categories. This suite tests whether our implementation conforms to the SQL:1999 grammar specification.
+conformance-what-is-slt = What is SQLLogicTest?
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
+conformance-how-complement = How do they complement each other?
+conformance-sqltest-validates = <span class="font-medium">sqltest (BNF-driven):</span> Validates grammar conformance to SQL:1999 standard specifications
+conformance-slt-validates = <span class="font-medium">SQLLogicTest (Result-driven):</span> Validates semantic correctness with millions of real queries
+conformance-coverage-point = <span class="font-medium">Coverage:</span> sqltest covers 739 standard feature tests; SQLLogicTest covers practical scenarios
+conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
+conformance-what-is-core = What is SQL:1999 Core?
+conformance-core-explanation = SQL:1999 Core is the official mandatory feature set defined in the SQL:1999 (ISO/IEC 9075:1999) standard. It consists of approximately 169 required features that any database claiming Core compliance must implement. Official Core compliance is verified through the NIST SQL Test Suite, not community test suites.
+conformance-what-mean = What do our pass rates mean?
+conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</strong> ({ $sqltestPassed }/{ $sqltestTotal } tests) demonstrates strong SQL:1999 grammar conformance. { $sltInfo } Together, these results indicate comprehensive SQL:1999 compliance, though they do not constitute official Core certification.
+conformance-slt-pass-info = Our <strong>{ $sltRate }% SQLLogicTest pass rate</strong> ({ $sltPassed }/{ $sltTotal } test files) shows we handle real-world queries correctly.
+conformance-bottom-line = <strong>Bottom Line:</strong> We use two complementary test suites to ensure both standards conformance (sqltest) and practical correctness (SQLLogicTest). High pass rates in both demonstrate serious SQL:1999 implementation quality, though formal Core certification would require testing against official NIST suites.
+
+# Failing tests section
+conformance-failing-tests-title = Failing Tests
+conformance-failing-tests-desc = The following tests are currently failing. Click to expand details.
+conformance-view-failing = View failing test details ({ $count } tests)
+conformance-error-label = Error:
+
+# Metadata
+conformance-generated = Generated:
+conformance-commit = Commit:
+conformance-status = Status:
