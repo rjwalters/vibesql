@@ -104,7 +104,8 @@ find_benchmark_binary() {
     fi
 
     local search_dir="$PROJECT_ROOT/target/profiling/deps"
-    local binary=$(find "$search_dir" -maxdepth 1 -name "${bench_name}-*" -type f -perm +111 ! -name "*.d" ! -name "*.o" 2>/dev/null | head -1)
+    # Use -perm /111 for POSIX compatibility (macOS find doesn't support +111)
+    local binary=$(find "$search_dir" -maxdepth 1 -name "${bench_name}-*" -type f ! -name "*.d" ! -name "*.o" 2>/dev/null | while read f; do [ -x "$f" ] && echo "$f"; done | head -1)
 
     if [[ -z "$binary" ]]; then
         error "Could not find benchmark binary for $bench_name in $search_dir/"
