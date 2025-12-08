@@ -3,6 +3,7 @@
 //! This module provides the ExplainExecutor for analyzing query execution plans.
 //! It shows information about:
 //! - Table scans vs index scans
+//! - Skip-scan optimization (non-prefix index usage)
 //! - Join types and order
 //! - Filter pushdown information
 //! - Estimated row counts (when statistics are available)
@@ -12,6 +13,7 @@ use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
 use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
+use crate::optimizer::index_planner::IndexPlanner;
 use crate::select::scan::index_scan::cost_based_index_selection;
 
 /// Represents a single node in the query execution plan
@@ -263,7 +265,7 @@ impl ExplainExecutor {
         order_by: &Option<Vec<vibesql_ast::OrderByItem>>,
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
-        // Check if we can use an index
+        // First check for regular index scan
         let index_info = cost_based_index_selection(
             table_name,
             where_clause.as_ref(),
@@ -271,7 +273,34 @@ impl ExplainExecutor {
             database,
         );
 
-        let mut node = if let Some((index_name, sorted_cols)) = index_info {
+        // If no regular index scan, check for skip-scan optimization
+        let skip_scan_plan = if index_info.is_none() {
+            if let Some(where_expr) = where_clause {
+                let planner = IndexPlanner::new(database);
+                planner.plan_skip_scan(table_name, where_expr)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let mut node = if let Some(skip_plan) = skip_scan_plan {
+            // Skip-scan detected - display skip-scan specific information
+            let skip_info = skip_plan.skip_scan_info.as_ref().unwrap();
+
+            let mut skip_node = PlanNode::new("Skip Scan").with_object(table_name);
+            skip_node.details.push(format!("Using index: {}", skip_plan.index_name));
+            skip_node.details.push(format!(
+                "Skip columns: {} (cardinality: {})",
+                skip_info.prefix_columns.join(", "),
+                skip_info.prefix_cardinality
+            ));
+            skip_node.details.push(format!("Filter column: {}", skip_info.filter_column));
+            skip_node.details.push(format!("Estimated cost: {:.2}", skip_info.estimated_cost));
+
+            skip_node
+        } else if let Some((index_name, sorted_cols)) = index_info {
             let mut idx_node = PlanNode::new("Index Scan").with_object(table_name);
             idx_node.details.push(format!("Using index: {}", index_name));
 
