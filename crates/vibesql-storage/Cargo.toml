@@ -96,3 +96,7 @@ harness = false
 [[bench]]
 name = "row_capacity_benchmark"
 harness = false
+
+[[bench]]
+name = "skip_scan_benchmark"
+harness = false
