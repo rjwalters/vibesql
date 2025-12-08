@@ -242,6 +242,7 @@ bench-no-wasm-data = WASMデータがありません
 
 # テーブルヘッダー
 bench-table-operation = 操作
+bench-table-query = クエリ
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite
@@ -349,6 +350,7 @@ bench-tpcc-name = TPC-C
 bench-tpcc-title = TPC-C オンライントランザクション処理ベンチマーク
 bench-tpcc-description = <strong>TPC-Cベンチマーク</strong>は、注文入力、支払い処理、注文状況クエリ、配送処理、在庫レベル監視を含む複雑なトランザクションの組み合わせで、完全な注文入力環境をシミュレートします。
 bench-tpcc-ops-label = TPC-Cトランザクション
+bench-tpcc-transactions-label = 実行されたトランザクション
 bench-tpcc-note-intro = TPC-Cは1分あたりのトランザクション数（tpmC）を測定し、複雑なビジネスロジックを持つ並行トランザクションを処理するデータベースの能力をテストします。このベンチマークは<strong>トランザクションワークロードパフォーマンス</strong>の評価に重要です。
 bench-tpcc-note-results = <strong>注:</strong> 結果は平均トランザクションレイテンシを示しています。低いほど良いです。TPC-Cは、厳格な一貫性要件を持つ書き込み集中型ワークロードに対して特に要求が厳しいです。
 
@@ -369,6 +371,8 @@ bench-tpcc-disc-btree = インメモリワークロード向けに最適化さ�
 bench-tpcc-disc-prepared = クエリプランは一度コンパイルされ再利用
 bench-tpcc-disc-scaling-title = さらなるスケーリング
 bench-tpcc-disc-scaling = 現在の結果はシングルスレッドです。VibeSQLのアーキテクチャはマルチスレッドトランザクション処理をサポートしており、並列実行サポートを追加することでほぼ線形のスケーリングが期待されます。目標は最新のマルチコアハードウェアで500K以上のTPSを達成することです。
+bench-tpcc-disc-duckdb-title = DuckDBがOLTPで遅れる理由
+bench-tpcc-disc-duckdb = DuckDBはTPC-Cで約385 TPSしか達成できません（VibeSQLより60倍遅く、SQLiteより12倍遅い）。これは予想通りの結果です：DuckDBは大規模なバッチ操作向けに最適化された<strong>分析用（OLAP）データベース</strong>であり、単一行トランザクション向けではありません。カラムナーストレージ形式は数百万行のスキャンに優れていますが、TPC-Cのようなワークロードで支配的なポイント検索や小規模更新にはオーバーヘッドが発生します。
 
 # Sysbench組み込み固有
 bench-sysbench-embedded-name = Sysbench（組み込み）
@@ -396,6 +400,8 @@ bench-sysbench-emb-disc-nonindex = 非インデックス列のフルテーブル
 bench-sysbench-emb-disc-deletes = トゥームストーンベースの削除にはクリーンアップオーバーヘッドがあり、コンパクション改善を計画中
 bench-sysbench-emb-disc-duckdb-title = DuckDB比較
 bench-sysbench-emb-disc-duckdb = DuckDBは分析ワークロード向けに最適化されており、マイクロ操作向けではありません。ここでの100-1000倍遅い結果は、単一行レイテンシをバルクスループットと引き換えにするアーキテクチャの選択（列指向ストレージ、ベクトル化実行）を反映しています。VibeSQLは両方のユースケースを対象としています。
+bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
+bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
 
 # Sysbenchサーバー固有
 bench-sysbench-server-name = Sysbench（サーバー）
@@ -537,69 +543,74 @@ conformance-run-sqllogictest = # SQLLogicTestスイートを実行（数時間�
 conformance-generate-coverage = # カバレッジレポートを生成
 conformance-open-coverage = # カバレッジレポートを開く
 
-bench-table-query = Query
-bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
-bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
-bench-tpcc-transactions-label = transactions executed
+# sqltest セクション
+conformance-sqltest-title = sqltest 結果
+conformance-sqltest-desc = <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">sqltest</a>の結果 - SQL:1999標準から派生したBNF駆動の適合テストスイートで、739のテストがコア機能と基盤機能をカバーしています。
+conformance-overall-pass-rate = 全体合格率
+conformance-tests-of-passing = { $passed } / { $total } テスト合格
+conformance-passed = 合格
+conformance-failed = 失敗
+conformance-errors = エラー
+conformance-test-coverage = テストカバレッジ
+conformance-core-features = コア機能（Eシリーズ）
+conformance-additional-features = 追加機能
 
-# Conformance page (English placeholders)
-conformance-additional-features = Additional Features
-conformance-bottom-line = <strong>Bottom Line:</strong> We use two complementary test suites to ensure both standards conformance (sqltest) and practical correctness (SQLLogicTest). High pass rates in both demonstrate serious SQL:1999 implementation quality, though formal Core certification would require testing against official NIST suites.
-conformance-commit = Commit:
-conformance-core-explanation = SQL:1999 Core is the official mandatory feature set defined in the SQL:1999 (ISO/IEC 9075:1999) standard. It consists of approximately 169 required features that any database claiming Core compliance must implement. Official Core compliance is verified through the NIST SQL Test Suite, not community test suites.
-conformance-core-features = Core Features (E-Series)
-conformance-coverage-point = <span class="font-medium">Coverage:</span> sqltest covers 739 standard feature tests; SQLLogicTest covers practical scenarios
-conformance-e011 = Numeric data types
-conformance-e021 = Character string types
-conformance-e031 = Identifiers
-conformance-e051 = Basic query specification
-conformance-e061 = Basic predicates and search conditions
-conformance-e071 = Basic query expressions
-conformance-e081 = Basic privileges
-conformance-e091 = Set functions
-conformance-e101 = Basic data manipulation
-conformance-e111 = Single row SELECT statement
-conformance-e121 = Basic cursor support
-conformance-e131 = Null value support
-conformance-e141 = Basic integrity constraints
-conformance-e151 = Transaction support
-conformance-e161 = SQL comments
-conformance-error-label = Error:
-conformance-errors = Errors
-conformance-explanation-title = Understanding Our Test Suites
-conformance-f031 = Basic schema manipulation
-conformance-failed = Failed
-conformance-failing-tests-desc = The following tests are currently failing. Click to expand details.
-conformance-failing-tests-title = Failing Tests
-conformance-files-of-passing = { $passed } of { $total } test files passing
-conformance-generated = Generated:
-conformance-how-complement = How do they complement each other?
-conformance-overall-pass-rate = Overall Pass Rate
-conformance-pass-rates-mean = Our <strong>{ $sqltestRate }% sqltest pass rate</strong> ({ $sqltestPassed }/{ $sqltestTotal } tests) demonstrates strong SQL:1999 grammar conformance. { $sltInfo } Together, these results indicate comprehensive SQL:1999 compliance, though they do not constitute official Core certification.
-conformance-passed = Passed
-conformance-philosophy-point = <span class="font-medium">Philosophy:</span> sqltest says "can you parse this?"; SQLLogicTest says "does this work correctly?"
-conformance-slt-ddl = DDL Tests
-conformance-slt-desc = Results from the comprehensive <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a> suite containing ~5.9 million tests across 623 test files from the official SQLite corpus.
-conformance-slt-evidence = Evidence Tests
-conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> is a comprehensive test suite originally developed for SQLite, containing ~5.9 million SQL test cases across 623 test files. It tests practical correctness by running real-world queries and validating results. This suite focuses on semantic correctness and edge cases rather than pure grammar conformance.
-conformance-slt-index = Index Tests
-conformance-slt-note = <strong>Note:</strong> SQLLogicTest provides a different perspective from sqltest. While sqltest focuses on BNF grammar conformance from the SQL:1999 specification, SQLLogicTest contains millions of real-world SQL queries testing practical correctness across a wide range of scenarios.
-conformance-slt-other = Other Tests
-conformance-slt-pass-info = Our <strong>{ $sltRate }% SQLLogicTest pass rate</strong> ({ $sltPassed }/{ $sltTotal } test files) shows we handle real-world queries correctly.
-conformance-slt-random = Random Tests
-conformance-slt-select = SELECT Tests
-conformance-slt-title = SQLLogicTest Results
-conformance-slt-validates = <span class="font-medium">SQLLogicTest (Result-driven):</span> Validates semantic correctness with millions of real queries
-conformance-sqltest-desc = Results from <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">sqltest</a> - a community-maintained BNF-driven conformance test suite derived from the SQL:1999 standard, containing 739 tests covering Core and Foundation features.
-conformance-sqltest-explanation = <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">sqltest</a> is a community-maintained test suite by Elliot Chance that provides BNF-driven conformance tests derived from the SQL:1999 standard. It contains 739 tests covering Core and Foundation features across E-series and F-series test categories. This suite tests whether our implementation conforms to the SQL:1999 grammar specification.
-conformance-sqltest-title = sqltest Results
-conformance-sqltest-validates = <span class="font-medium">sqltest (BNF-driven):</span> Validates grammar conformance to SQL:1999 standard specifications
-conformance-status = Status:
-conformance-test-categories = Test Categories
-conformance-test-coverage = Test Coverage
-conformance-tests-of-passing = { $passed } of { $total } tests passing
-conformance-view-failing = View failing test details ({ $count } tests)
-conformance-what-is-core = What is SQL:1999 Core?
-conformance-what-is-slt = What is SQLLogicTest?
-conformance-what-is-sqltest = What is sqltest?
-conformance-what-mean = What do our pass rates mean?
+# 機能コード
+conformance-e011 = 数値データ型
+conformance-e021 = 文字列型
+conformance-e031 = 識別子
+conformance-e051 = 基本クエリ指定
+conformance-e061 = 基本述語と検索条件
+conformance-e071 = 基本クエリ式
+conformance-e081 = 基本権限
+conformance-e091 = 集合関数
+conformance-e101 = 基本データ操作
+conformance-e111 = 単一行SELECT文
+conformance-e121 = 基本カーソルサポート
+conformance-e131 = NULL値サポート
+conformance-e141 = 基本整合性制約
+conformance-e151 = トランザクションサポート
+conformance-e161 = SQLコメント
+conformance-f031 = 基本スキーマ操作
+
+# SQLLogicTest セクション
+conformance-slt-title = SQLLogicTest 結果
+conformance-slt-desc = 公式SQLiteコーパスから623のテストファイルにわたる約590万のテストを含む包括的な<a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a>スイートの結果。
+conformance-files-of-passing = { $passed } / { $total } テストファイル合格
+conformance-test-categories = テストカテゴリ
+conformance-slt-select = SELECTテスト
+conformance-slt-evidence = 証拠テスト
+conformance-slt-index = インデックステスト
+conformance-slt-random = ランダムテスト
+conformance-slt-ddl = DDLテスト
+conformance-slt-other = その他のテスト
+conformance-slt-note = <strong>注:</strong> SQLLogicTestはsqltestとは異なる視点を提供します。sqltestがSQL:1999仕様のBNF文法適合性に焦点を当てているのに対し、SQLLogicTestは幅広いシナリオで実際の正確性をテストする数百万の実世界SQLクエリを含んでいます。
+
+# 説明セクション
+conformance-explanation-title = テストスイートの理解
+conformance-what-is-sqltest = sqltestとは？
+conformance-sqltest-explanation = <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">sqltest</a>は、Elliot Chanceによるコミュニティ維持のテストスイートで、SQL:1999標準から派生したBNF駆動の適合テストを提供します。EシリーズとFシリーズのテストカテゴリにわたるコア機能と基盤機能をカバーする739のテストを含んでいます。このスイートは、私たちの実装がSQL:1999文法仕様に準拠しているかどうかをテストします。
+conformance-what-is-slt = SQLLogicTestとは？
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a>は、もともとSQLite用に開発された包括的なテストスイートで、623のテストファイルにわたる約590万のSQLテストケースを含んでいます。実世界のクエリを実行して結果を検証することで実際の正確性をテストします。このスイートは純粋な文法適合性よりも意味的な正確性とエッジケースに焦点を当てています。
+conformance-how-complement = どのように補完し合うか？
+conformance-sqltest-validates = <span class="font-medium">sqltest（BNF駆動）:</span> SQL:1999標準仕様への文法適合性を検証
+conformance-slt-validates = <span class="font-medium">SQLLogicTest（結果駆動）:</span> 数百万の実クエリで意味的正確性を検証
+conformance-coverage-point = <span class="font-medium">カバレッジ:</span> sqltestは739の標準機能テストをカバー、SQLLogicTestは実用的なシナリオをカバー
+conformance-philosophy-point = <span class="font-medium">哲学:</span> sqltestは「これを解析できるか？」を問い、SQLLogicTestは「これは正しく動作するか？」を問う
+conformance-what-is-core = SQL:1999 Coreとは？
+conformance-core-explanation = SQL:1999 Coreは、SQL:1999（ISO/IEC 9075:1999）標準で定義された公式の必須機能セットです。Core準拠を主張するデータベースが実装しなければならない約169の必須機能で構成されています。公式のCore準拠は、コミュニティテストスイートではなく、NIST SQLテストスイートを通じて検証されます。
+conformance-what-mean = 合格率の意味は？
+conformance-pass-rates-mean = 私たちの<strong>{ $sqltestRate }% sqltest合格率</strong>（{ $sqltestPassed }/{ $sqltestTotal }テスト）は、強力なSQL:1999文法適合性を示しています。{ $sltInfo } これらの結果は包括的なSQL:1999準拠を示していますが、公式のCore認証を構成するものではありません。
+conformance-slt-pass-info = 私たちの<strong>{ $sltRate }% SQLLogicTest合格率</strong>（{ $sltPassed }/{ $sltTotal }テストファイル）は、実世界のクエリを正しく処理できることを示しています。
+conformance-bottom-line = <strong>結論:</strong> 私たちは、標準適合性（sqltest）と実際の正確性（SQLLogicTest）の両方を確保するために、2つの補完的なテストスイートを使用しています。両方での高い合格率は、真剣なSQL:1999実装品質を示していますが、正式なCore認証には公式NISTスイートに対するテストが必要です。
+
+# 失敗テストセクション
+conformance-failing-tests-title = 失敗テスト
+conformance-failing-tests-desc = 以下のテストが現在失敗しています。詳細を展開するにはクリックしてください。
+conformance-view-failing = 失敗テストの詳細を表示（{ $count }テスト）
+conformance-error-label = エラー:
+
+# メタデータ
+conformance-generated = 生成日:
+conformance-commit = コミット:
+conformance-status = ステータス:

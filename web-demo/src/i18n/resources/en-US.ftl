@@ -400,15 +400,15 @@ bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTIN
 
 # Sysbench Embedded Discussion
 bench-sysbench-emb-disc-point-title = Point Lookups: At Parity
-bench-sysbench-emb-disc-point = VibeSQL's point selects run at <strong>~0.37µs</strong>, matching SQLite's ~0.36µs and vastly outperforming DuckDB. Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
+bench-sysbench-emb-disc-point = VibeSQL's point selects run at <strong>~0.37µs</strong>, matching SQLite's ~0.36µs. Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
 bench-sysbench-emb-disc-index-title = Index Updates: Room for Improvement
 bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~4.3µs vs SQLite's ~1.7µs</strong>. This is an area for optimization as our MVCC design adds overhead for index maintenance that we're working to reduce.
 bench-sysbench-emb-disc-improve-title = Areas for Improvement
 bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
 bench-sysbench-emb-disc-nonindex = Non-indexed updates show VibeSQL at ~1.9µs vs SQLite's ~1.4µs - close to parity
 bench-sysbench-emb-disc-deletes = Delete operations improved dramatically: now ~5.5µs vs SQLite's ~3.8µs (was 1183µs previously)
-bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
-bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
+bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
+bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
 
 # Sysbench Server specific
 bench-sysbench-server-name = Sysbench (Server)
@@ -443,7 +443,7 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 bench-footprint-emb-disc-size-title = Binary Size: Middle Ground
 bench-footprint-emb-disc-size = VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects our choice to include advanced features (window functions, CTEs, columnar execution) while keeping the binary manageable for embedded deployments.
 bench-footprint-emb-disc-startup-title = Startup: Fastest Cold Start
-bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~5.4ms cold startup</strong>, faster than SQLite (~5.9ms) and significantly faster than DuckDB (~12.3ms). Our minimal initialization path loads only essential metadata structures on startup.
+bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~6ms cold startup</strong>, faster than SQLite (~6.5ms) and significantly faster than DuckDB (~13ms). Our minimal initialization path loads only essential metadata structures on startup.
 bench-footprint-emb-disc-memory-title = Memory Efficiency
 bench-footprint-emb-disc-memory = Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB. The difference from SQLite reflects our more sophisticated query optimizer and columnar execution infrastructure that's allocated upfront.
 bench-footprint-emb-disc-roadmap-title = Size Reduction Roadmap
