@@ -154,10 +154,10 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
 /// use vibesql_l10n::init;
 ///
 /// // Use system locale
-/// init(None)?;
+/// init(None).unwrap();
 ///
 /// // Or specify explicitly
-/// init(Some("es"))?;
+/// init(Some("es")).unwrap();
 /// ```
 pub fn init(locale: Option<&str>) -> Result<(), L10nError> {
     let locale_str = locale.map(String::from).unwrap_or_else(detection::detect_locale);
