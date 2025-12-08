@@ -83,6 +83,7 @@ pub(super) fn apply_limit_offset(
 /// * `iter` - Iterator over rows (can be lazy or materialized)
 /// * `limit` - Maximum number of rows to return (None = unlimited)
 /// * `offset` - Number of rows to skip from the start (None = 0)
+#[allow(dead_code)]
 pub(super) fn apply_limit_offset_iter<I>(
     iter: I,
     limit: Option<usize>,

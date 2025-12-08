@@ -50,6 +50,7 @@ pub use search::JoinOrderSearch;
 /// This type enables deferred row materialization for LIMIT queries:
 /// - `SELECT * FROM t LIMIT 10` only clones 10 rows, not all of `t`
 /// - Memory usage is O(LIMIT) instead of O(table_size)
+#[allow(dead_code)]
 pub(super) enum FromDataIterator {
     /// Iterator over a materialized Vec<Row>
     Vec(std::vec::IntoIter<vibesql_storage::Row>),
@@ -127,6 +128,7 @@ impl FromData {
     /// - Processing with LIMIT (only need first N rows)
     /// - Filtering results (may discard many rows)
     /// - Streaming output without full materialization
+    #[allow(dead_code)]
     pub fn into_iter(self) -> FromDataIterator {
         match self {
             Self::Materialized(rows) => FromDataIterator::Vec(rows.into_iter()),
@@ -266,6 +268,7 @@ impl FromResult {
     /// - Early termination: Stop iterating when a condition is met
     ///
     /// # Issue #4060
+    #[allow(dead_code)]
     pub(super) fn into_iter(self) -> FromDataIterator {
         self.data.into_iter()
     }
@@ -282,6 +285,7 @@ impl FromResult {
     /// - `take(10)`: clones only 10 rows
     ///
     /// # Issue #4060
+    #[allow(dead_code)]
     pub(super) fn take(self, n: usize) -> Vec<vibesql_storage::Row> {
         self.into_iter().take(n).collect()
     }
