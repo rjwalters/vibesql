@@ -370,15 +370,17 @@ bench-tpcc-delivery = Delivery - Batch processing of pending orders
 bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
 
 # TPC-C Discussion
-bench-tpcc-disc-faster-title = 32x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~77,000 transactions per second</strong> compared to SQLite's ~2,400 TPS, a 32x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
+bench-tpcc-disc-faster-title = 5x Faster Than SQLite
+bench-tpcc-disc-faster = VibeSQL achieves <strong>~23,000 transactions per second</strong> compared to SQLite's ~4,500 TPS, a 5x improvement. This speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
 bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
 bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
 bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution
 bench-tpcc-disc-btree = Purpose-built index structure optimized for in-memory workloads
 bench-tpcc-disc-prepared = Query plans are compiled once and reused
 bench-tpcc-disc-scaling-title = Scaling Further
-bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect near-linear scaling as we add parallel execution support. Our goal is to achieve 500K+ TPS on modern multi-core hardware.
+bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect improved scaling as we add parallel execution support.
+bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
+bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
 
 # Sysbench Embedded specific
 bench-sysbench-embedded-name = Sysbench (Embedded)
@@ -396,14 +398,14 @@ bench-sysbench-delete = Delete - Remove rows by primary key
 bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
 
 # Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = Point Lookups: VibeSQL Leads
-bench-sysbench-emb-disc-point = VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
-bench-sysbench-emb-disc-index-title = Index Updates: 2x Faster
-bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design allows in-place index updates without write-ahead logging overhead for each operation.
+bench-sysbench-emb-disc-point-title = Point Lookups: At Parity
+bench-sysbench-emb-disc-point = VibeSQL's point selects run at <strong>~0.37µs</strong>, matching SQLite's ~0.36µs and vastly outperforming DuckDB. Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
+bench-sysbench-emb-disc-index-title = Index Updates: Room for Improvement
+bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~4.3µs vs SQLite's ~1.7µs</strong>. This is an area for optimization as our MVCC design adds overhead for index maintenance that we're working to reduce.
 bench-sysbench-emb-disc-improve-title = Areas for Improvement
 bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
-bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need predicate pushdown optimization
-bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
+bench-sysbench-emb-disc-nonindex = Non-indexed updates show VibeSQL at ~1.9µs vs SQLite's ~1.4µs - close to parity
+bench-sysbench-emb-disc-deletes = Delete operations improved dramatically: now ~5.5µs vs SQLite's ~3.8µs (was 1183µs previously)
 bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
 bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
 
@@ -440,7 +442,7 @@ bench-footprint-peak-memory = Peak Memory - Maximum resident set size during ini
 bench-footprint-emb-disc-size-title = Binary Size: Middle Ground
 bench-footprint-emb-disc-size = VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects our choice to include advanced features (window functions, CTEs, columnar execution) while keeping the binary manageable for embedded deployments.
 bench-footprint-emb-disc-startup-title = Startup: Fastest Cold Start
-bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only essential metadata structures on startup.
+bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~5.4ms cold startup</strong>, faster than SQLite (~5.9ms) and significantly faster than DuckDB (~12.3ms). Our minimal initialization path loads only essential metadata structures on startup.
 bench-footprint-emb-disc-memory-title = Memory Efficiency
 bench-footprint-emb-disc-memory = Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB. The difference from SQLite reflects our more sophisticated query optimizer and columnar execution infrastructure that's allocated upfront.
 bench-footprint-emb-disc-roadmap-title = Size Reduction Roadmap
@@ -461,8 +463,8 @@ bench-footprint-wasm-size = WASM Size - Size of the WebAssembly module for brows
 bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
-bench-footprint-srv-disc-wasm-title = WASM: 2.2MB Compressed
-bench-footprint-srv-disc-wasm = VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast initial page loads. This is a full SQL:1999 database with window functions, CTEs, and ACID transactions running entirely in the browser.
+bench-footprint-srv-disc-wasm-title = WASM: 1.5MB Compressed
+bench-footprint-srv-disc-wasm = VibeSQL's WebAssembly module compresses to <strong>~1.5MB gzipped</strong>, enabling fast initial page loads. This is a full SQL:1999 database with window functions, CTEs, and ACID transactions running entirely in the browser.
 bench-footprint-srv-disc-included-title = What's Included
 bench-footprint-srv-disc-parser = Complete SQL parser and query optimizer
 bench-footprint-srv-disc-btree = B-tree storage engine with MVCC

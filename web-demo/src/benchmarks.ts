@@ -499,6 +499,10 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         title: t('bench-tpcc-disc-scaling-title'),
         content: pI18n('bench-tpcc-disc-scaling'),
       },
+      {
+        title: t('bench-tpcc-disc-duckdb-title'),
+        content: pI18n('bench-tpcc-disc-duckdb'),
+      },
     ]),
   },
   'sysbench-embedded': {
