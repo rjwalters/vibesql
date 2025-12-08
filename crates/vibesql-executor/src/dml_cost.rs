@@ -121,6 +121,7 @@ impl<'a> DmlOptimizer<'a> {
             last_updated: instant::SystemTime::now(),
             is_stale: true, // Mark as stale since it's a fallback
             sample_metadata: None,
+            avg_row_bytes: None, // No actual data sampled
         }
     }
 
