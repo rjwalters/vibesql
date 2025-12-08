@@ -447,73 +447,29 @@ impl UpdateExecutor {
             None => return Ok(None), // Not a simple PK equality
         };
 
-        // Get table and check for PK index
-        let table = database
-            .get_table(&stmt.table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+        // Get table and check for PK index, look up row index
+        let row_index = {
+            let table = database
+                .get_table(&stmt.table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-        let pk_index = match table.primary_key_index() {
-            Some(idx) => idx,
-            None => return Ok(None), // No PK index
-        };
+            let pk_index = match table.primary_key_index() {
+                Some(idx) => idx,
+                None => return Ok(None), // No PK index
+            };
 
-        // Look up row by PK
-        let row_index = match pk_index.get(&pk_value) {
-            Some(&idx) => idx,
-            None => return Ok(Some(0)), // Row not found - 0 rows updated
-        };
-
-        // SUPER-FAST PATH: Single literal assignment to non-indexed, non-PK column
-        // This path avoids ALL row cloning by updating the column in-place
-        if stmt.assignments.len() == 1 {
-            let assignment = &stmt.assignments[0];
-
-            // Check if value is a literal (no expression evaluation needed)
-            if let vibesql_ast::Expression::Literal(new_value) = &assignment.value {
-                if let Some(col_index) = schema.get_column_index(&assignment.column) {
-                    // Check column is not in PK
-                    let is_pk_col = schema
-                        .get_primary_key_indices()
-                        .map(|pk| pk.contains(&col_index))
-                        .unwrap_or(false);
-
-                    // Check column is not in any unique constraint
-                    // unique_constraints is Vec<Vec<String>> where each inner Vec is column names
-                    let col_name_upper = assignment.column.to_uppercase();
-                    let is_unique_col = schema
-                        .unique_constraints
-                        .iter()
-                        .any(|uc| uc.iter().any(|name| name.to_uppercase() == col_name_upper));
-
-                    // Check NOT NULL constraint
-                    let column = &schema.columns[col_index];
-                    let null_ok =
-                        column.nullable || *new_value != vibesql_types::SqlValue::Null;
-
-                    if !is_pk_col && !is_unique_col && null_ok {
-                        // Check no user-defined indexes on this column
-                        let has_user_index =
-                            database.has_index_on_column(&stmt.table_name, &assignment.column);
-
-                        if !has_user_index {
-                            // SUPER-FAST: Direct in-place update, no row cloning!
-                            let table_mut = database
-                                .get_table_mut(&stmt.table_name)
-                                .ok_or_else(|| {
-                                    ExecutorError::TableNotFound(stmt.table_name.clone())
-                                })?;
-
-                            table_mut.update_column_inplace(
-                                row_index,
-                                col_index,
-                                new_value.clone(),
-                            );
-
-                            return Ok(Some(1));
-                        }
-                    }
-                }
+            // Look up row by PK
+            match pk_index.get(&pk_value) {
+                Some(&idx) => idx,
+                None => return Ok(Some(0)), // Row not found - 0 rows updated
             }
+        }; // table borrow ends here
+
+        // SUPER-FAST PATH: All literal assignments to non-indexed, non-PK, non-unique columns
+        // This path avoids ALL row cloning by updating columns in-place
+        // Extended from single-assignment to support multiple assignments (ONEPASS optimization)
+        if let Some(result) = Self::try_super_fast_path(stmt, database, schema, row_index)? {
+            return Ok(Some(result));
         }
 
         // Skip fast path if table has foreign keys (need validation)
@@ -546,7 +502,10 @@ impl UpdateExecutor {
             }
         }
 
-        // Get the old row
+        // Re-borrow table to get the old row
+        let table = database
+            .get_table(&stmt.table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
         let old_row = table.scan()[row_index].clone();
 
         // Create evaluator for expression evaluation
@@ -633,40 +592,163 @@ impl UpdateExecutor {
         Ok(Some(1))
     }
 
-    /// Extract primary key value from a simple equality expression.
-    /// Returns Some(pk_values) if expression is `pk_column = literal` or `literal = pk_column`.
+    /// Try SUPER-FAST path: direct in-place column updates for literal assignments
+    /// to non-indexed, non-PK, non-unique columns.
+    ///
+    /// This is the ONEPASS optimization for single-row updates:
+    /// - Supports multiple assignments (not just single)
+    /// - Validates all columns can be updated in-place
+    /// - No row cloning required
+    ///
+    /// Returns Some(1) if all updates were applied in-place, None if should use normal path.
+    fn try_super_fast_path(
+        stmt: &UpdateStmt,
+        database: &mut Database,
+        schema: &vibesql_catalog::TableSchema,
+        row_index: usize,
+    ) -> Result<Option<usize>, ExecutorError> {
+        // Collect all literal updates that can be done in-place
+        let mut inplace_updates: Vec<(usize, vibesql_types::SqlValue)> = Vec::new();
+
+        let pk_indices = schema.get_primary_key_indices();
+
+        for assignment in &stmt.assignments {
+            // Check if value is a literal (no expression evaluation needed)
+            let new_value = match &assignment.value {
+                vibesql_ast::Expression::Literal(val) => val.clone(),
+                _ => return Ok(None), // Non-literal expression - use normal path
+            };
+
+            let col_index = match schema.get_column_index(&assignment.column) {
+                Some(idx) => idx,
+                None => return Ok(None), // Column not found - let normal path handle error
+            };
+
+            // Check column is not in PK
+            let is_pk_col = pk_indices
+                .as_ref()
+                .map(|pk| pk.contains(&col_index))
+                .unwrap_or(false);
+            if is_pk_col {
+                return Ok(None); // PK update needs full validation
+            }
+
+            // Check column is not in any unique constraint
+            let col_name_upper = assignment.column.to_uppercase();
+            let is_unique_col = schema
+                .unique_constraints
+                .iter()
+                .any(|uc| uc.iter().any(|name| name.to_uppercase() == col_name_upper));
+            if is_unique_col {
+                return Ok(None); // Unique constraint needs validation
+            }
+
+            // Check NOT NULL constraint
+            let column = &schema.columns[col_index];
+            if !column.nullable && new_value == vibesql_types::SqlValue::Null {
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "NOT NULL constraint violation: column '{}' cannot be NULL",
+                    column.name
+                )));
+            }
+
+            // Check no user-defined indexes on this column
+            if database.has_index_on_column(&stmt.table_name, &assignment.column) {
+                return Ok(None); // Index update needs normal path
+            }
+
+            inplace_updates.push((col_index, new_value));
+        }
+
+        // All checks passed - apply updates in-place
+        if inplace_updates.is_empty() {
+            return Ok(None); // No updates to apply
+        }
+
+        let table_mut = database
+            .get_table_mut(&stmt.table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+        // Apply all column updates in-place (no row cloning!)
+        for (col_index, new_value) in inplace_updates {
+            table_mut.update_column_inplace(row_index, col_index, new_value);
+        }
+
+        Ok(Some(1))
+    }
+
+    /// Extract primary key values from WHERE expression.
+    ///
+    /// Supports:
+    /// - Single-column PK: `pk = value` or `value = pk`
+    /// - Composite PK: `pk1 = val1 AND pk2 = val2` (any order)
+    ///
+    /// Returns Some(pk_values) in PK column order if all PK columns are matched,
+    /// None otherwise.
     fn extract_pk_equality(
         expr: &Expression,
         schema: &vibesql_catalog::TableSchema,
     ) -> Option<Vec<vibesql_types::SqlValue>> {
-        if let Expression::BinaryOp { left, op: BinaryOperator::Equal, right } = expr {
-            // Check: column = literal
-            if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
-                (left.as_ref(), right.as_ref())
-            {
-                if let Some(pk_indices) = schema.get_primary_key_indices() {
-                    if let Some(col_index) = schema.get_column_index(column) {
-                        if pk_indices.len() == 1 && pk_indices[0] == col_index {
-                            return Some(vec![value.clone()]);
-                        }
-                    }
-                }
-            }
+        let pk_indices = schema.get_primary_key_indices()?;
+        if pk_indices.is_empty() {
+            return None;
+        }
 
-            // Check: literal = column
-            if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
-                (left.as_ref(), right.as_ref())
-            {
-                if let Some(pk_indices) = schema.get_primary_key_indices() {
-                    if let Some(col_index) = schema.get_column_index(column) {
-                        if pk_indices.len() == 1 && pk_indices[0] == col_index {
-                            return Some(vec![value.clone()]);
-                        }
-                    }
-                }
+        // Collect all column = literal equalities from the expression
+        let mut equalities: std::collections::HashMap<usize, vibesql_types::SqlValue> =
+            std::collections::HashMap::new();
+        Self::collect_pk_equalities(expr, schema, &mut equalities);
+
+        // Check if we have all PK columns and build result in PK order
+        let mut pk_values = Vec::with_capacity(pk_indices.len());
+        for &pk_col in &pk_indices {
+            match equalities.get(&pk_col) {
+                Some(value) => pk_values.push(value.clone()),
+                None => return None, // Missing PK column
             }
         }
-        None
+
+        Some(pk_values)
+    }
+
+    /// Recursively collect column = literal equalities from WHERE expression
+    fn collect_pk_equalities(
+        expr: &Expression,
+        schema: &vibesql_catalog::TableSchema,
+        equalities: &mut std::collections::HashMap<usize, vibesql_types::SqlValue>,
+    ) {
+        match expr {
+            Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+                // Recurse into AND branches
+                Self::collect_pk_equalities(left, schema, equalities);
+                Self::collect_pk_equalities(right, schema, equalities);
+            }
+            Expression::Conjunction(exprs) => {
+                // Handle flattened AND chains
+                for e in exprs {
+                    Self::collect_pk_equalities(e, schema, equalities);
+                }
+            }
+            Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+                // Check: column = literal
+                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                    (left.as_ref(), right.as_ref())
+                {
+                    if let Some(col_index) = schema.get_column_index(column) {
+                        equalities.insert(col_index, value.clone());
+                    }
+                }
+                // Check: literal = column
+                else if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                    (left.as_ref(), right.as_ref())
+                {
+                    if let Some(col_index) = schema.get_column_index(column) {
+                        equalities.insert(col_index, value.clone());
+                    }
+                }
+            }
+            _ => {} // Ignore other expressions
+        }
     }
 }
 

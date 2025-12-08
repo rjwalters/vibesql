@@ -52,48 +52,128 @@ impl<'a> RowSelector<'a> {
 
     /// Analyze WHERE expression to see if it can use primary key index for fast lookup
     ///
-    /// Returns the primary key value if the expression is a simple equality on the primary key,
-    /// otherwise returns None.
-    #[allow(clippy::single_match)]
+    /// Returns the primary key values if the expression is an equality (or conjunction of equalities)
+    /// on all primary key columns, otherwise returns None.
+    ///
+    /// Supports:
+    /// - Single-column PK: `WHERE pk = value`
+    /// - Composite PK: `WHERE pk1 = val1 AND pk2 = val2`
     fn extract_primary_key_lookup(
         where_expr: &Expression,
         schema: &vibesql_catalog::TableSchema,
     ) -> Option<Vec<vibesql_types::SqlValue>> {
-        // Only handle simple binary equality operations
-        match where_expr {
-            Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
-                // Check if left side is a column reference and right side is a literal
-                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
-                    (left.as_ref(), right.as_ref())
-                {
-                    // Check if this column is the primary key
-                    if let Some(pk_indices) = schema.get_primary_key_indices() {
-                        if let Some(col_index) = schema.get_column_index(column) {
-                            // Only handle single-column primary keys for now
-                            if pk_indices.len() == 1 && pk_indices[0] == col_index {
-                                return Some(vec![value.clone()]);
-                            }
-                        }
-                    }
-                }
+        let pk_indices = schema.get_primary_key_indices()?;
+        if pk_indices.is_empty() {
+            return None;
+        }
 
-                // Also check the reverse: literal = column
-                if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
-                    (left.as_ref(), right.as_ref())
-                {
-                    if let Some(pk_indices) = schema.get_primary_key_indices() {
-                        if let Some(col_index) = schema.get_column_index(column) {
-                            if pk_indices.len() == 1 && pk_indices[0] == col_index {
-                                return Some(vec![value.clone()]);
-                            }
-                        }
+        // For single-column PK, use simple extraction
+        if pk_indices.len() == 1 {
+            return Self::extract_single_pk_equality(where_expr, schema, pk_indices[0]);
+        }
+
+        // For composite PK, extract all equalities from AND expressions
+        Self::extract_composite_pk_equalities(where_expr, schema, &pk_indices)
+    }
+
+    /// Extract single PK column equality from expression
+    fn extract_single_pk_equality(
+        where_expr: &Expression,
+        schema: &vibesql_catalog::TableSchema,
+        pk_col_index: usize,
+    ) -> Option<Vec<vibesql_types::SqlValue>> {
+        if let Expression::BinaryOp { left, op: BinaryOperator::Equal, right } = where_expr {
+            // Check: column = literal
+            if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                (left.as_ref(), right.as_ref())
+            {
+                if let Some(col_index) = schema.get_column_index(column) {
+                    if col_index == pk_col_index {
+                        return Some(vec![value.clone()]);
                     }
                 }
             }
-            _ => {}
+
+            // Check: literal = column
+            if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                (left.as_ref(), right.as_ref())
+            {
+                if let Some(col_index) = schema.get_column_index(column) {
+                    if col_index == pk_col_index {
+                        return Some(vec![value.clone()]);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract composite PK values from AND expressions
+    ///
+    /// For a composite PK (pk1, pk2), matches expressions like:
+    /// - `pk1 = val1 AND pk2 = val2`
+    /// - `pk2 = val2 AND pk1 = val1` (order doesn't matter)
+    /// - Nested ANDs: `(pk1 = val1 AND pk2 = val2) AND pk3 = val3`
+    fn extract_composite_pk_equalities(
+        where_expr: &Expression,
+        schema: &vibesql_catalog::TableSchema,
+        pk_indices: &[usize],
+    ) -> Option<Vec<vibesql_types::SqlValue>> {
+        // Collect all equalities from the expression
+        let mut equalities: std::collections::HashMap<usize, vibesql_types::SqlValue> =
+            std::collections::HashMap::new();
+        Self::collect_equalities(where_expr, schema, &mut equalities);
+
+        // Check if we have all PK columns
+        let mut pk_values = Vec::with_capacity(pk_indices.len());
+        for &pk_col in pk_indices {
+            match equalities.get(&pk_col) {
+                Some(value) => pk_values.push(value.clone()),
+                None => return None, // Missing PK column equality
+            }
         }
 
-        None
+        Some(pk_values)
+    }
+
+    /// Recursively collect column = literal equalities from expression
+    fn collect_equalities(
+        expr: &Expression,
+        schema: &vibesql_catalog::TableSchema,
+        equalities: &mut std::collections::HashMap<usize, vibesql_types::SqlValue>,
+    ) {
+        match expr {
+            Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+                // Recurse into AND branches
+                Self::collect_equalities(left, schema, equalities);
+                Self::collect_equalities(right, schema, equalities);
+            }
+            Expression::Conjunction(exprs) => {
+                // Handle flattened AND chains
+                for e in exprs {
+                    Self::collect_equalities(e, schema, equalities);
+                }
+            }
+            Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+                // Check: column = literal
+                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                    (left.as_ref(), right.as_ref())
+                {
+                    if let Some(col_index) = schema.get_column_index(column) {
+                        equalities.insert(col_index, value.clone());
+                    }
+                }
+                // Check: literal = column
+                else if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                    (left.as_ref(), right.as_ref())
+                {
+                    if let Some(col_index) = schema.get_column_index(column) {
+                        equalities.insert(col_index, value.clone());
+                    }
+                }
+            }
+            _ => {} // Ignore other expressions (OR, comparisons, etc.)
+        }
     }
 
     /// Collect candidate rows that match the WHERE clause (fallback for non-indexed queries)
