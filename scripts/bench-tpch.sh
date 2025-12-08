@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TPC-H Benchmark Runner
 #
 # Consolidated script for running TPC-H benchmarks in various modes.

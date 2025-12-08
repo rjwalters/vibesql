@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Test script for validating join optimizations (Phase 4 of #2494)
 #
 # This script runs the problematic queries (Q3, Q7, Q10, Q12) with verbose

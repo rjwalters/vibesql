@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Quick conformance summary - shows both SQL:1999 and SQLLogicTest scores
 

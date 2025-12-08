@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Test a single SQLLogicTest file and report results
 # Usage: test_one_file.sh [test_file_or_path]
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Loom Worktree Helper Script
 # Safely creates and manages git worktrees for agent development

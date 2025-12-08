@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TPC-DS Isolated Benchmark Runner
 #
 # Runs TPC-DS benchmarks with each database engine in a separate process

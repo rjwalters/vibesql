@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # MySQL TPC-H Benchmark Runner
 #
 # This script starts MySQL via Docker, loads TPC-H data, and runs benchmarks.

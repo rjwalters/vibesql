@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # profile-query.sh - Profile a specific SQL query with detailed timing breakdown
 #

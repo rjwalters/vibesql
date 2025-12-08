@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Script to publish vibesql crates to crates.io in correct dependency order
 # Must be run from repository root
 
@@ -35,9 +35,12 @@ PATCH_BACKUP=""
 disable_patch() {
     if grep -q '^\[patch\.crates-io\]' "$CARGO_TOML"; then
         echo "Temporarily disabling [patch.crates-io] section for publishing..."
+        # Save original before any modifications
+        cp "$CARGO_TOML" "${CARGO_TOML}.bak"
         # Comment out the patch section (2 lines: header and the dependency)
-        sed -i.bak 's/^\[patch\.crates-io\]/# [patch.crates-io]/' "$CARGO_TOML"
-        sed -i '' 's/^sqllogictest = { path/# sqllogictest = { path/' "$CARGO_TOML"
+        # Use sed with temp file for cross-platform compatibility
+        sed 's/^\[patch\.crates-io\]/# [patch.crates-io]/' "$CARGO_TOML" > "${CARGO_TOML}.tmp" && mv "${CARGO_TOML}.tmp" "$CARGO_TOML"
+        sed 's/^sqllogictest = { path/# sqllogictest = { path/' "$CARGO_TOML" > "${CARGO_TOML}.tmp" && mv "${CARGO_TOML}.tmp" "$CARGO_TOML"
         PATCH_BACKUP="1"
         # Update Cargo.lock to use crates.io version
         cargo update -p sqllogictest 2>/dev/null || true

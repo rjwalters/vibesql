@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Backup test results databases to the repository
 # Backs up both SQLLogicTest results and benchmark results
 # Keeps only the 5 most recent backups of each type

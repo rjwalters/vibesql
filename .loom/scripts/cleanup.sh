@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Loom Cleanup Script - Remove build artifacts and orphaned worktrees
 #
 # AGENT USAGE INSTRUCTIONS:

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Test a sample of random/* tests to see current failure patterns
 
 set -e

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Ensure MySQL Docker container is running for benchmarks
 #
 # This script starts the MySQL Docker container if it's not already running
