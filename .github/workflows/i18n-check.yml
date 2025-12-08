@@ -53,12 +53,12 @@ jobs:
         run: uv python install 3.11
 
       - name: Check translation completeness
-        run: uv run --python 3.11 scripts/check-translations.py --verbose
+        run: uv run --no-project --python 3.11 scripts/check-translations.py --verbose
 
       - name: Generate coverage badge
         run: |
           mkdir -p badges
-          uv run --python 3.11 scripts/check-translations.py --badge badges/i18n-coverage.json
+          uv run --no-project --python 3.11 scripts/check-translations.py --badge badges/i18n-coverage.json
 
       - name: Upload badge artifact
         uses: actions/upload-artifact@v4
@@ -86,7 +86,7 @@ jobs:
       - name: Validate all locales
         run: |
           # Check for variable mismatches (strict)
-          uv run --python 3.11 scripts/check-translations.py --ci --threshold 0
+          uv run --no-project --python 3.11 scripts/check-translations.py --ci --threshold 0
 
       - name: Report status
         run: |
