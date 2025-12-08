@@ -319,6 +319,137 @@ SELECT       ~50µs     ~126µs (2.5x)        ~55µs (1.1x)        2.3x faster  
 
 **Takeaway**: The bottleneck was lock overhead, not PyO3 fundamentals. With better primitives, we achieve SQLite-level performance!
 
+## Structured Debug Output (JSON)
+
+For programmatic analysis by agents and CI systems, VibeSQL can emit debug output in JSON format.
+
+### Enabling JSON Output
+
+Set the `VIBESQL_DEBUG_FORMAT` environment variable:
+
+```bash
+# Enable JSON output for debug/profiling messages
+export VIBESQL_DEBUG_FORMAT=json
+
+# Run with profiling enabled
+JOIN_PROFILE=1 JOIN_REORDER_VERBOSE=1 ./your_benchmark 2> debug.log
+```
+
+### JSON Schema
+
+Each JSON message follows this structure:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:00.123Z",
+  "category": "optimizer",
+  "event": "join_order_decision",
+  "data": {
+    "original_order": ["customer", "orders", "lineitem"],
+    "optimal_order": ["lineitem", "orders", "customer"],
+    "optimizer_time_us": 1234,
+    "order_changed": true
+  }
+}
+```
+
+### Categories
+
+| Category | Description | Triggered By |
+|----------|-------------|--------------|
+| `optimizer` | Query optimization decisions | `JOIN_REORDER_VERBOSE=1` |
+| `execution` | Execution timing and statistics | `JOIN_PROFILE=1` |
+| `index` | Index selection and usage | `INDEX_SELECT_DEBUG=1` |
+| `dml` | DML operation timing | `DML_COST_DEBUG=1` |
+| `profile` | General profiling | `VIBESQL_PROFILE=1` |
+
+### Example Events
+
+**Join Order Decision** (`optimizer/join_order_decision`):
+```json
+{
+  "timestamp": "2024-01-15T10:30:00.123Z",
+  "category": "optimizer",
+  "event": "join_order_decision",
+  "data": {
+    "original_order": ["customer", "orders", "lineitem"],
+    "optimal_order": ["lineitem", "orders", "customer"],
+    "join_condition_count": 3,
+    "optimizer_time_us": 1234,
+    "order_changed": true
+  }
+}
+```
+
+**Join Profile Summary** (`execution/join_profile_summary`):
+```json
+{
+  "timestamp": "2024-01-15T10:30:01.456Z",
+  "category": "execution",
+  "event": "join_profile_summary",
+  "data": {
+    "table_count": 3,
+    "join_count": 2,
+    "total_scan_time_us": 5000,
+    "total_join_time_us": 12000,
+    "grand_total_us": 17500,
+    "result_row_count": 1000,
+    "scans": {
+      "lineitem (6001 rows)": {"duration_us": 3000, "duration_ms": 3.0}
+    },
+    "joins": {
+      "orders": {"duration_us": 8000, "cartesian_product": 6001000, "result_rows": 6001}
+    }
+  }
+}
+```
+
+### Parsing JSON Output
+
+Use the included Python script to parse and analyze debug output:
+
+```bash
+# Parse all events
+VIBESQL_DEBUG_FORMAT=json JOIN_PROFILE=1 ./benchmark 2>&1 | python scripts/parse_debug_output.py
+
+# Filter by category
+... | python scripts/parse_debug_output.py --filter optimizer
+
+# Filter by event type
+... | python scripts/parse_debug_output.py --filter-event join_profile_summary
+
+# Get summary statistics
+... | python scripts/parse_debug_output.py --summary
+
+# Output as JSON for further processing
+... | python scripts/parse_debug_output.py --json
+```
+
+### Example: CI Integration
+
+```bash
+#!/bin/bash
+# benchmark_with_analysis.sh
+
+# Run benchmark with JSON debug output
+VIBESQL_DEBUG_FORMAT=json JOIN_PROFILE=1 \
+  ./target/release/deps/tpch_profiling --bench Q1 2> debug.log
+
+# Extract timing summary
+python scripts/parse_debug_output.py --summary --json < debug.log > timing_summary.json
+
+# Check for regressions
+python -c "
+import json
+with open('timing_summary.json') as f:
+    summary = json.load(f)
+timing = summary.get('timing_stats', {})
+for event, stats in timing.items():
+    if stats['avg_us'] > 10000:  # 10ms threshold
+        print(f'Warning: {event} avg time {stats[\"avg_us\"]/1000:.1f}ms exceeds threshold')
+"
+```
+
 ## See Also
 
 - [CPU_PROFILING.md](CPU_PROFILING.md) - CPU profiling with samply (flame graphs)

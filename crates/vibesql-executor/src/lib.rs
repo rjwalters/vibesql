@@ -10,6 +10,7 @@ mod constraint_validator;
 pub mod correlation;
 mod create_table;
 pub mod cursor;
+pub mod debug_output;
 mod delete;
 pub mod dml_cost;
 mod domain_ddl;

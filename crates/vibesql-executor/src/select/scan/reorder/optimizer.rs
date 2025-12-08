@@ -2,6 +2,7 @@
 
 use super::{graph, predicates, utils};
 use crate::{
+    debug_output::{Category, DebugEvent, JsonValue},
     errors::ExecutorError,
     schema::CombinedSchema,
     select::{
@@ -18,6 +19,11 @@ use vibesql_ast::{Expression, FromClause};
 /// Check if join profiling is enabled via environment variable
 fn join_profile_enabled() -> bool {
     std::env::var("JOIN_PROFILE").is_ok()
+}
+
+/// Check if verbose join reorder logging is enabled
+fn join_reorder_verbose() -> bool {
+    std::env::var("JOIN_REORDER_VERBOSE").is_ok()
 }
 
 /// Apply join reordering optimization to a multi-table join
@@ -66,17 +72,25 @@ where
     // Combine table names into a set for predicate analysis (normalize to lowercase)
     let table_set: HashSet<String> = table_names.iter().map(|t| t.to_lowercase()).collect();
 
-    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-        eprintln!(
-            "[JOIN_REORDER] Schema-based column mapping: {} columns resolved from {} tables",
-            column_to_table.len(),
-            table_names.len()
-        );
+    if join_reorder_verbose() {
+        DebugEvent::new(Category::Optimizer, "column_mapping", "JOIN_REORDER")
+            .text(format!(
+                "Schema-based column mapping: {} columns resolved from {} tables",
+                column_to_table.len(),
+                table_names.len()
+            ))
+            .field_int("columns_resolved", column_to_table.len() as i64)
+            .field_int("table_count", table_names.len() as i64)
+            .field_str_array("tables", &table_names)
+            .emit();
         if column_to_table.is_empty() && !table_names.is_empty() {
-            eprintln!(
-                "[JOIN_REORDER] Warning: No schema columns found for tables: {:?}",
-                table_names
-            );
+            DebugEvent::new(Category::Optimizer, "column_mapping_warning", "JOIN_REORDER")
+                .text(format!(
+                    "Warning: No schema columns found for tables: {:?}",
+                    table_names
+                ))
+                .field_str_array("tables", &table_names)
+                .emit();
         }
     }
 
@@ -95,9 +109,12 @@ where
         analyzer.analyze_predicate(where_expr, &table_set);
 
         // Debug logging
-        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-            eprintln!("[JOIN_REORDER] WHERE clause present: {:?}", where_expr);
-            eprintln!("[JOIN_REORDER] Table set: {:?}", table_set);
+        if join_reorder_verbose() {
+            DebugEvent::new(Category::Optimizer, "where_clause_analysis", "JOIN_REORDER")
+                .text(format!("WHERE clause present: {:?}", where_expr))
+                .field_bool("has_where_clause", true)
+                .field_int("table_count", table_set.len() as i64)
+                .emit();
         }
 
         // Extract equijoin conditions from WHERE clause using schema-based column resolution
@@ -107,14 +124,20 @@ where
             &column_to_table,
         );
 
-        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-            eprintln!("[JOIN_REORDER] Extracted {} WHERE equijoins", equijoins.len());
+        if join_reorder_verbose() {
+            DebugEvent::new(Category::Optimizer, "where_equijoins", "JOIN_REORDER")
+                .text(format!("Extracted {} WHERE equijoins", equijoins.len()))
+                .field_int("equijoin_count", equijoins.len() as i64)
+                .emit();
         }
 
         equijoins
     } else {
-        if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-            eprintln!("[JOIN_REORDER] No WHERE clause");
+        if join_reorder_verbose() {
+            DebugEvent::new(Category::Optimizer, "where_clause_analysis", "JOIN_REORDER")
+                .text("No WHERE clause")
+                .field_bool("has_where_clause", false)
+                .emit();
         }
         Vec::new()
     };
@@ -154,11 +177,17 @@ where
         }
     }
 
-    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() && !table_local_predicates.is_empty() {
-        eprintln!(
-            "[JOIN_REORDER] Table-local predicates: {:?}",
-            table_local_predicates.keys().collect::<Vec<_>>()
-        );
+    if join_reorder_verbose() && !table_local_predicates.is_empty() {
+        let predicate_tables: Vec<String> =
+            table_local_predicates.keys().cloned().collect();
+        DebugEvent::new(Category::Optimizer, "table_local_predicates", "JOIN_REORDER")
+            .text(format!(
+                "Table-local predicates: {:?}",
+                predicate_tables
+            ))
+            .field_str_array("tables_with_predicates", &predicate_tables)
+            .field_int("predicate_table_count", predicate_tables.len() as i64)
+            .emit();
     }
 
     // Step 6.6: Build alias-to-table mapping for cardinality estimation
@@ -184,13 +213,18 @@ where
     let optimizer_time = optimizer_start.elapsed();
 
     // Log the reordering decision (optional, for debugging)
-    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-        eprintln!("[JOIN_REORDER] Original order: {:?}", table_names);
-        eprintln!("[JOIN_REORDER] Optimal order:  {:?}", optimal_order);
-        eprintln!(
-            "[JOIN_REORDER] Join conditions (including WHERE equijoins): {}",
-            join_conditions.len()
-        );
+    if join_reorder_verbose() {
+        DebugEvent::new(Category::Optimizer, "join_order_decision", "JOIN_REORDER")
+            .text(format!(
+                "Original order: {:?}, Optimal order: {:?}",
+                table_names, optimal_order
+            ))
+            .field_str_array("original_order", &table_names)
+            .field_str_array("optimal_order", &optimal_order)
+            .field_int("join_condition_count", join_conditions.len() as i64)
+            .field_duration_us("optimizer_time_us", optimizer_time)
+            .field_bool("order_changed", table_names != optimal_order)
+            .emit();
     }
 
     // Profiling: Track times for each phase
@@ -198,7 +232,11 @@ where
     let mut scan_times: Vec<(String, std::time::Duration)> = Vec::new();
     let mut join_times: Vec<(String, std::time::Duration, usize, usize)> = Vec::new();
     if profile {
-        eprintln!("[JOIN_PROFILE] Optimizer time: {:?}", optimizer_time);
+        DebugEvent::new(Category::Execution, "optimizer_time", "JOIN_PROFILE")
+            .text(format!("Optimizer time: {:?}", optimizer_time))
+            .field_duration_us("optimizer_time_us", optimizer_time)
+            .field_duration_ms("optimizer_time_ms", optimizer_time)
+            .emit();
     }
 
     // Step 8: Build a map from table name to TableRef for easy lookup
@@ -411,31 +449,65 @@ where
 
     // Print profiling summary
     if profile {
-        eprintln!("[JOIN_PROFILE] === Multi-way JOIN Timing Breakdown ===");
         let total_scan: std::time::Duration = scan_times.iter().map(|(_, t)| *t).sum();
         let total_join: std::time::Duration = join_times.iter().map(|(_, t, _, _)| *t).sum();
-        eprintln!("[JOIN_PROFILE] Table scans ({} tables):", scan_times.len());
-        for (name, time) in &scan_times {
-            eprintln!("[JOIN_PROFILE]   {} scan: {:?}", name, time);
-        }
-        eprintln!("[JOIN_PROFILE] Total scan time: {:?}", total_scan);
-        eprintln!("[JOIN_PROFILE] Joins ({} joins):", join_times.len());
-        for (name, time, cartesian, result_rows) in &join_times {
-            eprintln!(
-                "[JOIN_PROFILE]   Join {}: {:?} (cartesian={}, result={})",
-                name, time, cartesian, result_rows
-            );
-        }
-        eprintln!("[JOIN_PROFILE] Total join time: {:?}", total_join);
-        eprintln!(
-            "[JOIN_PROFILE] Column reorder: {:?} ({} rows)",
-            reorder_time,
-            reordered_rows.len()
-        );
-        eprintln!(
-            "[JOIN_PROFILE] Grand total (scan+join+reorder): {:?}",
-            total_scan + total_join + reorder_time
-        );
+        let grand_total = total_scan + total_join + reorder_time;
+
+        // Build structured scan data for JSON
+        let scan_data: Vec<(String, JsonValue)> = scan_times
+            .iter()
+            .map(|(name, time)| {
+                (
+                    name.clone(),
+                    JsonValue::Object(vec![
+                        ("duration_us".to_string(), JsonValue::Int(time.as_micros() as i64)),
+                        ("duration_ms".to_string(), JsonValue::Number(time.as_secs_f64() * 1000.0)),
+                    ]),
+                )
+            })
+            .collect();
+
+        // Build structured join data for JSON
+        let join_data: Vec<(String, JsonValue)> = join_times
+            .iter()
+            .map(|(name, time, cartesian, result_rows)| {
+                (
+                    name.clone(),
+                    JsonValue::Object(vec![
+                        ("duration_us".to_string(), JsonValue::Int(time.as_micros() as i64)),
+                        ("duration_ms".to_string(), JsonValue::Number(time.as_secs_f64() * 1000.0)),
+                        ("cartesian_product".to_string(), JsonValue::Int(*cartesian as i64)),
+                        ("result_rows".to_string(), JsonValue::Int(*result_rows as i64)),
+                    ]),
+                )
+            })
+            .collect();
+
+        // Emit structured profiling summary
+        DebugEvent::new(Category::Execution, "join_profile_summary", "JOIN_PROFILE")
+            .text(format!(
+                "=== Multi-way JOIN Timing Breakdown ===\n\
+                 Table scans ({} tables): {:?}\n\
+                 Total join time: {:?}\n\
+                 Column reorder: {:?} ({} rows)\n\
+                 Grand total: {:?}",
+                scan_times.len(),
+                total_scan,
+                total_join,
+                reorder_time,
+                reordered_rows.len(),
+                grand_total
+            ))
+            .field_int("table_count", scan_times.len() as i64)
+            .field_int("join_count", join_times.len() as i64)
+            .field_duration_us("total_scan_time_us", total_scan)
+            .field_duration_us("total_join_time_us", total_join)
+            .field_duration_us("reorder_time_us", reorder_time)
+            .field_duration_us("grand_total_us", grand_total)
+            .field_int("result_row_count", reordered_rows.len() as i64)
+            .field("scans", JsonValue::Object(scan_data))
+            .field("joins", JsonValue::Object(join_data))
+            .emit();
     }
 
     // Build a new combined schema with tables in original order

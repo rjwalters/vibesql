@@ -1,5 +1,9 @@
 //! Performance profiling and debug utilities for understanding bottlenecks
 //!
+//! This module provides profiling infrastructure that integrates with the
+//! structured debug output system. When `VIBESQL_DEBUG_FORMAT=json`, profiling
+//! output is emitted as JSON for machine parsing.
+//!
 //! # Environment Variables
 //!
 //! ## Umbrella Debug Flag
@@ -27,6 +31,7 @@
 //! - `JOIN_PROFILE` - Join execution phase timing
 //! - `RANGE_SCAN_PROFILE` - Range scan phase timing
 
+use crate::debug_output::{self, Category, DebugEvent};
 use instant::Instant;
 use std::sync::LazyLock;
 
@@ -67,6 +72,21 @@ pub enum DebugCategory {
 // Thread-local cache for debug checks to avoid repeated env var lookups
 thread_local! {
     static SCAN_PATH_VERBOSE_ENABLED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Initialize profiling based on environment variable.
+/// Also initializes the debug output format.
+pub fn init() {
+    // Initialize debug output format first
+    debug_output::init();
+
+    // Force lazy initialization of profiling flag
+    if *PROFILING_ENABLED {
+        debug_output::debug_event(Category::Profile, "init", "PROFILE")
+            .text("Profiling enabled")
+            .field_bool("enabled", true)
+            .emit();
+    }
 }
 
 /// Check if profiling is enabled
@@ -129,12 +149,17 @@ impl Drop for ProfileTimer {
     fn drop(&mut self) {
         if self.enabled {
             let elapsed = self.start.elapsed();
-            eprintln!(
-                "[PROFILE] {} took {:.3}ms ({:.0}µs)",
-                self.label,
-                elapsed.as_secs_f64() * 1000.0,
-                elapsed.as_micros()
-            );
+            DebugEvent::new(Category::Profile, "timer", "PROFILE")
+                .text(format!(
+                    "{} took {:.3}ms ({:.0}µs)",
+                    self.label,
+                    elapsed.as_secs_f64() * 1000.0,
+                    elapsed.as_micros()
+                ))
+                .field_str("label", self.label)
+                .field_duration_ms("duration_ms", elapsed)
+                .field_duration_us("duration_us", elapsed)
+                .emit();
         }
     }
 }
