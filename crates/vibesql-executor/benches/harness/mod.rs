@@ -246,6 +246,50 @@ impl Harness {
     pub fn timeout(&self) -> Duration {
         self.config.timeout
     }
+
+    /// Get the configured number of benchmark iterations
+    pub fn iterations(&self) -> usize {
+        self.config.benchmark_iterations
+    }
+
+    /// Run a batched benchmark where each sample sets up fresh state
+    ///
+    /// This is similar to Criterion's `iter_custom` pattern where:
+    /// - `setup` is called once per sample to create fresh state
+    /// - `batch_fn` runs `iterations` operations on that state, returning total duration
+    ///
+    /// This pattern is useful for benchmarks that need fresh database state
+    /// for each measurement (e.g., insert benchmarks where IDs must be unique).
+    pub fn run_batched<S, Setup, BatchFn>(
+        &self,
+        name: &str,
+        mut setup: Setup,
+        mut batch_fn: BatchFn,
+    ) -> BenchStats
+    where
+        Setup: FnMut() -> S,
+        BatchFn: FnMut(S, usize) -> Duration,
+    {
+        // Warmup phase - run a few batches to warm up
+        for _ in 0..self.config.warmup_iterations {
+            let state = setup();
+            let _ = batch_fn(state, self.config.benchmark_iterations);
+        }
+
+        // Timed phase - each sample is one batch
+        // We collect per-operation times by dividing batch time by iteration count
+        let mut times = Vec::with_capacity(self.config.benchmark_iterations);
+
+        for _ in 0..self.config.benchmark_iterations {
+            let state = setup();
+            let batch_duration = batch_fn(state, self.config.benchmark_iterations);
+            // Store per-operation time
+            let per_op = batch_duration / self.config.benchmark_iterations as u32;
+            times.push(per_op);
+        }
+
+        BenchStats::from_times(name, times)
+    }
 }
 
 impl Default for Harness {

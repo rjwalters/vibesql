@@ -19,35 +19,33 @@
 //! This benchmark measures OLTP (Online Transaction Processing) latency performance
 //! using industry-standard sysbench-compatible workloads. It compares:
 //! - VibeSQL (native Rust API)
-//! - SQLite (via rusqlite) - requires 'benchmark-comparison' feature
-//! - DuckDB (via duckdb-rs) - requires 'benchmark-comparison' feature
+//! - SQLite (via rusqlite) - requires 'sqlite-comparison' feature
+//! - DuckDB (via duckdb-rs) - requires 'duckdb-comparison' feature
 //!
 //! All measurements are done in-memory with no Python/FFI overhead.
 //!
 //! ## MySQL Benchmarks
 //!
 //! For MySQL comparison benchmarks, use the standalone runner `sysbench_benchmark.rs`
-//! which supports MySQL via the `MYSQL_URL` environment variable. MySQL cannot be
-//! integrated into this criterion-based benchmark because MySQL's `&mut self` query
-//! API is incompatible with criterion's `iter_batched` pattern.
+//! which supports MySQL via the `MYSQL_URL` environment variable.
 //!
 //! ## Test Categories
 //!
 //! **Read Tests:**
-//! - `sysbench_point_select` - Single row lookup by primary key
+//! - `point_select` - Single row lookup by primary key
 //! - `oltp_read_only` - Full read-only transaction (10 point selects + 4 range queries)
 //! - `select_random_points` - Multiple random point selects (index lookup throughput)
 //! - `select_random_ranges` - Range queries with BETWEEN (range scan performance)
 //!
 //! **Write Tests:**
-//! - `sysbench_insert` - Single row inserts
-//! - `sysbench_delete` - Single row delete by primary key
-//! - `sysbench_update_index` - Update indexed column (k = k + 1)
-//! - `sysbench_update_non_index` - Update non-indexed column (c = ?)
-//! - `sysbench_write_only` - Write-only workload (1 index update, 1 non-index update, 1 delete, 1 insert)
+//! - `insert` - Single row inserts
+//! - `delete` - Single row delete by primary key
+//! - `update_index` - Update indexed column (k = k + 1)
+//! - `update_non_index` - Update non-indexed column (c = ?)
+//! - `write_only` - Write-only workload (1 index update, 1 non-index update, 1 delete, 1 insert)
 //!
 //! **Mixed Tests:**
-//! - `sysbench_read_write` - Mixed read/write workload (10 reads, 1 update per transaction)
+//! - `read_write` - Mixed read/write workload (10 reads, 1 update per transaction)
 //!
 //! ## Usage
 //!
@@ -55,20 +53,15 @@
 //! # Run all sysbench benchmarks (VibeSQL only)
 //! cargo bench --bench sysbench_oltp
 //!
-//! # Run with SQLite/DuckDB comparison
+//! # With comparison engines
+//! cargo bench --bench sysbench_oltp --features sqlite-comparison
+//! cargo bench --bench sysbench_oltp --features duckdb-comparison
 //! cargo bench --bench sysbench_oltp --features benchmark-comparison
 //!
-//! # Run only point select benchmarks
-//! cargo bench --bench sysbench_oltp -- point_select
-//!
-//! # Run only read-only transaction benchmarks
-//! cargo bench --bench sysbench_oltp -- oltp_read_only
-//!
-//! # Run only VibeSQL benchmarks
-//! cargo bench --bench sysbench_oltp -- vibesql
-//!
-//! # Run only write_only benchmarks
-//! cargo bench --bench sysbench_oltp -- write_only
+//! # Environment variables for configuration
+//! SYSBENCH_TABLE_SIZE=10000  # Number of rows (default: 10000)
+//! WARMUP_ITERATIONS=3        # Warmup iterations (default: 3)
+//! BENCHMARK_ITERATIONS=10    # Measurement iterations (default: 10)
 //! ```
 //!
 //! ## Table Size
@@ -80,14 +73,16 @@
 //! - [Dolt Latency Benchmarks](https://docs.dolthub.com/sql-reference/benchmarks/latency)
 //! - [sysbench GitHub](https://github.com/akopytov/sysbench)
 
+mod harness;
 mod sysbench;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use harness::{print_group_header, print_summary_table, BenchResult, Harness};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
+use std::env;
 use std::hint::black_box;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::Instant;
 use sysbench::schema::load_vibesql;
 use sysbench::SysbenchData;
 use vibesql_executor::{PreparedStatement, PreparedStatementCache, Session, SessionMut};
@@ -104,34 +99,41 @@ use sysbench::schema::load_duckdb;
 use sysbench::schema::load_sqlite;
 
 // =============================================================================
+// Configuration
+// =============================================================================
+
+/// Default table size for sysbench tests
+fn table_size() -> usize {
+    env::var("SYSBENCH_TABLE_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10_000)
+}
+
+/// Range size for range queries (sysbench default is 100)
+const RANGE_SIZE: usize = 100;
+
+/// Number of point selects in oltp_read_only transaction
+const POINT_SELECTS_PER_TXN: usize = 10;
+
+/// Number of random IDs for select_random_points benchmark
+const RANDOM_POINTS_COUNT: usize = 10;
+
+// =============================================================================
 // Prepared Statement Holder for VibeSQL
 // =============================================================================
 
 /// Pre-prepared statements for fair comparison with SQLite/DuckDB
-///
-/// SQLite and DuckDB use `prepare_cached()` which caches parsed statements.
-/// This struct holds pre-prepared statements for VibeSQL to ensure fair comparison
-/// without SQL parsing overhead in the benchmark hot path.
 struct VibesqlPreparedStatements {
-    /// SELECT c FROM sbtest1 WHERE id = ?
     point_select: Arc<PreparedStatement>,
-    /// SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?
     simple_range: Arc<PreparedStatement>,
-    /// SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?
     sum_range: Arc<PreparedStatement>,
-    /// SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c
     order_range: Arc<PreparedStatement>,
-    /// SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c
     distinct_range: Arc<PreparedStatement>,
-    /// DELETE FROM sbtest1 WHERE id = ?
     delete: Arc<PreparedStatement>,
-    /// INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)
     insert: Arc<PreparedStatement>,
-    /// UPDATE sbtest1 SET k = k + 1 WHERE id = ?
     update_index: Arc<PreparedStatement>,
-    /// UPDATE sbtest1 SET c = ? WHERE id = ?
     update_non_index: Arc<PreparedStatement>,
-    /// Shared cache for all statements
     cache: Arc<PreparedStatementCache>,
 }
 
@@ -155,7 +157,6 @@ impl VibesqlPreparedStatements {
                 .prepare("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
                 .unwrap(),
             delete: session.prepare("DELETE FROM sbtest1 WHERE id = ?").unwrap(),
-            // Note: column is named "padding" because PAD is a SQL keyword
             insert: session
                 .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)")
                 .unwrap(),
@@ -166,32 +167,15 @@ impl VibesqlPreparedStatements {
     }
 }
 
-/// Default table size for sysbench tests
-const TABLE_SIZE: usize = 10_000;
-
-/// Range size for range queries (sysbench default is 100)
-const RANGE_SIZE: usize = 100;
-
-/// Number of point selects in oltp_read_only transaction
-const POINT_SELECTS_PER_TXN: usize = 10;
-
-/// Number of random IDs for select_random_points benchmark
-const RANDOM_POINTS_COUNT: usize = 10;
-
 // =============================================================================
-// Helper Functions - VibeSQL (using prepared statements for fair comparison)
+// Helper Functions - VibeSQL
 // =============================================================================
 
-/// Execute a point select query on VibeSQL using prepared statement
-///
-/// This uses pre-prepared statements to avoid SQL parsing overhead in the hot path,
-/// providing a fair comparison with SQLite's `prepare_cached()`.
 fn vibesql_point_select(session: &Session, stmt: &PreparedStatement, id: i64) -> usize {
     let result = session.execute_prepared(stmt, &[SqlValue::Integer(id)]).unwrap();
     result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute an insert on VibeSQL using prepared statement
 fn vibesql_insert(
     session: &mut SessionMut,
     stmt: &PreparedStatement,
@@ -213,29 +197,20 @@ fn vibesql_insert(
         .unwrap();
 }
 
-/// Execute an update query on VibeSQL (update non-indexed column) using prepared statement
 fn vibesql_update_non_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, c: &str) {
     session
         .execute_prepared_mut(stmt, &[SqlValue::Varchar(arcstr::ArcStr::from(c)), SqlValue::Integer(id)])
         .unwrap();
 }
 
-/// Execute an update query on VibeSQL (update indexed column k) using prepared statement
-///
-/// This uses SQL `UPDATE sbtest1 SET k = k + 1 WHERE id = ?` through the prepared
-/// statement interface, providing a fair comparison with SQLite's `prepare_cached()`.
-///
-/// Sysbench equivalent: UPDATE sbtest1 SET k = k + 1 WHERE id = ?
 fn vibesql_update_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64) {
     session.execute_prepared_mut(stmt, &[SqlValue::Integer(id)]).unwrap();
 }
 
-/// Execute a delete query on VibeSQL using prepared statement
 fn vibesql_delete(session: &mut SessionMut, stmt: &PreparedStatement, id: i64) {
     session.execute_prepared_mut(stmt, &[SqlValue::Integer(id)]).unwrap();
 }
 
-/// Execute a simple range query on VibeSQL using prepared statement
 fn vibesql_simple_range(
     session: &Session,
     stmt: &PreparedStatement,
@@ -248,7 +223,6 @@ fn vibesql_simple_range(
     result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute a sum range query on VibeSQL using prepared statement
 fn vibesql_sum_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
     let result = session
         .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
@@ -256,7 +230,6 @@ fn vibesql_sum_range(session: &Session, stmt: &PreparedStatement, start: i64, en
     result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute an order range query on VibeSQL using prepared statement
 fn vibesql_order_range(session: &Session, stmt: &PreparedStatement, start: i64, end: i64) -> usize {
     let result = session
         .execute_prepared(stmt, &[SqlValue::Integer(start), SqlValue::Integer(end)])
@@ -264,7 +237,6 @@ fn vibesql_order_range(session: &Session, stmt: &PreparedStatement, start: i64, 
     result.rows().map(|r| r.len()).unwrap_or(0)
 }
 
-/// Execute a distinct range query on VibeSQL using prepared statement
 fn vibesql_distinct_range(
     session: &Session,
     stmt: &PreparedStatement,
@@ -281,7 +253,7 @@ fn vibesql_distinct_range(
 // Helper Functions - SQLite
 // =============================================================================
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
     let mut rows = stmt.query([id]).unwrap();
@@ -292,31 +264,31 @@ fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_insert(conn: &SqliteConn, id: i64, k: i64, c: &str, pad: &str) {
     let mut stmt = conn.prepare_cached(sysbench::INSERT_SQL_NUMBERED).unwrap();
     stmt.execute(rusqlite::params![id, k, c, pad]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_update_non_index(conn: &SqliteConn, id: i64, c: &str) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
     stmt.execute(rusqlite::params![c, id]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_update_index(conn: &SqliteConn, id: i64) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_delete(conn: &SqliteConn, id: i64) {
     let mut stmt = conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
@@ -327,7 +299,7 @@ fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
@@ -339,7 +311,7 @@ fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_order_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap();
@@ -351,7 +323,7 @@ fn sqlite_order_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite-comparison")]
 fn sqlite_distinct_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt = conn
         .prepare_cached("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
@@ -452,10 +424,9 @@ fn duckdb_distinct_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
 }
 
 // =============================================================================
-// Helper Functions for Data Generation
+// Data Generation Helpers
 // =============================================================================
 
-/// Generate a 120-char 'c' column value
 fn generate_c_string() -> String {
     let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
     let mut s = String::with_capacity(120);
@@ -470,7 +441,6 @@ fn generate_c_string() -> String {
     s
 }
 
-/// Generate a 60-char 'pad' column value
 fn generate_pad_string() -> String {
     let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
     let mut s = String::with_capacity(60);
@@ -489,695 +459,594 @@ fn generate_pad_string() -> String {
 }
 
 // =============================================================================
-// Point Select Benchmarks
+// Benchmark Implementations
 // =============================================================================
 
-/// Benchmark oltp_point_select on VibeSQL using prepared statements
-///
-/// This test measures single-row lookup by primary key, which is the most
-/// common OLTP operation. It tests index lookup performance.
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_point_select_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_point_select");
-    group.measurement_time(Duration::from_secs(10));
+fn run_point_select_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-    let db = load_vibesql(TABLE_SIZE);
-    let stmts = VibesqlPreparedStatements::new(&db);
-    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
-    let mut rng = ChaCha8Rng::seed_from_u64(42);
+    // VibeSQL
+    {
+        let db = load_vibesql(tbl_size);
+        let stmts = VibesqlPreparedStatements::new(&db);
+        let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
-            black_box(vibesql_point_select(&session, &stmts.point_select, id))
-        })
-    });
+        let stats = harness.run("vibesql", || {
+            let id = rng.random_range(1..=tbl_size as i64);
+            let start = Instant::now();
+            black_box(vibesql_point_select(&session, &stmts.point_select, id));
+            BenchResult::Ok(start.elapsed())
+        });
+        results.push(stats);
+    }
 
-    group.finish();
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let conn = load_sqlite(tbl_size);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        let stats = harness.run("sqlite", || {
+            let id = rng.random_range(1..=tbl_size as i64);
+            let start = Instant::now();
+            black_box(sqlite_point_select(&conn, id));
+            BenchResult::Ok(start.elapsed())
+        });
+        results.push(stats);
+    }
+
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let conn = load_duckdb(tbl_size);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        let stats = harness.run("duckdb", || {
+            let id = rng.random_range(1..=tbl_size as i64);
+            let start = Instant::now();
+            black_box(duckdb_point_select(&conn, id));
+            BenchResult::Ok(start.elapsed())
+        });
+        results.push(stats);
+    }
+
+    results
 }
 
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_point_select_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_point_select");
-    group.measurement_time(Duration::from_secs(10));
+fn run_insert_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-    let conn = load_sqlite(TABLE_SIZE);
-    let mut rng = ChaCha8Rng::seed_from_u64(42);
+    // VibeSQL - uses batched pattern because we need fresh DB state
+    {
+        let stats = harness.run_batched(
+            "vibesql",
+            || {
+                let db = load_vibesql(tbl_size);
+                let stmts = VibesqlPreparedStatements::new(&db);
+                (db, stmts, SysbenchData::new(tbl_size), (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (mut db, stmts, mut data_gen, mut next_id) = state;
+                let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
 
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
-            black_box(sqlite_point_select(&conn, id))
-        })
-    });
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let k = data_gen.random_k();
+                    let c = generate_c_string();
+                    let pad = generate_pad_string();
+                    vibesql_insert(&mut session, &stmts.insert, next_id, k, &c, &pad);
+                    next_id += 1;
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
 
-    group.finish();
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let stats = harness.run_batched(
+            "sqlite",
+            || {
+                let conn = load_sqlite(tbl_size);
+                (conn, SysbenchData::new(tbl_size), (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (conn, mut data_gen, mut next_id) = state;
+
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let k = data_gen.random_k();
+                    let c = generate_c_string();
+                    let pad = generate_pad_string();
+                    sqlite_insert(&conn, next_id, k, &c, &pad);
+                    next_id += 1;
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let stats = harness.run_batched(
+            "duckdb",
+            || {
+                let conn = load_duckdb(tbl_size);
+                (conn, SysbenchData::new(tbl_size), (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (conn, mut data_gen, mut next_id) = state;
+
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let k = data_gen.random_k();
+                    let c = generate_c_string();
+                    let pad = generate_pad_string();
+                    duckdb_insert(&conn, next_id, k, &c, &pad);
+                    next_id += 1;
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    results
 }
 
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_point_select_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_point_select");
-    group.measurement_time(Duration::from_secs(10));
+fn run_delete_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-    let conn = load_duckdb(TABLE_SIZE);
-    let mut rng = ChaCha8Rng::seed_from_u64(42);
+    // VibeSQL
+    {
+        let stats = harness.run_batched(
+            "vibesql",
+            || {
+                let db = load_vibesql(tbl_size);
+                let stmts = VibesqlPreparedStatements::new(&db);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                let data_gen = SysbenchData::new(tbl_size);
+                (db, stmts, rng, data_gen, (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (mut db, stmts, mut rng, mut data_gen, mut next_id) = state;
+                let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
 
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
-            black_box(duckdb_point_select(&conn, id))
-        })
-    });
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let delete_id = rng.random_range(1..=next_id - 1);
+                    vibesql_delete(&mut session, &stmts.delete, delete_id);
 
-    group.finish();
+                    // Re-insert to maintain table size
+                    let k = data_gen.random_k();
+                    let c = generate_c_string();
+                    let pad = generate_pad_string();
+                    vibesql_insert(&mut session, &stmts.insert, next_id, k, &c, &pad);
+                    next_id += 1;
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let stats = harness.run_batched(
+            "sqlite",
+            || {
+                let conn = load_sqlite(tbl_size);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                let data_gen = SysbenchData::new(tbl_size);
+                (conn, rng, data_gen, (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (conn, mut rng, mut data_gen, mut next_id) = state;
+
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let delete_id = rng.random_range(1..=next_id - 1);
+                    sqlite_delete(&conn, delete_id);
+
+                    let k = data_gen.random_k();
+                    let c = generate_c_string();
+                    let pad = generate_pad_string();
+                    sqlite_insert(&conn, next_id, k, &c, &pad);
+                    next_id += 1;
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let stats = harness.run_batched(
+            "duckdb",
+            || {
+                let conn = load_duckdb(tbl_size);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                let data_gen = SysbenchData::new(tbl_size);
+                (conn, rng, data_gen, (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (conn, mut rng, mut data_gen, mut next_id) = state;
+
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let delete_id = rng.random_range(1..=next_id - 1);
+                    duckdb_delete(&conn, delete_id);
+
+                    let k = data_gen.random_k();
+                    let c = generate_c_string();
+                    let pad = generate_pad_string();
+                    duckdb_insert(&conn, next_id, k, &c, &pad);
+                    next_id += 1;
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    results
 }
 
-// =============================================================================
-// Insert Benchmarks
-// =============================================================================
+fn run_update_index_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-/// Benchmark oltp_insert on VibeSQL using prepared statements
-///
-/// This test measures single-row insert performance. Each iteration inserts
-/// a new row with a unique ID.
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_insert_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_insert");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    // We need a fresh database for each benchmark run to avoid duplicate key errors
-    // So we use iter_custom to set up a new database for each measurement batch
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let mut db = load_vibesql(TABLE_SIZE);
-            let stmts = VibesqlPreparedStatements::new(&db);
-            let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let k = data_gen.random_k();
-                let c = generate_c_string();
-                let pad = generate_pad_string();
-                vibesql_insert(&mut session, &stmts.insert, next_id, k, &c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_insert_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_insert");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_sqlite(TABLE_SIZE);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let k = data_gen.random_k();
-                let c = generate_c_string();
-                let pad = generate_pad_string();
-                sqlite_insert(&conn, next_id, k, &c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_insert_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_insert");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_duckdb(TABLE_SIZE);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let k = data_gen.random_k();
-                let c = generate_c_string();
-                let pad = generate_pad_string();
-                duckdb_insert(&conn, next_id, k, &c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-// =============================================================================
-// Delete Benchmarks
-// =============================================================================
-
-/// Benchmark oltp_delete on VibeSQL using prepared statements
-///
-/// This test measures DELETE by primary key performance. Uses iter_custom
-/// to load the database once and perform multiple deletes, avoiding the overhead
-/// of database loading in the measurement.
-///
-/// Sysbench equivalent: DELETE FROM sbtest1 WHERE id = ?
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_delete_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_delete");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let mut db = load_vibesql(TABLE_SIZE);
-            let stmts = VibesqlPreparedStatements::new(&db);
-            let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-
-            // Track which IDs have been deleted to avoid deleting the same row twice
-            // and to re-insert deleted rows to maintain table size
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // Delete a random existing row
-                let delete_id = rng.random_range(1..=next_id - 1);
-                vibesql_delete(&mut session, &stmts.delete, delete_id);
-
-                // Re-insert a row to maintain table size (like sysbench does)
-                let k = data_gen.random_k();
-                let c = generate_c_string();
-                let pad = generate_pad_string();
-                vibesql_insert(&mut session, &stmts.insert, next_id, k, &c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_delete_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_delete");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_sqlite(TABLE_SIZE);
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // Delete a random existing row
-                let delete_id = rng.random_range(1..=next_id - 1);
-                sqlite_delete(&conn, delete_id);
-
-                // Re-insert a row to maintain table size (like sysbench does)
-                let k = data_gen.random_k();
-                let c = generate_c_string();
-                let pad = generate_pad_string();
-                sqlite_insert(&conn, next_id, k, &c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_delete_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_delete");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_duckdb(TABLE_SIZE);
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // Delete a random existing row
-                let delete_id = rng.random_range(1..=next_id - 1);
-                duckdb_delete(&conn, delete_id);
-
-                // Re-insert a row to maintain table size (like sysbench does)
-                let k = data_gen.random_k();
-                let c = generate_c_string();
-                let pad = generate_pad_string();
-                duckdb_insert(&conn, next_id, k, &c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-// =============================================================================
-// Update Index Benchmarks
-// =============================================================================
-
-/// Benchmark oltp_update_index on VibeSQL
-///
-/// This test measures UPDATE performance on an indexed column (k).
-/// Tests index maintenance overhead since k has a secondary index.
-///
-/// Sysbench equivalent: UPDATE sbtest1 SET k = k + 1 WHERE id = ?
-fn benchmark_update_index_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_update_index");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        let mut db = load_vibesql(TABLE_SIZE);
+    // VibeSQL
+    {
+        let mut db = load_vibesql(tbl_size);
         let stmts = VibesqlPreparedStatements::new(&db);
         let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
+        let stats = harness.run("vibesql", || {
+            let id = rng.random_range(1..=tbl_size as i64);
+            let start = Instant::now();
             vibesql_update_index(&mut session, &stmts.update_index, id);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_update_index_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_update_index");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        let conn = load_sqlite(TABLE_SIZE);
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let conn = load_sqlite(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
+        let stats = harness.run("sqlite", || {
+            let id = rng.random_range(1..=tbl_size as i64);
+            let start = Instant::now();
             sqlite_update_index(&conn, id);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_update_index_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_update_index");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        let conn = load_duckdb(TABLE_SIZE);
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let conn = load_duckdb(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
+        let stats = harness.run("duckdb", || {
+            let id = rng.random_range(1..=tbl_size as i64);
+            let start = Instant::now();
             duckdb_update_index(&conn, id);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
+    results
 }
 
-// =============================================================================
-// Update Non-Index Benchmarks
-// =============================================================================
+fn run_update_non_index_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-/// Benchmark oltp_update_non_index on VibeSQL using prepared statements
-///
-/// This test measures UPDATE performance on a non-indexed column (c).
-/// This avoids index maintenance overhead, measuring pure row update performance.
-///
-/// Sysbench equivalent: UPDATE sbtest1 SET c = ? WHERE id = ?
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_update_non_index_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_update_non_index");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        let mut db = load_vibesql(TABLE_SIZE);
+    // VibeSQL
+    {
+        let mut db = load_vibesql(tbl_size);
         let stmts = VibesqlPreparedStatements::new(&db);
         let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
+        let stats = harness.run("vibesql", || {
+            let id = rng.random_range(1..=tbl_size as i64);
             let c = generate_c_string();
+            let start = Instant::now();
             vibesql_update_non_index(&mut session, &stmts.update_non_index, id, &c);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_update_non_index_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_update_non_index");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        let conn = load_sqlite(TABLE_SIZE);
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let conn = load_sqlite(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
+        let stats = harness.run("sqlite", || {
+            let id = rng.random_range(1..=tbl_size as i64);
             let c = generate_c_string();
+            let start = Instant::now();
             sqlite_update_non_index(&conn, id, &c);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_update_non_index_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_update_non_index");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        let conn = load_duckdb(TABLE_SIZE);
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let conn = load_duckdb(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
-        b.iter(|| {
-            let id = rng.random_range(1..=TABLE_SIZE as i64);
+        let stats = harness.run("duckdb", || {
+            let id = rng.random_range(1..=tbl_size as i64);
             let c = generate_c_string();
+            let start = Instant::now();
             duckdb_update_non_index(&conn, id, &c);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
+    results
 }
 
-// =============================================================================
-// Write-Only Benchmarks
-// =============================================================================
+fn run_write_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-/// Benchmark oltp_write_only on VibeSQL using prepared statements
-///
-/// This test simulates a write-heavy OLTP workload per transaction:
-/// - 1 index update (UPDATE sbtest1 SET k = k + 1 WHERE id = ?)
-/// - 1 non-index update (UPDATE sbtest1 SET c = ? WHERE id = ?)
-/// - 1 delete (DELETE FROM sbtest1 WHERE id = ?)
-/// - 1 insert (INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?))
-///
-/// The delete uses a random existing ID, the insert uses a new ID.
-/// This measures write throughput without read operations.
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_write_only_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_write_only");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
+    // VibeSQL
+    {
+        let stats = harness.run_batched(
+            "vibesql",
+            || {
+                let db = load_vibesql(tbl_size);
+                let stmts = VibesqlPreparedStatements::new(&db);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                let data_gen = SysbenchData::new(tbl_size);
+                (db, stmts, rng, data_gen, (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (mut db, stmts, mut rng, mut data_gen, mut next_id) = state;
+                let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
 
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let mut db = load_vibesql(TABLE_SIZE);
-            let stmts = VibesqlPreparedStatements::new(&db);
-            let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let update_id = rng.random_range(1..=tbl_size as i64);
 
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // Pick a random ID for updates
-                let update_id = rng.random_range(1..=TABLE_SIZE as i64);
+                    // 1 index update
+                    vibesql_update_index(&mut session, &stmts.update_index, update_id);
 
-                // 1 index update (SET k = k + 1)
-                vibesql_update_index(&mut session, &stmts.update_index, update_id);
+                    // 1 non-index update
+                    let c = generate_c_string();
+                    vibesql_update_non_index(&mut session, &stmts.update_non_index, update_id, &c);
 
-                // 1 non-index update (SET c = ?)
-                let c = generate_c_string();
-                vibesql_update_non_index(&mut session, &stmts.update_non_index, update_id, &c);
+                    // 1 delete
+                    let delete_id = rng.random_range(1..=next_id - 1);
+                    vibesql_delete(&mut session, &stmts.delete, delete_id);
 
-                // 1 delete (random existing row)
-                let delete_id = rng.random_range(1..=next_id - 1);
-                vibesql_delete(&mut session, &stmts.delete, delete_id);
-
-                // 1 insert (new row with new ID)
-                let k = data_gen.random_k();
-                let new_c = generate_c_string();
-                let pad = generate_pad_string();
-                vibesql_insert(&mut session, &stmts.insert, next_id, k, &new_c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_write_only_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_write_only");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_sqlite(TABLE_SIZE);
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // Pick a random ID for updates
-                let update_id = rng.random_range(1..=TABLE_SIZE as i64);
-
-                // 1 index update (SET k = k + 1)
-                sqlite_update_index(&conn, update_id);
-
-                // 1 non-index update (SET c = ?)
-                let c = generate_c_string();
-                sqlite_update_non_index(&conn, update_id, &c);
-
-                // 1 delete (random existing row)
-                let delete_id = rng.random_range(1..=next_id - 1);
-                sqlite_delete(&conn, delete_id);
-
-                // 1 insert (new row with new ID)
-                let k = data_gen.random_k();
-                let new_c = generate_c_string();
-                let pad = generate_pad_string();
-                sqlite_insert(&conn, next_id, k, &new_c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_write_only_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_write_only");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_duckdb(TABLE_SIZE);
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-            let mut data_gen = SysbenchData::new(TABLE_SIZE);
-            let mut next_id = (TABLE_SIZE + 1) as i64;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // Pick a random ID for updates
-                let update_id = rng.random_range(1..=TABLE_SIZE as i64);
-
-                // 1 index update (SET k = k + 1)
-                duckdb_update_index(&conn, update_id);
-
-                // 1 non-index update (SET c = ?)
-                let c = generate_c_string();
-                duckdb_update_non_index(&conn, update_id, &c);
-
-                // 1 delete (random existing row)
-                let delete_id = rng.random_range(1..=next_id - 1);
-                duckdb_delete(&conn, delete_id);
-
-                // 1 insert (new row with new ID)
-                let k = data_gen.random_k();
-                let new_c = generate_c_string();
-                let pad = generate_pad_string();
-                duckdb_insert(&conn, next_id, k, &new_c, &pad);
-                next_id += 1;
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
-}
-
-// =============================================================================
-// Read-Write Mixed Workload Benchmarks
-// =============================================================================
-
-/// Benchmark oltp_read_write on VibeSQL using prepared statements
-///
-/// This test simulates a mixed OLTP workload with:
-/// - 10 point select queries
-/// - 1 update (non-indexed column)
-///
-/// This ratio is based on typical OLTP workloads where reads dominate.
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_read_write_vibesql(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_read_write");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
-
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let mut db = load_vibesql(TABLE_SIZE);
-            let stmts = VibesqlPreparedStatements::new(&db);
-            let mut session_mut = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // 10 point selects (use read-only session via database reference)
-                for _ in 0..10 {
-                    let id = rng.random_range(1..=TABLE_SIZE as i64);
-                    let read_session = Session::with_shared_cache(
-                        session_mut.database(),
-                        Arc::clone(&stmts.cache),
-                    );
-                    black_box(vibesql_point_select(&read_session, &stmts.point_select, id));
+                    // 1 insert
+                    let k = data_gen.random_k();
+                    let new_c = generate_c_string();
+                    let pad = generate_pad_string();
+                    vibesql_insert(&mut session, &stmts.insert, next_id, k, &new_c, &pad);
+                    next_id += 1;
                 }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
 
-                // 1 update (non-indexed column)
-                let id = rng.random_range(1..=TABLE_SIZE as i64);
-                let c = generate_c_string();
-                vibesql_update_non_index(&mut session_mut, &stmts.update_non_index, id, &c);
-            }
-            start.elapsed()
-        })
-    });
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let stats = harness.run_batched(
+            "sqlite",
+            || {
+                let conn = load_sqlite(tbl_size);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                let data_gen = SysbenchData::new(tbl_size);
+                (conn, rng, data_gen, (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (conn, mut rng, mut data_gen, mut next_id) = state;
 
-    group.finish();
-}
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let update_id = rng.random_range(1..=tbl_size as i64);
 
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_read_write_sqlite(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_read_write");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
+                    sqlite_update_index(&conn, update_id);
 
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_sqlite(TABLE_SIZE);
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
+                    let c = generate_c_string();
+                    sqlite_update_non_index(&conn, update_id, &c);
 
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // 10 point selects
-                for _ in 0..10 {
-                    let id = rng.random_range(1..=TABLE_SIZE as i64);
-                    black_box(sqlite_point_select(&conn, id));
+                    let delete_id = rng.random_range(1..=next_id - 1);
+                    sqlite_delete(&conn, delete_id);
+
+                    let k = data_gen.random_k();
+                    let new_c = generate_c_string();
+                    let pad = generate_pad_string();
+                    sqlite_insert(&conn, next_id, k, &new_c, &pad);
+                    next_id += 1;
                 }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
 
-                // 1 update (non-indexed column)
-                let id = rng.random_range(1..=TABLE_SIZE as i64);
-                let c = generate_c_string();
-                sqlite_update_non_index(&conn, id, &c);
-            }
-            start.elapsed()
-        })
-    });
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let stats = harness.run_batched(
+            "duckdb",
+            || {
+                let conn = load_duckdb(tbl_size);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                let data_gen = SysbenchData::new(tbl_size);
+                (conn, rng, data_gen, (tbl_size + 1) as i64)
+            },
+            |state, batch_iters| {
+                let (conn, mut rng, mut data_gen, mut next_id) = state;
 
-    group.finish();
-}
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    let update_id = rng.random_range(1..=tbl_size as i64);
 
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_read_write_duckdb(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sysbench_read_write");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
+                    duckdb_update_index(&conn, update_id);
 
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter_custom(|iters| {
-            let conn = load_duckdb(TABLE_SIZE);
-            let mut rng = ChaCha8Rng::seed_from_u64(42);
+                    let c = generate_c_string();
+                    duckdb_update_non_index(&conn, update_id, &c);
 
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                // 10 point selects
-                for _ in 0..10 {
-                    let id = rng.random_range(1..=TABLE_SIZE as i64);
-                    black_box(duckdb_point_select(&conn, id));
+                    let delete_id = rng.random_range(1..=next_id - 1);
+                    duckdb_delete(&conn, delete_id);
+
+                    let k = data_gen.random_k();
+                    let new_c = generate_c_string();
+                    let pad = generate_pad_string();
+                    duckdb_insert(&conn, next_id, k, &new_c, &pad);
+                    next_id += 1;
                 }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
 
-                // 1 update (non-indexed column)
-                let id = rng.random_range(1..=TABLE_SIZE as i64);
-                let c = generate_c_string();
-                duckdb_update_non_index(&conn, id, &c);
-            }
-            start.elapsed()
-        })
-    });
-
-    group.finish();
+    results
 }
 
-// =============================================================================
-// oltp_read_only Benchmark
-// =============================================================================
+fn run_read_write_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-/// Standard sysbench read-only transaction using prepared statements:
-/// - 10 point selects
-/// - 1 simple range query
-/// - 1 sum range query
-/// - 1 order range query
-/// - 1 distinct range query
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_oltp_read_only_vibesql(c: &mut Criterion) {
-    let db = load_vibesql(TABLE_SIZE);
-    let stmts = VibesqlPreparedStatements::new(&db);
-    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
-    let mut data = SysbenchData::new(TABLE_SIZE);
+    // VibeSQL
+    {
+        let stats = harness.run_batched(
+            "vibesql",
+            || {
+                let db = load_vibesql(tbl_size);
+                let stmts = VibesqlPreparedStatements::new(&db);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                (db, stmts, rng)
+            },
+            |state, batch_iters| {
+                let (mut db, stmts, mut rng) = state;
+                let mut session_mut = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
 
-    let mut group = c.benchmark_group("oltp_read_only");
-    group.measurement_time(Duration::from_secs(10));
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    // 10 point selects
+                    for _ in 0..10 {
+                        let id = rng.random_range(1..=tbl_size as i64);
+                        let read_session = Session::with_shared_cache(
+                            session_mut.database(),
+                            Arc::clone(&stmts.cache),
+                        );
+                        black_box(vibesql_point_select(&read_session, &stmts.point_select, id));
+                    }
 
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter(|| {
+                    // 1 update
+                    let id = rng.random_range(1..=tbl_size as i64);
+                    let c = generate_c_string();
+                    vibesql_update_non_index(&mut session_mut, &stmts.update_non_index, id, &c);
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let stats = harness.run_batched(
+            "sqlite",
+            || {
+                let conn = load_sqlite(tbl_size);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                (conn, rng)
+            },
+            |state, batch_iters| {
+                let (conn, mut rng) = state;
+
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    for _ in 0..10 {
+                        let id = rng.random_range(1..=tbl_size as i64);
+                        black_box(sqlite_point_select(&conn, id));
+                    }
+
+                    let id = rng.random_range(1..=tbl_size as i64);
+                    let c = generate_c_string();
+                    sqlite_update_non_index(&conn, id, &c);
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let stats = harness.run_batched(
+            "duckdb",
+            || {
+                let conn = load_duckdb(tbl_size);
+                let rng = ChaCha8Rng::seed_from_u64(42);
+                (conn, rng)
+            },
+            |state, batch_iters| {
+                let (conn, mut rng) = state;
+
+                let start = Instant::now();
+                for _ in 0..batch_iters {
+                    for _ in 0..10 {
+                        let id = rng.random_range(1..=tbl_size as i64);
+                        black_box(duckdb_point_select(&conn, id));
+                    }
+
+                    let id = rng.random_range(1..=tbl_size as i64);
+                    let c = generate_c_string();
+                    duckdb_update_non_index(&conn, id, &c);
+                }
+                start.elapsed()
+            },
+        );
+        results.push(stats);
+    }
+
+    results
+}
+
+fn run_oltp_read_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
+
+    // VibeSQL
+    {
+        let db = load_vibesql(tbl_size);
+        let stmts = VibesqlPreparedStatements::new(&db);
+        let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
+        let mut data = SysbenchData::new(tbl_size);
+
+        let stats = harness.run("vibesql", || {
+            let start = Instant::now();
             let mut total = 0;
 
             // 10 point selects
@@ -1186,330 +1055,276 @@ fn benchmark_oltp_read_only_vibesql(c: &mut Criterion) {
                 total += vibesql_point_select(&session, &stmts.point_select, id);
             }
 
-            // 1 simple range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_simple_range(&session, &stmts.simple_range, start, end);
+            // 1 simple range
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += vibesql_simple_range(&session, &stmts.simple_range, s, e);
 
-            // 1 sum range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_sum_range(&session, &stmts.sum_range, start, end);
+            // 1 sum range
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += vibesql_sum_range(&session, &stmts.sum_range, s, e);
 
-            // 1 order range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_order_range(&session, &stmts.order_range, start, end);
+            // 1 order range
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += vibesql_order_range(&session, &stmts.order_range, s, e);
 
-            // 1 distinct range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += vibesql_distinct_range(&session, &stmts.distinct_range, start, end);
+            // 1 distinct range
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += vibesql_distinct_range(&session, &stmts.distinct_range, s, e);
 
             black_box(total);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let conn = load_sqlite(tbl_size);
+        let mut data = SysbenchData::new(tbl_size);
 
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_oltp_read_only_sqlite(c: &mut Criterion) {
-    let conn = load_sqlite(TABLE_SIZE);
-    let mut data = SysbenchData::new(TABLE_SIZE);
-
-    let mut group = c.benchmark_group("oltp_read_only");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter(|| {
+        let stats = harness.run("sqlite", || {
+            let start = Instant::now();
             let mut total = 0;
 
-            // 10 point selects
             let ids = data.random_ids(POINT_SELECTS_PER_TXN);
             for id in ids {
                 total += sqlite_point_select(&conn, id);
             }
 
-            // 1 simple range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += sqlite_simple_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += sqlite_simple_range(&conn, s, e);
 
-            // 1 sum range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += sqlite_sum_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += sqlite_sum_range(&conn, s, e);
 
-            // 1 order range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += sqlite_order_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += sqlite_order_range(&conn, s, e);
 
-            // 1 distinct range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += sqlite_distinct_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += sqlite_distinct_range(&conn, s, e);
 
             black_box(total);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let conn = load_duckdb(tbl_size);
+        let mut data = SysbenchData::new(tbl_size);
 
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_oltp_read_only_duckdb(c: &mut Criterion) {
-    let conn = load_duckdb(TABLE_SIZE);
-    let mut data = SysbenchData::new(TABLE_SIZE);
-
-    let mut group = c.benchmark_group("oltp_read_only");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter(|| {
+        let stats = harness.run("duckdb", || {
+            let start = Instant::now();
             let mut total = 0;
 
-            // 10 point selects
             let ids = data.random_ids(POINT_SELECTS_PER_TXN);
             for id in ids {
                 total += duckdb_point_select(&conn, id);
             }
 
-            // 1 simple range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += duckdb_simple_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += duckdb_simple_range(&conn, s, e);
 
-            // 1 sum range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += duckdb_sum_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += duckdb_sum_range(&conn, s, e);
 
-            // 1 order range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += duckdb_order_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += duckdb_order_range(&conn, s, e);
 
-            // 1 distinct range query
-            let (start, end) = data.random_range(RANGE_SIZE);
-            total += duckdb_distinct_range(&conn, start, end);
+            let (s, e) = data.random_range(RANGE_SIZE);
+            total += duckdb_distinct_range(&conn, s, e);
 
             black_box(total);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
+    results
 }
 
-// =============================================================================
-// select_random_points Benchmark (NEW)
-// =============================================================================
+fn run_select_random_points_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
 
-/// Multiple random point selects - tests index lookup throughput.
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_select_random_points_vibesql(c: &mut Criterion) {
-    let db = load_vibesql(TABLE_SIZE);
-    let stmts = VibesqlPreparedStatements::new(&db);
-    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
-    let mut data = SysbenchData::new(TABLE_SIZE);
+    // VibeSQL
+    {
+        let db = load_vibesql(tbl_size);
+        let stmts = VibesqlPreparedStatements::new(&db);
+        let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
+        let mut data = SysbenchData::new(tbl_size);
 
-    let mut group = c.benchmark_group("select_random_points");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter(|| {
+        let stats = harness.run("vibesql", || {
+            let start = Instant::now();
             let ids = data.random_ids(RANDOM_POINTS_COUNT);
             let mut total = 0;
             for id in ids {
                 total += vibesql_point_select(&session, &stmts.point_select, id);
             }
             black_box(total);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let conn = load_sqlite(tbl_size);
+        let mut data = SysbenchData::new(tbl_size);
 
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_select_random_points_sqlite(c: &mut Criterion) {
-    let conn = load_sqlite(TABLE_SIZE);
-    let mut data = SysbenchData::new(TABLE_SIZE);
-
-    let mut group = c.benchmark_group("select_random_points");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter(|| {
+        let stats = harness.run("sqlite", || {
+            let start = Instant::now();
             let ids = data.random_ids(RANDOM_POINTS_COUNT);
             let mut total = 0;
             for id in ids {
                 total += sqlite_point_select(&conn, id);
             }
             black_box(total);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
-}
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let conn = load_duckdb(tbl_size);
+        let mut data = SysbenchData::new(tbl_size);
 
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_select_random_points_duckdb(c: &mut Criterion) {
-    let conn = load_duckdb(TABLE_SIZE);
-    let mut data = SysbenchData::new(TABLE_SIZE);
-
-    let mut group = c.benchmark_group("select_random_points");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter(|| {
+        let stats = harness.run("duckdb", || {
+            let start = Instant::now();
             let ids = data.random_ids(RANDOM_POINTS_COUNT);
             let mut total = 0;
             for id in ids {
                 total += duckdb_point_select(&conn, id);
             }
             black_box(total);
+            BenchResult::Ok(start.elapsed())
         });
-    });
+        results.push(stats);
+    }
 
-    group.finish();
+    results
+}
+
+fn run_select_random_ranges_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+    let mut results = Vec::new();
+
+    // VibeSQL
+    {
+        let db = load_vibesql(tbl_size);
+        let stmts = VibesqlPreparedStatements::new(&db);
+        let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
+        let mut data = SysbenchData::new(tbl_size);
+
+        let stats = harness.run("vibesql", || {
+            let start = Instant::now();
+            let (s, e) = data.random_range(RANGE_SIZE);
+            black_box(vibesql_simple_range(&session, &stmts.simple_range, s, e));
+            BenchResult::Ok(start.elapsed())
+        });
+        results.push(stats);
+    }
+
+    // SQLite
+    #[cfg(feature = "sqlite-comparison")]
+    {
+        let conn = load_sqlite(tbl_size);
+        let mut data = SysbenchData::new(tbl_size);
+
+        let stats = harness.run("sqlite", || {
+            let start = Instant::now();
+            let (s, e) = data.random_range(RANGE_SIZE);
+            black_box(sqlite_simple_range(&conn, s, e));
+            BenchResult::Ok(start.elapsed())
+        });
+        results.push(stats);
+    }
+
+    // DuckDB
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        let conn = load_duckdb(tbl_size);
+        let mut data = SysbenchData::new(tbl_size);
+
+        let stats = harness.run("duckdb", || {
+            let start = Instant::now();
+            let (s, e) = data.random_range(RANGE_SIZE);
+            black_box(duckdb_simple_range(&conn, s, e));
+            BenchResult::Ok(start.elapsed())
+        });
+        results.push(stats);
+    }
+
+    results
 }
 
 // =============================================================================
-// select_random_ranges Benchmark (NEW)
+// Main Entry Point
 // =============================================================================
 
-/// Range queries with BETWEEN clause - tests range scan performance.
-///
-/// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
-fn benchmark_select_random_ranges_vibesql(c: &mut Criterion) {
-    let db = load_vibesql(TABLE_SIZE);
-    let stmts = VibesqlPreparedStatements::new(&db);
-    let session = Session::with_shared_cache(&db, Arc::clone(&stmts.cache));
-    let mut data = SysbenchData::new(TABLE_SIZE);
+fn main() {
+    let tbl_size = table_size();
+    let harness = Harness::new();
 
-    let mut group = c.benchmark_group("select_random_ranges");
-    group.measurement_time(Duration::from_secs(10));
+    eprintln!("=== Sysbench OLTP Benchmark Suite ===");
+    eprintln!("Table size: {} rows", tbl_size);
+    eprintln!("Warmup iterations: {}", harness::DEFAULT_WARMUP_ITERATIONS);
+    eprintln!("Benchmark iterations: {}", harness::DEFAULT_BENCHMARK_ITERATIONS);
+    eprintln!();
 
-    group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let (start, end) = data.random_range(RANGE_SIZE);
-            black_box(vibesql_simple_range(&session, &stmts.simple_range, start, end));
-        });
-    });
+    // Point Select
+    print_group_header("point_select");
+    let results = run_point_select_benchmarks(&harness, tbl_size);
+    print_summary_table("point_select", &results);
 
-    group.finish();
+    // Insert
+    print_group_header("insert");
+    let results = run_insert_benchmarks(&harness, tbl_size);
+    print_summary_table("insert", &results);
+
+    // Delete
+    print_group_header("delete");
+    let results = run_delete_benchmarks(&harness, tbl_size);
+    print_summary_table("delete", &results);
+
+    // Update Index
+    print_group_header("update_index");
+    let results = run_update_index_benchmarks(&harness, tbl_size);
+    print_summary_table("update_index", &results);
+
+    // Update Non-Index
+    print_group_header("update_non_index");
+    let results = run_update_non_index_benchmarks(&harness, tbl_size);
+    print_summary_table("update_non_index", &results);
+
+    // Write-Only
+    print_group_header("write_only");
+    let results = run_write_only_benchmarks(&harness, tbl_size);
+    print_summary_table("write_only", &results);
+
+    // Read-Write
+    print_group_header("read_write");
+    let results = run_read_write_benchmarks(&harness, tbl_size);
+    print_summary_table("read_write", &results);
+
+    // OLTP Read-Only
+    print_group_header("oltp_read_only");
+    let results = run_oltp_read_only_benchmarks(&harness, tbl_size);
+    print_summary_table("oltp_read_only", &results);
+
+    // Select Random Points
+    print_group_header("select_random_points");
+    let results = run_select_random_points_benchmarks(&harness, tbl_size);
+    print_summary_table("select_random_points", &results);
+
+    // Select Random Ranges
+    print_group_header("select_random_ranges");
+    let results = run_select_random_ranges_benchmarks(&harness, tbl_size);
+    print_summary_table("select_random_ranges", &results);
+
+    eprintln!("\n=== Benchmark Complete ===");
 }
-
-#[cfg(feature = "benchmark-comparison")]
-fn benchmark_select_random_ranges_sqlite(c: &mut Criterion) {
-    let conn = load_sqlite(TABLE_SIZE);
-    let mut data = SysbenchData::new(TABLE_SIZE);
-
-    let mut group = c.benchmark_group("select_random_ranges");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let (start, end) = data.random_range(RANGE_SIZE);
-            black_box(sqlite_simple_range(&conn, start, end));
-        });
-    });
-
-    group.finish();
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn benchmark_select_random_ranges_duckdb(c: &mut Criterion) {
-    let conn = load_duckdb(TABLE_SIZE);
-    let mut data = SysbenchData::new(TABLE_SIZE);
-
-    let mut group = c.benchmark_group("select_random_ranges");
-    group.measurement_time(Duration::from_secs(10));
-
-    group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter(|| {
-            let (start, end) = data.random_range(RANGE_SIZE);
-            black_box(duckdb_simple_range(&conn, start, end));
-        });
-    });
-
-    group.finish();
-}
-
-// =============================================================================
-// Criterion Benchmark Groups
-// =============================================================================
-
-// Case 1: No comparison features - VibeSQL only
-#[cfg(not(feature = "sqlite-comparison"))]
-criterion_group!(
-    benches,
-    benchmark_point_select_vibesql,
-    benchmark_insert_vibesql,
-    benchmark_delete_vibesql,
-    benchmark_update_index_vibesql,
-    benchmark_update_non_index_vibesql,
-    benchmark_write_only_vibesql,
-    benchmark_read_write_vibesql,
-    // Read-only benchmarks
-    benchmark_oltp_read_only_vibesql,
-    benchmark_select_random_points_vibesql,
-    benchmark_select_random_ranges_vibesql,
-);
-
-// Case 2: SQLite comparison enabled, but not DuckDB - VibeSQL + SQLite
-#[cfg(all(feature = "sqlite-comparison", not(feature = "duckdb-comparison")))]
-criterion_group!(
-    benches,
-    benchmark_point_select_vibesql,
-    benchmark_point_select_sqlite,
-    benchmark_insert_vibesql,
-    benchmark_insert_sqlite,
-    benchmark_delete_vibesql,
-    benchmark_delete_sqlite,
-    benchmark_update_index_vibesql,
-    benchmark_update_index_sqlite,
-    benchmark_update_non_index_vibesql,
-    benchmark_update_non_index_sqlite,
-    benchmark_write_only_vibesql,
-    benchmark_write_only_sqlite,
-    benchmark_read_write_vibesql,
-    benchmark_read_write_sqlite,
-    // Read-only benchmarks
-    benchmark_oltp_read_only_vibesql,
-    benchmark_oltp_read_only_sqlite,
-    benchmark_select_random_points_vibesql,
-    benchmark_select_random_points_sqlite,
-    benchmark_select_random_ranges_vibesql,
-    benchmark_select_random_ranges_sqlite,
-);
-
-// Case 3: Both SQLite and DuckDB comparison enabled - VibeSQL + SQLite + DuckDB
-#[cfg(all(feature = "sqlite-comparison", feature = "duckdb-comparison"))]
-criterion_group!(
-    benches,
-    benchmark_point_select_vibesql,
-    benchmark_point_select_sqlite,
-    benchmark_point_select_duckdb,
-    benchmark_insert_vibesql,
-    benchmark_insert_sqlite,
-    benchmark_insert_duckdb,
-    benchmark_delete_vibesql,
-    benchmark_delete_sqlite,
-    benchmark_delete_duckdb,
-    benchmark_update_index_vibesql,
-    benchmark_update_index_sqlite,
-    benchmark_update_index_duckdb,
-    benchmark_update_non_index_vibesql,
-    benchmark_update_non_index_sqlite,
-    benchmark_update_non_index_duckdb,
-    benchmark_write_only_vibesql,
-    benchmark_write_only_sqlite,
-    benchmark_write_only_duckdb,
-    benchmark_read_write_vibesql,
-    benchmark_read_write_sqlite,
-    benchmark_read_write_duckdb,
-    // Read-only benchmarks
-    benchmark_oltp_read_only_vibesql,
-    benchmark_oltp_read_only_sqlite,
-    benchmark_oltp_read_only_duckdb,
-    benchmark_select_random_points_vibesql,
-    benchmark_select_random_points_sqlite,
-    benchmark_select_random_points_duckdb,
-    benchmark_select_random_ranges_vibesql,
-    benchmark_select_random_ranges_sqlite,
-    benchmark_select_random_ranges_duckdb,
-);
-
-criterion_main!(benches);
