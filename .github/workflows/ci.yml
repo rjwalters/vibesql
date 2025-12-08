@@ -15,6 +15,18 @@ concurrency:
 
 jobs:
   # ============================================================================
+  # Verify benchmark queries haven't been modified
+  # ============================================================================
+  verify-benchmark-queries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify TPC-H and TPC-DS queries
+        run: python3 scripts/verify_benchmark_queries.py
+
+  # ============================================================================
   # Fast CI for branches/PRs - optimized for speed
   # ============================================================================
   test:
