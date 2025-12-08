@@ -1444,10 +1444,7 @@ fn load_partsupp_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     // Each part is supplied by 4 suppliers
     for part_key in 1..=data.part_count {
         for j in 0..4 {
-            let supp_key = ((part_key
-                + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count)))
-                % data.supplier_count)
-                + 1;
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, j);
             let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
             let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
             let row = Row::new(vec![
@@ -1478,10 +1475,7 @@ fn load_partsupp_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     // Each part is supplied by 4 suppliers
     for part_key in 1..=data.part_count {
         for j in 0..4 {
-            let supp_key = ((part_key
-                + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count)))
-                % data.supplier_count)
-                + 1;
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, j);
             let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
             let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
 
@@ -1504,10 +1498,7 @@ fn load_partsupp_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     // Each part is supplied by 4 suppliers
     for part_key in 1..=data.part_count {
         for j in 0..4 {
-            let supp_key = ((part_key
-                + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count)))
-                % data.supplier_count)
-                + 1;
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, j);
             let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
             let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
 
@@ -1616,13 +1607,19 @@ fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 
 /// Returns one of the 4 valid supplier keys for a given part_key.
 /// This matches the supplier generation logic in load_partsupp.
+///
+/// Uses a formula that guarantees 4 unique suppliers per part at any scale factor.
+/// The base supplier is determined by (part_key - 1) % supplier_count, then
+/// we add evenly-spaced offsets (0, 1/4, 2/4, 3/4 of supplier_count) for each j.
 fn get_valid_supplier_for_part(
     part_key: usize,
     supplier_count: usize,
     supplier_idx: usize,
 ) -> usize {
     let j = supplier_idx % 4; // 0-3
-    ((part_key + (j * (supplier_count / 4 + (part_key - 1) / supplier_count))) % supplier_count) + 1
+    let base = (part_key - 1) % supplier_count;
+    let offset = (j * supplier_count) / 4;
+    ((base + offset) % supplier_count) + 1
 }
 
 fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
@@ -1880,10 +1877,7 @@ fn load_part_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
 fn load_partsupp_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     for part_key in 1..=data.part_count {
         for j in 0..4 {
-            let supp_key = ((part_key
-                + (j * (data.supplier_count / 4 + (part_key - 1) / data.supplier_count)))
-                % data.supplier_count)
-                + 1;
+            let supp_key = get_valid_supplier_for_part(part_key, data.supplier_count, j);
             let availqty = ((part_key * 17 + j * 31) % 9999) + 1;
             let supplycost = ((part_key * 13 + j * 7) % 100000) as f64 / 100.0 + 1.0;
 

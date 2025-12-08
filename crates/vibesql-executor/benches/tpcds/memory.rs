@@ -2,9 +2,6 @@
 //!
 //! Provides platform-specific memory usage monitoring to help diagnose
 //! and prevent OOM issues during long benchmark runs.
-//!
-//! Also provides utilities for determining parallelism levels for
-//! concurrent query execution.
 
 /// Memory usage statistics
 #[derive(Debug, Clone, Copy)]
@@ -276,71 +273,9 @@ impl std::fmt::Display for JemallocStats {
     }
 }
 
-/// Compute optimal parallelism level for benchmark execution
-///
-/// Returns the number of parallel workers to use based on:
-/// - Available CPU cores (leaves some headroom for system tasks)
-/// - Memory pressure (reduces parallelism under high memory usage)
-/// - Optional override via environment variable
-///
-/// # Environment Variables
-/// - `PARALLEL_WORKERS`: Override the computed parallelism level (1-128)
-///
-/// # Returns
-/// Number of parallel workers (minimum 1, maximum num_cpus)
-pub fn compute_parallelism() -> usize {
-    // Check for explicit override first
-    if let Ok(workers) = std::env::var("PARALLEL_WORKERS") {
-        if let Ok(n) = workers.parse::<usize>() {
-            return n.clamp(1, 128);
-        }
-    }
-
-    // Get available CPUs
-    let num_cpus = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
-
-    // Leave some headroom for system tasks - use ~75% of cores
-    // but at least 2 workers on multi-core systems
-    let base_parallelism = if num_cpus >= 4 {
-        (num_cpus * 3) / 4
-    } else if num_cpus >= 2 {
-        num_cpus - 1
-    } else {
-        1
-    };
-
-    // Check memory pressure and reduce parallelism if needed
-    if let Some(stats) = get_memory_usage() {
-        // Get total system memory estimate (rss * 4 as rough approximation)
-        // or use sysinfo if we want more accuracy
-        let rss_mb = stats.rss_mb();
-
-        // If we're already using a lot of memory, reduce parallelism
-        // Each additional worker can add significant memory overhead
-        if rss_mb > 4000.0 {
-            // Above 4GB RSS, halve parallelism
-            return (base_parallelism / 2).max(1);
-        } else if rss_mb > 2000.0 {
-            // Above 2GB RSS, reduce by 25%
-            return ((base_parallelism * 3) / 4).max(1);
-        }
-    }
-
-    base_parallelism.max(1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_compute_parallelism() {
-        let parallelism = compute_parallelism();
-        assert!(parallelism >= 1, "Parallelism should be at least 1");
-        let num_cpus = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
-        assert!(parallelism <= num_cpus, "Parallelism should not exceed CPU count");
-        println!("Computed parallelism: {} (CPUs: {})", parallelism, num_cpus);
-    }
 
     #[test]
     fn test_get_memory_usage() {

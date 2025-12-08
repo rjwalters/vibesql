@@ -22,9 +22,9 @@
 //!
 //! Parallel Execution Mode:
 //! When PARALLEL_BATCHES=1 is set, queries within each batch are executed in
-//! parallel using rayon. This can significantly reduce wall-clock time but may
-//! affect per-query memory tracking accuracy. Parallel mode is automatically
-//! disabled when VALIDATE=1 is set (to ensure deterministic comparison).
+//! parallel using rayon. This can significantly reduce wall-clock time (2-4x speedup
+//! typical) but may affect per-query memory tracking accuracy. Parallel mode is
+//! automatically disabled when VALIDATE=1 is set (to ensure deterministic comparison).
 //!
 //! Validation Mode:
 //! When VALIDATE=1 is set (requires --features benchmark-comparison), the runner
@@ -49,15 +49,16 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+mod memory_monitor;
 mod tpcds;
 
+use memory_monitor::compute_parallelism;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tpcds::memory::{
-    compute_parallelism, get_jemalloc_stats, get_memory_usage, hint_memory_release,
-    is_jemalloc_enabled, MemoryTracker,
+    get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker,
 };
 use tpcds::queries::TPCDS_QUERIES;
 use tpcds::schema::load_vibesql;
