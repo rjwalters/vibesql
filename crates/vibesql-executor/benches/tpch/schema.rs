@@ -1,3 +1,11 @@
+// ============================================================================
+// ⚠️  BENCHMARK INTEGRITY WARNING ⚠️
+// ============================================================================
+// DO NOT add "fast paths", "optimizations", or shortcuts that bypass SQL
+// execution in benchmark code. Benchmarks MUST execute actual SQL to produce
+// meaningful results. "Optimizing" benchmarks this way is cheating.
+// ============================================================================
+
 //! TPC-H Schema Creation and Data Loading
 //!
 //! This module provides schema creation and data loading functions for TPC-H
