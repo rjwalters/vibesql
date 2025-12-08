@@ -2,6 +2,75 @@
 
 This guide covers CPU profiling for VibeSQL using samply. This is essential for understanding where time is spent during query execution and identifying optimization opportunities.
 
+## When to Use What: Decision Tree
+
+VibeSQL has two complementary profiling approaches:
+- **CPU profiling (samply)**: Shows WHERE time is spent in code
+- **Semantic debug logging (env vars)**: Shows WHY the optimizer made decisions
+
+Use this decision tree to quickly find the right tool:
+
+```
+Is the problem...
+│
+├─► "Query is slow, don't know why"
+│   └─► make profile-tpch Q=X              (samply CPU profiling)
+│
+├─► "Join order seems wrong"
+│   └─► JOIN_REORDER_VERBOSE=1             (shows optimizer reasoning)
+│
+├─► "Subquery not being optimized"
+│   └─► SUBQUERY_TRANSFORM_VERBOSE=1       (shows IN/EXISTS → semi-join)
+│
+├─► "Index not being used"
+│   └─► INDEX_SELECT_DEBUG=1               (shows selectivity analysis)
+│
+├─► "DELETE is slow"
+│   └─► DELETE_PROFILE_VERBOSE=1           (shows phase breakdown)
+│
+├─► "Table not being eliminated"
+│   └─► TABLE_ELIM_VERBOSE=1               (shows FK-based elimination)
+│
+├─► "DML choosing wrong strategy"
+│   └─► DML_COST_DEBUG=1                   (shows cost model decisions)
+│
+├─► "Compare before/after"
+│   └─► SAVE_ONLY=1 make profile-tpch Q=X  (saves for later comparison)
+│
+└─► "Need to profile in CI/agent"
+    └─► (auto file output in non-TTY)      (samply load profile-*.json.gz)
+```
+
+### Quick Reference
+
+| Symptom | Tool | Command |
+|---------|------|---------|
+| General slowness | samply | `make profile-tpch Q=X` |
+| Bad join order | env var | `JOIN_REORDER_VERBOSE=1` |
+| Index not used | env var | `INDEX_SELECT_DEBUG=1` |
+| Subquery not optimized | env var | `SUBQUERY_TRANSFORM_VERBOSE=1` |
+| Slow deletes | env var | `DELETE_PROFILE_VERBOSE=1` |
+| Table not eliminated | env var | `TABLE_ELIM_VERBOSE=1` |
+| DML wrong strategy | env var | `DML_COST_DEBUG=1` |
+| Join execution timing | env var | `JOIN_PROFILE=1` |
+| Range scan timing | env var | `RANGE_SCAN_PROFILE=1` |
+| Memory issues | samply | Look for `alloc`, `Vec::push` |
+
+### Example: Debugging a Slow Query
+
+```bash
+# Step 1: Profile with samply to find hot spots
+make profile-query Q=Q13
+
+# Step 2: If samply shows join code is hot, check optimizer decisions
+JOIN_REORDER_VERBOSE=1 SCALE_FACTOR=0.01 QUERY_FILTER=Q13 \
+  ./target/release/deps/tpch_profiling-* Q13
+
+# Step 3: If index selection looks wrong
+INDEX_SELECT_DEBUG=1 TABLE_SCAN_DEBUG=1 \
+  ./target/release/deps/tpch_profiling-* Q13
+```
+
 ## Quick Start
 
 ```bash
