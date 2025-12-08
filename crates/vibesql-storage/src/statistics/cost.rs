@@ -581,8 +581,8 @@ impl CostEstimator {
         let mut combined = first_cardinality;
 
         // For each additional column, apply correlation-aware multiplication
-        for i in 1..prefix_col_stats.len() {
-            let col_cardinality = prefix_col_stats[i].n_distinct as f64;
+        for col_stat in prefix_col_stats.iter().skip(1) {
+            let col_cardinality = col_stat.n_distinct as f64;
 
             // Estimate how many values of this column appear per value of the previous columns
             // If columns are correlated (e.g., region per country), this ratio will be smaller

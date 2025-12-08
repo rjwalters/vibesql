@@ -144,10 +144,7 @@ fn duckdb_enabled() -> bool {
 
 #[cfg(feature = "mysql-comparison")]
 fn mysql_enabled() -> bool {
-    match get_comparison_engine() {
-        Some(ref e) if e == "mysql" => true,
-        _ => false,
-    }
+    matches!(get_comparison_engine(), Some(ref e) if e == "mysql")
 }
 
 /// Run a query on VibeSQL

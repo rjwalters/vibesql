@@ -85,8 +85,6 @@ use mysql::prelude::*;
 use mysql::PooledConn;
 #[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "mysql-comparison")]
-use sysbench::schema::load_mysql;
 
 /// Default table size for sysbench tests
 const DEFAULT_TABLE_SIZE: usize = 10_000;
