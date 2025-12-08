@@ -480,6 +480,134 @@ impl CostEstimator {
         skip_scan_cost < table_scan_cost
     }
 
+    /// Estimate skip-scan cost for multi-column prefix skip
+    ///
+    /// This extends `estimate_skip_scan_cost` to handle skipping multiple prefix columns.
+    /// For an index on (a, b, c, d) with a filter on column d:
+    /// - skip_columns=1: iterate distinct(a), seek each (a, d_val)
+    /// - skip_columns=2: iterate distinct(a,b), seek each (a, b, d_val)
+    /// - skip_columns=3: iterate distinct(a,b,c), seek each (a, b, c, d_val)
+    ///
+    /// The optimal skip depth depends on the combined cardinality of prefix columns.
+    ///
+    /// # Arguments
+    /// * `table_stats` - Statistics for the table
+    /// * `prefix_col_stats` - Statistics for each prefix column being skipped (in order)
+    /// * `filter_selectivity` - Selectivity of the filter on non-prefix columns
+    ///
+    /// # Returns
+    /// Estimated cost of skip-scan with multi-column prefix
+    ///
+    /// # Example
+    /// ```text
+    /// // Index on (country, region, city, date), query: WHERE date = '2024-01-01'
+    /// // Skip 3 columns to filter on date:
+    /// let stats = vec![&country_stats, &region_stats, &city_stats];
+    /// let cost = estimator.estimate_skip_scan_cost_multi_column(&table_stats, &stats, 0.01);
+    /// ```
+    pub fn estimate_skip_scan_cost_multi_column(
+        &self,
+        table_stats: &TableStatistics,
+        prefix_col_stats: &[&ColumnStatistics],
+        filter_selectivity: f64,
+    ) -> f64 {
+        if prefix_col_stats.is_empty() {
+            // No prefix to skip - this is essentially a table scan
+            return self.estimate_table_scan(table_stats);
+        }
+
+        // For single column, delegate to existing method
+        if prefix_col_stats.len() == 1 {
+            return self.estimate_skip_scan_cost(table_stats, prefix_col_stats[0], filter_selectivity);
+        }
+
+        let total_rows = table_stats.row_count as f64;
+
+        // Calculate combined cardinality for N prefix columns
+        // Worst case: product of all distinct values (independent columns)
+        // We apply a correlation factor to account for columns that are likely correlated
+        let combined_cardinality = self.estimate_combined_prefix_cardinality(prefix_col_stats, total_rows);
+
+        // Rows per prefix combination (assuming uniform distribution)
+        let rows_per_prefix = if combined_cardinality > 0.0 {
+            total_rows / combined_cardinality
+        } else {
+            total_rows
+        };
+
+        // Expected rows matching filter within each prefix group
+        let matching_rows_per_prefix = rows_per_prefix * filter_selectivity;
+
+        // 1. Seek cost: one random I/O per distinct prefix combination
+        // More prefix columns means more seeks
+        let seek_cost = combined_cardinality * self.random_page_cost;
+
+        // 2. Index scan cost within each prefix group
+        let index_scan_cost = combined_cardinality * matching_rows_per_prefix * self.cpu_index_tuple_cost;
+
+        // 3. Table fetch cost: estimate pages accessed for matched rows
+        let total_matching_rows = total_rows * filter_selectivity;
+        let estimated_pages = (total_matching_rows.sqrt()).max(1.0);
+        let table_fetch_cost = estimated_pages * self.random_page_cost;
+
+        // 4. CPU cost for processing matched rows
+        let cpu_cost = total_matching_rows * self.cpu_tuple_cost;
+
+        seek_cost + index_scan_cost + table_fetch_cost + cpu_cost
+    }
+
+    /// Estimate combined cardinality for multiple prefix columns
+    ///
+    /// Uses a correlation-aware heuristic to estimate the number of distinct
+    /// combinations of N prefix columns.
+    ///
+    /// Naive approach: product of all distinct values (assumes independence)
+    /// Better approach: Apply correlation factor based on cardinality ratios
+    ///
+    /// For columns with similar cardinality ratios (e.g., country/region/city),
+    /// we expect significant correlation - each country has fewer regions than
+    /// the total distinct regions, and each region has fewer cities.
+    fn estimate_combined_prefix_cardinality(
+        &self,
+        prefix_col_stats: &[&ColumnStatistics],
+        total_rows: f64,
+    ) -> f64 {
+        if prefix_col_stats.is_empty() {
+            return 1.0;
+        }
+
+        // Start with the cardinality of the first column
+        let first_cardinality = prefix_col_stats[0].n_distinct as f64;
+        let mut combined = first_cardinality;
+
+        // For each additional column, apply correlation-aware multiplication
+        for i in 1..prefix_col_stats.len() {
+            let col_cardinality = prefix_col_stats[i].n_distinct as f64;
+
+            // Estimate how many values of this column appear per value of the previous columns
+            // If columns are correlated (e.g., region per country), this ratio will be smaller
+            // than the full cardinality
+            //
+            // Heuristic: If combined cardinality is already high relative to row count,
+            // new columns likely add fewer distinct combinations
+            let coverage_ratio = combined / total_rows.max(1.0);
+
+            // Correlation factor: higher coverage = more correlation = less multiplier
+            // Range: 0.3 (highly correlated) to 1.0 (independent)
+            let correlation_factor = (1.0 - 0.7 * coverage_ratio).max(0.3);
+
+            // Effective cardinality of this column given previous columns
+            let effective_cardinality = col_cardinality * correlation_factor;
+
+            combined *= effective_cardinality.max(1.0);
+
+            // Cap at total rows (can't have more combinations than rows)
+            combined = combined.min(total_rows);
+        }
+
+        combined.max(1.0)
+    }
+
     // ============================================================================
     // DML Cost Estimation
     // ============================================================================
@@ -1626,6 +1754,291 @@ mod tests {
         assert!(
             threshold_cardinality < 1000,
             "Skip-scan should not be beneficial for very high cardinalities"
+        );
+    }
+
+    // ============================================================================
+    // Multi-Column Skip-Scan Cost Estimation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_multi_column_skip_scan_cost_single_column_delegates() {
+        // When given a single column, multi-column cost should match single-column cost
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        let prefix_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: Some(SqlValue::Integer(1)),
+            max_value: Some(SqlValue::Integer(10)),
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let single_col_cost = estimator.estimate_skip_scan_cost(&table_stats, &prefix_stats, 0.01);
+        let multi_col_cost =
+            estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[&prefix_stats], 0.01);
+
+        assert!(
+            (single_col_cost - multi_col_cost).abs() < 0.001,
+            "Single-column and multi-column costs should match for single column: {} vs {}",
+            single_col_cost,
+            multi_col_cost
+        );
+    }
+
+    #[test]
+    fn test_multi_column_skip_scan_cost_increases_with_columns() {
+        // Adding more prefix columns should generally increase cost due to more seeks
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        let col1_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: Some(SqlValue::Integer(1)),
+            max_value: Some(SqlValue::Integer(10)),
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let col2_stats = ColumnStatistics {
+            n_distinct: 20,
+            null_count: 0,
+            min_value: Some(SqlValue::Integer(1)),
+            max_value: Some(SqlValue::Integer(20)),
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let col3_stats = ColumnStatistics {
+            n_distinct: 50,
+            null_count: 0,
+            min_value: Some(SqlValue::Integer(1)),
+            max_value: Some(SqlValue::Integer(50)),
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cost_1_col =
+            estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[&col1_stats], 0.01);
+        let cost_2_col = estimator
+            .estimate_skip_scan_cost_multi_column(&table_stats, &[&col1_stats, &col2_stats], 0.01);
+        let cost_3_col = estimator.estimate_skip_scan_cost_multi_column(
+            &table_stats,
+            &[&col1_stats, &col2_stats, &col3_stats],
+            0.01,
+        );
+
+        // More columns = more prefix combinations = higher seek cost
+        assert!(
+            cost_2_col > cost_1_col,
+            "2-column skip cost ({}) should exceed 1-column cost ({})",
+            cost_2_col,
+            cost_1_col
+        );
+        assert!(
+            cost_3_col > cost_2_col,
+            "3-column skip cost ({}) should exceed 2-column cost ({})",
+            cost_3_col,
+            cost_2_col
+        );
+    }
+
+    #[test]
+    fn test_multi_column_skip_scan_correlation_adjustment() {
+        // Test that correlation factor limits combined cardinality
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(1000);
+
+        // High cardinality columns (if independent, would produce 10*100*500 = 500,000 combinations)
+        let col1_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let col2_stats = ColumnStatistics {
+            n_distinct: 100,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let col3_stats = ColumnStatistics {
+            n_distinct: 500,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cost = estimator.estimate_skip_scan_cost_multi_column(
+            &table_stats,
+            &[&col1_stats, &col2_stats, &col3_stats],
+            0.01,
+        );
+
+        // Cost should be finite and reasonable (correlation caps cardinality at row count)
+        assert!(cost.is_finite(), "Cost should be finite");
+        assert!(cost > 0.0, "Cost should be positive");
+
+        // If no correlation adjustment, cost would be astronomical due to 500K seeks
+        // With correlation, it should be capped based on row count (1000)
+        // Seek cost with full independence: 500,000 * 4.0 = 2,000,000
+        // Table scan cost: 1000/100 * 1.0 + 1000 * 0.01 = 10 + 10 = 20
+        let table_scan_cost = estimator.estimate_table_scan(&table_stats);
+        assert!(
+            cost < 500_000.0 * 4.0,
+            "Correlation should prevent astronomical costs: {} vs max {}",
+            cost,
+            500_000.0 * 4.0
+        );
+
+        // With these high cardinalities, skip-scan should not beat table scan
+        assert!(
+            cost > table_scan_cost,
+            "Skip-scan with high combined cardinality ({}) should cost more than table scan ({})",
+            cost,
+            table_scan_cost
+        );
+    }
+
+    #[test]
+    fn test_multi_column_skip_scan_empty_stats() {
+        // Test edge case: empty prefix stats returns table scan cost
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        let cost_empty =
+            estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[], 0.01);
+        let table_scan_cost = estimator.estimate_table_scan(&table_stats);
+
+        assert!(
+            (cost_empty - table_scan_cost).abs() < 0.001,
+            "Empty prefix should return table scan cost: {} vs {}",
+            cost_empty,
+            table_scan_cost
+        );
+    }
+
+    #[test]
+    fn test_multi_column_skip_scan_vs_single_column_decision() {
+        // Test scenario where multi-column skip might be better than single-column
+        // This happens when: the first column has high cardinality but combined
+        // columns with correlation produce fewer seeks than first column alone
+        let estimator = CostEstimator::default();
+        let table_stats = create_test_table_stats(10000);
+
+        // First column: high cardinality (100 distinct)
+        let col1_high_card = ColumnStatistics {
+            n_distinct: 100,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        // Second column: very low cardinality (2 distinct)
+        // Combined with first, might have 100*2 = 200 combinations worst case
+        // But with correlation, might be closer to 100 (each col1 value has ~both col2 values)
+        let col2_low_card = ColumnStatistics {
+            n_distinct: 2,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cost_1_col =
+            estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[&col1_high_card], 0.01);
+        let cost_2_col = estimator.estimate_skip_scan_cost_multi_column(
+            &table_stats,
+            &[&col1_high_card, &col2_low_card],
+            0.01,
+        );
+
+        // With these statistics, 2-column skip should have higher cost
+        // (adding another low-card column still increases prefix combinations)
+        assert!(
+            cost_2_col >= cost_1_col,
+            "2-column skip cost ({}) should be >= 1-column cost ({}) with these stats",
+            cost_2_col,
+            cost_1_col
+        );
+    }
+
+    #[test]
+    fn test_combined_prefix_cardinality_estimation() {
+        let estimator = CostEstimator::default();
+        let total_rows = 10000.0;
+
+        // Test 1: Single column
+        let col1_stats = ColumnStatistics {
+            n_distinct: 10,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cardinality_1 = estimator.estimate_combined_prefix_cardinality(&[&col1_stats], total_rows);
+        assert!(
+            (cardinality_1 - 10.0).abs() < 0.01,
+            "Single column cardinality should match n_distinct: {}",
+            cardinality_1
+        );
+
+        // Test 2: Two columns with low coverage (should have minimal correlation adjustment)
+        let col2_stats = ColumnStatistics {
+            n_distinct: 5,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cardinality_2 =
+            estimator.estimate_combined_prefix_cardinality(&[&col1_stats, &col2_stats], total_rows);
+        // With 10 * 5 = 50 max combinations and 10/10000 = 0.001 coverage ratio
+        // Correlation factor ≈ 1.0 - 0.7 * 0.001 ≈ 0.999
+        // So combined ≈ 10 * (5 * 0.999) ≈ 49.95
+        assert!(
+            cardinality_2 > 40.0 && cardinality_2 < 60.0,
+            "Two-column cardinality should be close to product with low correlation: {}",
+            cardinality_2
+        );
+
+        // Test 3: Cardinality should be capped at total_rows
+        let col_high_stats = ColumnStatistics {
+            n_distinct: 5000,
+            null_count: 0,
+            min_value: None,
+            max_value: None,
+            most_common_values: vec![],
+            histogram: None,
+        };
+
+        let cardinality_capped = estimator.estimate_combined_prefix_cardinality(
+            &[&col_high_stats, &col_high_stats],
+            total_rows,
+        );
+        assert!(
+            cardinality_capped <= total_rows,
+            "Combined cardinality ({}) should be capped at total_rows ({})",
+            cardinality_capped,
+            total_rows
         );
     }
 }

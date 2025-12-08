@@ -535,35 +535,48 @@ impl BTreeIndex {
         Ok(None)
     }
 
-    /// Get distinct values of the first column in a composite index
+    /// Get distinct N-column prefixes from a composite index
     ///
-    /// This is used for skip-scan optimization to enumerate the prefix values.
+    /// This generalizes single-column skip-scan to multi-column skip-scan.
+    /// It returns all distinct N-column prefixes, which are then used for
+    /// targeted lookups when filtering on columns beyond the Nth position.
+    ///
+    /// # Arguments
+    /// * `num_columns` - Number of prefix columns to extract (1 = first column only)
     ///
     /// # Returns
-    /// Vector of distinct first-column values in sorted order
+    /// Vector of distinct N-column prefixes in sorted order
     ///
     /// # Performance
     /// O(n) where n is the number of unique keys - must scan all leaves
-    pub fn get_distinct_first_column_values(
+    pub fn get_distinct_prefix_values(
         &self,
-    ) -> Result<Vec<vibesql_types::SqlValue>, StorageError> {
-        let mut distinct_values = Vec::new();
-        let mut last_first_col: Option<vibesql_types::SqlValue> = None;
+        num_columns: usize,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, StorageError> {
+        if num_columns == 0 {
+            return Ok(vec![vec![]]); // Empty prefix matches everything
+        }
+
+        let mut prefixes = Vec::new();
+        let mut last_prefix: Option<Vec<vibesql_types::SqlValue>> = None;
 
         // Start from leftmost leaf
         let mut current_leaf = self.find_leftmost_leaf()?;
 
         loop {
             for (key, _) in &current_leaf.entries {
-                if let Some(first_val) = key.first() {
-                    let is_new = match &last_first_col {
-                        None => true,
-                        Some(last) => first_val != last,
-                    };
-                    if is_new {
-                        distinct_values.push(first_val.clone());
-                        last_first_col = Some(first_val.clone());
-                    }
+                if key.len() < num_columns {
+                    continue; // Key doesn't have enough columns
+                }
+
+                let prefix: Vec<vibesql_types::SqlValue> = key[..num_columns].to_vec();
+                let is_new = match &last_prefix {
+                    None => true,
+                    Some(last) => prefix != *last,
+                };
+                if is_new {
+                    prefixes.push(prefix.clone());
+                    last_prefix = Some(prefix);
                 }
             }
 
@@ -574,7 +587,27 @@ impl BTreeIndex {
             current_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
         }
 
-        Ok(distinct_values)
+        Ok(prefixes)
+    }
+
+    /// Get distinct values of the first column in a composite index
+    ///
+    /// This is a convenience method that calls `get_distinct_prefix_values(1)`
+    /// and flattens the result to single values.
+    ///
+    /// # Returns
+    /// Vector of distinct first-column values in sorted order
+    ///
+    /// # Performance
+    /// O(n) where n is the number of unique keys - must scan all leaves
+    pub fn get_distinct_first_column_values(
+        &self,
+    ) -> Result<Vec<vibesql_types::SqlValue>, StorageError> {
+        let prefixes = self.get_distinct_prefix_values(1)?;
+        Ok(prefixes
+            .into_iter()
+            .filter_map(|mut p| p.pop())
+            .collect())
     }
 
     /// Skip-scan equality lookup on a non-prefix column

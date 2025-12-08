@@ -200,6 +200,14 @@ impl<'a> IndexPlanner<'a> {
     /// - The prefix columns have low cardinality (few distinct values)
     /// - The filter on non-prefix columns is selective
     ///
+    /// # Multi-Column Skip-Scan
+    ///
+    /// For an index on (a, b, c, d) with a filter on column d, the planner evaluates
+    /// multiple skip depths and chooses the one with minimum cost:
+    /// - skip_columns=1: iterate distinct(a), seek each (a, d_val)
+    /// - skip_columns=2: iterate distinct(a,b), seek each (a, b, d_val)
+    /// - skip_columns=3: iterate distinct(a,b,c), seek each (a, b, c, d_val)
+    ///
     /// # Arguments
     /// * `table_name` - Name of the table being queried
     /// * `where_clause` - WHERE clause predicate (required for skip-scan)
@@ -256,83 +264,124 @@ impl<'a> IndexPlanner<'a> {
                 }
 
                 // Check if WHERE clause filters on any non-first column
-                for (col_idx, index_col) in index_metadata.columns.iter().enumerate().skip(1) {
+                for (filter_col_idx, filter_col) in index_metadata.columns.iter().enumerate().skip(1) {
                     let filters_this_col =
                         crate::select::scan::index_scan::selection::expression_filters_column(
                             where_clause,
-                            &index_col.column_name,
+                            &filter_col.column_name,
                         );
 
                     if !filters_this_col {
                         continue;
                     }
 
-                    // Found a potential skip-scan: filter on column at index col_idx
-                    // Need statistics for the prefix column to estimate cardinality
-                    let prefix_col_stats = table_stats.columns.get(&first_col.column_name)?;
-
-                    // Estimate filter selectivity on the non-prefix column
-                    let filter_col_stats = table_stats.columns.get(&index_col.column_name);
+                    // Found a potential skip-scan: filter on column at index filter_col_idx
+                    // Estimate filter selectivity on the filter column
+                    let filter_col_stats = table_stats.columns.get(&filter_col.column_name);
                     let filter_selectivity = filter_col_stats
                         .map(|stats| {
                             crate::select::scan::index_scan::selection::estimate_selectivity(
                                 where_clause,
-                                &index_col.column_name,
+                                &filter_col.column_name,
                                 stats,
                             )
                         })
                         .unwrap_or(0.33);
 
-                    // Calculate skip-scan cost
-                    let skip_scan_cost = cost_estimator.estimate_skip_scan_cost(
-                        table_stats,
-                        prefix_col_stats,
-                        filter_selectivity,
-                    );
-
-                    // Debug output
-                    if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
-                        eprintln!(
-                            "[SKIP_SCAN] index={}, prefix_col={}, filter_col={}, prefix_n_distinct={}, filter_selectivity={:.4}, skip_scan_cost={:.2}, table_scan_cost={:.2}",
-                            index_name,
-                            first_col.column_name,
-                            index_col.column_name,
-                            prefix_col_stats.n_distinct,
-                            filter_selectivity,
-                            skip_scan_cost,
-                            table_scan_cost
-                        );
-                    }
-
-                    // Only consider if cheaper than table scan
-                    if skip_scan_cost >= table_scan_cost {
-                        continue;
-                    }
-
-                    // Track the best skip-scan option
-                    let is_better = match &best_skip_scan {
-                        None => true,
-                        Some((_, _, best_cost)) => skip_scan_cost < *best_cost,
-                    };
-
-                    if is_better {
-                        let prefix_columns: Vec<String> = index_metadata.columns[..col_idx]
+                    // Evaluate all possible skip depths (1 to filter_col_idx)
+                    // and choose the one with minimum cost
+                    for skip_depth in 1..=filter_col_idx {
+                        // Collect statistics for prefix columns being skipped
+                        let prefix_stats: Vec<_> = index_metadata.columns[..skip_depth]
                             .iter()
-                            .map(|c| c.column_name.clone())
+                            .filter_map(|c| table_stats.columns.get(&c.column_name))
                             .collect();
 
-                        let skip_info = SkipScanInfo {
-                            skip_columns: col_idx,
-                            prefix_columns,
-                            filter_column: index_col.column_name.clone(),
-                            prefix_cardinality: prefix_col_stats.n_distinct,
-                            estimated_cost: skip_scan_cost,
+                        // Skip if we don't have stats for all prefix columns
+                        if prefix_stats.len() != skip_depth {
+                            continue;
+                        }
+
+                        // Calculate skip-scan cost for this skip depth
+                        let skip_scan_cost = if skip_depth == 1 {
+                            // Use existing single-column cost model
+                            cost_estimator.estimate_skip_scan_cost(
+                                table_stats,
+                                prefix_stats[0],
+                                filter_selectivity,
+                            )
+                        } else {
+                            // Use multi-column cost model
+                            cost_estimator.estimate_skip_scan_cost_multi_column(
+                                table_stats,
+                                &prefix_stats,
+                                filter_selectivity,
+                            )
                         };
 
-                        best_skip_scan = Some((index_name.clone(), skip_info, skip_scan_cost));
+                        // Debug output
+                        if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+                            let prefix_names: Vec<_> = index_metadata.columns[..skip_depth]
+                                .iter()
+                                .map(|c| c.column_name.as_str())
+                                .collect();
+                            eprintln!(
+                                "[SKIP_SCAN] index={}, skip_depth={}, prefix_cols={:?}, filter_col={}, filter_selectivity={:.4}, skip_scan_cost={:.2}, table_scan_cost={:.2}",
+                                index_name,
+                                skip_depth,
+                                prefix_names,
+                                filter_col.column_name,
+                                filter_selectivity,
+                                skip_scan_cost,
+                                table_scan_cost
+                            );
+                        }
+
+                        // Only consider if cheaper than table scan
+                        if skip_scan_cost >= table_scan_cost {
+                            continue;
+                        }
+
+                        // Track the best skip-scan option across all indexes and skip depths
+                        let is_better = match &best_skip_scan {
+                            None => true,
+                            Some((_, _, best_cost)) => skip_scan_cost < *best_cost,
+                        };
+
+                        if is_better {
+                            let prefix_columns: Vec<String> = index_metadata.columns[..skip_depth]
+                                .iter()
+                                .map(|c| c.column_name.clone())
+                                .collect();
+
+                            // Estimate combined cardinality for multi-column prefix
+                            let prefix_cardinality = if skip_depth == 1 {
+                                prefix_stats[0].n_distinct
+                            } else {
+                                // Use approximate combined cardinality
+                                let combined = cost_estimator.estimate_skip_scan_cost_multi_column(
+                                    table_stats,
+                                    &prefix_stats,
+                                    1.0, // Use selectivity=1 to isolate cardinality effect
+                                );
+                                // Extract approximate cardinality from cost
+                                // (rough estimate based on seek cost component)
+                                (combined / cost_estimator.random_page_cost).ceil() as usize
+                            };
+
+                            let skip_info = SkipScanInfo {
+                                skip_columns: skip_depth,
+                                prefix_columns,
+                                filter_column: filter_col.column_name.clone(),
+                                prefix_cardinality,
+                                estimated_cost: skip_scan_cost,
+                            };
+
+                            best_skip_scan = Some((index_name.clone(), skip_info, skip_scan_cost));
+                        }
                     }
 
-                    // Only consider first matching column for this index
+                    // Only consider first matching filter column for this index
                     break;
                 }
             }
