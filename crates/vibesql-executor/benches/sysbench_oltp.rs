@@ -111,6 +111,8 @@ struct VibesqlPreparedStatements {
     delete: Arc<PreparedStatement>,
     /// INSERT INTO sbtest1 (id, k, c, pad) VALUES (?, ?, ?, ?)
     insert: Arc<PreparedStatement>,
+    /// UPDATE sbtest1 SET k = k + 1 WHERE id = ?
+    update_index: Arc<PreparedStatement>,
     /// UPDATE sbtest1 SET c = ? WHERE id = ?
     update_non_index: Arc<PreparedStatement>,
     /// Shared cache for all statements
@@ -141,6 +143,7 @@ impl VibesqlPreparedStatements {
             insert: session
                 .prepare("INSERT INTO sbtest1 (id, k, c, padding) VALUES (?, ?, ?, ?)")
                 .unwrap(),
+            update_index: session.prepare("UPDATE sbtest1 SET k = k + 1 WHERE id = ?").unwrap(),
             update_non_index: session.prepare("UPDATE sbtest1 SET c = ? WHERE id = ?").unwrap(),
             cache,
         }
@@ -201,40 +204,14 @@ fn vibesql_update_non_index(session: &mut SessionMut, stmt: &PreparedStatement, 
         .unwrap();
 }
 
-/// Execute an update query on VibeSQL (update indexed column k)
+/// Execute an update query on VibeSQL (update indexed column k) using prepared statement
 ///
-/// Uses direct API for k = k + 1 operation since it requires read-modify-write.
-/// This is a fair comparison as the operation itself is equivalent to
-/// SQLite's prepared UPDATE sbtest1 SET k = k + 1 WHERE id = ?
-fn vibesql_update_index(db: &mut VibeDB, id: i64) {
-    // For k = k + 1, we need to read current value first then update
-    // Use PK index for O(1) lookup
-    let (row_index, current_k, row_clone) = {
-        let table = db.get_table("SBTEST1").unwrap();
-        let pk_index = table.primary_key_index().unwrap();
-
-        if let Some(&idx) = pk_index.get(&vec![SqlValue::Integer(id)]) {
-            let row = &table.scan()[idx];
-            // k is at index 1 (id=0, k=1, c=2, pad=3)
-            if let SqlValue::Integer(k) = &row.values[1] {
-                (idx, *k, row.clone())
-            } else {
-                return;
-            }
-        } else {
-            return;
-        }
-    };
-
-    let new_k = current_k + 1;
-    // Use direct table update
-    let table_mut = db.get_table_mut("SBTEST1").unwrap();
-    let mut new_row = row_clone;
-    new_row.set(1, SqlValue::Integer(new_k)).unwrap();
-    let mut changed = std::collections::HashSet::new();
-    changed.insert(1);
-    table_mut.update_row_selective(row_index, new_row, &changed).unwrap();
-    db.invalidate_columnar_cache("SBTEST1");
+/// This uses SQL `UPDATE sbtest1 SET k = k + 1 WHERE id = ?` through the prepared
+/// statement interface, providing a fair comparison with SQLite's `prepare_cached()`.
+///
+/// Sysbench equivalent: UPDATE sbtest1 SET k = k + 1 WHERE id = ?
+fn vibesql_update_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64) {
+    session.execute_prepared_mut(stmt, &[SqlValue::Integer(id)]).unwrap();
 }
 
 /// Execute a delete query on VibeSQL using prepared statement
@@ -786,11 +763,13 @@ fn benchmark_update_index_vibesql(c: &mut Criterion) {
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
         let mut db = load_vibesql(TABLE_SIZE);
+        let stmts = VibesqlPreparedStatements::new(&db);
+        let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
         let mut rng = ChaCha8Rng::seed_from_u64(42);
 
         b.iter(|| {
             let id = rng.random_range(1..=TABLE_SIZE as i64);
-            vibesql_update_index(&mut db, id);
+            vibesql_update_index(&mut session, &stmts.update_index, id);
         });
     });
 
@@ -938,8 +917,8 @@ fn benchmark_write_only_vibesql(c: &mut Criterion) {
                 // Pick a random ID for updates
                 let update_id = rng.random_range(1..=TABLE_SIZE as i64);
 
-                // 1 index update (SET k = k + 1) - uses direct API
-                vibesql_update_index(session.database_mut(), update_id);
+                // 1 index update (SET k = k + 1)
+                vibesql_update_index(&mut session, &stmts.update_index, update_id);
 
                 // 1 non-index update (SET c = ?)
                 let c = generate_c_string();
