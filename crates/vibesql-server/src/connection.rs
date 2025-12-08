@@ -919,6 +919,11 @@ impl ConnectionHandler {
             return false;
         }
 
+        // Record successful partial update sent
+        if let Some(metrics) = self.observability.metrics() {
+            metrics.record_partial_update_sent();
+        }
+
         debug!(
             "Sent selective column update (0xF7) for subscription {:?}",
             subscription_id
@@ -1670,6 +1675,11 @@ impl ConnectionHandler {
                 SubscriptionUpdateType::SelectiveUpdate => "selective",
             };
             metrics.record_subscription_update(type_str, rows.len() as u64);
+
+            // Record full update sent for efficiency stats
+            if matches!(update_type, SubscriptionUpdateType::Full) {
+                metrics.record_full_update_sent();
+            }
         }
 
         BackendMessage::SubscriptionData { subscription_id: *subscription_id, update_type, rows }
