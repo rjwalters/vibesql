@@ -28,20 +28,6 @@ pub(crate) enum IndexScanChoice {
     },
 }
 
-impl IndexScanChoice {
-    /// Get the index name regardless of scan type
-    pub fn index_name(&self) -> &str {
-        match self {
-            IndexScanChoice::Regular { index_name, .. } => index_name,
-            IndexScanChoice::SkipScan { index_name, .. } => index_name,
-        }
-    }
-
-    /// Check if this is a skip-scan choice
-    pub fn is_skip_scan(&self) -> bool {
-        matches!(self, IndexScanChoice::SkipScan { .. })
-    }
-}
 
 /// Check if any ORDER BY column is nullable
 ///

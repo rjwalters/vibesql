@@ -940,7 +940,7 @@ fn where_clause_fully_satisfied_by_index(
 /// # Performance
 /// Cost = O(prefix_cardinality × log n + k) vs O(n) for table scan
 /// Beneficial when prefix columns have low cardinality and filter is selective.
-pub(crate) fn execute_skip_scan(
+pub(in crate::select::scan) fn execute_skip_scan(
     table_name: &str,
     index_name: &str,
     alias: Option<&String>,
