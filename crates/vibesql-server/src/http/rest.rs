@@ -782,7 +782,13 @@ async fn subscribe_stream(
     // Create subscription via SubscriptionManager
     let (tx, mut rx) = mpsc::channel(32);
     let subscription_id = match state.subscription_manager.subscribe(params.query.clone(), tx) {
-        Ok(id) => id,
+        Ok(id) => {
+            // Track the new subscription in metrics
+            if let Some(ref metrics) = state.metrics {
+                metrics.increment_subscriptions_active();
+            }
+            id
+        }
         Err(e) => {
             error!("Failed to create subscription: {}", e);
             let event_data = serde_json::to_string(&SseEvent {
@@ -848,8 +854,9 @@ async fn subscribe_stream(
         drop(db_guard);
         error!("Failed to send initial results: {}", e);
         let was_selective_eligible = state.subscription_manager.unsubscribe(subscription_id);
-        if was_selective_eligible {
-            if let Some(ref metrics) = state.metrics {
+        if let Some(ref metrics) = state.metrics {
+            metrics.decrement_subscriptions_active();
+            if was_selective_eligible {
                 metrics.decrement_selective_eligible();
             }
         }
@@ -1004,8 +1011,9 @@ async fn subscribe_stream(
 
         // Clean up subscription when stream ends
         let was_selective_eligible = state.subscription_manager.unsubscribe(subscription_id);
-        if was_selective_eligible {
-            if let Some(ref metrics) = state.metrics {
+        if let Some(ref metrics) = state.metrics {
+            metrics.decrement_subscriptions_active();
+            if was_selective_eligible {
                 metrics.decrement_selective_eligible();
             }
         }
