@@ -2,9 +2,21 @@
 //!
 //! These benchmarks validate the 2-3x speedup claims for parallel sorting
 //! implemented in PR #1594, as part of Phase 1.5 of the PARALLELISM_ROADMAP.md
+//!
+//! Migrated from Criterion to custom harness for deterministic timing.
+//!
+//! Usage:
+//!   cargo bench --bench parallel_sort
+//!
+//! Environment variables:
+//!   WARMUP_ITERATIONS - Number of warmup runs (default: 3)
+//!   BENCHMARK_ITERATIONS - Number of timed runs (default: 10)
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+mod harness;
+
+use harness::{print_group_header, BenchResult, Harness};
 use std::hint::black_box;
+use std::time::Instant;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -75,274 +87,242 @@ fn setup_sort_table(db: &mut Database, row_count: usize, include_nulls: bool) {
     }
 }
 
+/// Setup: Create a table with already sorted data
+fn setup_presorted_table(db: &mut Database, row_count: usize, table_name: &str) {
+    let schema = vibesql_catalog::TableSchema::new(
+        table_name.to_string(),
+        vec![vibesql_catalog::ColumnSchema {
+            name: "ID".to_string(),
+            data_type: vibesql_types::DataType::Integer,
+            nullable: false,
+            default_value: None,
+        }],
+    );
+    db.create_table(schema).unwrap();
+
+    for i in 0..row_count {
+        let row = vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(i as i64)]);
+        db.insert_row(table_name, row).unwrap();
+    }
+}
+
+/// Setup: Create a table with reverse sorted data
+fn setup_reverse_sorted_table(db: &mut Database, row_count: usize, table_name: &str) {
+    let schema = vibesql_catalog::TableSchema::new(
+        table_name.to_string(),
+        vec![vibesql_catalog::ColumnSchema {
+            name: "ID".to_string(),
+            data_type: vibesql_types::DataType::Integer,
+            nullable: false,
+            default_value: None,
+        }],
+    );
+    db.create_table(schema).unwrap();
+
+    for i in 0..row_count {
+        let row = vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(
+            (row_count - i) as i64,
+        )]);
+        db.insert_row(table_name, row).unwrap();
+    }
+}
+
+/// Run a benchmark with a specific thread pool configuration
+fn run_benchmark_with_cores(
+    harness: &Harness,
+    name: &str,
+    db: &Database,
+    sql: &str,
+    cores: usize,
+) -> harness::BenchStats {
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
+
+    pool.install(|| {
+        harness.run(name, || {
+            let start = Instant::now();
+            let stmt = parse_select(sql);
+            let executor = SelectExecutor::new(db);
+            let result = executor.execute(&stmt);
+            match result {
+                Ok(rows) => {
+                    black_box(rows);
+                    BenchResult::Ok(start.elapsed())
+                }
+                Err(e) => BenchResult::Error(e.to_string()),
+            }
+        })
+    })
+}
+
 /// Benchmark: Simple integer sort (best case for parallelization)
-fn bench_simple_integer_sort(c: &mut Criterion) {
-    let mut group = c.benchmark_group("simple_integer_sort");
+fn bench_simple_integer_sort(harness: &Harness) {
+    print_group_header("Simple Integer Sort");
 
     for row_count in [1_000, 10_000, 100_000] {
         let mut db = Database::new();
         setup_sort_table(&mut db, row_count, false);
 
-        group.throughput(Throughput::Elements(row_count as u64));
+        eprintln!("\n  Row count: {}", row_count);
 
-        // Benchmark with different core counts
         for cores in [1, 2, 4, 8] {
-            group.bench_with_input(
-                BenchmarkId::new(format!("{}_cores", cores), row_count),
-                &(row_count, cores),
-                |b, &(_, cores)| {
-                    // Create a new thread pool for each benchmark
-                    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-                    pool.install(|| {
-                        b.iter(|| {
-                            let stmt = parse_select("SELECT * FROM sort_test ORDER BY id;");
-                            let executor = SelectExecutor::new(&db);
-                            black_box(executor.execute(&stmt).unwrap())
-                        });
-                    });
-                },
-            );
+            let name = format!("{}_cores/{}_rows", cores, row_count);
+            let stats =
+                run_benchmark_with_cores(harness, &name, &db, "SELECT * FROM sort_test ORDER BY id;", cores);
+            stats.print_compact();
         }
     }
-
-    group.finish();
 }
 
 /// Benchmark: Multi-column sort (more complex comparisons)
-fn bench_multi_column_sort(c: &mut Criterion) {
-    let mut group = c.benchmark_group("multi_column_sort");
+fn bench_multi_column_sort(harness: &Harness) {
+    print_group_header("Multi-Column Sort");
 
     for row_count in [1_000, 10_000, 100_000] {
         let mut db = Database::new();
         setup_sort_table(&mut db, row_count, false);
 
-        group.throughput(Throughput::Elements(row_count as u64));
+        eprintln!("\n  Row count: {}", row_count);
 
         for cores in [1, 2, 4, 8] {
-            group.bench_with_input(
-                BenchmarkId::new(format!("{}_cores", cores), row_count),
-                &(row_count, cores),
-                |b, &(_, cores)| {
-                    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-                    pool.install(|| {
-                        b.iter(|| {
-                            let stmt =
-                                parse_select("SELECT * FROM sort_test ORDER BY category, id DESC;");
-                            let executor = SelectExecutor::new(&db);
-                            black_box(executor.execute(&stmt).unwrap())
-                        });
-                    });
-                },
+            let name = format!("{}_cores/{}_rows", cores, row_count);
+            let stats = run_benchmark_with_cores(
+                harness,
+                &name,
+                &db,
+                "SELECT * FROM sort_test ORDER BY category, id DESC;",
+                cores,
             );
+            stats.print_compact();
         }
     }
-
-    group.finish();
 }
 
 /// Benchmark: String sort (expensive comparisons)
-fn bench_string_sort(c: &mut Criterion) {
-    let mut group = c.benchmark_group("string_sort");
+fn bench_string_sort(harness: &Harness) {
+    print_group_header("String Sort");
 
     for row_count in [1_000, 10_000, 100_000] {
         let mut db = Database::new();
         setup_sort_table(&mut db, row_count, false);
 
-        group.throughput(Throughput::Elements(row_count as u64));
+        eprintln!("\n  Row count: {}", row_count);
 
         for cores in [1, 2, 4, 8] {
-            group.bench_with_input(
-                BenchmarkId::new(format!("{}_cores", cores), row_count),
-                &(row_count, cores),
-                |b, &(_, cores)| {
-                    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-                    pool.install(|| {
-                        b.iter(|| {
-                            let stmt = parse_select("SELECT * FROM sort_test ORDER BY name;");
-                            let executor = SelectExecutor::new(&db);
-                            black_box(executor.execute(&stmt).unwrap())
-                        });
-                    });
-                },
+            let name = format!("{}_cores/{}_rows", cores, row_count);
+            let stats = run_benchmark_with_cores(
+                harness,
+                &name,
+                &db,
+                "SELECT * FROM sort_test ORDER BY name;",
+                cores,
             );
+            stats.print_compact();
         }
     }
-
-    group.finish();
 }
 
 /// Benchmark: Sort with NULLs (worst case for comparisons)
-fn bench_sort_with_nulls(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sort_with_nulls");
+fn bench_sort_with_nulls(harness: &Harness) {
+    print_group_header("Sort with NULLs");
 
     for row_count in [1_000, 10_000, 100_000] {
         let mut db = Database::new();
         setup_sort_table(&mut db, row_count, true); // ~10% NULL values
 
-        group.throughput(Throughput::Elements(row_count as u64));
+        eprintln!("\n  Row count: {}", row_count);
 
         for cores in [1, 2, 4, 8] {
-            group.bench_with_input(
-                BenchmarkId::new(format!("{}_cores", cores), row_count),
-                &(row_count, cores),
-                |b, &(_, cores)| {
-                    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-                    pool.install(|| {
-                        b.iter(|| {
-                            let stmt = parse_select("SELECT * FROM sort_test ORDER BY value;");
-                            let executor = SelectExecutor::new(&db);
-                            black_box(executor.execute(&stmt).unwrap())
-                        });
-                    });
-                },
+            let name = format!("{}_cores/{}_rows", cores, row_count);
+            let stats = run_benchmark_with_cores(
+                harness,
+                &name,
+                &db,
+                "SELECT * FROM sort_test ORDER BY value;",
+                cores,
             );
+            stats.print_compact();
         }
     }
-
-    group.finish();
 }
 
 /// Benchmark: Threshold boundary testing
 /// Tests performance at the threshold boundary to validate threshold values
-fn bench_threshold_boundary(c: &mut Criterion) {
-    let mut group = c.benchmark_group("threshold_boundary");
+fn bench_threshold_boundary(harness: &Harness) {
+    print_group_header("Threshold Boundary (8 cores)");
 
     // Test around the 8-core threshold of 5,000 rows (from parallel.rs:116-121)
     for row_count in [4_500, 5_000, 5_500] {
         let mut db = Database::new();
         setup_sort_table(&mut db, row_count, false);
 
-        group.throughput(Throughput::Elements(row_count as u64));
-
-        // Test with 8 cores (aggressive threshold: 5,000)
         let cores = 8;
-        group.bench_with_input(BenchmarkId::new("8_cores", row_count), &row_count, |b, &_| {
-            let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-            pool.install(|| {
-                b.iter(|| {
-                    let stmt = parse_select("SELECT * FROM sort_test ORDER BY id;");
-                    let executor = SelectExecutor::new(&db);
-                    black_box(executor.execute(&stmt).unwrap())
-                });
-            });
-        });
+        let name = format!("8_cores/{}_rows", row_count);
+        let stats =
+            run_benchmark_with_cores(harness, &name, &db, "SELECT * FROM sort_test ORDER BY id;", cores);
+        stats.print();
     }
-
-    group.finish();
 }
 
 /// Benchmark: Already sorted data (best case for sort algorithm)
-fn bench_presorted_data(c: &mut Criterion) {
-    let mut group = c.benchmark_group("presorted_data");
+fn bench_presorted_data(harness: &Harness) {
+    print_group_header("Pre-sorted Data");
 
     for row_count in [10_000, 100_000] {
         let mut db = Database::new();
+        setup_presorted_table(&mut db, row_count, "PRESORTED_TEST");
 
-        // Create table with already sorted data
-        let schema = vibesql_catalog::TableSchema::new(
-            "PRESORTED_TEST".to_string(),
-            vec![vibesql_catalog::ColumnSchema {
-                name: "ID".to_string(),
-                data_type: vibesql_types::DataType::Integer,
-                nullable: false,
-                default_value: None,
-            }],
-        );
-        db.create_table(schema).unwrap();
-
-        for i in 0..row_count {
-            let row = vibesql_storage::Row::new(vec![
-                vibesql_types::SqlValue::Integer(i as i64), // Already sorted
-            ]);
-            db.insert_row("PRESORTED_TEST", row).unwrap();
-        }
-
-        group.throughput(Throughput::Elements(row_count as u64));
+        eprintln!("\n  Row count: {}", row_count);
 
         for cores in [1, 4, 8] {
-            group.bench_with_input(
-                BenchmarkId::new(format!("{}_cores", cores), row_count),
-                &(row_count, cores),
-                |b, &(_, cores)| {
-                    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-                    pool.install(|| {
-                        b.iter(|| {
-                            let stmt = parse_select("SELECT * FROM presorted_test ORDER BY id;");
-                            let executor = SelectExecutor::new(&db);
-                            black_box(executor.execute(&stmt).unwrap())
-                        });
-                    });
-                },
+            let name = format!("{}_cores/{}_rows", cores, row_count);
+            let stats = run_benchmark_with_cores(
+                harness,
+                &name,
+                &db,
+                "SELECT * FROM presorted_test ORDER BY id;",
+                cores,
             );
+            stats.print_compact();
         }
     }
-
-    group.finish();
 }
 
 /// Benchmark: Reverse sorted data (worst case for some sort algorithms)
-fn bench_reverse_sorted_data(c: &mut Criterion) {
-    let mut group = c.benchmark_group("reverse_sorted_data");
+fn bench_reverse_sorted_data(harness: &Harness) {
+    print_group_header("Reverse-sorted Data");
 
     for row_count in [10_000, 100_000] {
         let mut db = Database::new();
+        setup_reverse_sorted_table(&mut db, row_count, "REVERSE_TEST");
 
-        let schema = vibesql_catalog::TableSchema::new(
-            "REVERSE_TEST".to_string(),
-            vec![vibesql_catalog::ColumnSchema {
-                name: "ID".to_string(),
-                data_type: vibesql_types::DataType::Integer,
-                nullable: false,
-                default_value: None,
-            }],
-        );
-        db.create_table(schema).unwrap();
-
-        for i in 0..row_count {
-            let row = vibesql_storage::Row::new(vec![
-                vibesql_types::SqlValue::Integer((row_count - i) as i64), // Reverse sorted
-            ]);
-            db.insert_row("REVERSE_TEST", row).unwrap();
-        }
-
-        group.throughput(Throughput::Elements(row_count as u64));
+        eprintln!("\n  Row count: {}", row_count);
 
         for cores in [1, 4, 8] {
-            group.bench_with_input(
-                BenchmarkId::new(format!("{}_cores", cores), row_count),
-                &(row_count, cores),
-                |b, &(_, cores)| {
-                    let pool = rayon::ThreadPoolBuilder::new().num_threads(cores).build().unwrap();
-
-                    pool.install(|| {
-                        b.iter(|| {
-                            let stmt = parse_select("SELECT * FROM reverse_test ORDER BY id;");
-                            let executor = SelectExecutor::new(&db);
-                            black_box(executor.execute(&stmt).unwrap())
-                        });
-                    });
-                },
+            let name = format!("{}_cores/{}_rows", cores, row_count);
+            let stats = run_benchmark_with_cores(
+                harness,
+                &name,
+                &db,
+                "SELECT * FROM reverse_test ORDER BY id;",
+                cores,
             );
+            stats.print_compact();
         }
     }
-
-    group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_simple_integer_sort,
-    bench_multi_column_sort,
-    bench_string_sort,
-    bench_sort_with_nulls,
-    bench_threshold_boundary,
-    bench_presorted_data,
-    bench_reverse_sorted_data
-);
-criterion_main!(benches);
+fn main() {
+    eprintln!("\n=== Parallel Sort Benchmarks ===\n");
+
+    let harness = Harness::new();
+
+    bench_simple_integer_sort(&harness);
+    bench_multi_column_sort(&harness);
+    bench_string_sort(&harness);
+    bench_sort_with_nulls(&harness);
+    bench_threshold_boundary(&harness);
+    bench_presorted_data(&harness);
+    bench_reverse_sorted_data(&harness);
+
+    eprintln!("\n=== Benchmark Complete ===\n");
+}

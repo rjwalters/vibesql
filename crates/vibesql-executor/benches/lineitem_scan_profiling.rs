@@ -5,16 +5,25 @@
 //! - Date predicate filtering cost
 //! - Comparison with DuckDB equivalent operations
 //!
+//! Migrated from Criterion to custom harness for deterministic timing.
+//!
 //! Usage:
-//!   cargo bench --bench lineitem_scan_profiling --features benchmark-comparison
+//!   cargo bench --bench lineitem_scan_profiling
+//!   cargo bench --bench lineitem_scan_profiling --features duckdb-comparison
+//!
+//! Environment variables:
+//!   WARMUP_ITERATIONS - Number of warmup runs (default: 3)
+//!   BENCHMARK_ITERATIONS - Number of timed runs (default: 10)
+//!   SCALE_FACTOR - TPC-H scale factor (default: 0.01)
 //!
 //! Part of issue #2962: Profile lineitem table scan performance
 
+mod harness;
 mod tpch;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use harness::{print_group_header, print_summary_table, BenchResult, Harness};
 use std::hint::black_box;
-use std::time::Duration;
+use std::time::Instant;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 
@@ -53,31 +62,28 @@ const LINEITEM_DATE_LIMIT_100: &str =
 // VibeSQL Benchmark Functions
 // =============================================================================
 
-fn benchmark_vibesql(c: &mut Criterion, group_name: &str, sql: &str) {
-    let mut group = c.benchmark_group(group_name);
-    group.measurement_time(Duration::from_secs(5));
-
-    let db = load_vibesql(0.01);
-
-    // Get row count for throughput calculation
-    let row_count = db.get_table("lineitem").map(|t| t.row_count()).unwrap_or(0);
-
-    group.throughput(Throughput::Elements(row_count as u64));
-
-    group.bench_function("vibesql", |b| {
-        b.iter(|| {
-            let stmt = Parser::parse_sql(sql).unwrap();
-            if let vibesql_ast::Statement::Select(select) = stmt {
-                let executor = SelectExecutor::new(&db);
-                let result = executor.execute(&select).unwrap();
-                black_box(result.len())
-            } else {
-                0
+fn run_vibesql_benchmark(
+    harness: &Harness,
+    name: &str,
+    db: &vibesql_storage::Database,
+    sql: &str,
+) -> harness::BenchStats {
+    harness.run(name, || {
+        let start = Instant::now();
+        let stmt = Parser::parse_sql(sql).unwrap();
+        if let vibesql_ast::Statement::Select(select) = stmt {
+            let executor = SelectExecutor::new(db);
+            match executor.execute(&select) {
+                Ok(result) => {
+                    black_box(result.len());
+                    BenchResult::Ok(start.elapsed())
+                }
+                Err(e) => BenchResult::Error(e.to_string()),
             }
-        });
-    });
-
-    group.finish();
+        } else {
+            BenchResult::Error("Not a SELECT statement".to_string())
+        }
+    })
 }
 
 // =============================================================================
@@ -85,148 +91,90 @@ fn benchmark_vibesql(c: &mut Criterion, group_name: &str, sql: &str) {
 // =============================================================================
 
 #[cfg(feature = "duckdb-comparison")]
-fn benchmark_duckdb(c: &mut Criterion, group_name: &str, sql: &str) {
-    let mut group = c.benchmark_group(group_name);
-    group.measurement_time(Duration::from_secs(5));
-
-    let conn = load_duckdb(0.01);
-
-    // Get row count for throughput calculation
-    let row_count: i64 = conn
-        .prepare("SELECT COUNT(*) FROM lineitem")
-        .unwrap()
-        .query_row([], |row| row.get(0))
-        .unwrap();
-
-    group.throughput(Throughput::Elements(row_count as u64));
-
-    group.bench_function("duckdb", |b| {
-        b.iter(|| {
-            let mut stmt = conn.prepare(sql).unwrap();
-            let mut rows = stmt.query([]).unwrap();
-            let mut count = 0;
-            while rows.next().unwrap().is_some() {
-                count += 1;
-            }
-            black_box(count)
-        });
-    });
-
-    group.finish();
+fn run_duckdb_benchmark(
+    harness: &Harness,
+    name: &str,
+    conn: &duckdb::Connection,
+    sql: &str,
+) -> harness::BenchStats {
+    harness.run(name, || {
+        let start = Instant::now();
+        let mut stmt = conn.prepare(sql).unwrap();
+        let mut rows = stmt.query([]).unwrap();
+        let mut count = 0;
+        while rows.next().unwrap().is_some() {
+            count += 1;
+        }
+        black_box(count);
+        BenchResult::Ok(start.elapsed())
+    })
 }
 
 // =============================================================================
-// Benchmark Functions
+// Benchmark Runner
 // =============================================================================
 
-fn bench_full_scan_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_full_scan", LINEITEM_FULL_SCAN);
+fn main() {
+    eprintln!("\n=== Lineitem Scan Profiling Benchmarks ===\n");
+
+    let scale_factor: f64 = std::env::var("SCALE_FACTOR")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.01);
+
+    eprintln!("Scale factor: {}", scale_factor);
+
+    let harness = Harness::new();
+
+    // Load VibeSQL database
+    eprintln!("\nLoading VibeSQL TPC-H data...");
+    let db = load_vibesql(scale_factor);
+    let row_count = db.get_table("lineitem").map(|t| t.row_count()).unwrap_or(0);
+    eprintln!("Loaded {} lineitem rows\n", row_count);
+
+    // Define benchmarks
+    let benchmarks = [
+        ("full_scan", LINEITEM_FULL_SCAN),
+        ("count", LINEITEM_COUNT),
+        ("date_filter", LINEITEM_DATE_FILTER),
+        ("date_count", LINEITEM_DATE_COUNT),
+        ("single_column", LINEITEM_SINGLE_COLUMN),
+        ("two_columns", LINEITEM_TWO_COLUMNS),
+        ("limit_100", LINEITEM_LIMIT_100),
+        ("date_limit_100", LINEITEM_DATE_LIMIT_100),
+    ];
+
+    // Run VibeSQL benchmarks
+    print_group_header("VibeSQL Lineitem Scans");
+    let mut vibesql_results = Vec::new();
+    for (name, sql) in &benchmarks {
+        let stats = run_vibesql_benchmark(&harness, name, &db, sql);
+        stats.print();
+        vibesql_results.push(stats);
+    }
+
+    // Run DuckDB benchmarks if feature is enabled
+    #[cfg(feature = "duckdb-comparison")]
+    {
+        eprintln!("\nLoading DuckDB TPC-H data...");
+        let conn = load_duckdb(scale_factor);
+
+        print_group_header("DuckDB Lineitem Scans");
+        let mut duckdb_results = Vec::new();
+        for (name, sql) in &benchmarks {
+            let stats = run_duckdb_benchmark(&harness, name, &conn, sql);
+            stats.print();
+            duckdb_results.push(stats);
+        }
+
+        // Print comparison summary
+        harness::print_comparison_table(&[("VibeSQL", vibesql_results), ("DuckDB", duckdb_results)]);
+    }
+
+    #[cfg(not(feature = "duckdb-comparison"))]
+    {
+        print_summary_table("VibeSQL", &vibesql_results);
+    }
+
+    eprintln!("\n=== Benchmark Complete ===\n");
 }
-
-fn bench_count_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_count", LINEITEM_COUNT);
-}
-
-fn bench_date_filter_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_date_filter", LINEITEM_DATE_FILTER);
-}
-
-fn bench_date_count_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_date_count", LINEITEM_DATE_COUNT);
-}
-
-fn bench_single_column_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_single_column", LINEITEM_SINGLE_COLUMN);
-}
-
-fn bench_two_columns_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_two_columns", LINEITEM_TWO_COLUMNS);
-}
-
-fn bench_limit_100_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_limit_100", LINEITEM_LIMIT_100);
-}
-
-fn bench_date_limit_100_vibesql(c: &mut Criterion) {
-    benchmark_vibesql(c, "lineitem_date_limit_100", LINEITEM_DATE_LIMIT_100);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_full_scan_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_full_scan", LINEITEM_FULL_SCAN);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_count_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_count", LINEITEM_COUNT);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_date_filter_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_date_filter", LINEITEM_DATE_FILTER);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_date_count_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_date_count", LINEITEM_DATE_COUNT);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_single_column_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_single_column", LINEITEM_SINGLE_COLUMN);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_two_columns_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_two_columns", LINEITEM_TWO_COLUMNS);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_limit_100_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_limit_100", LINEITEM_LIMIT_100);
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn bench_date_limit_100_duckdb(c: &mut Criterion) {
-    benchmark_duckdb(c, "lineitem_date_limit_100", LINEITEM_DATE_LIMIT_100);
-}
-
-// =============================================================================
-// Criterion Benchmark Groups
-// =============================================================================
-
-#[cfg(not(feature = "duckdb-comparison"))]
-criterion_group!(
-    benches,
-    bench_full_scan_vibesql,
-    bench_count_vibesql,
-    bench_date_filter_vibesql,
-    bench_date_count_vibesql,
-    bench_single_column_vibesql,
-    bench_two_columns_vibesql,
-    bench_limit_100_vibesql,
-    bench_date_limit_100_vibesql
-);
-
-#[cfg(feature = "duckdb-comparison")]
-criterion_group!(
-    benches,
-    bench_full_scan_vibesql,
-    bench_full_scan_duckdb,
-    bench_count_vibesql,
-    bench_count_duckdb,
-    bench_date_filter_vibesql,
-    bench_date_filter_duckdb,
-    bench_date_count_vibesql,
-    bench_date_count_duckdb,
-    bench_single_column_vibesql,
-    bench_single_column_duckdb,
-    bench_two_columns_vibesql,
-    bench_two_columns_duckdb,
-    bench_limit_100_vibesql,
-    bench_limit_100_duckdb,
-    bench_date_limit_100_vibesql,
-    bench_date_limit_100_duckdb
-);
-
-criterion_main!(benches);
