@@ -131,6 +131,15 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     conn
 }
 
+/// Get a MySQL connection pool for parallel execution.
+/// Returns None if MYSQL_URL is not set.
+/// Note: This assumes the database has already been loaded by `load_mysql`.
+#[cfg(feature = "mysql-comparison")]
+pub fn get_mysql_pool() -> Option<Pool> {
+    let url = std::env::var("MYSQL_URL").ok()?;
+    Pool::new(url.as_str()).ok()
+}
+
 /// Load MySQL TPC-C database
 /// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpcc)
 /// Returns None if MYSQL_URL is not set or connection fails
