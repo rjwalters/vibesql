@@ -308,6 +308,69 @@ impl Default for MemoryMonitor {
     }
 }
 
+/// Compute optimal parallelism level based on available memory
+///
+/// Returns a parallelism level (1, 2, 4, or 8) based on the percentage
+/// of free system memory. This allows benchmark runners to scale their
+/// parallelism dynamically without risking OOM.
+///
+/// | Free Memory | Parallelism |
+/// |-------------|-------------|
+/// | > 70%       | 8 workers   |
+/// | 50-70%      | 4 workers   |
+/// | 30-50%      | 2 workers   |
+/// | < 30%       | 1 (sequential) |
+///
+/// The `PARALLEL_QUERIES` environment variable can override this:
+/// - `PARALLEL_QUERIES=0` disables parallelism (returns 1)
+/// - `PARALLEL_QUERIES=N` forces N workers (clamped to 1-16)
+pub fn compute_parallelism() -> usize {
+    // Check for environment variable override
+    if let Ok(val) = std::env::var("PARALLEL_QUERIES") {
+        if let Ok(n) = val.parse::<usize>() {
+            if n == 0 {
+                return 1; // Explicit disable
+            }
+            return n.clamp(1, 16);
+        }
+    }
+
+    // Get current memory stats
+    let mut monitor = MemoryMonitor::new();
+    let stats = monitor.current_stats();
+
+    // Calculate free percentage
+    let free_percent = if stats.total_bytes > 0 {
+        (stats.available_bytes as f64 / stats.total_bytes as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // Determine parallelism based on free memory
+    let parallelism = if free_percent > 70.0 {
+        8
+    } else if free_percent > 50.0 {
+        4
+    } else if free_percent > 30.0 {
+        2
+    } else {
+        1
+    };
+
+    // Log the decision for debugging
+    if std::env::var("PARALLEL_DEBUG").is_ok() {
+        eprintln!(
+            "[PARALLEL] Free memory: {:.1}% ({} / {}), parallelism: {}",
+            free_percent,
+            format_bytes(stats.available_bytes),
+            format_bytes(stats.total_bytes),
+            parallelism
+        );
+    }
+
+    parallelism
+}
+
 /// Format bytes as a human-readable string
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
@@ -423,6 +486,22 @@ mod tests {
         assert_eq!(format_bytes(1536), "1.50 KB");
         assert_eq!(format_bytes(1_572_864), "1.50 MB");
         assert_eq!(format_bytes(1_610_612_736), "1.50 GB");
+    }
+
+    #[test]
+    fn test_compute_parallelism() {
+        use super::compute_parallelism;
+
+        // Test that compute_parallelism returns a valid value (1, 2, 4, or 8)
+        let parallelism = compute_parallelism();
+        assert!(
+            parallelism == 1 || parallelism == 2 || parallelism == 4 || parallelism == 8,
+            "parallelism should be 1, 2, 4, or 8, got {}",
+            parallelism
+        );
+
+        // At minimum, parallelism should be 1
+        assert!(parallelism >= 1, "parallelism should be at least 1");
     }
 
     /// Test macOS-specific memory detection fallback
