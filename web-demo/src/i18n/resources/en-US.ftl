@@ -340,18 +340,18 @@ bench-tpcds-title = TPC-DS Decision Support Benchmark
 bench-tpcds-description = <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model a modern decision support system with significantly more complex query patterns including multiple fact tables, snow-flake schema, and advanced SQL features.
 bench-tpcds-ops-label = TPC-DS queries
 bench-tpcds-note-intro = TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features like window functions, common table expressions (WITH clause), and complex join patterns across multiple fact and dimension tables.
-bench-tpcds-note-remaining = <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or specific date arithmetic functions not yet implemented.
+bench-tpcds-note-remaining = <strong>Note:</strong> All 99 TPC-DS queries pass, demonstrating comprehensive SQL:1999 feature support including INTERSECT, EXCEPT, window functions, CTEs, and complex subqueries.
 
 # TPC-DS Discussion
 bench-tpcds-disc-coverage-title = SQL:1999 Feature Coverage
-bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>, demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
+bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>all 99 queries</strong>, demonstrating complete coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, recursive CTEs, and INTERSECT/EXCEPT set operations.
 bench-tpcds-disc-optimization-title = Complex Query Optimization
 bench-tpcds-disc-optimization = TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
 bench-tpcds-disc-cte = Intelligent decision between materialized and inline CTEs
 bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when beneficial
 bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
-bench-tpcds-disc-toward-title = Toward 99/99
-bench-tpcds-disc-toward = INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set operations fit naturally into our existing query algebra and will be implemented as hash-based operators similar to our DISTINCT processing.
+bench-tpcds-disc-toward-title = Complete TPC-DS Coverage
+bench-tpcds-disc-toward = With all 99 queries passing, VibeSQL demonstrates production-ready SQL:1999 compliance for complex analytical workloads. Recent additions of INTERSECT and EXCEPT set operations completed full TPC-DS coverage, implemented as efficient hash-based operators.
 
 # TPC-C specific
 bench-tpcc-name = TPC-C

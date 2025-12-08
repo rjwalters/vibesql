@@ -422,7 +422,7 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
       t('bench-tpcds-description'),
       [
         li(t('bench-schema'), '24 tables with star/snowflake schema design'),
-        li(t('bench-query-count'), '99 queries (currently 88/99 passing)'),
+        li(t('bench-query-count'), '99 queries (all 99 passing)'),
         li(t('bench-scale-factor'), 'SF 0.01'),
         li(t('bench-query-types'), 'Reporting, ad-hoc, data mining patterns'),
         li(t('bench-sql-features'), 'Window functions, CTEs, complex subqueries, ROLLUP/CUBE'),
@@ -1053,7 +1053,7 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
     if (!vibesql && !vibesqlServer && !sqlite && !duckdb && !mysql) continue;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
 
     // Operation name (with tooltip)
     const opCell = document.createElement('td');
@@ -1262,7 +1262,7 @@ function renderFootprintEmbeddedTable(data: FootprintResults): void {
 
   for (const benchmark of availableBenchmarks) {
     const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
 
     // Database name
     const dbCell = document.createElement('td');
@@ -1454,7 +1454,7 @@ function renderFootprintServerTable(data: FootprintResults): void {
 
   for (const metric of metrics) {
     const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
 
     const nameCell = document.createElement('td');
     nameCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
@@ -1606,7 +1606,7 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     if (!primary && !comparison) continue;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
 
     // Operation name
     const opCell = document.createElement('td');
@@ -1807,7 +1807,7 @@ function renderTPCCTable(data: TPCCResults): void {
     if (!vibesql && !sqlite && !duckdb) continue;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
 
     // Operation name
     const opCell = document.createElement('td');
@@ -1966,7 +1966,26 @@ function parseTPCDSBenchmarkName(name: string): { queryNum: string; database: st
 }
 
 /**
- * Render TPC-DS results table (VibeSQL only, shows pass/fail status)
+ * Group TPC-DS benchmarks by query number
+ */
+function groupTPCDSBenchmarksByQuery(benchmarks: TPCDSBenchmark[]): Map<string, Map<string, TPCDSBenchmark>> {
+  const grouped = new Map<string, Map<string, TPCDSBenchmark>>();
+
+  for (const bench of benchmarks) {
+    const { queryNum, database } = parseTPCDSBenchmarkName(bench.name);
+
+    if (!grouped.has(queryNum)) {
+      grouped.set(queryNum, new Map());
+    }
+
+    grouped.get(queryNum)!.set(database, bench);
+  }
+
+  return grouped;
+}
+
+/**
+ * Render TPC-DS results table with comparison data (VibeSQL vs SQLite vs DuckDB)
  */
 function renderTPCDSTable(data: TPCDSResults): void {
   const tbody = document.getElementById('results-tbody');
@@ -1975,107 +1994,195 @@ function renderTPCDSTable(data: TPCDSResults): void {
 
   const config = SUITE_CONFIGS['tpcds'];
 
+  // Check if we have comparison data
+  const hasSQLite = data.benchmarks.some(b => b.name.endsWith('_sqlite'));
+  const hasDuckDB = data.benchmarks.some(b => b.name.endsWith('_duckdb'));
+
   // Update table headers for TPC-DS view
   const thead = table.querySelector('thead tr');
   if (thead) {
-    thead.innerHTML = `
-      <th class="px-4 py-3">Query</th>
-      <th class="px-4 py-3 text-right">Execution Time</th>
-      <th class="px-4 py-3 text-right">Rows</th>
-      <th class="px-4 py-3 text-center">Status</th>
-    `;
+    if (hasSQLite || hasDuckDB) {
+      // Comparison mode: show all engines
+      thead.innerHTML = `
+        <th class="px-4 py-3">${t('bench-table-query')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-sqlite')}</th>
+        <th class="px-4 py-3 text-right">${t('bench-table-duckdb')}</th>
+      `;
+    } else {
+      // VibeSQL only mode
+      thead.innerHTML = `
+        <th class="px-4 py-3">Query</th>
+        <th class="px-4 py-3 text-right">Execution Time</th>
+        <th class="px-4 py-3 text-right">Rows</th>
+        <th class="px-4 py-3 text-center">Status</th>
+      `;
+    }
   }
 
   tbody.innerHTML = '';
 
-  // Sort benchmarks by query number
-  const sortedBenchmarks = [...data.benchmarks].sort((a, b) => {
-    const aNum = parseInt(parseTPCDSBenchmarkName(a.name).queryNum.replace('q', ''));
-    const bNum = parseInt(parseTPCDSBenchmarkName(b.name).queryNum.replace('q', ''));
+  const grouped = groupTPCDSBenchmarksByQuery(data.benchmarks);
+
+  // Sort by query number
+  const sortedQueries = [...grouped.entries()].sort((a, b) => {
+    const aNum = parseInt(a[0].replace('q', ''));
+    const bNum = parseInt(b[0].replace('q', ''));
     return aNum - bNum;
   });
 
+  const sqliteSpeedup = { total: 0, count: 0 };
+  const duckdbSpeedup = { total: 0, count: 0 };
   let passedCount = 0;
 
-  for (const bench of sortedBenchmarks) {
-    const { queryNum } = parseTPCDSBenchmarkName(bench.name);
-    const isPassed = bench.stats.status === 'passed';
-    if (isPassed) passedCount++;
+  for (const [queryNum, databases] of sortedQueries) {
+    const vibesql = databases.get('vibesql');
+    const sqlite = databases.get('sqlite');
+    const duckdb = databases.get('duckdb');
+
+    // Only count VibeSQL queries for pass rate
+    if (vibesql?.stats.status === 'passed') passedCount++;
 
     const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-100 dark:bg-gray-700/50 transition-colors';
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
 
-    // Query name with description tooltip
+    // Query name
     const queryCell = document.createElement('td');
     queryCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
     const description = config.descriptions[queryNum];
     if (description) {
-      queryCell.innerHTML = `<span class="cursor-help" title="${description}">TPC-DS ${queryNum.toUpperCase()}</span>`;
+      queryCell.innerHTML = `<span class="cursor-help" title="${description}">${queryNum.toUpperCase()}</span>`;
     } else {
-      queryCell.textContent = `TPC-DS ${queryNum.toUpperCase()}`;
+      queryCell.textContent = queryNum.toUpperCase();
     }
     row.appendChild(queryCell);
 
-    // Execution time
-    const timeCell = document.createElement('td');
-    timeCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-    if (isPassed && bench.stats.mean > 0) {
-      timeCell.textContent = formatTime(bench.stats.mean, bench.stats.stddev) || t('bench-na');
-    } else {
-      timeCell.textContent = '-';
-    }
-    row.appendChild(timeCell);
+    if (hasSQLite || hasDuckDB) {
+      // Comparison mode: show timing for each engine
+      // Determine which engine is fastest for this query
+      const times = [
+        { name: 'vibesql', time: vibesql?.stats.mean || Infinity },
+        { name: 'sqlite', time: sqlite?.stats.mean || Infinity },
+        { name: 'duckdb', time: duckdb?.stats.mean || Infinity },
+      ].filter(t => t.time !== Infinity);
+      const fastest = times.length > 0 ? times.reduce((a, b) => a.time < b.time ? a : b).name : null;
 
-    // Rows returned
-    const rowsCell = document.createElement('td');
-    rowsCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-    rowsCell.textContent = bench.stats.rows.toLocaleString();
-    row.appendChild(rowsCell);
+      // VibeSQL time
+      const vibesqlCell = document.createElement('td');
+      const vibesqlIsFastest = fastest === 'vibesql';
+      vibesqlCell.className = vibesqlIsFastest
+        ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+        : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+      vibesqlCell.textContent = vibesql && vibesql.stats.mean > 0
+        ? formatTime(vibesql.stats.mean, vibesql.stats.stddev) || t('bench-na')
+        : t('bench-na');
+      row.appendChild(vibesqlCell);
 
-    // Status
-    const statusCell = document.createElement('td');
-    statusCell.className = 'px-4 py-3 text-center text-2xl';
-    if (bench.stats.status === 'passed') {
-      statusCell.textContent = '✅';
-      statusCell.title = 'Query passed';
-    } else if (bench.stats.status === 'timeout') {
-      statusCell.textContent = '⏱️';
-      statusCell.title = 'Query timed out';
+      // SQLite time
+      const sqliteCell = document.createElement('td');
+      const sqliteIsFastest = fastest === 'sqlite';
+      sqliteCell.className = sqliteIsFastest
+        ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+        : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+      sqliteCell.textContent = sqlite && sqlite.stats.mean > 0
+        ? formatTime(sqlite.stats.mean) || t('bench-na')
+        : t('bench-na');
+      row.appendChild(sqliteCell);
+
+      // DuckDB time
+      const duckdbCell = document.createElement('td');
+      const duckdbIsFastest = fastest === 'duckdb';
+      duckdbCell.className = duckdbIsFastest
+        ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+        : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+      duckdbCell.textContent = duckdb && duckdb.stats.mean > 0
+        ? formatTime(duckdb.stats.mean) || t('bench-na')
+        : t('bench-na');
+      row.appendChild(duckdbCell);
+
+      // Calculate speedup (lower time is better, so sqlite/vibesql for speedup)
+      if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
+        const speedup = sqlite.stats.mean / vibesql.stats.mean;
+        sqliteSpeedup.total += speedup;
+        sqliteSpeedup.count++;
+      }
+      if (vibesql && duckdb && vibesql.stats.mean > 0 && duckdb.stats.mean > 0) {
+        const speedup = duckdb.stats.mean / vibesql.stats.mean;
+        duckdbSpeedup.total += speedup;
+        duckdbSpeedup.count++;
+      }
     } else {
-      statusCell.textContent = '❌';
-      statusCell.title = 'Query failed';
+      // VibeSQL only mode
+      const isPassed = vibesql?.stats.status === 'passed';
+
+      // Execution time
+      const timeCell = document.createElement('td');
+      timeCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+      if (isPassed && vibesql && vibesql.stats.mean > 0) {
+        timeCell.textContent = formatTime(vibesql.stats.mean, vibesql.stats.stddev) || t('bench-na');
+      } else {
+        timeCell.textContent = '-';
+      }
+      row.appendChild(timeCell);
+
+      // Rows returned
+      const rowsCell = document.createElement('td');
+      rowsCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+      rowsCell.textContent = vibesql?.stats.rows?.toLocaleString() || '0';
+      row.appendChild(rowsCell);
+
+      // Status
+      const statusCell = document.createElement('td');
+      statusCell.className = 'px-4 py-3 text-center text-2xl';
+      if (vibesql?.stats.status === 'passed') {
+        statusCell.textContent = '✅';
+        statusCell.title = 'Query passed';
+      } else if (vibesql?.stats.status === 'timeout') {
+        statusCell.textContent = '⏱️';
+        statusCell.title = 'Query timed out';
+      } else {
+        statusCell.textContent = '❌';
+        statusCell.title = 'Query failed';
+      }
+      row.appendChild(statusCell);
     }
-    row.appendChild(statusCell);
 
     tbody.appendChild(row);
   }
 
-  // Update summary cards for TPC-DS (shows pass rate instead of speedup)
-  const sqliteEl = document.getElementById('avg-speedup-sqlite');
-  if (sqliteEl) {
-    const passRate = (passedCount / sortedBenchmarks.length * 100).toFixed(0);
-    sqliteEl.textContent = `${passRate}%`;
-    sqliteEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
-  }
-  const sqliteHeader = sqliteEl?.parentElement?.querySelector('h3');
-  if (sqliteHeader) sqliteHeader.textContent = 'Pass Rate';
-  const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
-  if (sqliteLabelEl) sqliteLabelEl.textContent = 'queries passing';
+  // Update summary cards based on comparison mode
+  if (hasSQLite || hasDuckDB) {
+    // Show speedup ratios like TPC-C
+    resetSummaryCardHeaders();
+    updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
+  } else {
+    // Show pass rate for VibeSQL-only mode
+    const sqliteEl = document.getElementById('avg-speedup-sqlite');
+    if (sqliteEl) {
+      const passRate = (passedCount / sortedQueries.length * 100).toFixed(0);
+      sqliteEl.textContent = `${passRate}%`;
+      sqliteEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
+    }
+    const sqliteHeader = sqliteEl?.parentElement?.querySelector('h3');
+    if (sqliteHeader) sqliteHeader.textContent = t('bench-pass-rate');
+    const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
+    if (sqliteLabelEl) sqliteLabelEl.textContent = t('bench-queries-passing');
 
-  // Show passed/total in DuckDB slot
-  const duckdbEl = document.getElementById('avg-speedup-duckdb');
-  if (duckdbEl) {
-    duckdbEl.textContent = `${passedCount}/${sortedBenchmarks.length}`;
-    duckdbEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
+    // Show passed/total in DuckDB slot
+    const duckdbEl = document.getElementById('avg-speedup-duckdb');
+    if (duckdbEl) {
+      duckdbEl.textContent = `${passedCount}/${sortedQueries.length}`;
+      duckdbEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
+    }
+    const duckdbHeader = duckdbEl?.parentElement?.querySelector('h3');
+    if (duckdbHeader) duckdbHeader.textContent = t('bench-queries');
+    const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
+    if (duckdbLabelEl) duckdbLabelEl.textContent = t('bench-passed-total');
   }
-  const duckdbHeader = duckdbEl?.parentElement?.querySelector('h3');
-  if (duckdbHeader) duckdbHeader.textContent = 'Queries';
-  const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
-  if (duckdbLabelEl) duckdbLabelEl.textContent = 'passed / total';
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
-    opsTestedEl.textContent = `${passedCount}`;
+    opsTestedEl.textContent = `${sortedQueries.length}`;
   }
 
   // Update last updated timestamp
