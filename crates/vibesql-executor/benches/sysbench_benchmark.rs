@@ -85,8 +85,6 @@ use mysql::prelude::*;
 use mysql::PooledConn;
 #[cfg(feature = "sqlite-comparison")]
 use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "duckdb-comparison")]
-use sysbench::schema::load_duckdb;
 #[cfg(feature = "mysql-comparison")]
 use sysbench::schema::load_mysql;
 
