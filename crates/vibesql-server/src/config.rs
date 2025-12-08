@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -192,7 +193,8 @@ impl Config {
         for path in config_paths {
             if path.exists() {
                 let contents = fs::read_to_string(&path)?;
-                let config: Config = toml::from_str(&contents)?;
+                let mut config: Config = toml::from_str(&contents)?;
+                config.apply_env_overrides();
                 return Ok(config);
             }
         }
@@ -205,14 +207,103 @@ impl Config {
     #[allow(dead_code)]
     pub fn load_from(path: &PathBuf) -> Result<Self> {
         let contents = fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&contents)?;
+        let mut config: Config = toml::from_str(&contents)?;
+        config.apply_env_overrides();
         Ok(config)
     }
+
+    /// Apply environment variable overrides to the configuration.
+    ///
+    /// Environment variables with the `VIBESQL_` prefix override configuration file values.
+    /// This follows the precedence: environment variable > config file > default.
+    ///
+    /// # Supported Environment Variables
+    ///
+    /// | Environment Variable | Config Path |
+    /// |---------------------|-------------|
+    /// | `VIBESQL_SERVER_HOST` | `server.host` |
+    /// | `VIBESQL_SERVER_PORT` | `server.port` |
+    /// | `VIBESQL_SERVER_MAX_CONNECTIONS` | `server.max_connections` |
+    /// | `VIBESQL_SERVER_SSL_ENABLED` | `server.ssl_enabled` |
+    /// | `VIBESQL_SERVER_SSL_CERT` | `server.ssl_cert` |
+    /// | `VIBESQL_SERVER_SSL_KEY` | `server.ssl_key` |
+    /// | `VIBESQL_AUTH_METHOD` | `auth.method` |
+    /// | `VIBESQL_AUTH_PASSWORD_FILE` | `auth.password_file` |
+    /// | `VIBESQL_LOG_LEVEL` | `logging.level` |
+    /// | `VIBESQL_LOG_FILE` | `logging.file` |
+    /// | `VIBESQL_HTTP_ENABLED` | `http.enabled` |
+    /// | `VIBESQL_HTTP_HOST` | `http.host` |
+    /// | `VIBESQL_HTTP_PORT` | `http.port` |
+    pub fn apply_env_overrides(&mut self) {
+        // Server configuration
+        if let Ok(val) = env::var("VIBESQL_SERVER_HOST") {
+            self.server.host = val;
+        }
+        if let Ok(val) = env::var("VIBESQL_SERVER_PORT") {
+            if let Ok(port) = val.parse() {
+                self.server.port = port;
+            }
+        }
+        if let Ok(val) = env::var("VIBESQL_SERVER_MAX_CONNECTIONS") {
+            if let Ok(max_conn) = val.parse() {
+                self.server.max_connections = max_conn;
+            }
+        }
+        if let Ok(val) = env::var("VIBESQL_SERVER_SSL_ENABLED") {
+            self.server.ssl_enabled = parse_bool(&val);
+        }
+        if let Ok(val) = env::var("VIBESQL_SERVER_SSL_CERT") {
+            self.server.ssl_cert = Some(PathBuf::from(val));
+        }
+        if let Ok(val) = env::var("VIBESQL_SERVER_SSL_KEY") {
+            self.server.ssl_key = Some(PathBuf::from(val));
+        }
+
+        // Auth configuration
+        if let Ok(val) = env::var("VIBESQL_AUTH_METHOD") {
+            self.auth.method = val;
+        }
+        if let Ok(val) = env::var("VIBESQL_AUTH_PASSWORD_FILE") {
+            self.auth.password_file = Some(PathBuf::from(val));
+        }
+
+        // Logging configuration
+        if let Ok(val) = env::var("VIBESQL_LOG_LEVEL") {
+            self.logging.level = val;
+        }
+        if let Ok(val) = env::var("VIBESQL_LOG_FILE") {
+            self.logging.file = Some(PathBuf::from(val));
+        }
+
+        // HTTP configuration
+        if let Ok(val) = env::var("VIBESQL_HTTP_ENABLED") {
+            self.http.enabled = parse_bool(&val);
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_HOST") {
+            self.http.host = val;
+        }
+        if let Ok(val) = env::var("VIBESQL_HTTP_PORT") {
+            if let Ok(port) = val.parse() {
+                self.http.port = port;
+            }
+        }
+    }
+}
+
+/// Parse a string value as a boolean.
+/// Accepts "true", "1", "yes", "on" as true (case-insensitive).
+/// All other values are considered false.
+fn parse_bool(val: &str) -> bool {
+    matches!(val.to_lowercase().as_str(), "true" | "1" | "yes" | "on")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Environment variable tests must be serialized to avoid interference
+    static ENV_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_default_config() {
@@ -310,5 +401,211 @@ enabled = false
             (config.subscriptions.selective_updates.max_changed_columns_ratio
                 - deserialized.subscriptions.selective_updates.max_changed_columns_ratio).abs() < 0.001
         );
+    }
+
+    #[test]
+    fn test_parse_bool() {
+        assert!(parse_bool("true"));
+        assert!(parse_bool("TRUE"));
+        assert!(parse_bool("True"));
+        assert!(parse_bool("1"));
+        assert!(parse_bool("yes"));
+        assert!(parse_bool("YES"));
+        assert!(parse_bool("on"));
+        assert!(parse_bool("ON"));
+
+        assert!(!parse_bool("false"));
+        assert!(!parse_bool("0"));
+        assert!(!parse_bool("no"));
+        assert!(!parse_bool("off"));
+        assert!(!parse_bool(""));
+        assert!(!parse_bool("invalid"));
+    }
+
+    #[test]
+    fn test_env_override_server_host() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.server.host, "0.0.0.0");
+
+        env::set_var("VIBESQL_SERVER_HOST", "127.0.0.1");
+        config.apply_env_overrides();
+        assert_eq!(config.server.host, "127.0.0.1");
+        env::remove_var("VIBESQL_SERVER_HOST");
+    }
+
+    #[test]
+    fn test_env_override_server_port() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.server.port, 5432);
+
+        env::set_var("VIBESQL_SERVER_PORT", "5433");
+        config.apply_env_overrides();
+        assert_eq!(config.server.port, 5433);
+        env::remove_var("VIBESQL_SERVER_PORT");
+    }
+
+    #[test]
+    fn test_env_override_server_port_invalid() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.server.port, 5432);
+
+        // Invalid port should be ignored
+        env::set_var("VIBESQL_SERVER_PORT", "not_a_number");
+        config.apply_env_overrides();
+        assert_eq!(config.server.port, 5432);
+        env::remove_var("VIBESQL_SERVER_PORT");
+    }
+
+    #[test]
+    fn test_env_override_max_connections() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.server.max_connections, 100);
+
+        env::set_var("VIBESQL_SERVER_MAX_CONNECTIONS", "500");
+        config.apply_env_overrides();
+        assert_eq!(config.server.max_connections, 500);
+        env::remove_var("VIBESQL_SERVER_MAX_CONNECTIONS");
+    }
+
+    #[test]
+    fn test_env_override_ssl_enabled() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(!config.server.ssl_enabled);
+
+        env::set_var("VIBESQL_SERVER_SSL_ENABLED", "true");
+        config.apply_env_overrides();
+        assert!(config.server.ssl_enabled);
+        env::remove_var("VIBESQL_SERVER_SSL_ENABLED");
+    }
+
+    #[test]
+    fn test_env_override_ssl_cert_and_key() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(config.server.ssl_cert.is_none());
+        assert!(config.server.ssl_key.is_none());
+
+        env::set_var("VIBESQL_SERVER_SSL_CERT", "/path/to/cert.pem");
+        env::set_var("VIBESQL_SERVER_SSL_KEY", "/path/to/key.pem");
+        config.apply_env_overrides();
+        assert_eq!(config.server.ssl_cert, Some(PathBuf::from("/path/to/cert.pem")));
+        assert_eq!(config.server.ssl_key, Some(PathBuf::from("/path/to/key.pem")));
+        env::remove_var("VIBESQL_SERVER_SSL_CERT");
+        env::remove_var("VIBESQL_SERVER_SSL_KEY");
+    }
+
+    #[test]
+    fn test_env_override_auth_method() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.auth.method, "trust");
+
+        env::set_var("VIBESQL_AUTH_METHOD", "scram-sha-256");
+        config.apply_env_overrides();
+        assert_eq!(config.auth.method, "scram-sha-256");
+        env::remove_var("VIBESQL_AUTH_METHOD");
+    }
+
+    #[test]
+    fn test_env_override_auth_password_file() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(config.auth.password_file.is_none());
+
+        env::set_var("VIBESQL_AUTH_PASSWORD_FILE", "/etc/vibesql/passwords");
+        config.apply_env_overrides();
+        assert_eq!(config.auth.password_file, Some(PathBuf::from("/etc/vibesql/passwords")));
+        env::remove_var("VIBESQL_AUTH_PASSWORD_FILE");
+    }
+
+    #[test]
+    fn test_env_override_log_level() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.logging.level, "info");
+
+        env::set_var("VIBESQL_LOG_LEVEL", "debug");
+        config.apply_env_overrides();
+        assert_eq!(config.logging.level, "debug");
+        env::remove_var("VIBESQL_LOG_LEVEL");
+    }
+
+    #[test]
+    fn test_env_override_log_file() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(config.logging.file.is_none());
+
+        env::set_var("VIBESQL_LOG_FILE", "/var/log/vibesql/server.log");
+        config.apply_env_overrides();
+        assert_eq!(config.logging.file, Some(PathBuf::from("/var/log/vibesql/server.log")));
+        env::remove_var("VIBESQL_LOG_FILE");
+    }
+
+    #[test]
+    fn test_env_override_http_enabled() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(config.http.enabled);
+
+        env::set_var("VIBESQL_HTTP_ENABLED", "false");
+        config.apply_env_overrides();
+        assert!(!config.http.enabled);
+        env::remove_var("VIBESQL_HTTP_ENABLED");
+    }
+
+    #[test]
+    fn test_env_override_http_host() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.host, "0.0.0.0");
+
+        env::set_var("VIBESQL_HTTP_HOST", "localhost");
+        config.apply_env_overrides();
+        assert_eq!(config.http.host, "localhost");
+        env::remove_var("VIBESQL_HTTP_HOST");
+    }
+
+    #[test]
+    fn test_env_override_http_port() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert_eq!(config.http.port, 8080);
+
+        env::set_var("VIBESQL_HTTP_PORT", "9090");
+        config.apply_env_overrides();
+        assert_eq!(config.http.port, 9090);
+        env::remove_var("VIBESQL_HTTP_PORT");
+    }
+
+    #[test]
+    fn test_env_override_multiple_values() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+
+        env::set_var("VIBESQL_SERVER_HOST", "192.168.1.1");
+        env::set_var("VIBESQL_SERVER_PORT", "5433");
+        env::set_var("VIBESQL_AUTH_METHOD", "md5");
+        env::set_var("VIBESQL_LOG_LEVEL", "warn");
+        env::set_var("VIBESQL_HTTP_PORT", "8081");
+
+        config.apply_env_overrides();
+
+        assert_eq!(config.server.host, "192.168.1.1");
+        assert_eq!(config.server.port, 5433);
+        assert_eq!(config.auth.method, "md5");
+        assert_eq!(config.logging.level, "warn");
+        assert_eq!(config.http.port, 8081);
+
+        env::remove_var("VIBESQL_SERVER_HOST");
+        env::remove_var("VIBESQL_SERVER_PORT");
+        env::remove_var("VIBESQL_AUTH_METHOD");
+        env::remove_var("VIBESQL_LOG_LEVEL");
+        env::remove_var("VIBESQL_HTTP_PORT");
     }
 }
