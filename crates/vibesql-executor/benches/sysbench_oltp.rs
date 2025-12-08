@@ -660,36 +660,45 @@ fn benchmark_insert_duckdb(c: &mut Criterion) {
 
 /// Benchmark oltp_delete on VibeSQL using prepared statements
 ///
-/// This test measures DELETE by primary key performance. Uses iter_batched
-/// to set up a fresh database for each iteration batch since deletes modify state.
+/// This test measures DELETE by primary key performance. Uses iter_custom
+/// to load the database once and perform multiple deletes, avoiding the overhead
+/// of database loading in the measurement.
 ///
 /// Sysbench equivalent: DELETE FROM sbtest1 WHERE id = ?
 ///
 /// Uses prepared statements for fair comparison with SQLite's `prepare_cached()`.
 fn benchmark_delete_vibesql(c: &mut Criterion) {
-    use criterion::BatchSize;
-
     let mut group = c.benchmark_group("sysbench_delete");
     group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each iteration loads fresh 10k-row database
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("vibesql", TABLE_SIZE), |b| {
-        b.iter_batched(
-            || {
-                // Setup: create fresh database and prepared statements
-                let db = load_vibesql(TABLE_SIZE);
-                let stmts = VibesqlPreparedStatements::new(&db);
-                let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
-                let id = rng.random_range(1..=TABLE_SIZE as i64);
-                (db, stmts, id)
-            },
-            |(mut db, stmts, id)| {
-                // Delete single row using prepared statement
-                let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
-                vibesql_delete(&mut session, &stmts.delete, id);
-            },
-            BatchSize::LargeInput,
-        );
+        b.iter_custom(|iters| {
+            let mut db = load_vibesql(TABLE_SIZE);
+            let stmts = VibesqlPreparedStatements::new(&db);
+            let mut session = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
+            let mut rng = ChaCha8Rng::seed_from_u64(42);
+            let mut data_gen = SysbenchData::new(TABLE_SIZE);
+
+            // Track which IDs have been deleted to avoid deleting the same row twice
+            // and to re-insert deleted rows to maintain table size
+            let mut next_id = (TABLE_SIZE + 1) as i64;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                // Delete a random existing row
+                let delete_id = rng.random_range(1..=next_id - 1);
+                vibesql_delete(&mut session, &stmts.delete, delete_id);
+
+                // Re-insert a row to maintain table size (like sysbench does)
+                let k = data_gen.random_k();
+                let c = generate_c_string();
+                let pad = generate_pad_string();
+                vibesql_insert(&mut session, &stmts.insert, next_id, k, &c, &pad);
+                next_id += 1;
+            }
+            start.elapsed()
+        })
     });
 
     group.finish();
@@ -697,25 +706,32 @@ fn benchmark_delete_vibesql(c: &mut Criterion) {
 
 #[cfg(feature = "benchmark-comparison")]
 fn benchmark_delete_sqlite(c: &mut Criterion) {
-    use criterion::BatchSize;
-
     let mut group = c.benchmark_group("sysbench_delete");
     group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each iteration loads fresh 10k-row database
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("sqlite", TABLE_SIZE), |b| {
-        b.iter_batched(
-            || {
-                let conn = load_sqlite(TABLE_SIZE);
-                let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
-                let id = rng.random_range(1..=TABLE_SIZE as i64);
-                (conn, id)
-            },
-            |(conn, id)| {
-                sqlite_delete(&conn, id);
-            },
-            BatchSize::LargeInput,
-        );
+        b.iter_custom(|iters| {
+            let conn = load_sqlite(TABLE_SIZE);
+            let mut rng = ChaCha8Rng::seed_from_u64(42);
+            let mut data_gen = SysbenchData::new(TABLE_SIZE);
+            let mut next_id = (TABLE_SIZE + 1) as i64;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                // Delete a random existing row
+                let delete_id = rng.random_range(1..=next_id - 1);
+                sqlite_delete(&conn, delete_id);
+
+                // Re-insert a row to maintain table size (like sysbench does)
+                let k = data_gen.random_k();
+                let c = generate_c_string();
+                let pad = generate_pad_string();
+                sqlite_insert(&conn, next_id, k, &c, &pad);
+                next_id += 1;
+            }
+            start.elapsed()
+        })
     });
 
     group.finish();
@@ -723,25 +739,32 @@ fn benchmark_delete_sqlite(c: &mut Criterion) {
 
 #[cfg(feature = "duckdb-comparison")]
 fn benchmark_delete_duckdb(c: &mut Criterion) {
-    use criterion::BatchSize;
-
     let mut group = c.benchmark_group("sysbench_delete");
     group.measurement_time(Duration::from_secs(10));
-    group.sample_size(10); // Reduced: each iteration loads fresh 10k-row database
+    group.sample_size(10); // Reduced: each sample loads fresh 10k-row database
 
     group.bench_function(BenchmarkId::new("duckdb", TABLE_SIZE), |b| {
-        b.iter_batched(
-            || {
-                let conn = load_duckdb(TABLE_SIZE);
-                let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
-                let id = rng.random_range(1..=TABLE_SIZE as i64);
-                (conn, id)
-            },
-            |(conn, id)| {
-                duckdb_delete(&conn, id);
-            },
-            BatchSize::LargeInput,
-        );
+        b.iter_custom(|iters| {
+            let conn = load_duckdb(TABLE_SIZE);
+            let mut rng = ChaCha8Rng::seed_from_u64(42);
+            let mut data_gen = SysbenchData::new(TABLE_SIZE);
+            let mut next_id = (TABLE_SIZE + 1) as i64;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                // Delete a random existing row
+                let delete_id = rng.random_range(1..=next_id - 1);
+                duckdb_delete(&conn, delete_id);
+
+                // Re-insert a row to maintain table size (like sysbench does)
+                let k = data_gen.random_k();
+                let c = generate_c_string();
+                let pad = generate_pad_string();
+                duckdb_insert(&conn, next_id, k, &c, &pad);
+                next_id += 1;
+            }
+            start.elapsed()
+        })
     });
 
     group.finish();
