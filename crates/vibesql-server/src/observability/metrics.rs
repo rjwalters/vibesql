@@ -39,6 +39,7 @@ pub struct ServerMetrics {
     // Partial update efficiency metrics
     partial_update_fallbacks_total: Counter<u64>,
     partial_update_bytes_saved: Histogram<u64>,
+    selective_update_bytes_saved_total: Counter<u64>,
     partial_update_efficiency: Gauge<f64>,
     partial_update_efficiency_numerator: Arc<AtomicU64>,
     partial_update_efficiency_denominator: Arc<AtomicU64>,
@@ -170,6 +171,12 @@ impl ServerMetrics {
             .with_unit("By")
             .build();
 
+        let selective_update_bytes_saved_total = meter
+            .u64_counter("vibesql_selective_update_bytes_saved_total")
+            .with_description("Total bytes saved by using selective column updates instead of full row updates")
+            .with_unit("By")
+            .build();
+
         let partial_update_efficiency = meter
             .f64_gauge("vibesql_partial_update_efficiency")
             .with_description("Rolling average of column efficiency (columns_sent / total_columns) for partial updates")
@@ -216,6 +223,7 @@ impl ServerMetrics {
             subscriptions_selective_eligible_count,
             partial_update_fallbacks_total,
             partial_update_bytes_saved,
+            selective_update_bytes_saved_total,
             partial_update_efficiency,
             partial_update_efficiency_numerator,
             partial_update_efficiency_denominator,
@@ -388,7 +396,10 @@ impl ServerMetrics {
     /// # Arguments
     /// * `bytes_saved` - Estimated bytes saved (full_row_size - partial_update_size)
     pub fn record_partial_update_bytes_saved(&self, bytes_saved: u64) {
+        // Record per-update histogram for distribution analysis
         self.partial_update_bytes_saved.record(bytes_saved, &[]);
+        // Increment counter for cumulative tracking via OpenTelemetry
+        self.selective_update_bytes_saved_total.add(bytes_saved, &[]);
         // Also track cumulative bytes saved for HTTP stats endpoint
         self.total_bytes_saved_count.fetch_add(bytes_saved, Ordering::Relaxed);
     }
@@ -619,6 +630,10 @@ mod tests {
     #[test]
     fn test_partial_update_bytes_saved_recording() {
         // This test verifies the method exists and can be called without panicking.
+        // The method records to three places:
+        // 1. partial_update_bytes_saved histogram (per-update distribution)
+        // 2. selective_update_bytes_saved_total counter (cumulative OpenTelemetry metric)
+        // 3. total_bytes_saved_count AtomicU64 (for HTTP stats endpoint)
         let metrics = create_test_metrics();
 
         // Should not panic when recording bytes saved
