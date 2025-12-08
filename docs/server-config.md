@@ -12,6 +12,83 @@ The server looks for configuration in the following locations (in order):
 
 If no configuration file is found, the server will fail to start.
 
+## Environment Variable Overrides
+
+Environment variables with the `VIBESQL_` prefix override configuration file values. This is useful for containerized deployments (Docker, Kubernetes) where configuration files may not be easily mounted, or when secrets should be injected via environment variables.
+
+### Precedence
+
+Configuration values are resolved in this order (highest to lowest priority):
+
+1. **Environment variable** (highest priority)
+2. **Configuration file**
+3. **Default value** (lowest priority)
+
+### Supported Environment Variables
+
+| Environment Variable | Config Path | Example |
+|---------------------|-------------|---------|
+| `VIBESQL_SERVER_HOST` | `server.host` | `0.0.0.0` |
+| `VIBESQL_SERVER_PORT` | `server.port` | `5432` |
+| `VIBESQL_SERVER_MAX_CONNECTIONS` | `server.max_connections` | `100` |
+| `VIBESQL_SERVER_SSL_ENABLED` | `server.ssl_enabled` | `true` |
+| `VIBESQL_SERVER_SSL_CERT` | `server.ssl_cert` | `/path/to/cert.pem` |
+| `VIBESQL_SERVER_SSL_KEY` | `server.ssl_key` | `/path/to/key.pem` |
+| `VIBESQL_AUTH_METHOD` | `auth.method` | `scram-sha-256` |
+| `VIBESQL_AUTH_PASSWORD_FILE` | `auth.password_file` | `/etc/vibesql/passwords` |
+| `VIBESQL_LOG_LEVEL` | `logging.level` | `info` |
+| `VIBESQL_LOG_FILE` | `logging.file` | `/var/log/vibesql/server.log` |
+| `VIBESQL_HTTP_ENABLED` | `http.enabled` | `true` |
+| `VIBESQL_HTTP_HOST` | `http.host` | `0.0.0.0` |
+| `VIBESQL_HTTP_PORT` | `http.port` | `8080` |
+
+### Boolean Values
+
+Boolean environment variables accept the following values (case-insensitive):
+- **True**: `true`, `1`, `yes`, `on`
+- **False**: any other value (e.g., `false`, `0`, `no`, `off`)
+
+### Example: Docker Deployment
+
+```bash
+docker run -d \
+  -e VIBESQL_SERVER_HOST=0.0.0.0 \
+  -e VIBESQL_SERVER_PORT=5432 \
+  -e VIBESQL_AUTH_METHOD=scram-sha-256 \
+  -e VIBESQL_LOG_LEVEL=info \
+  -e VIBESQL_HTTP_ENABLED=true \
+  -e VIBESQL_HTTP_PORT=8080 \
+  vibesql-server
+```
+
+### Example: Kubernetes ConfigMap/Secret
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vibesql-server
+spec:
+  containers:
+  - name: vibesql
+    image: vibesql-server
+    env:
+    - name: VIBESQL_SERVER_HOST
+      value: "0.0.0.0"
+    - name: VIBESQL_SERVER_PORT
+      value: "5432"
+    - name: VIBESQL_AUTH_METHOD
+      valueFrom:
+        secretKeyRef:
+          name: vibesql-secrets
+          key: auth-method
+    - name: VIBESQL_LOG_LEVEL
+      valueFrom:
+        configMapKeyRef:
+          name: vibesql-config
+          key: log-level
+```
+
 ## Configuration Format
 
 The configuration file uses [TOML](https://toml.io) format.
