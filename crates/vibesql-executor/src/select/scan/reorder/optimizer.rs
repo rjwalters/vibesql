@@ -707,15 +707,7 @@ fn identify_semi_join_target_table(
         .collect();
 
     // Find column references in the condition that belong to inner tables
-    let target = find_inner_table_in_condition(condition, &table_names);
-
-    if std::env::var("SEMI_JOIN_DEBUG").is_ok() {
-        eprintln!("[SEMI_JOIN_DEBUG] Condition: {:?}", condition);
-        eprintln!("[SEMI_JOIN_DEBUG] Inner tables: {:?}", table_names);
-        eprintln!("[SEMI_JOIN_DEBUG] Target table: {:?}", target);
-    }
-
-    target
+    find_inner_table_in_condition(condition, &table_names)
 }
 
 /// Find which inner table is referenced in the semi-join condition
