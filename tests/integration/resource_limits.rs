@@ -495,7 +495,7 @@ fn test_partial_result_cleanup_on_error() {
     match executor.execute(&stmt) {
         Ok(result) => {
             // Expected to complete
-            assert!(result.len() > 0);
+            assert!(!result.is_empty());
         }
         Err(_) => {
             // If error occurred, partial results should be cleaned up

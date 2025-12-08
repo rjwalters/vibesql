@@ -13,7 +13,7 @@ use vibesql::catalog::{ColumnSchema, TableSchema};
 use vibesql::executor::SelectExecutor;
 use vibesql::parser::Parser;
 use vibesql::storage::{Database, Row};
-use vibesql::types::{DataType, SqlValue};
+use vibesql::types::{DataType, SqlValue, StringValue};
 
 fn create_northwind_db() -> Database {
     let mut db = Database::new();
@@ -60,15 +60,15 @@ fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Beverages")),
-            SqlValue::Varchar(std::sync::Arc::from("Soft drinks, coffees, teas, beers, and ales")),
+            SqlValue::Varchar(StringValue::from("Beverages")),
+            SqlValue::Varchar(StringValue::from("Soft drinks, coffees, teas, beers, and ales")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Condiments")),
-            SqlValue::Varchar(std::sync::Arc::from(
+            SqlValue::Varchar(StringValue::from("Condiments")),
+            SqlValue::Varchar(StringValue::from(
                 "Sweet and savory sauces, relishes, spreads, and seasonings",
             )),
         ]))
@@ -76,43 +76,43 @@ fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Confections")),
-            SqlValue::Varchar(std::sync::Arc::from("Desserts, candies, and sweet breads")),
+            SqlValue::Varchar(StringValue::from("Confections")),
+            SqlValue::Varchar(StringValue::from("Desserts, candies, and sweet breads")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Dairy Products")),
-            SqlValue::Varchar(std::sync::Arc::from("Cheeses")),
+            SqlValue::Varchar(StringValue::from("Dairy Products")),
+            SqlValue::Varchar(StringValue::from("Cheeses")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Grains/Cereals")),
-            SqlValue::Varchar(std::sync::Arc::from("Breads, crackers, pasta, and cereal")),
+            SqlValue::Varchar(StringValue::from("Grains/Cereals")),
+            SqlValue::Varchar(StringValue::from("Breads, crackers, pasta, and cereal")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar(std::sync::Arc::from("Meat/Poultry")),
-            SqlValue::Varchar(std::sync::Arc::from("Prepared meats")),
+            SqlValue::Varchar(StringValue::from("Meat/Poultry")),
+            SqlValue::Varchar(StringValue::from("Prepared meats")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar(std::sync::Arc::from("Produce")),
-            SqlValue::Varchar(std::sync::Arc::from("Dried fruit and bean curd")),
+            SqlValue::Varchar(StringValue::from("Produce")),
+            SqlValue::Varchar(StringValue::from("Dried fruit and bean curd")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar(std::sync::Arc::from("Seafood")),
-            SqlValue::Varchar(std::sync::Arc::from("Seaweed and fish")),
+            SqlValue::Varchar(StringValue::from("Seafood")),
+            SqlValue::Varchar(StringValue::from("Seaweed and fish")),
         ]))
         .unwrap();
 
@@ -145,7 +145,7 @@ fn create_northwind_db() -> Database {
         products_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(std::sync::Arc::from(name)),
+                SqlValue::Varchar(StringValue::from(name)),
                 SqlValue::Integer(cat_id),
                 SqlValue::Float(price),
                 SqlValue::Integer(stock),

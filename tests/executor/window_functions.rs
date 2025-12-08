@@ -4,7 +4,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 #[test]
 fn test_window_demo_count_over() {
@@ -41,27 +41,27 @@ fn test_window_demo_count_over() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Smith")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(100000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Jones")),
+            SqlValue::Varchar(StringValue::from("Sales")),
             SqlValue::Integer(80000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Carol")),
-            SqlValue::Varchar(std::sync::Arc::from("Davis")),
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Carol")),
+            SqlValue::Varchar(StringValue::from("Davis")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(95000),
         ]))
         .unwrap();
@@ -124,24 +124,24 @@ fn test_window_demo_running_total() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
+            SqlValue::Varchar(StringValue::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Smith")),
             SqlValue::Integer(100),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
+            SqlValue::Varchar(StringValue::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Jones")),
             SqlValue::Integer(200),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Carol")),
-            SqlValue::Varchar(std::sync::Arc::from("Davis")),
+            SqlValue::Varchar(StringValue::from("Carol")),
+            SqlValue::Varchar(StringValue::from("Davis")),
             SqlValue::Integer(300),
         ]))
         .unwrap();
@@ -209,27 +209,27 @@ fn test_window_demo_partitioned_avg() {
     table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Smith")),
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Smith")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(100),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
-            SqlValue::Varchar(std::sync::Arc::from("Jones")),
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Jones")),
+            SqlValue::Varchar(StringValue::from("Sales")),
             SqlValue::Integer(200),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Carol")),
-            SqlValue::Varchar(std::sync::Arc::from("Davis")),
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Carol")),
+            SqlValue::Varchar(StringValue::from("Davis")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(300),
         ]))
         .unwrap();
@@ -283,13 +283,13 @@ fn test_window_lag_basic() {
     use vibesql_storage::Row;
     let table = db.get_table_mut("SALES").unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("2024-01")), SqlValue::Integer(100)]))
+        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-01")), SqlValue::Integer(100)]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("2024-02")), SqlValue::Integer(150)]))
+        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-02")), SqlValue::Integer(150)]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("2024-03")), SqlValue::Integer(200)]))
+        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-03")), SqlValue::Integer(200)]))
         .unwrap();
 
     // Test LAG to get previous month's revenue
@@ -345,13 +345,13 @@ fn test_window_lead_basic() {
     use vibesql_storage::Row;
     let table = db.get_table_mut("SALES").unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("2024-01")), SqlValue::Integer(100)]))
+        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-01")), SqlValue::Integer(100)]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("2024-02")), SqlValue::Integer(150)]))
+        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-02")), SqlValue::Integer(150)]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("2024-03")), SqlValue::Integer(200)]))
+        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-03")), SqlValue::Integer(200)]))
         .unwrap();
 
     // Test LEAD to get next month's revenue
@@ -413,29 +413,29 @@ fn test_window_first_value() {
     let table = db.get_table_mut("EMPLOYEES").unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(120000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(95000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
-            SqlValue::Varchar(std::sync::Arc::from("Carol")),
+            SqlValue::Varchar(StringValue::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Carol")),
             SqlValue::Integer(85000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
-            SqlValue::Varchar(std::sync::Arc::from("Dave")),
+            SqlValue::Varchar(StringValue::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Dave")),
             SqlValue::Integer(90000),
         ]))
         .unwrap();
@@ -500,29 +500,29 @@ fn test_window_last_value() {
     let table = db.get_table_mut("EMPLOYEES").unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(120000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Engineering")),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(95000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
-            SqlValue::Varchar(std::sync::Arc::from("Carol")),
+            SqlValue::Varchar(StringValue::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Carol")),
             SqlValue::Integer(85000),
         ]))
         .unwrap();
     table
         .insert(Row::new(vec![
-            SqlValue::Varchar(std::sync::Arc::from("Sales")),
-            SqlValue::Varchar(std::sync::Arc::from("Dave")),
+            SqlValue::Varchar(StringValue::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Dave")),
             SqlValue::Integer(90000),
         ]))
         .unwrap();

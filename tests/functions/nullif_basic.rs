@@ -3,7 +3,7 @@
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(sql: &str) -> Result<Vec<Row>, String> {
@@ -65,7 +65,7 @@ fn test_nullif_string_unequal() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar(std::sync::Arc::from("hello")),
+        SqlValue::Varchar(StringValue::from("hello")),
         "NULLIF('hello', 'world') should return 'hello'"
     );
 }

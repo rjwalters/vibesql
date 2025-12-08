@@ -92,7 +92,7 @@ fn test_update_hash_indexes() {
         unique_indices.iter().map(|&idx| table.scan()[0].values[idx].clone()).collect();
 
     let constraint_violated =
-        if !test_unique_values.iter().any(|v| *v == vibesql_types::SqlValue::Null) {
+        if !test_unique_values.contains(&vibesql_types::SqlValue::Null) {
             unique_indexes[0].contains_key(&test_unique_values)
         } else {
             false

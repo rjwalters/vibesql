@@ -7,7 +7,7 @@ use vibesql::catalog::{ColumnSchema, TableSchema};
 use vibesql::executor::SelectExecutor;
 use vibesql::parser::Parser;
 use vibesql::storage::{Database, Row};
-use vibesql::types::{DataType, SqlValue};
+use vibesql::types::{DataType, SqlValue, StringValue};
 
 fn create_northwind_db() -> Database {
     let mut db = Database::new();
@@ -66,8 +66,8 @@ fn create_northwind_db() -> Database {
         categories_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(std::sync::Arc::from(name)),
-                SqlValue::Varchar(std::sync::Arc::from(desc)),
+                SqlValue::Varchar(StringValue::from(name)),
+                SqlValue::Varchar(StringValue::from(desc)),
             ]))
             .unwrap();
     }
@@ -101,7 +101,7 @@ fn create_northwind_db() -> Database {
         products_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(std::sync::Arc::from(name)),
+                SqlValue::Varchar(StringValue::from(name)),
                 SqlValue::Integer(cat_id),
                 SqlValue::Float(price),
                 SqlValue::Integer(stock),

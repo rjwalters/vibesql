@@ -12,7 +12,7 @@ use regex::Regex;
 use vibesql::catalog::{ColumnSchema, TableSchema};
 use vibesql::parser::Parser;
 use vibesql::storage::{Database, Row};
-use vibesql::types::{DataType, SqlValue};
+use vibesql::types::{DataType, SqlValue, StringValue};
 
 // Import database creation functions from test file
 // (We'll inline them for now since we can't easily import from tests)
@@ -81,8 +81,8 @@ mod db_setup {
             categories_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(id),
-                    SqlValue::Varchar(std::sync::Arc::from(name)),
-                    SqlValue::Varchar(std::sync::Arc::from(desc)),
+                    SqlValue::Varchar(StringValue::from(name)),
+                    SqlValue::Varchar(StringValue::from(desc)),
                 ]))
                 .unwrap();
         }
@@ -116,7 +116,7 @@ mod db_setup {
             products_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(id),
-                    SqlValue::Varchar(std::sync::Arc::from(name)),
+                    SqlValue::Varchar(StringValue::from(name)),
                     SqlValue::Integer(cat_id),
                     SqlValue::Float(price),
                     SqlValue::Integer(stock),
@@ -242,8 +242,8 @@ mod db_setup {
             students_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(i),
-                    SqlValue::Varchar(std::sync::Arc::from(name)),
-                    SqlValue::Varchar(std::sync::Arc::from(major)),
+                    SqlValue::Varchar(StringValue::from(name)),
+                    SqlValue::Varchar(StringValue::from(major)),
                     SqlValue::Float(gpa),
                 ]))
                 .unwrap();
@@ -267,8 +267,8 @@ mod db_setup {
             courses_table
                 .insert(Row::new(vec![
                     SqlValue::Integer(id),
-                    SqlValue::Varchar(std::sync::Arc::from(name)),
-                    SqlValue::Varchar(std::sync::Arc::from(dept)),
+                    SqlValue::Varchar(StringValue::from(name)),
+                    SqlValue::Varchar(StringValue::from(dept)),
                     SqlValue::Integer(credits),
                 ]))
                 .unwrap();
@@ -298,8 +298,8 @@ mod db_setup {
                     .insert(Row::new(vec![
                         SqlValue::Integer(student_id),
                         SqlValue::Integer(course_id),
-                        SqlValue::Varchar(std::sync::Arc::from(grade)),
-                        SqlValue::Varchar(std::sync::Arc::from("Fall 2024")),
+                        SqlValue::Varchar(StringValue::from(grade)),
+                        SqlValue::Varchar(StringValue::from("Fall 2024")),
                     ]))
                     .unwrap();
 
@@ -316,7 +316,7 @@ mod db_setup {
                     SqlValue::Integer(student_id),
                     SqlValue::Integer(course_id),
                     SqlValue::Null,
-                    SqlValue::Varchar(std::sync::Arc::from("Spring 2025")),
+                    SqlValue::Varchar(StringValue::from("Spring 2025")),
                 ]))
                 .unwrap();
         }

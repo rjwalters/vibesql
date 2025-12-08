@@ -13,7 +13,7 @@ mod common;
 use common::referential_integrity_fixtures::*;
 use vibesql_catalog::{ColumnSchema, ReferentialAction, TableSchema};
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 // ========================================================================
 // Phase 1: ON DELETE Actions - Basic Tests
@@ -136,7 +136,7 @@ fn test_on_delete_cascade_multi_level() {
         Row::new(vec![
             SqlValue::Integer(10),
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Parent1")),
+            SqlValue::Varchar(StringValue::from("Parent1")),
         ]),
     )
     .unwrap();
@@ -145,7 +145,7 @@ fn test_on_delete_cascade_multi_level() {
         Row::new(vec![
             SqlValue::Integer(100),
             SqlValue::Integer(10),
-            SqlValue::Varchar(std::sync::Arc::from("Child1")),
+            SqlValue::Varchar(StringValue::from("Child1")),
         ]),
     )
     .unwrap();
@@ -739,7 +739,7 @@ fn test_self_referential_table() {
     // Insert employees: CEO (no manager), Manager (reports to CEO), Employee (reports to Manager)
     db.insert_row(
         "EMPLOYEE",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Varchar(std::sync::Arc::from("CEO"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Varchar(StringValue::from("CEO"))]),
     )
     .unwrap();
     db.insert_row(
@@ -747,7 +747,7 @@ fn test_self_referential_table() {
         Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Manager")),
+            SqlValue::Varchar(StringValue::from("Manager")),
         ]),
     )
     .unwrap();
@@ -756,7 +756,7 @@ fn test_self_referential_table() {
         Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Employee")),
+            SqlValue::Varchar(StringValue::from("Employee")),
         ]),
     )
     .unwrap();
@@ -789,7 +789,7 @@ fn test_multi_column_foreign_key() {
         Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Integer(100),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
         ]),
     )
     .unwrap();

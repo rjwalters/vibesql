@@ -9,7 +9,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
     let stmt = Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
@@ -45,28 +45,28 @@ fn insert_sample_products(db: &mut Database) {
     let rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Apple iPhone")),
-            SqlValue::Varchar(std::sync::Arc::from("APPL-001")),
+            SqlValue::Varchar(StringValue::from("Apple iPhone")),
+            SqlValue::Varchar(StringValue::from("APPL-001")),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Samsung Galaxy")),
-            SqlValue::Varchar(std::sync::Arc::from("SAMS-002")),
+            SqlValue::Varchar(StringValue::from("Samsung Galaxy")),
+            SqlValue::Varchar(StringValue::from("SAMS-002")),
         ]),
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Apple MacBook")),
-            SqlValue::Varchar(std::sync::Arc::from("APPL-100")),
+            SqlValue::Varchar(StringValue::from("Apple MacBook")),
+            SqlValue::Varchar(StringValue::from("APPL-100")),
         ]),
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Microsoft Surface")),
-            SqlValue::Varchar(std::sync::Arc::from("MSFT-050")),
+            SqlValue::Varchar(StringValue::from("Microsoft Surface")),
+            SqlValue::Varchar(StringValue::from("MSFT-050")),
         ]),
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Apple Watch")),
-            SqlValue::Varchar(std::sync::Arc::from("APPL-200")),
+            SqlValue::Varchar(StringValue::from("Apple Watch")),
+            SqlValue::Varchar(StringValue::from("APPL-200")),
         ]),
     ];
 
@@ -181,19 +181,19 @@ fn setup_customers_orders_db() -> Database {
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Alice"))]),
     )
     .unwrap();
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(StringValue::from("Bob"))]),
     )
     .unwrap();
 
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(StringValue::from("Charlie"))]),
     )
     .unwrap();
 
@@ -258,7 +258,7 @@ fn test_any_quantifier() {
     ).unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Alice")));
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn setup_mixed_types_db() -> Database {
         "MIXED_DATA",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("123")),
+            SqlValue::Varchar(StringValue::from("123")),
             SqlValue::Integer(456),
             SqlValue::Double(78.9),
         ]),
@@ -349,7 +349,7 @@ fn setup_mixed_types_db() -> Database {
         "MIXED_DATA",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("999")),
+            SqlValue::Varchar(StringValue::from("999")),
             SqlValue::Integer(111),
             SqlValue::Double(22.3),
         ]),
@@ -380,7 +380,7 @@ fn test_cast_integer_to_varchar() {
             .unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("456")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("456")));
 }
 
 #[test]
@@ -456,7 +456,7 @@ fn test_like_with_exists() {
     ).unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Alice")));
 }
 
 #[test]

@@ -83,7 +83,7 @@ fn test_issue_990_multiple_unary_plus() {
         vibesql_types::SqlValue::Integer(n) => assert_eq!(*n, 97, "Expected 97, got {}", n),
         vibesql_types::SqlValue::Numeric(n) => {
             // Check if it's close to 97 (allowing for floating point comparison)
-            assert!(((*n as f64) - 97.0).abs() < 0.001, "Expected 97, got {}", n);
+            assert!((*n - 97.0).abs() < 0.001, "Expected 97, got {}", n);
         }
         other => panic!("Expected Integer or Numeric, got {:?}", other),
     }
@@ -158,7 +158,7 @@ fn test_issue_990_simpler_case() {
     match &result[0].values[0] {
         vibesql_types::SqlValue::Integer(n) => assert_eq!(*n, 97, "Expected 97, got {}", n),
         vibesql_types::SqlValue::Numeric(n) => {
-            assert!(((*n as f64) - 97.0).abs() < 0.001, "Expected 97, got {}", n);
+            assert!((*n - 97.0).abs() < 0.001, "Expected 97, got {}", n);
         }
         other => panic!("Expected Integer or Numeric, got {:?}", other),
     }

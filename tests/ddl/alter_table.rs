@@ -6,7 +6,7 @@ use vibesql_ast::Statement;
 use vibesql_executor::{AlterTableExecutor, CreateTableExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::SqlValue;
+use vibesql_types::{SqlValue, StringValue};
 
 /// Helper to create a basic test table
 fn create_test_table(db: &mut Database) {
@@ -29,9 +29,9 @@ fn create_populated_table(db: &mut Database) {
     let row1 = Row {
         values: vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(30),
-            SqlValue::Varchar(std::sync::Arc::from("alice@example.com")),
+            SqlValue::Varchar(StringValue::from("alice@example.com")),
         ]
         .into(),
     };
@@ -40,9 +40,9 @@ fn create_populated_table(db: &mut Database) {
     let row2 = Row {
         values: vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(25),
-            SqlValue::Varchar(std::sync::Arc::from("bob@example.com")),
+            SqlValue::Varchar(StringValue::from("bob@example.com")),
         ]
         .into(),
     };
@@ -284,7 +284,7 @@ fn test_set_not_null_with_nulls_error() {
     let row = Row {
         values: vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(30),
             SqlValue::Null, // NULL email
         ]
@@ -558,7 +558,7 @@ fn test_add_column_with_default() {
 
         // Check existing rows got the default value
         for row in table.scan() {
-            assert_eq!(row.values[status_idx], SqlValue::Varchar(std::sync::Arc::from("active")));
+            assert_eq!(row.values[status_idx], SqlValue::Varchar(StringValue::from("active")));
         }
     }
 }

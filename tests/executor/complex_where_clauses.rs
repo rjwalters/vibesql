@@ -266,5 +266,5 @@ fn test_null_handling_in_complex_where() {
     // row 0: COL4=700.0, not > 700.0, doesn't match
     // row 2: COL4=800.0, COL0=300, matches second condition, COL3=600
     // row 3: COL4=750.0, COL0=100, matches second condition, COL3=250
-    assert!(result.len() > 0, "Should return rows matching NULL conditions");
+    assert!(!result.is_empty(), "Should return rows matching NULL conditions");
 }

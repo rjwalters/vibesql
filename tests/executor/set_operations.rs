@@ -6,7 +6,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
@@ -58,43 +58,43 @@ fn test_e2e_set_operations() {
     // Insert data: table_a has 1, 2, 3, 4; table_b has 3, 4, 5, 6
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(StringValue::from("Bob"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(StringValue::from("Charlie"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("David"))]),
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(StringValue::from("David"))]),
     )
     .unwrap();
 
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(StringValue::from("Charlie"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("David"))]),
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(StringValue::from("David"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(5), SqlValue::Varchar(std::sync::Arc::from("Eve"))]),
+        Row::new(vec![SqlValue::Integer(5), SqlValue::Varchar(StringValue::from("Eve"))]),
     )
     .unwrap();
     db.insert_row(
         "TABLE_B",
-        Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar(std::sync::Arc::from("Frank"))]),
+        Row::new(vec![SqlValue::Integer(6), SqlValue::Varchar(StringValue::from("Frank"))]),
     )
     .unwrap();
 
@@ -152,7 +152,7 @@ fn test_e2e_set_operations() {
     // Test 5: Multiple UNION operations
     db.insert_row(
         "TABLE_A",
-        Row::new(vec![SqlValue::Integer(7), SqlValue::Varchar(std::sync::Arc::from("Grace"))]),
+        Row::new(vec![SqlValue::Integer(7), SqlValue::Varchar(StringValue::from("Grace"))]),
     )
     .unwrap();
     let results = execute_select(&db,

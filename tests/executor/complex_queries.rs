@@ -6,7 +6,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
@@ -51,7 +51,7 @@ fn test_e2e_quantified_comparisons() {
         "EMPLOYEES",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(50000),
             SqlValue::Integer(1),
         ]),
@@ -61,7 +61,7 @@ fn test_e2e_quantified_comparisons() {
         "EMPLOYEES",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(60000),
             SqlValue::Integer(1),
         ]),
@@ -71,7 +71,7 @@ fn test_e2e_quantified_comparisons() {
         "EMPLOYEES",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(StringValue::from("Charlie")),
             SqlValue::Integer(70000),
             SqlValue::Integer(1),
         ]),
@@ -81,7 +81,7 @@ fn test_e2e_quantified_comparisons() {
         "EMPLOYEES",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("David")),
+            SqlValue::Varchar(StringValue::from("David")),
             SqlValue::Integer(80000),
             SqlValue::Integer(2),
         ]),
@@ -91,7 +91,7 @@ fn test_e2e_quantified_comparisons() {
         "EMPLOYEES",
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Eve")),
+            SqlValue::Varchar(StringValue::from("Eve")),
             SqlValue::Integer(90000),
             SqlValue::Integer(2),
         ]),
@@ -104,8 +104,8 @@ fn test_e2e_quantified_comparisons() {
         "SELECT name FROM employees WHERE salary > ALL (SELECT salary FROM employees WHERE dept_id = 1)"
     ).unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("David")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Eve")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("David")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Eve")));
 
     // Test 2: < ALL - salary less than all dept 2 salaries
     // Alice (50000), Bob (60000), Charlie (70000) have salary < ALL dept 2 salaries (80000, 90000)
@@ -113,7 +113,7 @@ fn test_e2e_quantified_comparisons() {
         "SELECT name FROM employees WHERE salary < ALL (SELECT salary FROM employees WHERE dept_id = 2)"
     ).unwrap();
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Alice")));
 
     // Test 3: > ANY - salary greater than at least one dept 1 salary
     // Everyone except Alice (50000 is not > any value in dept 1 starting with 50000)
@@ -137,9 +137,9 @@ fn test_e2e_quantified_comparisons() {
         "SELECT name FROM employees WHERE salary = ANY (SELECT salary FROM employees WHERE dept_id = 1)"
     ).unwrap();
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
-    assert_eq!(results[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Alice")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Bob")));
+    assert_eq!(results[2].values[0], SqlValue::Varchar(StringValue::from("Charlie")));
 
     // Test 6: SOME is synonym for ANY
     let results = execute_select(&db,
@@ -164,7 +164,7 @@ fn test_e2e_quantified_comparisons() {
         "SELECT name, salary > ALL (SELECT salary FROM employees WHERE dept_id = 1) AS is_highest FROM employees WHERE id = 5"
     ).unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Eve")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Eve")));
     assert_eq!(results[0].values[1], SqlValue::Boolean(true)); // Eve's 90000 > all dept 1 salaries
 
     // Test 10: Complex query with AND
@@ -172,8 +172,8 @@ fn test_e2e_quantified_comparisons() {
         "SELECT name FROM employees WHERE salary > ANY (SELECT salary FROM employees WHERE dept_id = 1) AND salary < ALL (SELECT salary FROM employees WHERE dept_id = 2)"
     ).unwrap();
     assert_eq!(results.len(), 2); // Bob (60000) and Charlie (70000)
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Bob")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Charlie")));
 
     // Test 11: >= ALL
     let results = execute_select(&db,

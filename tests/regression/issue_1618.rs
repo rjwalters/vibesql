@@ -11,7 +11,7 @@ use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
 thread_local! {
-    static EXECUTOR_TEST_POOL: RefCell<Option<Database>> = RefCell::new(None);
+    static EXECUTOR_TEST_POOL: RefCell<Option<Database>> = const { RefCell::new(None) };
 }
 
 fn get_pooled_database() -> Database {
@@ -67,7 +67,7 @@ fn execute_sql(db: &mut Database, sql: &str) -> Result<usize, String> {
                 executor.execute(&select_stmt).map_err(|e| format!("Select error: {:?}", e))?;
             Ok(rows.len())
         }
-        _ => Err(format!("Unsupported statement type")),
+        _ => Err("Unsupported statement type".to_string()),
     }
 }
 

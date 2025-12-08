@@ -2,7 +2,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 fn execute_query(db: &Database, query: &str) -> Result<Vec<Row>, String> {
     let stmt = Parser::parse_sql(query).map_err(|e| format!("Parse error: {:?}", e))?;
@@ -34,7 +34,7 @@ fn test_substr_basic() {
     let results =
         execute_query(&db, "SELECT SUBSTR('hello world', 1, 5) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("hello")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("hello")));
 }
 
 // Test INSTR
@@ -114,7 +114,7 @@ fn test_format_with_decimals() {
 
     let results = execute_query(&db, "SELECT FORMAT(1234567.89, 2) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("1,234,567.89")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("1,234,567.89")));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn test_format_no_decimals() {
 
     let results = execute_query(&db, "SELECT FORMAT(1000000, 0) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("1,000,000")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("1,000,000")));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn test_format_negative() {
     // Test with integer subtraction to get negative number
     let results = execute_query(&db, "SELECT FORMAT(0 - 1234, 2) AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("-1,234.00")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("-1,234.00")));
 }
 
 // Test VERSION
@@ -162,7 +162,7 @@ fn test_database() {
 
     let results = execute_query(&db, "SELECT DATABASE() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("default")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("default")));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn test_schema() {
 
     let results = execute_query(&db, "SELECT SCHEMA() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("default")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("default")));
 }
 
 // Test USER/CURRENT_USER
@@ -183,7 +183,7 @@ fn test_user() {
 
     let results = execute_query(&db, "SELECT USER() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("anonymous")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("anonymous")));
 }
 
 #[test]
@@ -193,5 +193,5 @@ fn test_current_user() {
 
     let results = execute_query(&db, "SELECT CURRENT_USER() AS result FROM dual;").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("anonymous")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("anonymous")));
 }

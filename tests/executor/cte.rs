@@ -2,7 +2,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 fn execute_query(db: &Database, query: &str) -> Result<Vec<Row>, String> {
     let stmt = Parser::parse_sql(query).map_err(|e| format!("Parse error: {:?}", e))?;
@@ -38,7 +38,7 @@ fn create_test_database() -> Database {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(30),
         ]),
     )
@@ -47,7 +47,7 @@ fn create_test_database() -> Database {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(25),
         ]),
     )
@@ -56,7 +56,7 @@ fn create_test_database() -> Database {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(StringValue::from("Charlie")),
             SqlValue::Integer(35),
         ]),
     )
@@ -105,7 +105,7 @@ fn test_cte_basic() {
 
     assert_eq!(results.len(), 1); // Only Bob is under 30
     assert_eq!(results[0].values[0], SqlValue::Integer(2));
-    assert_eq!(results[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+    assert_eq!(results[0].values[1], SqlValue::Varchar(StringValue::from("Bob")));
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn test_cte_with_column_aliases() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].values[0], SqlValue::Integer(1));
-    assert_eq!(results[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(results[0].values[1], SqlValue::Varchar(StringValue::from("Alice")));
 }
 
 #[test]

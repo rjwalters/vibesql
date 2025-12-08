@@ -8,7 +8,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Helper to execute SELECT and return rows
 fn select_rows(db: &Database, sql: &str) -> Vec<Row> {
@@ -56,9 +56,9 @@ fn test_window_function_in_case_expression() {
     );
     assert_eq!(rows.len(), 3);
     // First row should have 'first', others should have 'not_first'
-    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("first")));
-    assert_eq!(rows[1].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("not_first")));
-    assert_eq!(rows[2].values[1], vibesql_types::SqlValue::Varchar(std::sync::Arc::from("not_first")));
+    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar(StringValue::from("first")));
+    assert_eq!(rows[1].values[1], vibesql_types::SqlValue::Varchar(StringValue::from("not_first")));
+    assert_eq!(rows[2].values[1], vibesql_types::SqlValue::Varchar(StringValue::from("not_first")));
 
     // Test 3: Window function in CASE THEN/ELSE result expressions
     let rows = select_rows(

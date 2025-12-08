@@ -2,7 +2,7 @@
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 use super::fixtures::*;
 
@@ -27,17 +27,17 @@ fn test_e2e_distinct() {
     // Insert rows with duplicate ages
     db.insert_row(
         "PEOPLE",
-        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Alice")), SqlValue::Integer(25)]),
+        Row::new(vec![SqlValue::Varchar(StringValue::from("Alice")), SqlValue::Integer(25)]),
     )
     .unwrap();
     db.insert_row(
         "PEOPLE",
-        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Bob")), SqlValue::Integer(30)]),
+        Row::new(vec![SqlValue::Varchar(StringValue::from("Bob")), SqlValue::Integer(30)]),
     )
     .unwrap();
     db.insert_row(
         "PEOPLE",
-        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Charlie")), SqlValue::Integer(25)]),
+        Row::new(vec![SqlValue::Varchar(StringValue::from("Charlie")), SqlValue::Integer(25)]),
     )
     .unwrap();
 
@@ -66,17 +66,17 @@ fn test_e2e_group_by_count() {
 
     db.insert_row(
         "SALES",
-        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Apple")), SqlValue::Integer(10)]),
+        Row::new(vec![SqlValue::Varchar(StringValue::from("Apple")), SqlValue::Integer(10)]),
     )
     .unwrap();
     db.insert_row(
         "SALES",
-        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Banana")), SqlValue::Integer(5)]),
+        Row::new(vec![SqlValue::Varchar(StringValue::from("Banana")), SqlValue::Integer(5)]),
     )
     .unwrap();
     db.insert_row(
         "SALES",
-        Row::new(vec![SqlValue::Varchar(std::sync::Arc::from("Apple")), SqlValue::Integer(15)]),
+        Row::new(vec![SqlValue::Varchar(StringValue::from("Apple")), SqlValue::Integer(15)]),
     )
     .unwrap();
 
@@ -85,13 +85,13 @@ fn test_e2e_group_by_count() {
     assert_eq!(results.len(), 2);
 
     // Find Apple row
-    let apple_row = results.iter().find(|r| r.values[0] == SqlValue::Varchar(std::sync::Arc::from("Apple")));
+    let apple_row = results.iter().find(|r| r.values[0] == SqlValue::Varchar(StringValue::from("Apple")));
     assert!(apple_row.is_some());
     assert_eq!(apple_row.unwrap().values[1], SqlValue::Integer(2)); // COUNT(*) returns Integer
 
     // Find Banana row
     let banana_row =
-        results.iter().find(|r| r.values[0] == SqlValue::Varchar(std::sync::Arc::from("Banana")));
+        results.iter().find(|r| r.values[0] == SqlValue::Varchar(StringValue::from("Banana")));
     assert!(banana_row.is_some());
     assert_eq!(banana_row.unwrap().values[1], SqlValue::Integer(1)); // COUNT(*) returns Integer
 }
@@ -110,6 +110,6 @@ fn test_e2e_limit_offset() {
     // Test LIMIT with OFFSET
     let results = execute_select(&db, "SELECT name FROM users LIMIT 2 OFFSET 2").unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Diana")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Charlie")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Diana")));
 }

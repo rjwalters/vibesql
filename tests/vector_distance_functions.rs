@@ -11,7 +11,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
@@ -348,7 +348,7 @@ fn test_vector_distance_similarity_search() {
         "DOCUMENTS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Hello world")),
+            SqlValue::Varchar(StringValue::from("Hello world")),
             SqlValue::Vector(vec![1.0, 0.0, 0.0]),
         ]),
     )
@@ -358,7 +358,7 @@ fn test_vector_distance_similarity_search() {
         "DOCUMENTS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("World hello")),
+            SqlValue::Varchar(StringValue::from("World hello")),
             SqlValue::Vector(vec![0.99, 0.01, 0.0]),
         ]),
     )
@@ -368,7 +368,7 @@ fn test_vector_distance_similarity_search() {
         "DOCUMENTS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Completely different")),
+            SqlValue::Varchar(StringValue::from("Completely different")),
             SqlValue::Vector(vec![0.0, 0.0, 1.0]),
         ]),
     )

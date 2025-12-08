@@ -8,7 +8,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{advanced_objects, ExplainExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Create a test database with a users table.
 fn create_test_db() -> Database {
@@ -30,12 +30,12 @@ fn create_test_db() -> Database {
     // Insert test data
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "USERS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(StringValue::from("Bob"))]),
     )
     .unwrap();
 

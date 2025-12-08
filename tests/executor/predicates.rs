@@ -6,7 +6,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
@@ -45,22 +45,22 @@ fn test_e2e_like_pattern_matching() {
     // Insert test data
     db.insert_row(
         "PRODUCTS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Widget Pro"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Widget Pro"))]),
     )
     .unwrap();
     db.insert_row(
         "PRODUCTS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Gadget Plus"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(StringValue::from("Gadget Plus"))]),
     )
     .unwrap();
     db.insert_row(
         "PRODUCTS",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Widget Mini"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(StringValue::from("Widget Mini"))]),
     )
     .unwrap();
     db.insert_row(
         "PRODUCTS",
-        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(std::sync::Arc::from("Super Gadget"))]),
+        Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(StringValue::from("Super Gadget"))]),
     )
     .unwrap();
 
@@ -136,8 +136,8 @@ fn test_e2e_in_list_predicate() {
         "PRODUCTS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Widget")),
-            SqlValue::Varchar(std::sync::Arc::from("electronics")),
+            SqlValue::Varchar(StringValue::from("Widget")),
+            SqlValue::Varchar(StringValue::from("electronics")),
             SqlValue::Integer(100),
         ]),
     )
@@ -146,8 +146,8 @@ fn test_e2e_in_list_predicate() {
         "PRODUCTS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Gadget")),
-            SqlValue::Varchar(std::sync::Arc::from("electronics")),
+            SqlValue::Varchar(StringValue::from("Gadget")),
+            SqlValue::Varchar(StringValue::from("electronics")),
             SqlValue::Integer(200),
         ]),
     )
@@ -156,8 +156,8 @@ fn test_e2e_in_list_predicate() {
         "PRODUCTS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Tool")),
-            SqlValue::Varchar(std::sync::Arc::from("hardware")),
+            SqlValue::Varchar(StringValue::from("Tool")),
+            SqlValue::Varchar(StringValue::from("hardware")),
             SqlValue::Integer(50),
         ]),
     )
@@ -166,8 +166,8 @@ fn test_e2e_in_list_predicate() {
         "PRODUCTS",
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Device")),
-            SqlValue::Varchar(std::sync::Arc::from("electronics")),
+            SqlValue::Varchar(StringValue::from("Device")),
+            SqlValue::Varchar(StringValue::from("electronics")),
             SqlValue::Integer(300),
         ]),
     )
@@ -176,8 +176,8 @@ fn test_e2e_in_list_predicate() {
         "PRODUCTS",
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Hammer")),
-            SqlValue::Varchar(std::sync::Arc::from("hardware")),
+            SqlValue::Varchar(StringValue::from("Hammer")),
+            SqlValue::Varchar(StringValue::from("hardware")),
             SqlValue::Integer(25),
         ]),
     )
@@ -186,35 +186,35 @@ fn test_e2e_in_list_predicate() {
     // Test 1: IN with integer list
     let results = execute_select(&db, "SELECT name FROM products WHERE id IN (1, 3, 5)").unwrap();
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Widget")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Tool")));
-    assert_eq!(results[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Hammer")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Widget")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Tool")));
+    assert_eq!(results[2].values[0], SqlValue::Varchar(StringValue::from("Hammer")));
 
     // Test 2: IN with string list
     let results =
         execute_select(&db, "SELECT name FROM products WHERE category IN ('hardware')").unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Tool")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Hammer")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Tool")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Hammer")));
 
     // Test 3: NOT IN
     let results = execute_select(&db, "SELECT name FROM products WHERE id NOT IN (2, 4)").unwrap();
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Widget")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Tool")));
-    assert_eq!(results[2].values[0], SqlValue::Varchar(std::sync::Arc::from("Hammer")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Widget")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Tool")));
+    assert_eq!(results[2].values[0], SqlValue::Varchar(StringValue::from("Hammer")));
 
     // Test 4: IN with single value
     let results = execute_select(&db, "SELECT name FROM products WHERE id IN (2)").unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Gadget")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Gadget")));
 
     // Test 5: IN with expressions
     let results =
         execute_select(&db, "SELECT name FROM products WHERE price IN (50, 100 + 100)").unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Gadget")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Tool")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Gadget")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Tool")));
 
     // Test 6: IN combined with AND
     let results = execute_select(
@@ -223,8 +223,8 @@ fn test_e2e_in_list_predicate() {
     )
     .unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Gadget")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Device")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Gadget")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Device")));
 
     // Test 7: Empty result
     let results = execute_select(&db, "SELECT name FROM products WHERE id IN (99, 100)").unwrap();
@@ -266,17 +266,17 @@ fn test_e2e_exists_predicate() {
     // Insert customers
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(std::sync::Arc::from("Alice"))]),
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(std::sync::Arc::from("Bob"))]),
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(StringValue::from("Bob"))]),
     )
     .unwrap();
     db.insert_row(
         "CUSTOMERS",
-        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(std::sync::Arc::from("Charlie"))]),
+        Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(StringValue::from("Charlie"))]),
     )
     .unwrap();
 
@@ -340,8 +340,8 @@ fn test_e2e_exists_predicate() {
     )
     .unwrap();
     assert_eq!(results.len(), 2, "Should find customers with id > 1 when orders exist");
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Bob")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Charlie")));
 
     // Test 6: EXISTS combined with OR
     let results = execute_select(

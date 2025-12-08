@@ -6,7 +6,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
@@ -53,8 +53,8 @@ fn test_e2e_coalesce_and_nullif() {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
-            SqlValue::Varchar(std::sync::Arc::from("Ally")),
+            SqlValue::Varchar(StringValue::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Ally")),
             SqlValue::Integer(100),
         ]),
     )
@@ -63,7 +63,7 @@ fn test_e2e_coalesce_and_nullif() {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Null, // NULL nickname
             SqlValue::Integer(0),
         ]),
@@ -73,8 +73,8 @@ fn test_e2e_coalesce_and_nullif() {
         "USERS",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
-            SqlValue::Varchar(std::sync::Arc::from("Chuck")),
+            SqlValue::Varchar(StringValue::from("Charlie")),
+            SqlValue::Varchar(StringValue::from("Chuck")),
             SqlValue::Integer(200),
         ]),
     )
@@ -85,14 +85,14 @@ fn test_e2e_coalesce_and_nullif() {
         execute_select(&db, "SELECT COALESCE(nickname, 'Unknown') FROM users WHERE id = 1")
             .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Ally")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Ally")));
 
     // Test 2: COALESCE with NULL value - returns second argument
     let results =
         execute_select(&db, "SELECT COALESCE(nickname, 'Unknown') FROM users WHERE id = 2")
             .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Unknown")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Unknown")));
 
     // Test 3: COALESCE with multiple arguments
     let results =
@@ -101,7 +101,7 @@ fn test_e2e_coalesce_and_nullif() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].values[0],
-        SqlValue::Varchar(std::sync::Arc::from("Bob")),
+        SqlValue::Varchar(StringValue::from("Bob")),
         "Should return name when nickname is NULL"
     );
 
@@ -149,7 +149,7 @@ fn test_e2e_coalesce_and_nullif() {
         execute_select(&db, "SELECT name FROM users WHERE COALESCE(nickname, name) = 'Bob'")
             .unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Bob")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Bob")));
 
     // Test 10: NULLIF with string comparison
     let results =

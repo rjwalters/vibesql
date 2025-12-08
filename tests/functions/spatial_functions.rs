@@ -70,7 +70,7 @@ fn test_st_geometry_type() {
 
     match &row.values[0] {
         SqlValue::Varchar(s) => {
-            assert_eq!(s.as_ref(), "LINESTRING");
+            assert_eq!(s.as_str(), "LINESTRING");
         }
         _ => panic!("Expected Varchar geometry type"),
     }

@@ -127,7 +127,7 @@ fn run_test_suite(name_filter: Option<&str>) -> (HashMap<String, TestStats>, usi
 
     let total_available_files = all_test_files.len();
 
-    if let Some(worker_id) = env::var("SQLLOGICTEST_WORKER_ID").ok() {
+    if let Ok(worker_id) = env::var("SQLLOGICTEST_WORKER_ID") {
         println!("\n=== SQLLogicTest Suite (Worker {}) ===", worker_id);
     } else {
         println!("\n=== SQLLogicTest Suite (Full Run) ===");

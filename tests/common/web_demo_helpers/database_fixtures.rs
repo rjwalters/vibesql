@@ -10,7 +10,7 @@
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Create a Northwind database for testing
 pub fn create_northwind_db() -> Database {
@@ -58,50 +58,50 @@ pub fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Beverages")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Soft drinks, coffees, teas, beers, and ales")),
+            SqlValue::Varchar(StringValue::from("Beverages")),
+            SqlValue::Varchar(StringValue::from("Soft drinks, coffees, teas, beers, and ales")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Condiments")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sweet and savory sauces")),
+            SqlValue::Varchar(StringValue::from("Condiments")),
+            SqlValue::Varchar(StringValue::from("Sweet and savory sauces")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Confections")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Desserts and candies")),
+            SqlValue::Varchar(StringValue::from("Confections")),
+            SqlValue::Varchar(StringValue::from("Desserts and candies")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(arcstr::ArcStr::from("Dairy Products")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Cheeses")),
+            SqlValue::Varchar(StringValue::from("Dairy Products")),
+            SqlValue::Varchar(StringValue::from("Cheeses")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar(arcstr::ArcStr::from("Meat/Poultry")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Prepared meats")),
+            SqlValue::Varchar(StringValue::from("Meat/Poultry")),
+            SqlValue::Varchar(StringValue::from("Prepared meats")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar(arcstr::ArcStr::from("Produce")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Dried fruit and bean curd")),
+            SqlValue::Varchar(StringValue::from("Produce")),
+            SqlValue::Varchar(StringValue::from("Dried fruit and bean curd")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar(arcstr::ArcStr::from("Seafood")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Seaweed and fish")),
+            SqlValue::Varchar(StringValue::from("Seafood")),
+            SqlValue::Varchar(StringValue::from("Seaweed and fish")),
         ]))
         .unwrap();
 
@@ -111,7 +111,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Chai")),
+            SqlValue::Varchar(StringValue::from("Chai")),
             SqlValue::Integer(1),
             SqlValue::Float(18.0),
             SqlValue::Integer(39),
@@ -122,7 +122,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Chang")),
+            SqlValue::Varchar(StringValue::from("Chang")),
             SqlValue::Integer(1),
             SqlValue::Float(19.0),
             SqlValue::Integer(17),
@@ -133,7 +133,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Aniseed Syrup")),
+            SqlValue::Varchar(StringValue::from("Aniseed Syrup")),
             SqlValue::Integer(2),
             SqlValue::Float(10.0),
             SqlValue::Integer(13),
@@ -144,7 +144,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(arcstr::ArcStr::from("Chef Anton's Cajun Seasoning")),
+            SqlValue::Varchar(StringValue::from("Chef Anton's Cajun Seasoning")),
             SqlValue::Integer(2),
             SqlValue::Float(22.0),
             SqlValue::Integer(53),
@@ -155,7 +155,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(arcstr::ArcStr::from("Chef Anton's Gumbo Mix")),
+            SqlValue::Varchar(StringValue::from("Chef Anton's Gumbo Mix")),
             SqlValue::Integer(2),
             SqlValue::Float(21.35),
             SqlValue::Integer(0),
@@ -167,7 +167,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar(arcstr::ArcStr::from("Mishi Kobe Niku")),
+            SqlValue::Varchar(StringValue::from("Mishi Kobe Niku")),
             SqlValue::Integer(3),
             SqlValue::Float(97.0),
             SqlValue::Integer(29),
@@ -178,7 +178,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sir Rodney's Marmalade")),
+            SqlValue::Varchar(StringValue::from("Sir Rodney's Marmalade")),
             SqlValue::Integer(3),
             SqlValue::Float(81.0),
             SqlValue::Integer(40),
@@ -189,7 +189,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar(arcstr::ArcStr::from("Carnarvon Tigers")),
+            SqlValue::Varchar(StringValue::from("Carnarvon Tigers")),
             SqlValue::Integer(3),
             SqlValue::Float(62.5),
             SqlValue::Integer(42),
@@ -200,7 +200,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(9),
-            SqlValue::Varchar(arcstr::ArcStr::from("Northwoods Cranberry Sauce")),
+            SqlValue::Varchar(StringValue::from("Northwoods Cranberry Sauce")),
             SqlValue::Integer(2),
             SqlValue::Float(40.0),
             SqlValue::Integer(6),
@@ -211,7 +211,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(10),
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice Mutton")),
+            SqlValue::Varchar(StringValue::from("Alice Mutton")),
             SqlValue::Integer(3),
             SqlValue::Float(39.0),
             SqlValue::Integer(0),
@@ -222,7 +222,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(11),
-            SqlValue::Varchar(arcstr::ArcStr::from("Queso Manchego La Pastora")),
+            SqlValue::Varchar(StringValue::from("Queso Manchego La Pastora")),
             SqlValue::Integer(2),
             SqlValue::Float(38.0),
             SqlValue::Integer(86),
@@ -233,7 +233,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(12),
-            SqlValue::Varchar(arcstr::ArcStr::from("Ikura")),
+            SqlValue::Varchar(StringValue::from("Ikura")),
             SqlValue::Integer(3),
             SqlValue::Float(31.0),
             SqlValue::Integer(31),
@@ -244,7 +244,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(13),
-            SqlValue::Varchar(arcstr::ArcStr::from("Grandma's Boysenberry Spread")),
+            SqlValue::Varchar(StringValue::from("Grandma's Boysenberry Spread")),
             SqlValue::Integer(2),
             SqlValue::Float(25.0),
             SqlValue::Integer(120),
@@ -255,7 +255,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(14),
-            SqlValue::Varchar(arcstr::ArcStr::from("Tofu")),
+            SqlValue::Varchar(StringValue::from("Tofu")),
             SqlValue::Integer(1),
             SqlValue::Float(23.25),
             SqlValue::Integer(35),
@@ -266,7 +266,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(15),
-            SqlValue::Varchar(arcstr::ArcStr::from("Queso Cabrales")),
+            SqlValue::Varchar(StringValue::from("Queso Cabrales")),
             SqlValue::Integer(2),
             SqlValue::Float(21.0),
             SqlValue::Integer(22),
@@ -278,7 +278,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(16),
-            SqlValue::Varchar(arcstr::ArcStr::from("Pavlova")),
+            SqlValue::Varchar(StringValue::from("Pavlova")),
             SqlValue::Integer(3),
             SqlValue::Float(17.45),
             SqlValue::Integer(29),
@@ -289,7 +289,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(17),
-            SqlValue::Varchar(arcstr::ArcStr::from("Raclette Courdavault")),
+            SqlValue::Varchar(StringValue::from("Raclette Courdavault")),
             SqlValue::Integer(4),
             SqlValue::Float(15.0),
             SqlValue::Integer(79),
@@ -300,7 +300,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(18),
-            SqlValue::Varchar(arcstr::ArcStr::from("Perth Pasties")),
+            SqlValue::Varchar(StringValue::from("Perth Pasties")),
             SqlValue::Integer(6),
             SqlValue::Float(12.8),
             SqlValue::Integer(0),
@@ -311,7 +311,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(19),
-            SqlValue::Varchar(arcstr::ArcStr::from("Manjimup Dried Apples")),
+            SqlValue::Varchar(StringValue::from("Manjimup Dried Apples")),
             SqlValue::Integer(7),
             SqlValue::Float(18.0),
             SqlValue::Integer(20),
@@ -322,7 +322,7 @@ pub fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(20),
-            SqlValue::Varchar(arcstr::ArcStr::from("Inlagd Sill")),
+            SqlValue::Varchar(StringValue::from("Inlagd Sill")),
             SqlValue::Integer(8),
             SqlValue::Float(19.0),
             SqlValue::Integer(112),
@@ -421,36 +421,36 @@ pub fn create_employees_db() -> Database {
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
-            SqlValue::Varchar(arcstr::ArcStr::from("San Francisco")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("San Francisco")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales")),
-            SqlValue::Varchar(arcstr::ArcStr::from("New York")),
+            SqlValue::Varchar(StringValue::from("Sales")),
+            SqlValue::Varchar(StringValue::from("New York")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Los Angeles")),
+            SqlValue::Varchar(StringValue::from("Marketing")),
+            SqlValue::Varchar(StringValue::from("Los Angeles")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(arcstr::ArcStr::from("Human Resources")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Chicago")),
+            SqlValue::Varchar(StringValue::from("Human Resources")),
+            SqlValue::Varchar(StringValue::from("Chicago")),
         ]))
         .unwrap();
     departments_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(arcstr::ArcStr::from("Operations")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Seattle")),
+            SqlValue::Varchar(StringValue::from("Operations")),
+            SqlValue::Varchar(StringValue::from("Seattle")),
         ]))
         .unwrap();
 
@@ -459,7 +459,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Cloud Migration")),
+            SqlValue::Varchar(StringValue::from("Cloud Migration")),
             SqlValue::Integer(1),
             SqlValue::Integer(500000),
         ]))
@@ -467,7 +467,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Mobile App")),
+            SqlValue::Varchar(StringValue::from("Mobile App")),
             SqlValue::Integer(1),
             SqlValue::Integer(350000),
         ]))
@@ -475,7 +475,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Data Analytics Platform")),
+            SqlValue::Varchar(StringValue::from("Data Analytics Platform")),
             SqlValue::Integer(1),
             SqlValue::Integer(220000),
         ]))
@@ -483,7 +483,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing Campaign")),
+            SqlValue::Varchar(StringValue::from("Marketing Campaign")),
             SqlValue::Integer(3),
             SqlValue::Integer(150000),
         ]))
@@ -491,7 +491,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(arcstr::ArcStr::from("Brand Redesign")),
+            SqlValue::Varchar(StringValue::from("Brand Redesign")),
             SqlValue::Integer(3),
             SqlValue::Integer(125000),
         ]))
@@ -499,7 +499,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(6),
-            SqlValue::Varchar(arcstr::ArcStr::from("CRM Implementation")),
+            SqlValue::Varchar(StringValue::from("CRM Implementation")),
             SqlValue::Integer(2),
             SqlValue::Integer(150000),
         ]))
@@ -507,7 +507,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(7),
-            SqlValue::Varchar(arcstr::ArcStr::from("HR System Upgrade")),
+            SqlValue::Varchar(StringValue::from("HR System Upgrade")),
             SqlValue::Integer(4),
             SqlValue::Integer(75000),
         ]))
@@ -515,7 +515,7 @@ pub fn create_employees_db() -> Database {
     projects_table
         .insert(Row::new(vec![
             SqlValue::Integer(8),
-            SqlValue::Varchar(arcstr::ArcStr::from("Warehouse Automation")),
+            SqlValue::Varchar(StringValue::from("Warehouse Automation")),
             SqlValue::Integer(5),
             SqlValue::Integer(410000),
         ]))
@@ -530,14 +530,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Johnson")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice Johnson")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Johnson")),
+            SqlValue::Varchar(StringValue::from("Alice Johnson")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Senior Engineer")),
+            SqlValue::Varchar(StringValue::from("Senior Engineer")),
             SqlValue::Float(95000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2020-01-15")),
+            SqlValue::Varchar(StringValue::from("2020-01-15")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -546,14 +546,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Smith")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Bob Smith")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Smith")),
+            SqlValue::Varchar(StringValue::from("Bob Smith")),
+            SqlValue::Varchar(StringValue::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales Manager")),
+            SqlValue::Varchar(StringValue::from("Sales Manager")),
             SqlValue::Float(85000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2019-03-22")),
+            SqlValue::Varchar(StringValue::from("2019-03-22")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -562,14 +562,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Carol")),
-            SqlValue::Varchar(arcstr::ArcStr::from("White")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Carol White")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Carol")),
+            SqlValue::Varchar(StringValue::from("White")),
+            SqlValue::Varchar(StringValue::from("Carol White")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineer")),
+            SqlValue::Varchar(StringValue::from("Engineer")),
             SqlValue::Float(75000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2021-06-10")),
+            SqlValue::Varchar(StringValue::from("2021-06-10")),
             SqlValue::Integer(1),
         ]))
         .unwrap();
@@ -578,14 +578,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(4),
             SqlValue::Integer(4),
-            SqlValue::Varchar(arcstr::ArcStr::from("David")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Brown")),
-            SqlValue::Varchar(arcstr::ArcStr::from("David Brown")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing")),
+            SqlValue::Varchar(StringValue::from("David")),
+            SqlValue::Varchar(StringValue::from("Brown")),
+            SqlValue::Varchar(StringValue::from("David Brown")),
+            SqlValue::Varchar(StringValue::from("Marketing")),
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing Specialist")),
+            SqlValue::Varchar(StringValue::from("Marketing Specialist")),
             SqlValue::Float(65000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2022-01-05")),
+            SqlValue::Varchar(StringValue::from("2022-01-05")),
             SqlValue::Integer(7),
         ]))
         .unwrap();
@@ -594,14 +594,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(5),
             SqlValue::Integer(5),
-            SqlValue::Varchar(arcstr::ArcStr::from("Eve")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Martinez")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Eve Martinez")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Eve")),
+            SqlValue::Varchar(StringValue::from("Martinez")),
+            SqlValue::Varchar(StringValue::from("Eve Martinez")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Senior Engineer")),
+            SqlValue::Varchar(StringValue::from("Senior Engineer")),
             SqlValue::Float(110000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2018-09-12")),
+            SqlValue::Varchar(StringValue::from("2018-09-12")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -610,14 +610,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(6),
             SqlValue::Integer(6),
-            SqlValue::Varchar(arcstr::ArcStr::from("Frank")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Wilson")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Frank Wilson")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Frank")),
+            SqlValue::Varchar(StringValue::from("Wilson")),
+            SqlValue::Varchar(StringValue::from("Frank Wilson")),
+            SqlValue::Varchar(StringValue::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales Representative")),
+            SqlValue::Varchar(StringValue::from("Sales Representative")),
             SqlValue::Float(55000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2021-11-20")),
+            SqlValue::Varchar(StringValue::from("2021-11-20")),
             SqlValue::Integer(2),
         ]))
         .unwrap();
@@ -626,14 +626,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(7),
             SqlValue::Integer(7),
-            SqlValue::Varchar(arcstr::ArcStr::from("Grace")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Taylor")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Grace Taylor")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing")),
+            SqlValue::Varchar(StringValue::from("Grace")),
+            SqlValue::Varchar(StringValue::from("Taylor")),
+            SqlValue::Varchar(StringValue::from("Grace Taylor")),
+            SqlValue::Varchar(StringValue::from("Marketing")),
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing Manager")),
+            SqlValue::Varchar(StringValue::from("Marketing Manager")),
             SqlValue::Float(90000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2019-07-08")),
+            SqlValue::Varchar(StringValue::from("2019-07-08")),
             SqlValue::Null,
         ]))
         .unwrap();
@@ -642,14 +642,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(8),
             SqlValue::Integer(8),
-            SqlValue::Varchar(arcstr::ArcStr::from("Henry")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Anderson")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Henry Anderson")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Henry")),
+            SqlValue::Varchar(StringValue::from("Anderson")),
+            SqlValue::Varchar(StringValue::from("Henry Anderson")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineer")),
+            SqlValue::Varchar(StringValue::from("Engineer")),
             SqlValue::Float(80000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2020-12-01")),
+            SqlValue::Varchar(StringValue::from("2020-12-01")),
             SqlValue::Integer(1),
         ]))
         .unwrap();
@@ -659,14 +659,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(9),
             SqlValue::Integer(9),
-            SqlValue::Varchar(arcstr::ArcStr::from("Maria")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Clark")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Maria Clark")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Maria")),
+            SqlValue::Varchar(StringValue::from("Clark")),
+            SqlValue::Varchar(StringValue::from("Maria Clark")),
+            SqlValue::Varchar(StringValue::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales Representative")),
+            SqlValue::Varchar(StringValue::from("Sales Representative")),
             SqlValue::Float(58000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2022-04-15")),
+            SqlValue::Varchar(StringValue::from("2022-04-15")),
             SqlValue::Integer(2),
         ]))
         .unwrap();
@@ -675,14 +675,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(10),
             SqlValue::Integer(10),
-            SqlValue::Varchar(arcstr::ArcStr::from("Nathan")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Lewis")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Nathan Lewis")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Engineering")),
+            SqlValue::Varchar(StringValue::from("Nathan")),
+            SqlValue::Varchar(StringValue::from("Lewis")),
+            SqlValue::Varchar(StringValue::from("Nathan Lewis")),
+            SqlValue::Varchar(StringValue::from("Engineering")),
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Senior Engineer")),
+            SqlValue::Varchar(StringValue::from("Senior Engineer")),
             SqlValue::Float(105000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2019-05-18")),
+            SqlValue::Varchar(StringValue::from("2019-05-18")),
             SqlValue::Integer(5),
         ]))
         .unwrap();
@@ -691,14 +691,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(11),
             SqlValue::Integer(11),
-            SqlValue::Varchar(arcstr::ArcStr::from("Olivia")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Walker")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Olivia Walker")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing")),
+            SqlValue::Varchar(StringValue::from("Olivia")),
+            SqlValue::Varchar(StringValue::from("Walker")),
+            SqlValue::Varchar(StringValue::from("Olivia Walker")),
+            SqlValue::Varchar(StringValue::from("Marketing")),
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("Marketing Specialist")),
+            SqlValue::Varchar(StringValue::from("Marketing Specialist")),
             SqlValue::Float(67000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2021-08-22")),
+            SqlValue::Varchar(StringValue::from("2021-08-22")),
             SqlValue::Integer(7),
         ]))
         .unwrap();
@@ -707,14 +707,14 @@ pub fn create_employees_db() -> Database {
         .insert(Row::new(vec![
             SqlValue::Integer(12),
             SqlValue::Integer(12),
-            SqlValue::Varchar(arcstr::ArcStr::from("Paul")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Hall")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Paul Hall")),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales")),
+            SqlValue::Varchar(StringValue::from("Paul")),
+            SqlValue::Varchar(StringValue::from("Hall")),
+            SqlValue::Varchar(StringValue::from("Paul Hall")),
+            SqlValue::Varchar(StringValue::from("Sales")),
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Sales Representative")),
+            SqlValue::Varchar(StringValue::from("Sales Representative")),
             SqlValue::Float(56000.0),
-            SqlValue::Varchar(arcstr::ArcStr::from("2023-02-10")),
+            SqlValue::Varchar(StringValue::from("2023-02-10")),
             SqlValue::Integer(2),
         ]))
         .unwrap();
@@ -801,8 +801,8 @@ pub fn create_university_db() -> Database {
         students_table
             .insert(Row::new(vec![
                 SqlValue::Integer(i),
-                SqlValue::Varchar(arcstr::ArcStr::from(name)),
-                SqlValue::Varchar(arcstr::ArcStr::from(major)),
+                SqlValue::Varchar(StringValue::from(name)),
+                SqlValue::Varchar(StringValue::from(major)),
                 SqlValue::Float(gpa),
             ]))
             .unwrap();
@@ -826,8 +826,8 @@ pub fn create_university_db() -> Database {
         courses_table
             .insert(Row::new(vec![
                 SqlValue::Integer(id),
-                SqlValue::Varchar(arcstr::ArcStr::from(name)),
-                SqlValue::Varchar(arcstr::ArcStr::from(dept)),
+                SqlValue::Varchar(StringValue::from(name)),
+                SqlValue::Varchar(StringValue::from(dept)),
                 SqlValue::Integer(credits),
             ]))
             .unwrap();
@@ -859,8 +859,8 @@ pub fn create_university_db() -> Database {
                 .insert(Row::new(vec![
                     SqlValue::Integer(student_id),
                     SqlValue::Integer(course_id),
-                    SqlValue::Varchar(arcstr::ArcStr::from(grade)),
-                    SqlValue::Varchar(arcstr::ArcStr::from("Fall 2024")),
+                    SqlValue::Varchar(StringValue::from(grade)),
+                    SqlValue::Varchar(StringValue::from("Fall 2024")),
                 ]))
                 .unwrap();
 
@@ -877,7 +877,7 @@ pub fn create_university_db() -> Database {
                 SqlValue::Integer(student_id),
                 SqlValue::Integer(course_id),
                 SqlValue::Null,
-                SqlValue::Varchar(arcstr::ArcStr::from("Spring 2025")),
+                SqlValue::Varchar(StringValue::from("Spring 2025")),
             ]))
             .unwrap();
     }

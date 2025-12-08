@@ -4,7 +4,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 // ========================================================================
 // Shared Test Utilities
@@ -45,27 +45,27 @@ pub fn insert_sample_users(db: &mut Database) {
     let rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(25),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(17),
         ]),
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(StringValue::from("Charlie")),
             SqlValue::Integer(30),
         ]),
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Diana")),
+            SqlValue::Varchar(StringValue::from("Diana")),
             SqlValue::Integer(22),
         ]),
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Eve")),
+            SqlValue::Varchar(StringValue::from("Eve")),
             SqlValue::Integer(35),
         ]),
     ];

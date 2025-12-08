@@ -6,7 +6,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Execute a SELECT query end-to-end: parse SQL → execute → return results.
 fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
@@ -39,27 +39,27 @@ fn insert_sample_users(db: &mut Database) {
     let rows = vec![
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Alice")),
+            SqlValue::Varchar(StringValue::from("Alice")),
             SqlValue::Integer(25),
         ]),
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Bob")),
+            SqlValue::Varchar(StringValue::from("Bob")),
             SqlValue::Integer(17),
         ]),
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Charlie")),
+            SqlValue::Varchar(StringValue::from("Charlie")),
             SqlValue::Integer(30),
         ]),
         Row::new(vec![
             SqlValue::Integer(4),
-            SqlValue::Varchar(std::sync::Arc::from("Diana")),
+            SqlValue::Varchar(StringValue::from("Diana")),
             SqlValue::Integer(22),
         ]),
         Row::new(vec![
             SqlValue::Integer(5),
-            SqlValue::Varchar(std::sync::Arc::from("Eve")),
+            SqlValue::Varchar(StringValue::from("Eve")),
             SqlValue::Integer(35),
         ]),
     ];
@@ -81,7 +81,7 @@ fn test_e2e_select_star() {
 
     // Verify first row
     assert_eq!(results[0].values[0], SqlValue::Integer(1));
-    assert_eq!(results[0].values[1], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(results[0].values[1], SqlValue::Varchar(StringValue::from("Alice")));
     assert_eq!(results[0].values[2], SqlValue::Integer(25));
 }
 
@@ -97,7 +97,7 @@ fn test_e2e_select_specific_columns() {
 
     // Verify structure: should have 2 columns (name, age)
     assert_eq!(results[0].values.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Alice")));
     assert_eq!(results[0].values[1], SqlValue::Integer(25));
 }
 
@@ -110,8 +110,8 @@ fn test_e2e_select_with_where() {
 
     let results = execute_select(&db, "SELECT name FROM users WHERE age > 25").unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Charlie")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Eve")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Charlie")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Eve")));
 }
 
 #[test]
@@ -124,6 +124,6 @@ fn test_e2e_select_with_complex_where() {
     let results =
         execute_select(&db, "SELECT name FROM users WHERE age > 20 AND age < 30").unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].values[0], SqlValue::Varchar(std::sync::Arc::from("Alice")));
-    assert_eq!(results[1].values[0], SqlValue::Varchar(std::sync::Arc::from("Diana")));
+    assert_eq!(results[0].values[0], SqlValue::Varchar(StringValue::from("Alice")));
+    assert_eq!(results[1].values[0], SqlValue::Varchar(StringValue::from("Diana")));
 }

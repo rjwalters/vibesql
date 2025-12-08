@@ -15,7 +15,7 @@ SELECT 1 IN ()
         .expect("Should parse successfully with comment on onlyif directive");
 
     println!("Parsed {} records", records.len());
-    assert!(records.len() > 0, "Should have parsed records");
+    assert!(!records.is_empty(), "Should have parsed records");
 }
 
 #[test]
@@ -29,7 +29,7 @@ SELECT 1
 
     let records = parse::<DefaultColumnType>(script).expect("Should parse skipif with comment");
 
-    assert!(records.len() > 0, "Should have parsed records");
+    assert!(!records.is_empty(), "Should have parsed records");
 }
 
 #[test]
@@ -47,7 +47,7 @@ SELECT 1
     let records =
         parse::<DefaultColumnType>(script).expect("Should parse multiple directives with comments");
 
-    assert!(records.len() > 0, "Should have parsed records");
+    assert!(!records.is_empty(), "Should have parsed records");
 }
 
 #[test]
@@ -62,5 +62,5 @@ SELECT 1
     let records =
         parse::<DefaultColumnType>(script).expect("Should still parse directives without comments");
 
-    assert!(records.len() > 0, "Should have parsed records");
+    assert!(!records.is_empty(), "Should have parsed records");
 }

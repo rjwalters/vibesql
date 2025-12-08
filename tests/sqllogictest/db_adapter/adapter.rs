@@ -157,7 +157,7 @@ impl AsyncDB for VibeSqlDB {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(100);
 
-            if self.query_count % log_interval == 0 {
+            if self.query_count.is_multiple_of(log_interval) {
                 eprintln!("  Query {}: {}", self.query_count, truncate_sql(sql, 60));
             }
         }

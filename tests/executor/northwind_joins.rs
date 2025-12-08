@@ -4,7 +4,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
-use vibesql_types::{DataType, SqlValue};
+use vibesql_types::{DataType, SqlValue, StringValue};
 
 fn create_northwind_db() -> Database {
     let mut db = Database::new();
@@ -51,22 +51,22 @@ fn create_northwind_db() -> Database {
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Beverages")),
-            SqlValue::Varchar(std::sync::Arc::from("Soft drinks, coffees, teas, beers, and ales")),
+            SqlValue::Varchar(StringValue::from("Beverages")),
+            SqlValue::Varchar(StringValue::from("Soft drinks, coffees, teas, beers, and ales")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Condiments")),
-            SqlValue::Varchar(std::sync::Arc::from("Sweet and savory sauces")),
+            SqlValue::Varchar(StringValue::from("Condiments")),
+            SqlValue::Varchar(StringValue::from("Sweet and savory sauces")),
         ]))
         .unwrap();
     categories_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Confections")),
-            SqlValue::Varchar(std::sync::Arc::from("Desserts, candies, and sweet breads")),
+            SqlValue::Varchar(StringValue::from("Confections")),
+            SqlValue::Varchar(StringValue::from("Desserts, candies, and sweet breads")),
         ]))
         .unwrap();
 
@@ -75,7 +75,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(std::sync::Arc::from("Chai")),
+            SqlValue::Varchar(StringValue::from("Chai")),
             SqlValue::Integer(1),
             SqlValue::Float(18.0),
             SqlValue::Integer(39),
@@ -84,7 +84,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(std::sync::Arc::from("Chang")),
+            SqlValue::Varchar(StringValue::from("Chang")),
             SqlValue::Integer(1),
             SqlValue::Float(19.0),
             SqlValue::Integer(17),
@@ -93,7 +93,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(std::sync::Arc::from("Aniseed Syrup")),
+            SqlValue::Varchar(StringValue::from("Aniseed Syrup")),
             SqlValue::Integer(2),
             SqlValue::Float(10.0),
             SqlValue::Integer(13),
@@ -102,7 +102,7 @@ fn create_northwind_db() -> Database {
     products_table
         .insert(Row::new(vec![
             SqlValue::Integer(16),
-            SqlValue::Varchar(std::sync::Arc::from("Pavlova")),
+            SqlValue::Varchar(StringValue::from("Pavlova")),
             SqlValue::Integer(3),
             SqlValue::Float(17.45),
             SqlValue::Integer(29),
@@ -141,7 +141,7 @@ fn test_inner_join_products_categories() {
         // Verify first row (ordered by category_name, product_name)
         // Should be Beverages category with Chai or Chang
         if let SqlValue::Varchar(cat_name) = &result[0].values[1] {
-            assert_eq!(cat_name.as_ref(), "Beverages");
+            assert_eq!(cat_name.as_str(), "Beverages");
         } else {
             panic!("Expected Varchar for category_name");
         }
@@ -213,7 +213,7 @@ fn test_products_by_category_aggregate() {
             .iter()
             .find(|row| {
                 if let SqlValue::Varchar(name) = &row.values[0] {
-                    name.as_ref() == "Beverages"
+                    name.as_str() == "Beverages"
                 } else {
                     false
                 }
