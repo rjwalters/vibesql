@@ -33,6 +33,8 @@ pub struct ServerMetrics {
     subscription_updates_total: Counter<u64>,
     selective_update_columns_sent: Histogram<u64>,
     selective_update_changed_ratio: Histogram<f64>,
+    subscriptions_active: Gauge<u64>,
+    subscriptions_active_count: Arc<AtomicU64>,
     subscriptions_selective_eligible: Gauge<u64>,
     subscriptions_selective_eligible_count: Arc<AtomicU64>,
 
@@ -151,6 +153,13 @@ impl ServerMetrics {
             .with_unit("1")
             .build();
 
+        let subscriptions_active = meter
+            .u64_gauge("vibesql_subscriptions_active")
+            .with_description("Total number of active subscriptions")
+            .with_unit("{subscription}")
+            .build();
+        let subscriptions_active_count = Arc::new(AtomicU64::new(0));
+
         let subscriptions_selective_eligible = meter
             .u64_gauge("vibesql_subscriptions_selective_eligible")
             .with_description("Active subscriptions eligible for selective column updates")
@@ -219,6 +228,8 @@ impl ServerMetrics {
             subscription_updates_total,
             selective_update_columns_sent,
             selective_update_changed_ratio,
+            subscriptions_active,
+            subscriptions_active_count,
             subscriptions_selective_eligible,
             subscriptions_selective_eligible_count,
             partial_update_fallbacks_total,
@@ -336,6 +347,27 @@ impl ServerMetrics {
                 KeyValue::new("row_count", row_count as i64),
             ],
         );
+    }
+
+    /// Increment the count of active subscriptions
+    ///
+    /// Called when a subscription is registered.
+    pub fn increment_subscriptions_active(&self) {
+        let new_value = self.subscriptions_active_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.subscriptions_active.record(new_value, &[]);
+    }
+
+    /// Decrement the count of active subscriptions
+    ///
+    /// Called when a subscription is unregistered.
+    pub fn decrement_subscriptions_active(&self) {
+        let new_value = self.subscriptions_active_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        self.subscriptions_active.record(new_value, &[]);
+    }
+
+    /// Get the current count of active subscriptions
+    pub fn subscriptions_active_count(&self) -> u64 {
+        self.subscriptions_active_count.load(Ordering::Relaxed)
     }
 
     /// Increment the count of selective-eligible subscriptions
@@ -529,6 +561,30 @@ mod tests {
     fn create_test_metrics() -> ServerMetrics {
         let meter = global::meter("test_meter");
         ServerMetrics::new(&meter)
+    }
+
+    #[test]
+    fn test_subscriptions_active_increment_decrement() {
+        let metrics = create_test_metrics();
+
+        // Initially zero
+        assert_eq!(metrics.subscriptions_active_count(), 0);
+
+        // Increment
+        metrics.increment_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 1);
+
+        // Increment again
+        metrics.increment_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 2);
+
+        // Decrement
+        metrics.decrement_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 1);
+
+        // Decrement again
+        metrics.decrement_subscriptions_active();
+        assert_eq!(metrics.subscriptions_active_count(), 0);
     }
 
     #[test]

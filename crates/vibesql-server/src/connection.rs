@@ -316,13 +316,14 @@ impl ConnectionHandler {
                 match self.handle_client_message(msg).await? {
                     ClientMessageResult::Continue => {}
                     ClientMessageResult::Terminate => {
-                        let (_total, selective_eligible) = self.subscription_manager
+                        let (total, selective_eligible) = self.subscription_manager
                             .unsubscribe_all_for_connection(&self.connection_id);
-                        if selective_eligible > 0 {
-                            if let Some(metrics) = self.observability.metrics() {
-                                for _ in 0..selective_eligible {
-                                    metrics.decrement_selective_eligible();
-                                }
+                        if let Some(metrics) = self.observability.metrics() {
+                            for _ in 0..total {
+                                metrics.decrement_subscriptions_active();
+                            }
+                            for _ in 0..selective_eligible {
+                                metrics.decrement_selective_eligible();
                             }
                         }
                         return Ok(());
@@ -376,13 +377,14 @@ impl ConnectionHandler {
         }
 
         // Clean up subscriptions when connection closes
-        let (_total, selective_eligible) = self.subscription_manager
+        let (total, selective_eligible) = self.subscription_manager
             .unsubscribe_all_for_connection(&self.connection_id);
-        if selective_eligible > 0 {
-            if let Some(metrics) = self.observability.metrics() {
-                for _ in 0..selective_eligible {
-                    metrics.decrement_selective_eligible();
-                }
+        if let Some(metrics) = self.observability.metrics() {
+            for _ in 0..total {
+                metrics.decrement_subscriptions_active();
+            }
+            for _ in 0..selective_eligible {
+                metrics.decrement_selective_eligible();
             }
         }
 
@@ -1119,6 +1121,11 @@ impl ConnectionHandler {
             let error_id = [0u8; 16];
             self.send_subscription_error(&error_id, &format!("{}", e)).await?;
             return Ok(());
+        }
+
+        // Track the new subscription in metrics
+        if let Some(metrics) = self.observability.metrics() {
+            metrics.increment_subscriptions_active();
         }
 
         // Store detected PK columns in the subscription for selective updates
