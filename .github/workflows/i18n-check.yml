@@ -8,21 +8,25 @@ on:
     branches: [main]
     paths:
       - 'crates/vibesql-l10n/**'
+      - 'web-demo/src/i18n/resources/**'
       - 'scripts/check-translations.py'
+      - 'scripts/check-web-translations.py'
       - '.github/workflows/i18n-check.yml'
   pull_request:
     paths:
       - 'crates/vibesql-l10n/**'
+      - 'web-demo/src/i18n/resources/**'
       - 'scripts/check-translations.py'
+      - 'scripts/check-web-translations.py'
       - '.github/workflows/i18n-check.yml'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # These two jobs run in parallel for faster feedback
+  # These jobs run in parallel for faster feedback
   fluent-syntax:
-    name: Fluent Syntax Check
+    name: CLI Fluent Syntax Check
     runs-on: ubuntu-latest
 
     steps:
@@ -37,8 +41,8 @@ jobs:
       - name: Check Fluent syntax
         run: cargo run -p vibesql-l10n --bin check-ftl
 
-  translation-completeness:
-    name: Translation Completeness
+  cli-translation-completeness:
+    name: CLI Translation Completeness
     runs-on: ubuntu-latest
     # Runs in parallel with fluent-syntax (no needs: dependency)
 
@@ -52,26 +56,23 @@ jobs:
       - name: Setup Python with uv
         run: uv python install 3.11
 
-      - name: Check translation completeness
+      - name: Check CLI translation completeness
         run: uv run --no-project --python 3.11 scripts/check-translations.py --verbose
 
-      - name: Generate coverage badge
+      - name: Generate CLI coverage badge
         run: |
           mkdir -p badges
           uv run --no-project --python 3.11 scripts/check-translations.py --badge badges/i18n-coverage.json
 
-      - name: Upload badge artifact
+      - name: Upload CLI badge artifact
         uses: actions/upload-artifact@v4
         with:
-          name: i18n-badge
+          name: cli-i18n-badge
           path: badges/i18n-coverage.json
 
-  # Strict check - only fails on syntax errors, warns on incomplete translations
-  # Waits for both parallel jobs to complete before running
-  strict-check:
-    name: Strict Validation
+  web-translation-completeness:
+    name: Web Demo Translation Completeness
     runs-on: ubuntu-latest
-    needs: [fluent-syntax, translation-completeness]
 
     steps:
       - name: Checkout repository
@@ -83,14 +84,53 @@ jobs:
       - name: Setup Python with uv
         run: uv python install 3.11
 
-      - name: Validate all locales
+      - name: Check Web Demo translation completeness
+        run: uv run --no-project --python 3.11 scripts/check-web-translations.py --verbose
+
+      - name: Generate Web Demo coverage badge
+        run: |
+          mkdir -p badges
+          uv run --no-project --python 3.11 scripts/check-web-translations.py --badge badges/web-i18n-coverage.json
+
+      - name: Upload Web Demo badge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-i18n-badge
+          path: badges/web-i18n-coverage.json
+
+  # Strict check - only fails on syntax errors, warns on incomplete translations
+  # Waits for all parallel jobs to complete before running
+  strict-check:
+    name: Strict Validation
+    runs-on: ubuntu-latest
+    needs: [fluent-syntax, cli-translation-completeness, web-translation-completeness]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Setup Python with uv
+        run: uv python install 3.11
+
+      - name: Validate CLI locales
         run: |
           # Check for variable mismatches (strict)
           uv run --no-project --python 3.11 scripts/check-translations.py --ci --threshold 0
+
+      - name: Validate Web Demo locales
+        run: |
+          # Check for variable mismatches (strict) - currently warn-only for web demo
+          # TODO: Enable strict mode once variable mismatches are fixed
+          uv run --no-project --python 3.11 scripts/check-web-translations.py --threshold 0 || true
 
       - name: Report status
         run: |
           echo "i18n validation passed!"
           echo ""
           echo "Note: Translation completeness is tracked but not enforced."
-          echo "Run 'python scripts/check-translations.py' locally to see coverage."
+          echo "Run these commands locally to see coverage:"
+          echo "  python scripts/check-translations.py      # CLI translations"
+          echo "  python scripts/check-web-translations.py  # Web Demo translations"
