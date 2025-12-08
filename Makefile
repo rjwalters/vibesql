@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -100,13 +100,13 @@ help:
 	@echo "  make benchmark-tpcds-all - Run TPC-DS with all engines simultaneously (may OOM)"
 	@echo "  make benchmark-sysbench  - Run Sysbench OLTP benchmarks"
 	@echo ""
-	@echo "Profiling targets (requires: cargo install flamegraph):"
-	@echo "  make flamegraph-tpch    - Generate flamegraph for TPC-H queries"
-	@echo "  make flamegraph-tpcc    - Generate flamegraph for TPC-C transactions"
-	@echo "  make flamegraph-sysbench - Generate flamegraph for Sysbench OLTP"
-	@echo "  make flamegraph-select  - Generate flamegraph for point SELECT"
+	@echo "Profiling targets (uses samply, no sudo required):"
+	@echo "  make profile-tpch       - Profile TPC-H queries (opens Firefox Profiler)"
+	@echo "  make profile-tpcc       - Profile TPC-C transactions"
+	@echo "  make profile-sysbench   - Profile Sysbench OLTP"
+	@echo "  make profile-select     - Profile point SELECT operations"
 	@echo "  make profile-query Q=X  - Profile specific TPC-H query (e.g., Q=Q6)"
-	@echo "  (Use ./scripts/flamegraph.sh --help for more options)"
+	@echo "  (Requires: cargo install samply)"
 	@echo ""
 	@echo "Subsystem benchmarks:"
 	@echo "  make bench-storage      - Run storage subsystem benchmarks (B-tree, page cache)"
@@ -381,7 +381,7 @@ clean:
 	rm -rf target/wheels
 	rm -f target/sqllogictest_*.json
 	rm -f /tmp/tpch_results.txt
-	rm -f flamegraph*.svg
+	rm -f profile-*.json.gz
 
 # Regenerate web dashboard data from benchmark database
 website:
@@ -394,29 +394,31 @@ website:
 #
 # Profiling Targets
 #
+# Uses samply profiler (no sudo required, opens Firefox Profiler in browser).
+# Install: cargo install samply
+#
 
-# Generate flamegraph for TPC-H queries
-flamegraph-tpch:
-	@echo "Generating flamegraph for TPC-H queries..."
-	@echo "Requires: cargo install flamegraph"
+# Profile TPC-H queries
+profile-tpch:
+	@echo "Profiling TPC-H queries..."
 	./scripts/flamegraph.sh tpch
 
-# Generate flamegraph for TPC-C transactions
-flamegraph-tpcc:
-	@echo "Generating flamegraph for TPC-C transactions..."
+# Profile TPC-C transactions
+profile-tpcc:
+	@echo "Profiling TPC-C transactions..."
 	./scripts/flamegraph.sh tpcc
 
-# Generate flamegraph for Sysbench OLTP
-flamegraph-sysbench:
-	@echo "Generating flamegraph for Sysbench OLTP..."
+# Profile Sysbench OLTP
+profile-sysbench:
+	@echo "Profiling Sysbench OLTP..."
 	./scripts/flamegraph.sh sysbench
 
-# Generate flamegraph for point SELECT operations
-flamegraph-select:
-	@echo "Generating flamegraph for SELECT operations..."
+# Profile point SELECT operations
+profile-select:
+	@echo "Profiling SELECT operations..."
 	./scripts/flamegraph.sh select
 
-# Profile specific TPC-H query with detailed timing breakdown
+# Profile specific TPC-H query
 # Usage: make profile-query Q=Q6
 profile-query:
 ifndef Q
@@ -425,7 +427,7 @@ ifndef Q
 	@exit 1
 endif
 	@echo "Profiling TPC-H query: $(Q)"
-	./scripts/profile-query.sh --tpch $(Q)
+	./scripts/flamegraph.sh tpch $(Q)
 
 #
 # Subsystem Benchmarks

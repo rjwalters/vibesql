@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# flamegraph.sh - Generate CPU flamegraphs for VibeSQL benchmarks
+# flamegraph.sh - Generate CPU profiles for VibeSQL benchmarks using samply
 #
 # Usage:
 #   ./scripts/flamegraph.sh tpch [QUERY]    # Profile TPC-H (optionally single query like Q6)
@@ -10,20 +10,19 @@
 #   ./scripts/flamegraph.sh custom <cmd>    # Profile custom command
 #
 # Requirements:
-#   - cargo-flamegraph: cargo install flamegraph
-#   - macOS: dtrace (built-in, requires sudo or disabled SIP)
-#   - Linux: perf (install via package manager)
+#   - samply: cargo install samply (no sudo required)
 #
 # Environment:
-#   FLAMEGRAPH_OUTPUT  Output file (default: flamegraph-<benchmark>.svg)
-#   FLAMEGRAPH_FREQ    Sampling frequency (default: 997 Hz)
+#   PROFILE_FREQ       Sampling frequency in Hz (default: 1000)
 #   QUERY_TIMEOUT_SECS Timeout per query (default: 30)
+#   SAVE_ONLY          Set to 1 to save profile to file, 0 to open browser
+#                      (Auto-detected: file output in non-TTY, browser in TTY)
 #   DRY_RUN            Set to 1 to show commands without executing
 #
 # Examples:
 #   ./scripts/flamegraph.sh tpch            # Profile all TPC-H queries
 #   ./scripts/flamegraph.sh tpch Q6         # Profile only Q6
-#   FLAMEGRAPH_FREQ=99 ./scripts/flamegraph.sh tpch Q6  # Lower freq sampling
+#   SAVE_ONLY=1 ./scripts/flamegraph.sh tpch Q6  # Save profile.json without UI
 #   DRY_RUN=1 ./scripts/flamegraph.sh tpch  # Show what would be run
 #
 
@@ -33,10 +32,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Configuration
-OUTPUT="${FLAMEGRAPH_OUTPUT:-flamegraph.svg}"
-FREQ="${FLAMEGRAPH_FREQ:-997}"
+FREQ="${PROFILE_FREQ:-1000}"
 TIMEOUT="${QUERY_TIMEOUT_SECS:-30}"
 DRY_RUN="${DRY_RUN:-0}"
+
+# Auto-detect SAVE_ONLY: default to file output when not in a TTY (agent mode)
+# Use SAVE_ONLY=0 to force browser output, SAVE_ONLY=1 to force file output
+if [[ -z "${SAVE_ONLY:-}" ]]; then
+    if [[ -t 1 ]]; then
+        SAVE_ONLY="0"  # Interactive terminal: open browser
+    else
+        SAVE_ONLY="1"  # Non-interactive (agent): save to file
+    fi
+else
+    SAVE_ONLY="${SAVE_ONLY}"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -52,58 +62,17 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
 cmd() { echo -e "${CYAN}[CMD]${NC} $1"; }
 
-run_cmd() {
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cmd "$*"
-    else
-        "$@"
-    fi
-}
-
 check_dependencies() {
-    if ! command -v cargo-flamegraph &> /dev/null && ! cargo flamegraph --version &> /dev/null; then
-        error "cargo-flamegraph not found. Install with: cargo install flamegraph"
-    fi
-
-    # Skip sudo check in dry-run mode
+    # Skip checks in dry-run mode
     if [[ "$DRY_RUN" == "1" ]]; then
-        info "Dry-run mode: skipping sudo/profiler checks"
+        info "Dry-run mode: skipping dependency checks"
         return
     fi
 
-    # Check for profiling tools
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        if ! command -v dtrace &> /dev/null; then
-            error "dtrace not found (should be built into macOS)"
-        fi
-
-        # On macOS, flamegraph uses dtrace which requires root
-        info "macOS detected - flamegraph will use dtrace (requires sudo)"
-
-        # Check if we already have cached sudo credentials
-        if ! sudo -n true 2>/dev/null; then
-            warn "dtrace requires root. You will be prompted for your password."
-            echo ""
-            # Prompt for sudo password now so it's cached for the actual profiling
-            if ! sudo -v; then
-                error "Failed to obtain sudo credentials. Cannot run dtrace-based profiling."
-            fi
-            success "Sudo credentials cached"
-        else
-            info "Sudo credentials already available"
-        fi
-    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        if ! command -v perf &> /dev/null; then
-            error "perf not found. Install with: sudo apt install linux-tools-common linux-tools-generic"
-        fi
-
-        # Check perf_event_paranoid setting
-        local paranoid=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo "unknown")
-        if [[ "$paranoid" != "unknown" && "$paranoid" -gt 1 ]]; then
-            warn "perf_event_paranoid is $paranoid (restrictive)"
-            warn "For best results, run: sudo sysctl kernel.perf_event_paranoid=1"
-        fi
+    if ! command -v samply &> /dev/null; then
+        error "samply not found. Install with: cargo install samply"
     fi
+    info "Using samply profiler (no sudo required)"
 }
 
 build_benchmark() {
@@ -113,7 +82,7 @@ build_benchmark() {
 
     info "Building $bench_name benchmark..."
 
-    local build_cmd="cargo build --profile bench --package $package --bench $bench_name"
+    local build_cmd="cargo build --profile profiling --package $package --bench $bench_name"
     if [[ -n "$features" ]]; then
         build_cmd="$build_cmd --features $features"
     fi
@@ -134,25 +103,50 @@ find_benchmark_binary() {
         return
     fi
 
-    # First try the deps directory (where criterion benchmarks go)
-    local binary=$(find "$PROJECT_ROOT/target/release/deps" -maxdepth 1 -name "${bench_name}-*" -type f -perm +111 ! -name "*.d" ! -name "*.o" 2>/dev/null | head -1)
+    local search_dir="$PROJECT_ROOT/target/profiling/deps"
+    local binary=$(find "$search_dir" -maxdepth 1 -name "${bench_name}-*" -type f -perm +111 ! -name "*.d" ! -name "*.o" 2>/dev/null | head -1)
 
     if [[ -z "$binary" ]]; then
-        error "Could not find benchmark binary for $bench_name in target/release/deps/"
+        error "Could not find benchmark binary for $bench_name in $search_dir/"
     fi
 
     info "Found binary: $(basename "$binary")"
     echo "$binary"
 }
 
+run_profiler() {
+    local binary="$1"
+    local output_name="$2"
+    local env_vars="$3"
+
+    local samply_args="--rate $FREQ"
+    if [[ "$SAVE_ONLY" == "1" ]]; then
+        samply_args="$samply_args --save-only -o ${output_name}.json.gz"
+    fi
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        cmd "$env_vars samply record $samply_args -- $binary"
+    else
+        info "Starting samply profiler..."
+        if [[ "$SAVE_ONLY" != "1" ]]; then
+            info "Profile will open in Firefox Profiler (profiler.firefox.com)"
+        fi
+        eval "$env_vars samply record $samply_args -- $binary"
+    fi
+
+    if [[ "$DRY_RUN" != "1" && "$SAVE_ONLY" == "1" ]]; then
+        success "Profile saved to: ${output_name}.json.gz"
+        info "Load later with: samply load ${output_name}.json.gz"
+    fi
+}
+
 profile_tpch() {
     local query="${1:-}"
-    local output_name="flamegraph-tpch"
+    local output_name="profile-tpch"
 
     if [[ -n "$query" ]]; then
-        # Convert to lowercase using tr (compatible with bash 3.x on macOS)
         local query_lower=$(echo "$query" | tr '[:upper:]' '[:lower:]')
-        output_name="flamegraph-tpch-${query_lower}"
+        output_name="profile-tpch-${query_lower}"
         info "Profiling TPC-H query: $query"
     else
         info "Profiling all TPC-H queries"
@@ -161,23 +155,12 @@ profile_tpch() {
     build_benchmark "tpch_profiling" "benchmark-comparison"
     local binary=$(find_benchmark_binary "tpch_profiling")
 
-    info "Running flamegraph (this may take a while)..."
-
     local env_vars="SCALE_FACTOR=0.01 PROFILING_ITERATIONS=3 QUERY_TIMEOUT_SECS=$TIMEOUT"
     if [[ -n "$query" ]]; then
         env_vars="QUERY_FILTER=$query $env_vars"
     fi
 
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cmd "$env_vars cargo flamegraph --root --freq $FREQ --output ${output_name}.svg -- $binary"
-    else
-        eval "$env_vars cargo flamegraph --root --freq $FREQ --output ${output_name}.svg -- $binary"
-    fi
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        success "Flamegraph saved to: ${output_name}.svg"
-        info "Open with: open ${output_name}.svg  (or view in browser)"
-    fi
+    run_profiler "$binary" "$output_name" "$env_vars"
 }
 
 profile_tpcc() {
@@ -190,19 +173,9 @@ profile_tpcc() {
     build_benchmark "tpcc_benchmark" "" "vibesql-executor"
     local binary=$(find_benchmark_binary "tpcc_benchmark")
 
-    info "Running flamegraph for TPC-C..."
-
     local env_vars="TPCC_DURATION_SECS=$duration TPCC_WARMUP_SECS=$warmup TPCC_SCALE_FACTOR=$scale"
 
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cmd "$env_vars cargo flamegraph --root --freq $FREQ --output flamegraph-tpcc.svg -- $binary"
-    else
-        eval "$env_vars cargo flamegraph --root --freq $FREQ --output flamegraph-tpcc.svg -- $binary"
-    fi
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        success "Flamegraph saved to: flamegraph-tpcc.svg"
-    fi
+    run_profiler "$binary" "profile-tpcc" "$env_vars"
 }
 
 profile_sysbench() {
@@ -212,24 +185,12 @@ profile_sysbench() {
 
     info "Profiling Sysbench OLTP (table_size=$table_size, duration=${duration}s, warmup=${warmup}s)"
 
-    # sysbench_benchmark is the standalone benchmark runner (not criterion-based)
-    # It doesn't require benchmark-comparison feature
     build_benchmark "sysbench_benchmark" "" "vibesql-executor"
     local binary=$(find_benchmark_binary "sysbench_benchmark")
 
-    info "Running flamegraph for Sysbench..."
-
     local env_vars="SYSBENCH_TABLE_SIZE=$table_size SYSBENCH_DURATION_SECS=$duration SYSBENCH_WARMUP_SECS=$warmup"
 
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cmd "$env_vars cargo flamegraph --root --freq $FREQ --output flamegraph-sysbench.svg -- $binary"
-    else
-        eval "$env_vars cargo flamegraph --root --freq $FREQ --output flamegraph-sysbench.svg -- $binary"
-    fi
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        success "Flamegraph saved to: flamegraph-sysbench.svg"
-    fi
+    run_profiler "$binary" "profile-sysbench" "$env_vars"
 }
 
 profile_select() {
@@ -238,21 +199,7 @@ profile_select() {
     build_benchmark "iterator_execution" "" "vibesql-executor"
     local binary=$(find_benchmark_binary "iterator_execution")
 
-    info "Running flamegraph for SELECT operations..."
-
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cmd "cargo flamegraph --root --freq $FREQ --output flamegraph-select.svg -- $binary"
-    else
-        cargo flamegraph \
-            --root \
-            --freq "$FREQ" \
-            --output "flamegraph-select.svg" \
-            -- "$binary"
-    fi
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        success "Flamegraph saved to: flamegraph-select.svg"
-    fi
+    run_profiler "$binary" "profile-select" ""
 }
 
 profile_custom() {
@@ -265,18 +212,19 @@ profile_custom() {
 
     info "Profiling custom command: $cmd_to_run"
 
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cmd "cargo flamegraph --root --freq $FREQ --output flamegraph-custom.svg -- $cmd_to_run"
-    else
-        cargo flamegraph \
-            --root \
-            --freq "$FREQ" \
-            --output "flamegraph-custom.svg" \
-            -- $cmd_to_run
+    local samply_args="--rate $FREQ"
+    if [[ "$SAVE_ONLY" == "1" ]]; then
+        samply_args="$samply_args --save-only -o profile-custom.json.gz"
     fi
 
-    if [[ "$DRY_RUN" != "1" ]]; then
-        success "Flamegraph saved to: flamegraph-custom.svg"
+    if [[ "$DRY_RUN" == "1" ]]; then
+        cmd "samply record $samply_args -- $cmd_to_run"
+    else
+        samply record $samply_args -- $cmd_to_run
+    fi
+
+    if [[ "$DRY_RUN" != "1" && "$SAVE_ONLY" == "1" ]]; then
+        success "Profile saved to: profile-custom.json.gz"
     fi
 }
 
@@ -299,28 +247,28 @@ Options:
   -h, --help, help       Show this help message
 
 Environment variables:
-  FLAMEGRAPH_OUTPUT      Output file (default: flamegraph-<benchmark>.svg)
-  FLAMEGRAPH_FREQ        Sampling frequency in Hz (default: 997)
+  PROFILE_FREQ           Sampling frequency in Hz (default: 1000)
   QUERY_TIMEOUT_SECS     Timeout per query in seconds (default: 30)
+  SAVE_ONLY              Set to 1 for file output, 0 for browser UI
+                         (Auto-detects: file in non-TTY, browser in TTY)
   DRY_RUN                Set to 1 to show commands without executing
 
 Requirements:
-  - cargo-flamegraph: cargo install flamegraph
-  - macOS: dtrace (built-in, requires sudo)
-  - Linux: perf (linux-tools-common package)
+  samply                 Install: cargo install samply
+                         No sudo required on macOS or Linux
 
 Examples:
-  $0 tpch                    # Profile all 22 TPC-H queries
-  $0 tpch Q6                 # Profile only Q6
-  $0 tpcc 60 10 2            # TPC-C: 60s duration, 10s warmup, scale=2
-  $0 sysbench 50000 20 5     # Sysbench: 50k rows, 20s duration, 5s warmup
-  $0 custom ./my-benchmark   # Profile custom binary
-  DRY_RUN=1 $0 tpch Q6       # Show commands without running
+  $0 tpch                       # Profile all TPC-H queries
+  $0 tpch Q6                    # Profile only Q6
+  $0 tpcc 60 10 2               # TPC-C: 60s duration, 10s warmup, scale=2
+  $0 sysbench 50000 20 5        # Sysbench: 50k rows, 20s duration, 5s warmup
+  SAVE_ONLY=1 $0 tpch Q6        # Save profile.json without opening UI
+  DRY_RUN=1 $0 tpch Q6          # Show commands without running
 
 Output:
-  Flamegraphs are saved as SVG files in the current directory.
-  Open with: open flamegraph-tpch-q6.svg (macOS)
-             xdg-open flamegraph-tpch-q6.svg (Linux)
+  Interactive (TTY): Opens Firefox Profiler in your browser (profiler.firefox.com)
+  Non-interactive:   Saves to .json.gz file for later viewing with 'samply load'
+  Override with SAVE_ONLY=0 (browser) or SAVE_ONLY=1 (file)
 EOF
     exit 1
 }
