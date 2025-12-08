@@ -217,332 +217,405 @@ subqueries-ex-correlated = Korrelierte Unterabfragen
 subqueries-ex-nested = Verschachtelte Unterabfragen
 
 # =============================================================================
-# Benchmarks Page
+# Benchmark-Seite
 # =============================================================================
 
-# Section headers
-bench-section-embedded = Embedded
+# Abschnittsüberschriften
+bench-section-embedded = Eingebettet
 bench-section-server = Server
-bench-results-title = Benchmark Results
-bench-perf-comparison = Performance Comparison
-bench-methodology-title = Methodology
-bench-analysis-roadmap = Analysis & Roadmap
+bench-results-title = Benchmark-Ergebnisse
+bench-perf-comparison = Leistungsvergleich
+bench-methodology-title = Methodik
+bench-analysis-roadmap = Analyse & Roadmap
 
-# Summary cards
+# Zusammenfassungskarten
 bench-vs-sqlite = vs SQLite
 bench-vs-duckdb = vs DuckDB
 bench-vs-mysql = vs MySQL
-bench-ops-tested = Operations Tested
-bench-last-updated = Last Updated
-bench-avg-speedup = average speedup
-bench-from-main = from main branch
-bench-loading = Loading...
-bench-na = N/A
-bench-faster = { $value }x faster
-bench-slower = { $value }x slower
+bench-ops-tested = Getestete Operationen
+bench-last-updated = Zuletzt aktualisiert
+bench-avg-speedup = durchschnittliche Beschleunigung
+bench-from-main = vom main-Branch
+bench-loading = Lädt...
+bench-na = N/V
+bench-faster = { $value }x schneller
+bench-slower = { $value }x langsamer
 bench-speedup = { $value }x
-bench-startup-time-label = startup time
-bench-download-size = download size
-bench-uncompressed = uncompressed
-bench-size-metrics = size metrics
-bench-failed = FAILED
-bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-startup-time-label = Startzeit
+bench-download-size = Downloadgröße
+bench-uncompressed = unkomprimiert
+bench-size-metrics = Größenmetriken
+bench-failed = FEHLGESCHLAGEN
+bench-failed-title = Abfrage fehlgeschlagen (Zeitüberschreitung oder Fehler)
+bench-no-wasm-data = Keine WASM-Daten verfügbar
 
-# Table headers
+# Tabellenüberschriften
 bench-table-operation = Operation
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite
 bench-table-duckdb = DuckDB
 bench-table-mysql = MySQL
-bench-table-loading = Loading benchmark results...
-bench-vibesql-server-title = VibeSQL via PostgreSQL wire protocol
+bench-table-loading = Lade Benchmark-Ergebnisse...
+bench-vibesql-server-title = VibeSQL über PostgreSQL-Protokoll
 
-# Common benchmark terms
+# Allgemeine Benchmark-Begriffe
 bench-hardware = Hardware
-bench-benchmark-framework = Benchmark Framework
-bench-scale-factor = Scale Factor
-bench-data = Data
-bench-databases-tested = Databases Tested
-bench-execution-mode = Execution Mode
-bench-measurement = Measurement
-bench-workload = Workload
-bench-transaction-mix = Transaction Mix
-bench-warehouses = Warehouses
-bench-concurrency = Concurrency
-bench-acid-compliance = ACID Compliance
-bench-mode = Mode
-bench-workload-types = Workload Types
-bench-table-size = Table Size
-bench-index-types = Index Types
-bench-operations = Operations
-bench-databases = Databases
-bench-protocol-overhead = Protocol Overhead
-bench-binary-size = Binary Size
-bench-startup-time = Startup Time
-bench-peak-memory = Peak Memory
+bench-benchmark-framework = Benchmark-Framework
+bench-scale-factor = Skalierungsfaktor
+bench-data = Daten
+bench-databases-tested = Getestete Datenbanken
+bench-execution-mode = Ausführungsmodus
+bench-measurement = Messung
+bench-workload = Arbeitslast
+bench-transaction-mix = Transaktionsmix
+bench-warehouses = Lager
+bench-concurrency = Nebenläufigkeit
+bench-acid-compliance = ACID-Konformität
+bench-mode = Modus
+bench-workload-types = Arbeitslasttypen
+bench-table-size = Tabellengröße
+bench-index-types = Indextypen
+bench-operations = Operationen
+bench-databases = Datenbanken
+bench-protocol-overhead = Protokoll-Overhead
+bench-binary-size = Binärgröße
+bench-startup-time = Startzeit
+bench-peak-memory = Maximaler Speicher
 bench-schema = Schema
-bench-query-count = Query Count
-bench-query-types = Query Types
-bench-sql-features = SQL Features
-bench-wasm-size = WASM Size
+bench-query-count = Abfrageanzahl
+bench-query-types = Abfragetypen
+bench-sql-features = SQL-Funktionen
+bench-wasm-size = WASM-Größe
 bench-wasm-gzip = WASM (gzip)
 bench-wasm-brotli = WASM (brotli)
 
-# TPC-H specific
+# TPC-H spezifisch
 bench-tpch-name = TPC-H
-bench-tpch-title = TPC-H Decision Support Benchmark
-bench-tpch-description = These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>, which simulates real-world decision support workloads with complex analytical queries involving aggregations, joins, subqueries, and sorting.
-bench-tpch-ops-label = TPC-H queries
-bench-tpch-note-intro = All benchmarks measure end-to-end query execution time including parsing, planning, execution, and result materialization. This represents <strong>real-world SQL engine performance</strong> for analytical workloads.
-bench-tpch-note-queries = <strong>Note:</strong> TPC-H queries test different aspects of SQL performance: simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15), and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+bench-tpch-title = TPC-H Entscheidungsunterstützungs-Benchmark
+bench-tpch-description = Diese Benchmarks verwenden die branchenübliche <strong>TPC-H Benchmark-Suite</strong>, die reale Entscheidungsunterstützungs-Arbeitslasten mit komplexen analytischen Abfragen simuliert, einschließlich Aggregationen, Joins, Unterabfragen und Sortierung.
+bench-tpch-ops-label = TPC-H-Abfragen
+bench-tpch-note-intro = Alle Benchmarks messen die End-to-End-Abfrageausführungszeit einschließlich Parsing, Planung, Ausführung und Ergebnismaterialisierung. Dies repräsentiert die <strong>reale SQL-Engine-Leistung</strong> für analytische Arbeitslasten.
+bench-tpch-note-queries = <strong>Hinweis:</strong> TPC-H-Abfragen testen verschiedene Aspekte der SQL-Leistung: einfache Aggregationen (Q1, Q6), komplexe Joins (Q2-Q5, Q7-Q10), Unterabfragen (Q11-Q15) und erweiterte Analytik (Q16-Q22). Fahren Sie mit der Maus über die Abfragenamen in der Tabelle für Beschreibungen.
 
-# TPC-H Discussion
-bench-tpch-disc-excels-title = Where VibeSQL Excels
-bench-tpch-disc-excels = VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20) where our columnar execution engine and SIMD-accelerated aggregations shine. These queries involve filtering large tables and computing aggregates without complex join patterns.
-bench-tpch-disc-targets-title = Current Optimization Targets
-bench-tpch-disc-targets = Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's decades-refined B-tree joins. Specific areas under active development:
-bench-tpch-disc-join-ordering = Improved cardinality estimation for better join order selection
-bench-tpch-disc-hash-sizing = Adaptive hash table growth and spill-to-disk for large joins
-bench-tpch-disc-vectorized = Batch processing in the join inner loop to improve cache utilization
-bench-tpch-disc-inl-joins = Leveraging B-tree indexes when beneficial
-bench-tpch-disc-path-title = Path to Leadership
-bench-tpch-disc-path = VibeSQL's architecture is designed for modern hardware with features like columnar storage, vectorized execution, and lock-free concurrency. As these optimizations mature, we expect VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.
+# TPC-H Diskussion
+bench-tpch-disc-excels-title = Wo VibeSQL glänzt
+bench-tpch-disc-excels = VibeSQL zeigt starke Leistung bei <strong>scan-intensiven Aggregationsabfragen</strong> (Q1, Q6, Q14, Q15, Q20), wo unsere spaltenorientierte Ausführungsengine und SIMD-beschleunigte Aggregationen hervorstechen. Diese Abfragen beinhalten das Filtern großer Tabellen und die Berechnung von Aggregaten ohne komplexe Join-Muster.
+bench-tpch-disc-targets-title = Aktuelle Optimierungsziele
+bench-tpch-disc-targets = Mehrfach-Join-Abfragen (Q3, Q5, Q7-Q10, Q18, Q19, Q21) zeigen derzeit SQLite vorne. Der Hauptengpass ist unsere Hash-Join-Implementierung, die noch nicht das gleiche Optimierungsniveau wie SQLites jahrzehntelang verfeinerte B-Tree-Joins erreicht. Spezifische Bereiche in aktiver Entwicklung:
+bench-tpch-disc-join-ordering = Verbesserte Kardinalitätsschätzung für bessere Join-Reihenfolgeauswahl
+bench-tpch-disc-hash-sizing = Adaptives Hash-Tabellen-Wachstum und Spill-to-Disk für große Joins
+bench-tpch-disc-vectorized = Batch-Verarbeitung in der Join-Innenschleife zur Verbesserung der Cache-Nutzung
+bench-tpch-disc-inl-joins = Nutzung von B-Tree-Indizes wenn vorteilhaft
+bench-tpch-disc-path-title = Weg zur Führungsposition
+bench-tpch-disc-path = VibeSQLs Architektur ist für moderne Hardware konzipiert mit Funktionen wie spaltenorientierter Speicherung, vektorisierter Ausführung und sperrenfreier Nebenläufigkeit. Mit der Reifung dieser Optimierungen erwarten wir, dass VibeSQL eine konsistente Führungsposition bei allen TPC-H-Abfragen erreicht. Das grundlegende Design unterstützt Parallelismus und SIMD, die traditionelle zeilenbasierte Datenbanken nicht einfach nachrüsten können.
 
-# TPC-H Query Descriptions
-bench-tpch-q1 = Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY
-bench-tpch-q2 = Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT
-bench-tpch-q3 = Shipping Priority - 3-table JOIN with aggregation
-bench-tpch-q4 = Order Priority Checking - Correlated EXISTS subquery
-bench-tpch-q5 = Local Supplier Volume - 6-table JOIN with complex filtering
-bench-tpch-q6 = Forecasting Revenue Change - WHERE filters with BETWEEN and SUM
-bench-tpch-q7 = Volume Shipping - 6-table JOIN with SUBSTR and date filtering
-bench-tpch-q8 = National Market Share - 7-table JOIN with CASE expressions
-bench-tpch-q9 = Product Type Profit Measure - 4-table JOIN with aggregation
-bench-tpch-q10 = Returned Item Reporting - 4-table JOIN with TOP-N LIMIT
-bench-tpch-q11 = Important Stock Identification - Subquery in HAVING clause
-bench-tpch-q12 = Shipping Modes Priority - CASE aggregation with date logic
-bench-tpch-q13 = Customer Distribution - LEFT OUTER JOIN with subquery
-bench-tpch-q14 = Promotion Effect - Conditional aggregation with CASE
-bench-tpch-q15 = Top Supplier - Nested subqueries with MAX
-bench-tpch-q16 = Parts/Supplier Relationship - NOT IN subquery with DISTINCT
-bench-tpch-q17 = Small-Quantity-Order Revenue - Correlated subquery in WHERE
-bench-tpch-q18 = Large Volume Customer - GROUP BY with HAVING
-bench-tpch-q19 = Discounted Revenue - Complex OR conditions
-bench-tpch-q20 = Potential Part Promotion - IN subquery with GROUP BY/HAVING
-bench-tpch-q21 = Suppliers Who Kept Orders Waiting - Multi-table EXISTS
-bench-tpch-q22 = Global Sales Opportunity - SUBSTR with NOT EXISTS subquery
+# TPC-H Abfragebeschreibungen
+bench-tpch-q1 = Preiszusammenfassungsbericht - Preisaggregation mit GROUP BY und ORDER BY
+bench-tpch-q2 = Minimalkostenlieferant - 3-Tabellen-JOIN mit ORDER BY und LIMIT
+bench-tpch-q3 = Versandpriorität - 3-Tabellen-JOIN mit Aggregation
+bench-tpch-q4 = Bestellprioritätsprüfung - Korrelierte EXISTS-Unterabfrage
+bench-tpch-q5 = Lokales Lieferantenvolumen - 6-Tabellen-JOIN mit komplexer Filterung
+bench-tpch-q6 = Umsatzänderungsprognose - WHERE-Filter mit BETWEEN und SUM
+bench-tpch-q7 = Versandvolumen - 6-Tabellen-JOIN mit SUBSTR und Datumsfilterung
+bench-tpch-q8 = Nationaler Marktanteil - 7-Tabellen-JOIN mit CASE-Ausdrücken
+bench-tpch-q9 = Produkttyp-Gewinnmessung - 4-Tabellen-JOIN mit Aggregation
+bench-tpch-q10 = Rückgabeartikel-Berichterstattung - 4-Tabellen-JOIN mit TOP-N LIMIT
+bench-tpch-q11 = Wichtige Bestandsidentifikation - Unterabfrage in HAVING-Klausel
+bench-tpch-q12 = Versandmodus-Priorität - CASE-Aggregation mit Datumslogik
+bench-tpch-q13 = Kundenverteilung - LEFT OUTER JOIN mit Unterabfrage
+bench-tpch-q14 = Promotion-Effekt - Bedingte Aggregation mit CASE
+bench-tpch-q15 = Top-Lieferant - Verschachtelte Unterabfragen mit MAX
+bench-tpch-q16 = Teile/Lieferanten-Beziehung - NOT IN-Unterabfrage mit DISTINCT
+bench-tpch-q17 = Kleinmengenbestellungs-Umsatz - Korrelierte Unterabfrage in WHERE
+bench-tpch-q18 = Großvolumen-Kunde - GROUP BY mit HAVING
+bench-tpch-q19 = Rabatt-Umsatz - Komplexe OR-Bedingungen
+bench-tpch-q20 = Potenzielle Teilepromotion - IN-Unterabfrage mit GROUP BY/HAVING
+bench-tpch-q21 = Lieferanten mit Bestellverzögerung - Mehrfach-Tabellen EXISTS
+bench-tpch-q22 = Globale Verkaufschance - SUBSTR mit NOT EXISTS-Unterabfrage
 
-# TPC-DS specific
+# TPC-DS spezifisch
 bench-tpcds-name = TPC-DS
-bench-tpcds-title = TPC-DS Decision Support Benchmark
-bench-tpcds-description = <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model a modern decision support system with significantly more complex query patterns including multiple fact tables, snow-flake schema, and advanced SQL features.
-bench-tpcds-ops-label = TPC-DS queries
-bench-tpcds-note-intro = TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features like window functions, common table expressions (WITH clause), and complex join patterns across multiple fact and dimension tables.
-bench-tpcds-note-remaining = <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or specific date arithmetic functions not yet implemented.
+bench-tpcds-title = TPC-DS Entscheidungsunterstützungs-Benchmark
+bench-tpcds-description = <strong>TPC-DS</strong> ist der Nachfolger von TPC-H mit 99 Abfragen, die ein modernes Entscheidungsunterstützungssystem modellieren mit deutlich komplexeren Abfragemustern einschließlich mehrerer Faktentabellen, Schneeflockenschema und erweiterten SQL-Funktionen.
+bench-tpcds-ops-label = TPC-DS-Abfragen
+bench-tpcds-note-intro = TPC-DS-Abfragen sind wesentlich komplexer als TPC-H und testen erweiterte SQL-Funktionen wie Fensterfunktionen, Common Table Expressions (WITH-Klausel) und komplexe Join-Muster über mehrere Fakten- und Dimensionstabellen.
+bench-tpcds-note-remaining = <strong>Hinweis:</strong> Verbleibende nicht unterstützte Abfragen erfordern Funktionen wie INTERSECT/EXCEPT oder spezifische Datumsarithmetikfunktionen, die noch nicht implementiert sind.
 
-# TPC-DS Discussion
-bench-tpcds-disc-coverage-title = SQL:1999 Feature Coverage
-bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>, demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
-bench-tpcds-disc-optimization-title = Complex Query Optimization
-bench-tpcds-disc-optimization = TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
-bench-tpcds-disc-cte = Intelligent decision between materialized and inline CTEs
-bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when beneficial
-bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
-bench-tpcds-disc-toward-title = Toward 99/99
-bench-tpcds-disc-toward = INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set operations fit naturally into our existing query algebra and will be implemented as hash-based operators similar to our DISTINCT processing.
+# TPC-DS Diskussion
+bench-tpcds-disc-coverage-title = SQL:1999 Funktionsabdeckung
+bench-tpcds-disc-coverage = TPC-DS testet die anspruchsvollsten SQL-Funktionen. VibeSQL besteht <strong>88 von 99 Abfragen</strong> und demonstriert breite Abdeckung von SQL:1999 einschließlich ROLLUP, CUBE, GROUPING(), Fensterfunktionen mit komplexem Framing und rekursiven CTEs. Die verbleibenden Abfragen erfordern INTERSECT/EXCEPT-Mengenoperationen.
+bench-tpcds-disc-optimization-title = Komplexe Abfrageoptimierung
+bench-tpcds-disc-optimization = TPC-DS-Abfragen verbinden oft mehr als 10 Tabellen mit korrelierten Unterabfragen. Aktuelle Fokusgebiete:
+bench-tpcds-disc-cte = Intelligente Entscheidung zwischen materialisierten und Inline-CTEs
+bench-tpcds-disc-decorrelation = Konvertierung korrelierter Unterabfragen in Joins wenn vorteilhaft
+bench-tpcds-disc-star = Fakten-Dimensions-Join-Reihenfolge für analytische Muster
+bench-tpcds-disc-toward-title = Auf dem Weg zu 99/99
+bench-tpcds-disc-toward = INTERSECT und EXCEPT sind geplante Ergänzungen, die die verbleibenden Abfragen ermöglichen werden. Diese Mengenoperationen fügen sich natürlich in unsere bestehende Abfragealgebra ein und werden als hash-basierte Operatoren ähnlich unserer DISTINCT-Verarbeitung implementiert.
 
-# TPC-C specific
+# TPC-C spezifisch
 bench-tpcc-name = TPC-C
-bench-tpcc-title = TPC-C Online Transaction Processing Benchmark
-bench-tpcc-description = The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment with a mix of complex transactions including order entry, payment processing, order status queries, delivery processing, and stock level monitoring.
-bench-tpcc-ops-label = TPC-C transactions
-bench-tpcc-note-intro = TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle concurrent transactions with complex business logic. This benchmark is critical for evaluating <strong>transactional workload performance</strong>.
-bench-tpcc-note-results = <strong>Note:</strong> Results show average transaction latency. Lower is better. TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
+bench-tpcc-title = TPC-C Online-Transaktionsverarbeitungs-Benchmark
+bench-tpcc-description = Der <strong>TPC-C-Benchmark</strong> simuliert eine vollständige Bestelleingabeumgebung mit einer Mischung aus komplexen Transaktionen einschließlich Bestelleingabe, Zahlungsverarbeitung, Bestellstatusabfragen, Lieferverarbeitung und Lagerbestandsüberwachung.
+bench-tpcc-ops-label = TPC-C-Transaktionen
+bench-tpcc-transactions-label = ausgeführte Transaktionen
+bench-tpcc-note-intro = TPC-C misst Transaktionen pro Minute (tpmC) und testet die Fähigkeit der Datenbank, konkurrierende Transaktionen mit komplexer Geschäftslogik zu verarbeiten. Dieser Benchmark ist kritisch für die Bewertung der <strong>transaktionalen Arbeitslastleistung</strong>.
+bench-tpcc-note-results = <strong>Hinweis:</strong> Ergebnisse zeigen die durchschnittliche Transaktionslatenz. Niedriger ist besser. TPC-C ist besonders anspruchsvoll für schreibintensive Arbeitslasten mit strengen Konsistenzanforderungen.
 
-# TPC-C Transaction Descriptions
-bench-tpcc-new-order = New Order - Complex transaction with inventory checks and order creation
-bench-tpcc-payment = Payment - Update customer balance and warehouse/district totals
-bench-tpcc-order-status = Order Status - Read-only query for customer order history
-bench-tpcc-delivery = Delivery - Batch processing of pending orders
-bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
+# TPC-C Transaktionsbeschreibungen
+bench-tpcc-new-order = Neue Bestellung - Komplexe Transaktion mit Bestandsprüfungen und Bestellerstellung
+bench-tpcc-payment = Zahlung - Aktualisierung von Kundensaldo und Lager-/Bezirkssummen
+bench-tpcc-order-status = Bestellstatus - Nur-Lese-Abfrage für Kundenbestellhistorie
+bench-tpcc-delivery = Lieferung - Stapelverarbeitung ausstehender Bestellungen
+bench-tpcc-stock-level = Lagerbestand - Zählen von Artikeln unter dem Schwellenwert in aktuellen Bestellungen
 
-# TPC-C Discussion
-bench-tpcc-disc-faster-title = 42x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS, a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
-bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
-bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
-bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution
-bench-tpcc-disc-btree = Purpose-built index structure optimized for in-memory workloads
-bench-tpcc-disc-prepared = Query plans are compiled once and reused
-bench-tpcc-disc-scaling-title = Scaling Further
-bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect near-linear scaling as we add parallel execution support. Our goal is to achieve 500K+ TPS on modern multi-core hardware.
+# TPC-C Diskussion
+bench-tpcc-disc-faster-title = 42x schneller als SQLite
+bench-tpcc-disc-faster = VibeSQL erreicht <strong>~79.000 Transaktionen pro Sekunde</strong> im Vergleich zu SQLites ~1.900 TPS, eine 42-fache Verbesserung. Diese dramatische Beschleunigung kommt von unserer sperrenfreien MVCC-Architektur, die SQLites grobkörnige Sperrung bei jeder Schreiboperation vermeidet.
+bench-tpcc-disc-dominates-title = Warum VibeSQL OLTP dominiert
+bench-tpcc-disc-lockfree = MVCC ermöglicht Lesern und Schreibern gleichzeitiges Fortschreiten ohne Blockierung
+bench-tpcc-disc-optimistic = Transaktionen kollidieren nur zum Commit-Zeitpunkt, nicht während der Ausführung
+bench-tpcc-disc-btree = Zweckgebaute Indexstruktur optimiert für In-Memory-Arbeitslasten
+bench-tpcc-disc-prepared = Abfragepläne werden einmal kompiliert und wiederverwendet
+bench-tpcc-disc-scaling-title = Weitere Skalierung
+bench-tpcc-disc-scaling = Aktuelle Ergebnisse sind single-threaded. VibeSQLs Architektur unterstützt Multi-Thread-Transaktionsverarbeitung, und wir erwarten nahezu lineare Skalierung mit der Hinzufügung paralleler Ausführungsunterstützung. Unser Ziel ist 500K+ TPS auf moderner Multi-Core-Hardware.
 
-# Sysbench Embedded specific
-bench-sysbench-embedded-name = Sysbench (Embedded)
-bench-sysbench-embedded-title = Sysbench Micro-Benchmarks (Embedded)
-bench-sysbench-embedded-description = <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific database operations. These tests measure raw performance for fundamental operations without the complexity of full transaction workloads.
-bench-sysbench-embedded-ops-label = Sysbench operations
-bench-sysbench-embedded-note = Embedded mode runs the database in-process with zero network overhead, ideal for single-process applications where minimal latency is critical.
+# Sysbench Eingebettet spezifisch
+bench-sysbench-embedded-name = Sysbench (Eingebettet)
+bench-sysbench-embedded-title = Sysbench Mikro-Benchmarks (Eingebettet)
+bench-sysbench-embedded-description = <strong>Sysbench</strong> bietet fokussierte Mikro-Benchmarks, die spezifische Datenbankoperationen isolieren. Diese Tests messen die Rohleistung für grundlegende Operationen ohne die Komplexität vollständiger Transaktionsarbeitslasten.
+bench-sysbench-embedded-ops-label = Sysbench-Operationen
+bench-sysbench-embedded-note = Der eingebettete Modus führt die Datenbank im Prozess mit null Netzwerk-Overhead aus, ideal für Single-Process-Anwendungen, bei denen minimale Latenz kritisch ist.
 
-# Sysbench Operation Descriptions
-bench-sysbench-point-select = Point Select - Single row lookup by primary key
-bench-sysbench-insert = Insert - Insert new rows into table
-bench-sysbench-update-index = Update Index - Update indexed column (k = k + 1)
-bench-sysbench-update-non-index = Update Non-Index - Update non-indexed column
-bench-sysbench-delete = Delete - Remove rows by primary key
-bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
+# Sysbench Operationsbeschreibungen
+bench-sysbench-point-select = Punktabfrage - Einzelzeilensuche nach Primärschlüssel
+bench-sysbench-insert = Einfügen - Neue Zeilen in Tabelle einfügen
+bench-sysbench-update-index = Index-Update - Indizierte Spalte aktualisieren (k = k + 1)
+bench-sysbench-update-non-index = Nicht-Index-Update - Nicht-indizierte Spalte aktualisieren
+bench-sysbench-delete = Löschen - Zeilen nach Primärschlüssel entfernen
+bench-sysbench-range-queries = Bereichsabfragen - Einfache, SUM, ORDER BY und DISTINCT Bereichsscans
 
-# Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = Point Lookups: VibeSQL Leads
-bench-sysbench-emb-disc-point = VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
-bench-sysbench-emb-disc-index-title = Index Updates: 2x Faster
-bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design allows in-place index updates without write-ahead logging overhead for each operation.
-bench-sysbench-emb-disc-improve-title = Areas for Improvement
-bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
-bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need predicate pushdown optimization
-bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
-bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
-bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
+# Sysbench Eingebettet Diskussion
+bench-sysbench-emb-disc-point-title = Punktabfragen: VibeSQL führt
+bench-sysbench-emb-disc-point = VibeSQLs direkte API erreicht <strong>~137ns pro Punktabfrage</strong>, gleichauf mit SQLite und weit vor DuckDB (~140µs). Unsere B-Tree-Implementierung ist für Einzelzeilensuchen mit minimalem Zeigerverfolgung und cache-freundlichen Knotenlayouts optimiert.
+bench-sysbench-emb-disc-index-title = Index-Updates: 2x schneller
+bench-sysbench-emb-disc-index = VibeSQLs indizierte Updates laufen bei <strong>~740ns vs SQLites ~1,6µs</strong>. Unser MVCC-Design ermöglicht In-Place-Index-Updates ohne Write-Ahead-Logging-Overhead für jede Operation.
+bench-sysbench-emb-disc-improve-title = Verbesserungsbereiche
+bench-sysbench-emb-disc-bulk = SQLites Batch-Insert-Pfad ist hochoptimiert; wir fügen Batch-B-Tree-Operationen hinzu
+bench-sysbench-emb-disc-nonindex = Vollständige Tabellenscans für nicht-indizierte Spalten benötigen Prädikat-Pushdown-Optimierung
+bench-sysbench-emb-disc-deletes = Unsere Tombstone-basierte Löschung hat Bereinigungsoverhead; Kompaktierungsverbesserungen sind geplant
+bench-sysbench-emb-disc-duckdb-title = DuckDB-Vergleich
+bench-sysbench-emb-disc-duckdb = DuckDB ist für analytische Arbeitslasten optimiert, nicht für Mikrooperationen. Seine 100-1000x langsameren Ergebnisse hier spiegeln architektonische Entscheidungen wider (spaltenorientierte Speicherung, vektorisierte Ausführung), die Einzelzeilenlatenz gegen Massendurchsatz eintauschen. VibeSQL zielt auf beide Anwendungsfälle.
 
-# Sysbench Server specific
+# Sysbench Server spezifisch
 bench-sysbench-server-name = Sysbench (Server)
-bench-sysbench-server-title = Sysbench Micro-Benchmarks (Server)
-bench-sysbench-server-description = <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol) against MySQL, measuring performance for multi-client database deployments.
-bench-sysbench-server-ops-label = Sysbench operations
-bench-sysbench-server-note = Server mode uses the PostgreSQL wire protocol, enabling multi-client access and compatibility with existing PostgreSQL tooling and drivers.
+bench-sysbench-server-title = Sysbench Mikro-Benchmarks (Server)
+bench-sysbench-server-description = <strong>Sysbench</strong> Server-Benchmarks vergleichen VibeSQL Server (PostgreSQL-Protokoll) mit MySQL und messen die Leistung für Multi-Client-Datenbankbereitstellungen.
+bench-sysbench-server-ops-label = Sysbench-Operationen
+bench-sysbench-server-note = Der Server-Modus verwendet das PostgreSQL-Protokoll und ermöglicht Multi-Client-Zugriff und Kompatibilität mit bestehenden PostgreSQL-Tools und -Treibern.
 
-# Sysbench Server Discussion
-bench-sysbench-srv-disc-protocol-title = PostgreSQL Wire Protocol
-bench-sysbench-srv-disc-protocol = VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query compared to embedded mode, but enables multi-client deployments.
-bench-sysbench-srv-disc-mysql-title = MySQL Comparison
-bench-sysbench-srv-disc-mysql = Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement for traditional client-server databases. Results vary by operation type, with VibeSQL showing advantages in read-heavy workloads.
-bench-sysbench-srv-disc-roadmap-title = Server Roadmap
-bench-sysbench-srv-disc-pooling = Reduce connection establishment overhead for high-throughput scenarios
-bench-sysbench-srv-disc-caching = Server-side caching of query plans across connections
-bench-sysbench-srv-disc-extended = Full PostgreSQL extended query protocol support for batch operations
+# Sysbench Server Diskussion
+bench-sysbench-srv-disc-protocol-title = PostgreSQL-Protokoll
+bench-sysbench-srv-disc-protocol = VibeSQL Server implementiert das PostgreSQL-Protokoll und ermöglicht Kompatibilität mit bestehenden PostgreSQL-Treibern und -Tools. Dies fügt ~10-50µs Protokoll-Overhead pro Abfrage im Vergleich zum eingebetteten Modus hinzu, ermöglicht aber Multi-Client-Bereitstellungen.
+bench-sysbench-srv-disc-mysql-title = MySQL-Vergleich
+bench-sysbench-srv-disc-mysql = Server-Benchmarks vergleichen mit MySQL, um VibeSQL als Drop-in-Ersatz für traditionelle Client-Server-Datenbanken zu bewerten. Ergebnisse variieren je nach Operationstyp, wobei VibeSQL Vorteile bei leseintensiven Arbeitslasten zeigt.
+bench-sysbench-srv-disc-roadmap-title = Server-Roadmap
+bench-sysbench-srv-disc-pooling = Reduzierung des Verbindungsaufbau-Overheads für Hochdurchsatzszenarien
+bench-sysbench-srv-disc-caching = Serverseitiges Caching von Abfrageplänen über Verbindungen hinweg
+bench-sysbench-srv-disc-extended = Vollständige PostgreSQL Extended Query Protocol-Unterstützung für Batch-Operationen
 
-# Footprint Embedded specific
-bench-footprint-embedded-name = Footprint (Embedded)
-bench-footprint-embedded-title = Native Binary Footprint
-bench-footprint-embedded-description = <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries, comparing binary size, cold startup time, and peak memory usage.
-bench-footprint-embedded-ops-label = databases compared
-bench-footprint-embedded-note = Native binary footprint is critical for <strong>embedded and edge deployments</strong> where binary size, startup latency, and memory consumption directly impact deployment feasibility.
+# Footprint Eingebettet spezifisch
+bench-footprint-embedded-name = Footprint (Eingebettet)
+bench-footprint-embedded-title = Native Binär-Footprint
+bench-footprint-embedded-description = <strong>Eingebettete Footprint-Benchmarks</strong> messen die Ressourceneffizienz nativer Datenbankbinärdateien und vergleichen Binärgröße, Kaltstartzeit und maximale Speichernutzung.
+bench-footprint-embedded-ops-label = verglichene Datenbanken
+bench-footprint-embedded-note = Der native Binär-Footprint ist kritisch für <strong>eingebettete und Edge-Bereitstellungen</strong>, bei denen Binärgröße, Startlatenz und Speicherverbrauch die Bereitstellungsmachbarkeit direkt beeinflussen.
 
-# Footprint Embedded Descriptions
-bench-footprint-binary-size = Binary Size - Size of the compiled database binary on disk
-bench-footprint-startup-time = Startup Time - Time to cold-start and execute first query
-bench-footprint-peak-memory = Peak Memory - Maximum resident set size during initialization
+# Footprint Eingebettet Beschreibungen
+bench-footprint-binary-size = Binärgröße - Größe der kompilierten Datenbankbinärdatei auf der Festplatte
+bench-footprint-startup-time = Startzeit - Zeit für Kaltstart und Ausführung der ersten Abfrage
+bench-footprint-peak-memory = Maximaler Speicher - Maximale Resident-Set-Größe während der Initialisierung
 
-# Footprint Embedded Discussion
-bench-footprint-emb-disc-size-title = Binary Size: Middle Ground
-bench-footprint-emb-disc-size = VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects our choice to include advanced features (window functions, CTEs, columnar execution) while keeping the binary manageable for embedded deployments.
-bench-footprint-emb-disc-startup-title = Startup: Fastest Cold Start
-bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only essential metadata structures on startup.
-bench-footprint-emb-disc-memory-title = Memory Efficiency
-bench-footprint-emb-disc-memory = Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB. The difference from SQLite reflects our more sophisticated query optimizer and columnar execution infrastructure that's allocated upfront.
-bench-footprint-emb-disc-roadmap-title = Size Reduction Roadmap
-bench-footprint-emb-disc-flags = Compile-time feature selection to exclude unused functionality
-bench-footprint-emb-disc-lto = Whole-program link-time optimization for dead code elimination
-bench-footprint-emb-disc-modular = Separate core engine from optional features (e.g., window functions)
+# Footprint Eingebettet Diskussion
+bench-footprint-emb-disc-size-title = Binärgröße: Goldener Mittelweg
+bench-footprint-emb-disc-size = VibeSQL mit <strong>~17 MB</strong> liegt zwischen SQLite (~5 MB) und DuckDB (~45 MB). Dies spiegelt unsere Entscheidung wider, erweiterte Funktionen (Fensterfunktionen, CTEs, spaltenorientierte Ausführung) einzuschließen und gleichzeitig die Binärdatei für eingebettete Bereitstellungen handhabbar zu halten.
+bench-footprint-emb-disc-startup-title = Start: Schnellster Kaltstart
+bench-footprint-emb-disc-startup = VibeSQL erreicht <strong>~7,7 ms Kaltstart</strong>, etwas schneller als SQLite (~8,2 ms) und deutlich schneller als DuckDB (~14,6 ms). Unser minimaler Initialisierungspfad lädt beim Start nur wesentliche Metadatenstrukturen.
+bench-footprint-emb-disc-memory-title = Speichereffizienz
+bench-footprint-emb-disc-memory = Der maximale Speicher beim Start beträgt ~7 MB für VibeSQL vs ~3 MB für SQLite und ~11 MB für DuckDB. Der Unterschied zu SQLite spiegelt unseren ausgefeilteren Abfrageoptimierer und die spaltenorientierte Ausführungsinfrastruktur wider, die vorab allokiert wird.
+bench-footprint-emb-disc-roadmap-title = Größenreduzierungs-Roadmap
+bench-footprint-emb-disc-flags = Kompilierzeit-Funktionsauswahl zum Ausschließen ungenutzter Funktionalität
+bench-footprint-emb-disc-lto = Gesamtprogramm-Link-Time-Optimierung zur Eliminierung toten Codes
+bench-footprint-emb-disc-modular = Trennung der Kern-Engine von optionalen Funktionen (z.B. Fensterfunktionen)
 
-# Footprint Server/WASM specific
+# Footprint Server/WASM spezifisch
 bench-footprint-server-name = Footprint (Server/WASM)
-bench-footprint-server-title = WASM Footprint
-bench-footprint-server-description = <strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment, critical for web applications where download size impacts user experience.
-bench-footprint-server-ops-label = deployment targets
-bench-footprint-server-note = WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.
-bench-footprint-server-note2 = <strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining full SQL:1999 compliance in the browser.
+bench-footprint-server-title = WASM-Footprint
+bench-footprint-server-description = <strong>WASM-Footprint-Benchmarks</strong> messen die WebAssembly-Modulgröße für Browser-Bereitstellung, kritisch für Webanwendungen, bei denen die Downloadgröße die Benutzererfahrung beeinflusst.
+bench-footprint-server-ops-label = Bereitstellungsziele
+bench-footprint-server-note = WASM-Größen sind kritisch für <strong>Web-Bereitstellungen</strong>, bei denen die Downloadzeit direkt die Zeit bis zur Interaktivität beeinflusst. Gzip-Größen sind am relevantesten, da Browser gzip-Inhalte automatisch dekomprimieren.
+bench-footprint-server-note2 = <strong>Hinweis:</strong> VibeSQL WASM ist für minimale Downloadgröße konzipiert bei gleichzeitiger Beibehaltung voller SQL:1999-Konformität im Browser.
 
-# Footprint Server Descriptions
-bench-footprint-wasm-size = WASM Size - Size of the WebAssembly module for browser deployment
-bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
+# Footprint Server Beschreibungen
+bench-footprint-wasm-size = WASM-Größe - Größe des WebAssembly-Moduls für Browser-Bereitstellung
+bench-footprint-wasm-gzip = WASM (gzip) - Komprimierte Größe für Web-Auslieferung
 
-# Footprint Server Discussion
-bench-footprint-srv-disc-wasm-title = WASM: 2.2MB Compressed
-bench-footprint-srv-disc-wasm = VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast initial page loads. This is a full SQL:1999 database with window functions, CTEs, and ACID transactions running entirely in the browser.
-bench-footprint-srv-disc-included-title = What's Included
-bench-footprint-srv-disc-parser = Complete SQL parser and query optimizer
-bench-footprint-srv-disc-btree = B-tree storage engine with MVCC
-bench-footprint-srv-disc-window = Window functions and advanced aggregations
-bench-footprint-srv-disc-cte = Common table expressions (WITH clause)
-bench-footprint-srv-disc-acid = Full ACID transaction support
-bench-footprint-srv-disc-benefits-title = Browser Deployment Benefits
-bench-footprint-srv-disc-benefits = Running SQL in the browser eliminates round-trip latency to servers, enables offline-first applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is designed for this use case with minimal dependencies and efficient memory usage.
-bench-footprint-srv-disc-roadmap-title = WASM Roadmap
-bench-footprint-srv-disc-streaming = Start executing while the module downloads
-bench-footprint-srv-disc-indexeddb = Durable storage across browser sessions
-bench-footprint-srv-disc-worker = Run queries off the main thread for responsive UIs
+# Footprint Server Diskussion
+bench-footprint-srv-disc-wasm-title = WASM: 2,2 MB komprimiert
+bench-footprint-srv-disc-wasm = VibeSQLs WebAssembly-Modul komprimiert auf <strong>~2,2 MB gzipped</strong> und ermöglicht schnelle initiale Seitenladevorgänge. Dies ist eine vollständige SQL:1999-Datenbank mit Fensterfunktionen, CTEs und ACID-Transaktionen, die vollständig im Browser läuft.
+bench-footprint-srv-disc-included-title = Was enthalten ist
+bench-footprint-srv-disc-parser = Vollständiger SQL-Parser und Abfrageoptimierer
+bench-footprint-srv-disc-btree = B-Tree-Speicher-Engine mit MVCC
+bench-footprint-srv-disc-window = Fensterfunktionen und erweiterte Aggregationen
+bench-footprint-srv-disc-cte = Common Table Expressions (WITH-Klausel)
+bench-footprint-srv-disc-acid = Volle ACID-Transaktionsunterstützung
+bench-footprint-srv-disc-benefits-title = Vorteile der Browser-Bereitstellung
+bench-footprint-srv-disc-benefits = SQL im Browser ausführen eliminiert Round-Trip-Latenz zu Servern, ermöglicht Offline-First-Anwendungen und hält sensible Daten auf dem Gerät des Benutzers. VibeSQLs WASM-Build ist für diesen Anwendungsfall mit minimalen Abhängigkeiten und effizienter Speichernutzung konzipiert.
+bench-footprint-srv-disc-roadmap-title = WASM-Roadmap
+bench-footprint-srv-disc-streaming = Ausführung beginnen während das Modul herunterlädt
+bench-footprint-srv-disc-indexeddb = Dauerhafte Speicherung über Browser-Sitzungen hinweg
+bench-footprint-srv-disc-worker = Abfragen außerhalb des Hauptthreads für reaktive UIs ausführen
 
-# Bullet point labels (used with descriptions)
-bench-bullet-join-ordering = Join ordering
-bench-bullet-hash-sizing = Hash table sizing
-bench-bullet-vectorized = Vectorized joins
-bench-bullet-inl-joins = Index-nested-loop joins
-bench-bullet-cte-materialization = CTE materialization
-bench-bullet-decorrelation = Subquery decorrelation
-bench-bullet-star-optimization = Star schema optimization
-bench-bullet-lock-free = Lock-free reads
-bench-bullet-optimistic = Optimistic concurrency
-bench-bullet-btree = In-memory B-tree
-bench-bullet-prepared = Prepared statement caching
-bench-bullet-bulk-inserts = Bulk inserts
-bench-bullet-non-indexed = Non-indexed updates
-bench-bullet-deletes = Deletes
-bench-bullet-connection-pooling = Connection pooling
-bench-bullet-stmt-caching = Prepared statement caching
-bench-bullet-extended-protocol = Extended query protocol
-bench-bullet-feature-flags = Feature flags
-bench-bullet-lto = LTO optimization
-bench-bullet-modular = Modular builds
-bench-bullet-streaming = Streaming compilation
-bench-bullet-indexeddb = IndexedDB persistence
-bench-bullet-worker = Worker thread support
+# Aufzählungspunkt-Labels (verwendet mit Beschreibungen)
+bench-bullet-join-ordering = Join-Reihenfolge
+bench-bullet-hash-sizing = Hash-Tabellen-Dimensionierung
+bench-bullet-vectorized = Vektorisierte Joins
+bench-bullet-inl-joins = Index-Nested-Loop-Joins
+bench-bullet-cte-materialization = CTE-Materialisierung
+bench-bullet-decorrelation = Unterabfragen-Dekorrelation
+bench-bullet-star-optimization = Sternschema-Optimierung
+bench-bullet-lock-free = Sperrenfreie Lesezugriffe
+bench-bullet-optimistic = Optimistische Nebenläufigkeit
+bench-bullet-btree = In-Memory B-Tree
+bench-bullet-prepared = Prepared-Statement-Caching
+bench-bullet-bulk-inserts = Masseneinfügungen
+bench-bullet-non-indexed = Nicht-indizierte Updates
+bench-bullet-deletes = Löschungen
+bench-bullet-connection-pooling = Verbindungspooling
+bench-bullet-stmt-caching = Prepared-Statement-Caching
+bench-bullet-extended-protocol = Extended Query Protocol
+bench-bullet-feature-flags = Feature-Flags
+bench-bullet-lto = LTO-Optimierung
+bench-bullet-modular = Modulare Builds
+bench-bullet-streaming = Streaming-Kompilierung
+bench-bullet-indexeddb = IndexedDB-Persistenz
+bench-bullet-worker = Worker-Thread-Unterstützung
 
 # =============================================================================
-# Conformance Page
+# Konformitätsseite
 # =============================================================================
 
-# Overview section
-conformance-sql-conformance = SQL Conformance
-conformance-testing-against = Testing against SQLLogicTest - the industry standard SQL test suite
-conformance-full-pass-rate = 100% File Pass Rate Achieved!
-conformance-tests-passing = Tests Passing
-conformance-files-passing = Files Passing
-conformance-loading = Loading conformance report...
-conformance-error-loading = Error Loading Report
-conformance-no-data = No conformance data available
+# Übersichtssektion
+conformance-sql-conformance = SQL-Konformität
+conformance-testing-against = Tests gegen SQLLogicTest - die branchenübliche SQL-Testsuite
+conformance-full-pass-rate = 100% Datei-Erfolgsrate erreicht!
+conformance-tests-passing = Bestandene Tests
+conformance-files-passing = Bestandene Dateien
+conformance-loading = Lade Konformitätsbericht...
+conformance-error-loading = Fehler beim Laden des Berichts
+conformance-no-data = Keine Konformitätsdaten verfügbar
 
-# Category breakdown
-conformance-category-title = Test Coverage by Category
-conformance-category-header = Category
-conformance-pass-rate-header = Pass Rate
-conformance-progress-header = Progress
+# Kategorieaufschlüsselung
+conformance-category-title = Testabdeckung nach Kategorie
+conformance-category-header = Kategorie
+conformance-pass-rate-header = Erfolgsrate
+conformance-progress-header = Fortschritt
 conformance-tests-header = Tests
-conformance-cat-select = SELECT Queries
-conformance-cat-aggregates = Aggregates
+conformance-cat-select = SELECT-Abfragen
+conformance-cat-aggregates = Aggregate
 conformance-cat-joins = JOINs
-conformance-cat-expressions = Expressions
-conformance-cat-subqueries = Subqueries
-conformance-cat-index = Index Operations
-conformance-cat-ddl = DDL Statements
-conformance-cat-evidence = Evidence Tests
-conformance-cat-random = Random Tests
-conformance-cat-other = Other Tests
+conformance-cat-expressions = Ausdrücke
+conformance-cat-subqueries = Unterabfragen
+conformance-cat-index = Index-Operationen
+conformance-cat-ddl = DDL-Anweisungen
+conformance-cat-evidence = Evidenz-Tests
+conformance-cat-random = Zufallstests
+conformance-cat-other = Andere Tests
 
-# Timeline
-conformance-timeline-title = Pass Rate History
-conformance-timeline-desc = Conformance progress over the last 90 days
-conformance-timeline-loading = Loading chart data...
+# Zeitachse
+conformance-timeline-title = Erfolgsraten-Verlauf
+conformance-timeline-desc = Konformitätsfortschritt der letzten 90 Tage
+conformance-timeline-loading = Lade Diagrammdaten...
 
-# Milestones
-conformance-milestones-title = Milestones
+# Meilensteine
+conformance-milestones-title = Meilensteine
 
-# Running tests locally
-conformance-running-locally-title = Running Tests Locally
-conformance-run-sqltest = # Run SQL:1999 conformance tests
-conformance-run-sqllogictest = # Run SQLLogicTest suite (takes hours)
-conformance-generate-coverage = # Generate coverage report
-conformance-open-coverage = # Open coverage report
+# Tests lokal ausführen
+conformance-running-locally-title = Tests lokal ausführen
+conformance-run-sqltest = # SQL:1999 Konformitätstests ausführen
+conformance-run-sqllogictest = # SQLLogicTest-Suite ausführen (dauert Stunden)
+conformance-generate-coverage = # Abdeckungsbericht generieren
+conformance-open-coverage = # Abdeckungsbericht öffnen
+
+# Legacy sqltest Sektion
+conformance-sqltest-title = sqltest-Ergebnisse
+conformance-sqltest-desc = Ergebnisse von <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">sqltest</a> - eine Community-gepflegte BNF-gesteuerte Konformitäts-Testsuite, abgeleitet vom SQL:1999-Standard, mit 739 Tests für Core- und Foundation-Funktionen.
+conformance-overall-pass-rate = Gesamterfolgsrate
+conformance-tests-of-passing = { $passed } von { $total } Tests bestanden
+conformance-passed = Bestanden
+conformance-failed = Fehlgeschlagen
+conformance-errors = Fehler
+conformance-test-coverage = Testabdeckung
+conformance-core-features = Core-Funktionen (E-Serie)
+conformance-additional-features = Zusätzliche Funktionen
+
+# Funktionscodes
+conformance-e011 = Numerische Datentypen
+conformance-e021 = Zeichenketten-Typen
+conformance-e031 = Bezeichner
+conformance-e051 = Grundlegende Abfragespezifikation
+conformance-e061 = Grundlegende Prädikate und Suchbedingungen
+conformance-e071 = Grundlegende Abfrageausdrücke
+conformance-e081 = Grundlegende Privilegien
+conformance-e091 = Mengenfunktionen
+conformance-e101 = Grundlegende Datenmanipulation
+conformance-e111 = Einzelzeilen-SELECT-Anweisung
+conformance-e121 = Grundlegende Cursor-Unterstützung
+conformance-e131 = NULL-Wert-Unterstützung
+conformance-e141 = Grundlegende Integritätsbedingungen
+conformance-e151 = Transaktionsunterstützung
+conformance-e161 = SQL-Kommentare
+conformance-f031 = Grundlegende Schema-Manipulation
+
+# SQLLogicTest Sektion
+conformance-slt-title = SQLLogicTest-Ergebnisse
+conformance-slt-desc = Ergebnisse der umfassenden <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">SQLLogicTest</a>-Suite mit ~5,9 Millionen Tests in 623 Testdateien aus dem offiziellen SQLite-Korpus.
+conformance-files-of-passing = { $passed } von { $total } Testdateien bestanden
+conformance-test-categories = Testkategorien
+conformance-slt-select = SELECT-Tests
+conformance-slt-evidence = Evidenz-Tests
+conformance-slt-index = Index-Tests
+conformance-slt-random = Zufallstests
+conformance-slt-ddl = DDL-Tests
+conformance-slt-other = Andere Tests
+conformance-slt-note = <strong>Hinweis:</strong> SQLLogicTest bietet eine andere Perspektive als sqltest. Während sich sqltest auf BNF-Grammatikkonformität der SQL:1999-Spezifikation konzentriert, enthält SQLLogicTest Millionen realer SQL-Abfragen, die praktische Korrektheit in einer Vielzahl von Szenarien testen.
+
+# Erklärungssektion
+conformance-explanation-title = Unsere Testsuites verstehen
+conformance-what-is-sqltest = Was ist sqltest?
+conformance-sqltest-explanation = <a href="https://github.com/elliotchance/sqltest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">sqltest</a> ist eine Community-gepflegte Testsuite von Elliot Chance, die BNF-gesteuerte Konformitätstests basierend auf dem SQL:1999-Standard bereitstellt. Sie enthält 739 Tests für Core- und Foundation-Funktionen in E- und F-Serien-Testkategorien. Diese Suite testet, ob unsere Implementierung der SQL:1999-Grammatikspezifikation entspricht.
+conformance-what-is-slt = Was ist SQLLogicTest?
+conformance-slt-explanation = <a href="https://github.com/dolthub/sqllogictest" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">SQLLogicTest</a> ist eine umfassende Testsuite, ursprünglich für SQLite entwickelt, mit ~5,9 Millionen SQL-Testfällen in 623 Testdateien. Sie testet praktische Korrektheit durch Ausführung realer Abfragen und Validierung der Ergebnisse. Diese Suite konzentriert sich auf semantische Korrektheit und Grenzfälle statt auf reine Grammatikkonformität.
+conformance-how-complement = Wie ergänzen sie sich?
+conformance-sqltest-validates = <span class="font-medium">sqltest (BNF-gesteuert):</span> Validiert Grammatikkonformität zu SQL:1999-Standardspezifikationen
+conformance-slt-validates = <span class="font-medium">SQLLogicTest (Ergebnis-gesteuert):</span> Validiert semantische Korrektheit mit Millionen realer Abfragen
+conformance-coverage-point = <span class="font-medium">Abdeckung:</span> sqltest umfasst 739 Standard-Funktionstests; SQLLogicTest umfasst praktische Szenarien
+conformance-philosophy-point = <span class="font-medium">Philosophie:</span> sqltest fragt "Können Sie das parsen?"; SQLLogicTest fragt "Funktioniert das korrekt?"
+conformance-what-is-core = Was ist SQL:1999 Core?
+conformance-core-explanation = SQL:1999 Core ist die offizielle obligatorische Funktionsmenge, definiert im SQL:1999-Standard (ISO/IEC 9075:1999). Sie besteht aus etwa 169 erforderlichen Funktionen, die jede Datenbank, die Core-Konformität beansprucht, implementieren muss. Offizielle Core-Konformität wird durch die NIST SQL-Testsuite verifiziert, nicht durch Community-Testsuites.
+conformance-what-mean = Was bedeuten unsere Erfolgsraten?
+conformance-pass-rates-mean = Unsere <strong>sqltest-Erfolgsrate von { $sqltestRate }%</strong> ({ $sqltestPassed }/{ $sqltestTotal } Tests) demonstriert starke SQL:1999-Grammatikkonformität. { $sltInfo } Zusammen zeigen diese Ergebnisse umfassende SQL:1999-Konformität, obwohl sie keine offizielle Core-Zertifizierung darstellen.
+conformance-slt-pass-info = Unsere <strong>SQLLogicTest-Erfolgsrate von { $sltRate }%</strong> ({ $sltPassed }/{ $sltTotal } Testdateien) zeigt, dass wir reale Abfragen korrekt verarbeiten.
+conformance-bottom-line = <strong>Fazit:</strong> Wir verwenden zwei komplementäre Testsuites, um sowohl Standardkonformität (sqltest) als auch praktische Korrektheit (SQLLogicTest) sicherzustellen. Hohe Erfolgsraten in beiden demonstrieren ernsthafte SQL:1999-Implementierungsqualität, obwohl formelle Core-Zertifizierung Tests gegen offizielle NIST-Suites erfordern würde.
+
+# Fehlgeschlagene Tests Sektion
+conformance-failing-tests-title = Fehlgeschlagene Tests
+conformance-failing-tests-desc = Die folgenden Tests schlagen derzeit fehl. Klicken Sie zum Erweitern der Details.
+conformance-view-failing = Details der fehlgeschlagenen Tests anzeigen ({ $count } Tests)
+conformance-error-label = Fehler:
+
+# Metadaten
+conformance-generated = Generiert:
+conformance-commit = Commit:
+conformance-status = Status:
 

@@ -208,332 +208,332 @@ subqueries-ex-correlated = 相关子查询
 subqueries-ex-nested = 嵌套子查询
 
 # =============================================================================
-# Benchmarks Page
+# 基准测试页面
 # =============================================================================
 
-# Section headers
-bench-section-embedded = Embedded
-bench-section-server = Server
-bench-results-title = Benchmark Results
-bench-perf-comparison = Performance Comparison
-bench-methodology-title = Methodology
-bench-analysis-roadmap = Analysis & Roadmap
+# 部分标题
+bench-section-embedded = 嵌入式
+bench-section-server = 服务器
+bench-results-title = 基准测试结果
+bench-perf-comparison = 性能比较
+bench-methodology-title = 测试方法
+bench-analysis-roadmap = 分析与路线图
 
-# Summary cards
+# 摘要卡片
 bench-vs-sqlite = vs SQLite
 bench-vs-duckdb = vs DuckDB
 bench-vs-mysql = vs MySQL
-bench-ops-tested = Operations Tested
-bench-last-updated = Last Updated
-bench-avg-speedup = average speedup
-bench-from-main = from main branch
-bench-loading = Loading...
+bench-ops-tested = 测试的操作
+bench-last-updated = 最后更新
+bench-avg-speedup = 平均加速比
+bench-from-main = 来自 main 分支
+bench-loading = 加载中...
 bench-na = N/A
-bench-faster = { $value }x faster
-bench-slower = { $value }x slower
-bench-speedup = { $value }x
-bench-startup-time-label = startup time
-bench-download-size = download size
-bench-uncompressed = uncompressed
-bench-size-metrics = size metrics
-bench-failed = FAILED
-bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-faster = 快 { $value } 倍
+bench-slower = 慢 { $value } 倍
+bench-speedup = { $value } 倍
+bench-startup-time-label = 启动时间
+bench-download-size = 下载大小
+bench-uncompressed = 未压缩
+bench-size-metrics = 大小指标
+bench-failed = 失败
+bench-failed-title = 查询失败（超时或错误）
+bench-no-wasm-data = 无可用的 WASM 数据
 
-# Table headers
-bench-table-operation = Operation
+# 表头
+bench-table-operation = 操作
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite
 bench-table-duckdb = DuckDB
 bench-table-mysql = MySQL
-bench-table-loading = Loading benchmark results...
-bench-vibesql-server-title = VibeSQL via PostgreSQL wire protocol
+bench-table-loading = 正在加载基准测试结果...
+bench-vibesql-server-title = 通过 PostgreSQL 协议的 VibeSQL
 
-# Common benchmark terms
-bench-hardware = Hardware
-bench-benchmark-framework = Benchmark Framework
-bench-scale-factor = Scale Factor
-bench-data = Data
-bench-databases-tested = Databases Tested
-bench-execution-mode = Execution Mode
-bench-measurement = Measurement
-bench-workload = Workload
-bench-transaction-mix = Transaction Mix
-bench-warehouses = Warehouses
-bench-concurrency = Concurrency
-bench-acid-compliance = ACID Compliance
-bench-mode = Mode
-bench-workload-types = Workload Types
-bench-table-size = Table Size
-bench-index-types = Index Types
-bench-operations = Operations
-bench-databases = Databases
-bench-protocol-overhead = Protocol Overhead
-bench-binary-size = Binary Size
-bench-startup-time = Startup Time
-bench-peak-memory = Peak Memory
-bench-schema = Schema
-bench-query-count = Query Count
-bench-query-types = Query Types
-bench-sql-features = SQL Features
-bench-wasm-size = WASM Size
+# 通用基准测试术语
+bench-hardware = 硬件
+bench-benchmark-framework = 基准测试框架
+bench-scale-factor = 规模因子
+bench-data = 数据
+bench-databases-tested = 测试的数据库
+bench-execution-mode = 执行模式
+bench-measurement = 测量
+bench-workload = 工作负载
+bench-transaction-mix = 事务组合
+bench-warehouses = 仓库数
+bench-concurrency = 并发性
+bench-acid-compliance = ACID 合规性
+bench-mode = 模式
+bench-workload-types = 工作负载类型
+bench-table-size = 表大小
+bench-index-types = 索引类型
+bench-operations = 操作
+bench-databases = 数据库
+bench-protocol-overhead = 协议开销
+bench-binary-size = 二进制大小
+bench-startup-time = 启动时间
+bench-peak-memory = 峰值内存
+bench-schema = 模式
+bench-query-count = 查询数量
+bench-query-types = 查询类型
+bench-sql-features = SQL 功能
+bench-wasm-size = WASM 大小
 bench-wasm-gzip = WASM (gzip)
 bench-wasm-brotli = WASM (brotli)
 
-# TPC-H specific
+# TPC-H 相关
 bench-tpch-name = TPC-H
-bench-tpch-title = TPC-H Decision Support Benchmark
-bench-tpch-description = These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>, which simulates real-world decision support workloads with complex analytical queries involving aggregations, joins, subqueries, and sorting.
-bench-tpch-ops-label = TPC-H queries
-bench-tpch-note-intro = All benchmarks measure end-to-end query execution time including parsing, planning, execution, and result materialization. This represents <strong>real-world SQL engine performance</strong> for analytical workloads.
-bench-tpch-note-queries = <strong>Note:</strong> TPC-H queries test different aspects of SQL performance: simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15), and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+bench-tpch-title = TPC-H 决策支持基准测试
+bench-tpch-description = 这些基准测试使用行业标准的 <strong>TPC-H 基准测试套件</strong>，它通过涉及聚合、连接、子查询和排序的复杂分析查询来模拟实际的决策支持工作负载。
+bench-tpch-ops-label = TPC-H 查询
+bench-tpch-note-intro = 所有基准测试都测量端到端的查询执行时间，包括解析、规划、执行和结果物化。这代表了分析工作负载的<strong>实际 SQL 引擎性能</strong>。
+bench-tpch-note-queries = <strong>注意：</strong>TPC-H 查询测试 SQL 性能的不同方面：简单聚合（Q1、Q6）、复杂连接（Q2-Q5、Q7-Q10）、子查询（Q11-Q15）和高级分析（Q16-Q22）。将鼠标悬停在上表的查询名称上可查看描述。
 
-# TPC-H Discussion
-bench-tpch-disc-excels-title = Where VibeSQL Excels
-bench-tpch-disc-excels = VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20) where our columnar execution engine and SIMD-accelerated aggregations shine. These queries involve filtering large tables and computing aggregates without complex join patterns.
-bench-tpch-disc-targets-title = Current Optimization Targets
-bench-tpch-disc-targets = Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's decades-refined B-tree joins. Specific areas under active development:
-bench-tpch-disc-join-ordering = Improved cardinality estimation for better join order selection
-bench-tpch-disc-hash-sizing = Adaptive hash table growth and spill-to-disk for large joins
-bench-tpch-disc-vectorized = Batch processing in the join inner loop to improve cache utilization
-bench-tpch-disc-inl-joins = Leveraging B-tree indexes when beneficial
-bench-tpch-disc-path-title = Path to Leadership
-bench-tpch-disc-path = VibeSQL's architecture is designed for modern hardware with features like columnar storage, vectorized execution, and lock-free concurrency. As these optimizations mature, we expect VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.
+# TPC-H 讨论
+bench-tpch-disc-excels-title = VibeSQL 的优势
+bench-tpch-disc-excels = VibeSQL 在<strong>扫描密集型聚合查询</strong>（Q1、Q6、Q14、Q15、Q20）上表现出色，这些查询中我们的列式执行引擎和 SIMD 加速聚合发挥了优势。这些查询涉及过滤大型表并计算聚合，而无需复杂的连接模式。
+bench-tpch-disc-targets-title = 当前优化目标
+bench-tpch-disc-targets = 多路连接查询（Q3、Q5、Q7-Q10、Q18、Q19、Q21）目前 SQLite 领先。主要瓶颈是我们的哈希连接实现，尚未采用与 SQLite 经过数十年改进的 B-tree 连接相同级别的优化。正在积极开发的特定领域：
+bench-tpch-disc-join-ordering = 改进基数估计以获得更好的连接顺序选择
+bench-tpch-disc-hash-sizing = 自适应哈希表增长和大型连接的磁盘溢出
+bench-tpch-disc-vectorized = 连接内循环中的批处理以提高缓存利用率
+bench-tpch-disc-inl-joins = 在有益时利用 B-tree 索引
+bench-tpch-disc-path-title = 通往领先的道路
+bench-tpch-disc-path = VibeSQL 的架构专为现代硬件设计，具有列式存储、向量化执行和无锁并发等功能。随着这些优化的成熟，我们预计 VibeSQL 将在所有 TPC-H 查询中实现一致的领先地位。基础设计支持传统行存储数据库无法轻易改造的并行性和 SIMD。
 
-# TPC-H Query Descriptions
-bench-tpch-q1 = Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY
-bench-tpch-q2 = Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT
-bench-tpch-q3 = Shipping Priority - 3-table JOIN with aggregation
-bench-tpch-q4 = Order Priority Checking - Correlated EXISTS subquery
-bench-tpch-q5 = Local Supplier Volume - 6-table JOIN with complex filtering
-bench-tpch-q6 = Forecasting Revenue Change - WHERE filters with BETWEEN and SUM
-bench-tpch-q7 = Volume Shipping - 6-table JOIN with SUBSTR and date filtering
-bench-tpch-q8 = National Market Share - 7-table JOIN with CASE expressions
-bench-tpch-q9 = Product Type Profit Measure - 4-table JOIN with aggregation
-bench-tpch-q10 = Returned Item Reporting - 4-table JOIN with TOP-N LIMIT
-bench-tpch-q11 = Important Stock Identification - Subquery in HAVING clause
-bench-tpch-q12 = Shipping Modes Priority - CASE aggregation with date logic
-bench-tpch-q13 = Customer Distribution - LEFT OUTER JOIN with subquery
-bench-tpch-q14 = Promotion Effect - Conditional aggregation with CASE
-bench-tpch-q15 = Top Supplier - Nested subqueries with MAX
-bench-tpch-q16 = Parts/Supplier Relationship - NOT IN subquery with DISTINCT
-bench-tpch-q17 = Small-Quantity-Order Revenue - Correlated subquery in WHERE
-bench-tpch-q18 = Large Volume Customer - GROUP BY with HAVING
-bench-tpch-q19 = Discounted Revenue - Complex OR conditions
-bench-tpch-q20 = Potential Part Promotion - IN subquery with GROUP BY/HAVING
-bench-tpch-q21 = Suppliers Who Kept Orders Waiting - Multi-table EXISTS
-bench-tpch-q22 = Global Sales Opportunity - SUBSTR with NOT EXISTS subquery
+# TPC-H 查询描述
+bench-tpch-q1 = 定价汇总报告 - 使用 GROUP BY 和 ORDER BY 的价格聚合
+bench-tpch-q2 = 最低成本供应商 - 带 ORDER BY 和 LIMIT 的 3 表 JOIN
+bench-tpch-q3 = 发货优先级 - 带聚合的 3 表 JOIN
+bench-tpch-q4 = 订单优先级检查 - 相关 EXISTS 子查询
+bench-tpch-q5 = 本地供应商销量 - 带复杂过滤的 6 表 JOIN
+bench-tpch-q6 = 预测收入变化 - 带 BETWEEN 和 SUM 的 WHERE 过滤
+bench-tpch-q7 = 批量发货 - 带 SUBSTR 和日期过滤的 6 表 JOIN
+bench-tpch-q8 = 国内市场份额 - 带 CASE 表达式的 7 表 JOIN
+bench-tpch-q9 = 产品类型利润测量 - 带聚合的 4 表 JOIN
+bench-tpch-q10 = 退货报告 - 带 TOP-N LIMIT 的 4 表 JOIN
+bench-tpch-q11 = 重要库存识别 - HAVING 子句中的子查询
+bench-tpch-q12 = 发货模式优先级 - 带日期逻辑的 CASE 聚合
+bench-tpch-q13 = 客户分布 - 带子查询的 LEFT OUTER JOIN
+bench-tpch-q14 = 促销效果 - 带 CASE 的条件聚合
+bench-tpch-q15 = 顶级供应商 - 带 MAX 的嵌套子查询
+bench-tpch-q16 = 零件/供应商关系 - 带 DISTINCT 的 NOT IN 子查询
+bench-tpch-q17 = 小批量订单收入 - WHERE 中的相关子查询
+bench-tpch-q18 = 大批量客户 - 带 HAVING 的 GROUP BY
+bench-tpch-q19 = 折扣收入 - 复杂的 OR 条件
+bench-tpch-q20 = 潜在零件促销 - 带 GROUP BY/HAVING 的 IN 子查询
+bench-tpch-q21 = 延迟订单的供应商 - 多表 EXISTS
+bench-tpch-q22 = 全球销售机会 - 带 NOT EXISTS 子查询的 SUBSTR
 
-# TPC-DS specific
+# TPC-DS 相关
 bench-tpcds-name = TPC-DS
-bench-tpcds-title = TPC-DS Decision Support Benchmark
-bench-tpcds-description = <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model a modern decision support system with significantly more complex query patterns including multiple fact tables, snow-flake schema, and advanced SQL features.
-bench-tpcds-ops-label = TPC-DS queries
-bench-tpcds-note-intro = TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features like window functions, common table expressions (WITH clause), and complex join patterns across multiple fact and dimension tables.
-bench-tpcds-note-remaining = <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or specific date arithmetic functions not yet implemented.
+bench-tpcds-title = TPC-DS 决策支持基准测试
+bench-tpcds-description = <strong>TPC-DS</strong> 是 TPC-H 的继任者，包含 99 个查询，模拟具有更复杂查询模式的现代决策支持系统，包括多个事实表、雪花模式和高级 SQL 功能。
+bench-tpcds-ops-label = TPC-DS 查询
+bench-tpcds-note-intro = TPC-DS 查询比 TPC-H 复杂得多，测试高级 SQL 功能，如窗口函数、公共表表达式（WITH 子句）以及跨多个事实表和维度表的复杂连接模式。
+bench-tpcds-note-remaining = <strong>注意：</strong>剩余不支持的查询需要尚未实现的功能，如 INTERSECT/EXCEPT 或特定的日期算术函数。
 
-# TPC-DS Discussion
-bench-tpcds-disc-coverage-title = SQL:1999 Feature Coverage
-bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>, demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
-bench-tpcds-disc-optimization-title = Complex Query Optimization
-bench-tpcds-disc-optimization = TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
-bench-tpcds-disc-cte = Intelligent decision between materialized and inline CTEs
-bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when beneficial
-bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
-bench-tpcds-disc-toward-title = Toward 99/99
-bench-tpcds-disc-toward = INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set operations fit naturally into our existing query algebra and will be implemented as hash-based operators similar to our DISTINCT processing.
+# TPC-DS 讨论
+bench-tpcds-disc-coverage-title = SQL:1999 功能覆盖
+bench-tpcds-disc-coverage = TPC-DS 测试最苛刻的 SQL 功能。VibeSQL 通过了 <strong>99 个查询中的 88 个</strong>，展示了 SQL:1999 的广泛覆盖，包括 ROLLUP、CUBE、GROUPING()、具有复杂框架的窗口函数和递归 CTE。剩余查询需要 INTERSECT/EXCEPT 集合操作。
+bench-tpcds-disc-optimization-title = 复杂查询优化
+bench-tpcds-disc-optimization = TPC-DS 查询通常连接 10+ 个带有相关子查询的表。当前重点领域：
+bench-tpcds-disc-cte = 在物化 CTE 和内联 CTE 之间做出明智决策
+bench-tpcds-disc-decorrelation = 在有益时将相关子查询转换为连接
+bench-tpcds-disc-star = 分析模式的事实-维度连接排序
+bench-tpcds-disc-toward-title = 迈向 99/99
+bench-tpcds-disc-toward = INTERSECT 和 EXCEPT 是计划添加的功能，将启用剩余查询。这些集合操作自然地融入我们现有的查询代数，并将作为类似于 DISTINCT 处理的基于哈希的运算符实现。
 
-# TPC-C specific
+# TPC-C 相关
 bench-tpcc-name = TPC-C
-bench-tpcc-title = TPC-C Online Transaction Processing Benchmark
-bench-tpcc-description = The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment with a mix of complex transactions including order entry, payment processing, order status queries, delivery processing, and stock level monitoring.
-bench-tpcc-ops-label = TPC-C transactions
-bench-tpcc-note-intro = TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle concurrent transactions with complex business logic. This benchmark is critical for evaluating <strong>transactional workload performance</strong>.
-bench-tpcc-note-results = <strong>Note:</strong> Results show average transaction latency. Lower is better. TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
+bench-tpcc-title = TPC-C 在线事务处理基准测试
+bench-tpcc-description = <strong>TPC-C 基准测试</strong>模拟完整的订单录入环境，包含复杂事务的组合，包括订单录入、付款处理、订单状态查询、交付处理和库存水平监控。
+bench-tpcc-ops-label = TPC-C 事务
+bench-tpcc-note-intro = TPC-C 测量每分钟事务数（tpmC）并测试数据库处理具有复杂业务逻辑的并发事务的能力。此基准测试对于评估<strong>事务工作负载性能</strong>至关重要。
+bench-tpcc-note-results = <strong>注意：</strong>结果显示平均事务延迟。越低越好。TPC-C 对具有严格一致性要求的写密集型工作负载尤其苛刻。
 
-# TPC-C Transaction Descriptions
-bench-tpcc-new-order = New Order - Complex transaction with inventory checks and order creation
-bench-tpcc-payment = Payment - Update customer balance and warehouse/district totals
-bench-tpcc-order-status = Order Status - Read-only query for customer order history
-bench-tpcc-delivery = Delivery - Batch processing of pending orders
-bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
+# TPC-C 事务描述
+bench-tpcc-new-order = 新订单 - 包含库存检查和订单创建的复杂事务
+bench-tpcc-payment = 付款 - 更新客户余额和仓库/地区总额
+bench-tpcc-order-status = 订单状态 - 客户订单历史的只读查询
+bench-tpcc-delivery = 交付 - 待处理订单的批处理
+bench-tpcc-stock-level = 库存水平 - 统计最近订单中低于阈值的商品
 
-# TPC-C Discussion
-bench-tpcc-disc-faster-title = 42x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS, a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
-bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
-bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
-bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution
-bench-tpcc-disc-btree = Purpose-built index structure optimized for in-memory workloads
-bench-tpcc-disc-prepared = Query plans are compiled once and reused
-bench-tpcc-disc-scaling-title = Scaling Further
-bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect near-linear scaling as we add parallel execution support. Our goal is to achieve 500K+ TPS on modern multi-core hardware.
+# TPC-C 讨论
+bench-tpcc-disc-faster-title = 比 SQLite 快 42 倍
+bench-tpcc-disc-faster = VibeSQL 实现了<strong>每秒约 79,000 个事务</strong>，而 SQLite 约为 1,900 TPS，提升了 42 倍。这种显著的加速来自我们的无锁 MVCC 架构，避免了 SQLite 在每次写操作上的粗粒度锁定。
+bench-tpcc-disc-dominates-title = VibeSQL 在 OLTP 中占主导地位的原因
+bench-tpcc-disc-lockfree = MVCC 允许读者和写者在不阻塞的情况下并发进行
+bench-tpcc-disc-optimistic = 事务仅在提交时发生冲突，而不是在执行期间
+bench-tpcc-disc-btree = 专为内存工作负载优化的专用索引结构
+bench-tpcc-disc-prepared = 查询计划编译一次后重复使用
+bench-tpcc-disc-scaling-title = 进一步扩展
+bench-tpcc-disc-scaling = 当前结果是单线程的。VibeSQL 的架构支持多线程事务处理，我们预计随着添加并行执行支持，将实现近线性扩展。我们的目标是在现代多核硬件上达到 500K+ TPS。
 
-# Sysbench Embedded specific
-bench-sysbench-embedded-name = Sysbench (Embedded)
-bench-sysbench-embedded-title = Sysbench Micro-Benchmarks (Embedded)
-bench-sysbench-embedded-description = <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific database operations. These tests measure raw performance for fundamental operations without the complexity of full transaction workloads.
-bench-sysbench-embedded-ops-label = Sysbench operations
-bench-sysbench-embedded-note = Embedded mode runs the database in-process with zero network overhead, ideal for single-process applications where minimal latency is critical.
+# Sysbench 嵌入式相关
+bench-sysbench-embedded-name = Sysbench（嵌入式）
+bench-sysbench-embedded-title = Sysbench 微基准测试（嵌入式）
+bench-sysbench-embedded-description = <strong>Sysbench</strong> 提供专注的微基准测试，隔离特定的数据库操作。这些测试测量基本操作的原始性能，而没有完整事务工作负载的复杂性。
+bench-sysbench-embedded-ops-label = Sysbench 操作
+bench-sysbench-embedded-note = 嵌入式模式在进程内运行数据库，零网络开销，非常适合最小延迟至关重要的单进程应用程序。
 
-# Sysbench Operation Descriptions
-bench-sysbench-point-select = Point Select - Single row lookup by primary key
-bench-sysbench-insert = Insert - Insert new rows into table
-bench-sysbench-update-index = Update Index - Update indexed column (k = k + 1)
-bench-sysbench-update-non-index = Update Non-Index - Update non-indexed column
-bench-sysbench-delete = Delete - Remove rows by primary key
-bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
+# Sysbench 操作描述
+bench-sysbench-point-select = 点查询 - 按主键查找单行
+bench-sysbench-insert = 插入 - 向表中插入新行
+bench-sysbench-update-index = 更新索引 - 更新索引列（k = k + 1）
+bench-sysbench-update-non-index = 更新非索引 - 更新非索引列
+bench-sysbench-delete = 删除 - 按主键删除行
+bench-sysbench-range-queries = 范围查询 - 简单、SUM、ORDER BY 和 DISTINCT 范围扫描
 
-# Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = Point Lookups: VibeSQL Leads
-bench-sysbench-emb-disc-point = VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
-bench-sysbench-emb-disc-index-title = Index Updates: 2x Faster
-bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design allows in-place index updates without write-ahead logging overhead for each operation.
-bench-sysbench-emb-disc-improve-title = Areas for Improvement
-bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
-bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need predicate pushdown optimization
-bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
-bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
-bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
+# Sysbench 嵌入式讨论
+bench-sysbench-emb-disc-point-title = 点查询：VibeSQL 领先
+bench-sysbench-emb-disc-point = VibeSQL 的直接 API 实现了<strong>每次点查询约 137ns</strong>，与 SQLite 相当，大幅超越 DuckDB（约 140µs）。我们的 B-tree 实现针对单行查找进行了优化，具有最小的指针追踪和缓存友好的节点布局。
+bench-sysbench-emb-disc-index-title = 索引更新：快 2 倍
+bench-sysbench-emb-disc-index = VibeSQL 的索引更新在<strong>约 740ns vs SQLite 的约 1.6µs</strong>下运行。我们的 MVCC 设计允许就地索引更新，无需每次操作的预写日志开销。
+bench-sysbench-emb-disc-improve-title = 改进领域
+bench-sysbench-emb-disc-bulk = SQLite 的批量插入路径高度优化；我们正在添加批量 B-tree 操作
+bench-sysbench-emb-disc-nonindex = 非索引列的全表扫描需要谓词下推优化
+bench-sysbench-emb-disc-deletes = 我们基于墓碑的删除有清理开销；计划进行压缩改进
+bench-sysbench-emb-disc-duckdb-title = DuckDB 比较
+bench-sysbench-emb-disc-duckdb = DuckDB 针对分析工作负载进行了优化，而不是微操作。这里 100-1000 倍较慢的结果反映了以单行延迟换取批量吞吐量的架构选择（列式存储、向量化执行）。VibeSQL 同时针对两种用例。
 
-# Sysbench Server specific
-bench-sysbench-server-name = Sysbench (Server)
-bench-sysbench-server-title = Sysbench Micro-Benchmarks (Server)
-bench-sysbench-server-description = <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol) against MySQL, measuring performance for multi-client database deployments.
-bench-sysbench-server-ops-label = Sysbench operations
-bench-sysbench-server-note = Server mode uses the PostgreSQL wire protocol, enabling multi-client access and compatibility with existing PostgreSQL tooling and drivers.
+# Sysbench 服务器相关
+bench-sysbench-server-name = Sysbench（服务器）
+bench-sysbench-server-title = Sysbench 微基准测试（服务器）
+bench-sysbench-server-description = <strong>Sysbench</strong> 服务器基准测试将 VibeSQL Server（PostgreSQL 协议）与 MySQL 进行比较，测量多客户端数据库部署的性能。
+bench-sysbench-server-ops-label = Sysbench 操作
+bench-sysbench-server-note = 服务器模式使用 PostgreSQL 协议，实现多客户端访问以及与现有 PostgreSQL 工具和驱动程序的兼容性。
 
-# Sysbench Server Discussion
-bench-sysbench-srv-disc-protocol-title = PostgreSQL Wire Protocol
-bench-sysbench-srv-disc-protocol = VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query compared to embedded mode, but enables multi-client deployments.
-bench-sysbench-srv-disc-mysql-title = MySQL Comparison
-bench-sysbench-srv-disc-mysql = Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement for traditional client-server databases. Results vary by operation type, with VibeSQL showing advantages in read-heavy workloads.
-bench-sysbench-srv-disc-roadmap-title = Server Roadmap
-bench-sysbench-srv-disc-pooling = Reduce connection establishment overhead for high-throughput scenarios
-bench-sysbench-srv-disc-caching = Server-side caching of query plans across connections
-bench-sysbench-srv-disc-extended = Full PostgreSQL extended query protocol support for batch operations
+# Sysbench 服务器讨论
+bench-sysbench-srv-disc-protocol-title = PostgreSQL 协议
+bench-sysbench-srv-disc-protocol = VibeSQL Server 实现了 PostgreSQL 协议，实现与现有 PostgreSQL 驱动程序和工具的兼容性。与嵌入式模式相比，这增加了每个查询约 10-50µs 的协议开销，但支持多客户端部署。
+bench-sysbench-srv-disc-mysql-title = MySQL 比较
+bench-sysbench-srv-disc-mysql = 服务器基准测试与 MySQL 进行比较，以评估 VibeSQL 作为传统客户端-服务器数据库的直接替代品。结果因操作类型而异，VibeSQL 在读密集型工作负载中显示出优势。
+bench-sysbench-srv-disc-roadmap-title = 服务器路线图
+bench-sysbench-srv-disc-pooling = 减少高吞吐量场景的连接建立开销
+bench-sysbench-srv-disc-caching = 跨连接的查询计划服务器端缓存
+bench-sysbench-srv-disc-extended = 完整的 PostgreSQL 扩展查询协议支持批量操作
 
-# Footprint Embedded specific
-bench-footprint-embedded-name = Footprint (Embedded)
-bench-footprint-embedded-title = Native Binary Footprint
-bench-footprint-embedded-description = <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries, comparing binary size, cold startup time, and peak memory usage.
-bench-footprint-embedded-ops-label = databases compared
-bench-footprint-embedded-note = Native binary footprint is critical for <strong>embedded and edge deployments</strong> where binary size, startup latency, and memory consumption directly impact deployment feasibility.
+# 占用空间嵌入式相关
+bench-footprint-embedded-name = 占用空间（嵌入式）
+bench-footprint-embedded-title = 原生二进制占用空间
+bench-footprint-embedded-description = <strong>嵌入式占用空间基准测试</strong>测量原生数据库二进制文件的资源效率，比较二进制大小、冷启动时间和峰值内存使用量。
+bench-footprint-embedded-ops-label = 比较的数据库
+bench-footprint-embedded-note = 原生二进制占用空间对于<strong>嵌入式和边缘部署</strong>至关重要，其中二进制大小、启动延迟和内存消耗直接影响部署可行性。
 
-# Footprint Embedded Descriptions
-bench-footprint-binary-size = Binary Size - Size of the compiled database binary on disk
-bench-footprint-startup-time = Startup Time - Time to cold-start and execute first query
-bench-footprint-peak-memory = Peak Memory - Maximum resident set size during initialization
+# 占用空间嵌入式描述
+bench-footprint-binary-size = 二进制大小 - 磁盘上编译后的数据库二进制文件大小
+bench-footprint-startup-time = 启动时间 - 冷启动并执行第一个查询的时间
+bench-footprint-peak-memory = 峰值内存 - 初始化期间的最大常驻集大小
 
-# Footprint Embedded Discussion
-bench-footprint-emb-disc-size-title = Binary Size: Middle Ground
-bench-footprint-emb-disc-size = VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects our choice to include advanced features (window functions, CTEs, columnar execution) while keeping the binary manageable for embedded deployments.
-bench-footprint-emb-disc-startup-title = Startup: Fastest Cold Start
-bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only essential metadata structures on startup.
-bench-footprint-emb-disc-memory-title = Memory Efficiency
-bench-footprint-emb-disc-memory = Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB. The difference from SQLite reflects our more sophisticated query optimizer and columnar execution infrastructure that's allocated upfront.
-bench-footprint-emb-disc-roadmap-title = Size Reduction Roadmap
-bench-footprint-emb-disc-flags = Compile-time feature selection to exclude unused functionality
-bench-footprint-emb-disc-lto = Whole-program link-time optimization for dead code elimination
-bench-footprint-emb-disc-modular = Separate core engine from optional features (e.g., window functions)
+# 占用空间嵌入式讨论
+bench-footprint-emb-disc-size-title = 二进制大小：中等
+bench-footprint-emb-disc-size = VibeSQL 约 <strong>17MB</strong>，介于 SQLite（约 5MB）和 DuckDB（约 45MB）之间。这反映了我们选择包含高级功能（窗口函数、CTE、列式执行），同时保持二进制对嵌入式部署可管理。
+bench-footprint-emb-disc-startup-title = 启动：最快的冷启动
+bench-footprint-emb-disc-startup = VibeSQL 实现了<strong>约 7.7ms 的冷启动</strong>，略快于 SQLite（约 8.2ms），显著快于 DuckDB（约 14.6ms）。我们的最小初始化路径在启动时仅加载必要的元数据结构。
+bench-footprint-emb-disc-memory-title = 内存效率
+bench-footprint-emb-disc-memory = 启动时的峰值内存：VibeSQL 约 7MB vs SQLite 约 3MB 和 DuckDB 约 11MB。与 SQLite 的差异反映了我们更复杂的查询优化器和预先分配的列式执行基础设施。
+bench-footprint-emb-disc-roadmap-title = 大小缩减路线图
+bench-footprint-emb-disc-flags = 编译时功能选择以排除未使用的功能
+bench-footprint-emb-disc-lto = 全程序链接时优化以消除死代码
+bench-footprint-emb-disc-modular = 将核心引擎与可选功能（例如窗口函数）分离
 
-# Footprint Server/WASM specific
-bench-footprint-server-name = Footprint (Server/WASM)
-bench-footprint-server-title = WASM Footprint
-bench-footprint-server-description = <strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment, critical for web applications where download size impacts user experience.
-bench-footprint-server-ops-label = deployment targets
-bench-footprint-server-note = WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.
-bench-footprint-server-note2 = <strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining full SQL:1999 compliance in the browser.
+# 占用空间服务器/WASM 相关
+bench-footprint-server-name = 占用空间（服务器/WASM）
+bench-footprint-server-title = WASM 占用空间
+bench-footprint-server-description = <strong>WASM 占用空间基准测试</strong>测量浏览器部署的 WebAssembly 模块大小，这对下载大小影响用户体验的 Web 应用程序至关重要。
+bench-footprint-server-ops-label = 部署目标
+bench-footprint-server-note = WASM 大小对于<strong>Web 部署</strong>至关重要，其中下载时间直接影响可交互时间。Gzip 大小最相关，因为浏览器会自动解压 gzip 内容。
+bench-footprint-server-note2 = <strong>注意：</strong>VibeSQL WASM 设计为最小下载大小，同时保持浏览器中完整的 SQL:1999 合规性。
 
-# Footprint Server Descriptions
-bench-footprint-wasm-size = WASM Size - Size of the WebAssembly module for browser deployment
-bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
+# 占用空间服务器描述
+bench-footprint-wasm-size = WASM 大小 - 浏览器部署的 WebAssembly 模块大小
+bench-footprint-wasm-gzip = WASM (gzip) - Web 交付的压缩大小
 
-# Footprint Server Discussion
-bench-footprint-srv-disc-wasm-title = WASM: 2.2MB Compressed
-bench-footprint-srv-disc-wasm = VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast initial page loads. This is a full SQL:1999 database with window functions, CTEs, and ACID transactions running entirely in the browser.
-bench-footprint-srv-disc-included-title = What's Included
-bench-footprint-srv-disc-parser = Complete SQL parser and query optimizer
-bench-footprint-srv-disc-btree = B-tree storage engine with MVCC
-bench-footprint-srv-disc-window = Window functions and advanced aggregations
-bench-footprint-srv-disc-cte = Common table expressions (WITH clause)
-bench-footprint-srv-disc-acid = Full ACID transaction support
-bench-footprint-srv-disc-benefits-title = Browser Deployment Benefits
-bench-footprint-srv-disc-benefits = Running SQL in the browser eliminates round-trip latency to servers, enables offline-first applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is designed for this use case with minimal dependencies and efficient memory usage.
-bench-footprint-srv-disc-roadmap-title = WASM Roadmap
-bench-footprint-srv-disc-streaming = Start executing while the module downloads
-bench-footprint-srv-disc-indexeddb = Durable storage across browser sessions
-bench-footprint-srv-disc-worker = Run queries off the main thread for responsive UIs
+# 占用空间服务器讨论
+bench-footprint-srv-disc-wasm-title = WASM：2.2MB 压缩
+bench-footprint-srv-disc-wasm = VibeSQL 的 WebAssembly 模块压缩后<strong>约 2.2MB gzip</strong>，实现快速的初始页面加载。这是一个完整的 SQL:1999 数据库，具有窗口函数、CTE 和 ACID 事务，完全在浏览器中运行。
+bench-footprint-srv-disc-included-title = 包含内容
+bench-footprint-srv-disc-parser = 完整的 SQL 解析器和查询优化器
+bench-footprint-srv-disc-btree = 带 MVCC 的 B-tree 存储引擎
+bench-footprint-srv-disc-window = 窗口函数和高级聚合
+bench-footprint-srv-disc-cte = 公共表表达式（WITH 子句）
+bench-footprint-srv-disc-acid = 完整的 ACID 事务支持
+bench-footprint-srv-disc-benefits-title = 浏览器部署优势
+bench-footprint-srv-disc-benefits = 在浏览器中运行 SQL 消除了到服务器的往返延迟，支持离线优先应用程序，并将敏感数据保留在用户设备上。VibeSQL 的 WASM 构建针对此用例设计，具有最小依赖项和高效的内存使用。
+bench-footprint-srv-disc-roadmap-title = WASM 路线图
+bench-footprint-srv-disc-streaming = 在模块下载时开始执行
+bench-footprint-srv-disc-indexeddb = 跨浏览器会话的持久存储
+bench-footprint-srv-disc-worker = 在主线程外运行查询以实现响应式 UI
 
-# Bullet point labels (used with descriptions)
-bench-bullet-join-ordering = Join ordering
-bench-bullet-hash-sizing = Hash table sizing
-bench-bullet-vectorized = Vectorized joins
-bench-bullet-inl-joins = Index-nested-loop joins
-bench-bullet-cte-materialization = CTE materialization
-bench-bullet-decorrelation = Subquery decorrelation
-bench-bullet-star-optimization = Star schema optimization
-bench-bullet-lock-free = Lock-free reads
-bench-bullet-optimistic = Optimistic concurrency
-bench-bullet-btree = In-memory B-tree
-bench-bullet-prepared = Prepared statement caching
-bench-bullet-bulk-inserts = Bulk inserts
-bench-bullet-non-indexed = Non-indexed updates
-bench-bullet-deletes = Deletes
-bench-bullet-connection-pooling = Connection pooling
-bench-bullet-stmt-caching = Prepared statement caching
-bench-bullet-extended-protocol = Extended query protocol
-bench-bullet-feature-flags = Feature flags
-bench-bullet-lto = LTO optimization
-bench-bullet-modular = Modular builds
-bench-bullet-streaming = Streaming compilation
-bench-bullet-indexeddb = IndexedDB persistence
-bench-bullet-worker = Worker thread support
+# 要点标签（与描述一起使用）
+bench-bullet-join-ordering = 连接排序
+bench-bullet-hash-sizing = 哈希表大小调整
+bench-bullet-vectorized = 向量化连接
+bench-bullet-inl-joins = 索引嵌套循环连接
+bench-bullet-cte-materialization = CTE 物化
+bench-bullet-decorrelation = 子查询去相关
+bench-bullet-star-optimization = 星型模式优化
+bench-bullet-lock-free = 无锁读取
+bench-bullet-optimistic = 乐观并发
+bench-bullet-btree = 内存 B-tree
+bench-bullet-prepared = 预处理语句缓存
+bench-bullet-bulk-inserts = 批量插入
+bench-bullet-non-indexed = 非索引更新
+bench-bullet-deletes = 删除
+bench-bullet-connection-pooling = 连接池
+bench-bullet-stmt-caching = 预处理语句缓存
+bench-bullet-extended-protocol = 扩展查询协议
+bench-bullet-feature-flags = 功能标志
+bench-bullet-lto = LTO 优化
+bench-bullet-modular = 模块化构建
+bench-bullet-streaming = 流式编译
+bench-bullet-indexeddb = IndexedDB 持久化
+bench-bullet-worker = 工作线程支持
 
 # =============================================================================
-# Conformance Page
+# 合规性页面
 # =============================================================================
 
-# Overview section
-conformance-sql-conformance = SQL Conformance
-conformance-testing-against = Testing against SQLLogicTest - the industry standard SQL test suite
-conformance-full-pass-rate = 100% File Pass Rate Achieved!
-conformance-tests-passing = Tests Passing
-conformance-files-passing = Files Passing
-conformance-loading = Loading conformance report...
-conformance-error-loading = Error Loading Report
-conformance-no-data = No conformance data available
+# 概述部分
+conformance-sql-conformance = SQL 合规性
+conformance-testing-against = 针对 SQLLogicTest 进行测试 - 行业标准 SQL 测试套件
+conformance-full-pass-rate = 达成 100% 文件通过率！
+conformance-tests-passing = 测试通过
+conformance-files-passing = 文件通过
+conformance-loading = 正在加载合规性报告...
+conformance-error-loading = 加载报告错误
+conformance-no-data = 无可用的合规性数据
 
-# Category breakdown
-conformance-category-title = Test Coverage by Category
-conformance-category-header = Category
-conformance-pass-rate-header = Pass Rate
-conformance-progress-header = Progress
-conformance-tests-header = Tests
-conformance-cat-select = SELECT Queries
-conformance-cat-aggregates = Aggregates
-conformance-cat-joins = JOINs
-conformance-cat-expressions = Expressions
-conformance-cat-subqueries = Subqueries
-conformance-cat-index = Index Operations
-conformance-cat-ddl = DDL Statements
-conformance-cat-evidence = Evidence Tests
-conformance-cat-random = Random Tests
-conformance-cat-other = Other Tests
+# 类别细分
+conformance-category-title = 按类别的测试覆盖率
+conformance-category-header = 类别
+conformance-pass-rate-header = 通过率
+conformance-progress-header = 进度
+conformance-tests-header = 测试
+conformance-cat-select = SELECT 查询
+conformance-cat-aggregates = 聚合
+conformance-cat-joins = JOIN
+conformance-cat-expressions = 表达式
+conformance-cat-subqueries = 子查询
+conformance-cat-index = 索引操作
+conformance-cat-ddl = DDL 语句
+conformance-cat-evidence = 证据测试
+conformance-cat-random = 随机测试
+conformance-cat-other = 其他测试
 
-# Timeline
-conformance-timeline-title = Pass Rate History
-conformance-timeline-desc = Conformance progress over the last 90 days
-conformance-timeline-loading = Loading chart data...
+# 时间线
+conformance-timeline-title = 通过率历史
+conformance-timeline-desc = 过去 90 天的合规性进展
+conformance-timeline-loading = 正在加载图表数据...
 
-# Milestones
-conformance-milestones-title = Milestones
+# 里程碑
+conformance-milestones-title = 里程碑
 
-# Running tests locally
-conformance-running-locally-title = Running Tests Locally
-conformance-run-sqltest = # Run SQL:1999 conformance tests
-conformance-run-sqllogictest = # Run SQLLogicTest suite (takes hours)
-conformance-generate-coverage = # Generate coverage report
-conformance-open-coverage = # Open coverage report
+# 本地运行测试
+conformance-running-locally-title = 本地运行测试
+conformance-run-sqltest = # 运行 SQL:1999 合规性测试
+conformance-run-sqllogictest = # 运行 SQLLogicTest 套件（需要数小时）
+conformance-generate-coverage = # 生成覆盖率报告
+conformance-open-coverage = # 打开覆盖率报告
 

@@ -130,14 +130,6 @@ function getLinearChartOptions(yAxisLabel: string): object {
 const li = (label: string, value: string): string =>
   `<li><strong>${label}:</strong> ${value}</li>`;
 
-/** Generate a methodology detail list item with i18n key */
-const liI18n = (labelKey: string, value: string): string =>
-  `<li><strong>${t(labelKey)}:</strong> ${value}</li>`;
-
-/** Generate a bullet list for discussions */
-const bullet = (label: string, desc: string): string =>
-  `<li><strong>${label}:</strong> ${desc}</li>`;
-
 /** Generate a bullet list item with i18n key */
 const bulletI18n = (labelKey: string, descKey: string): string =>
   `<li><strong>${t(labelKey)}:</strong> ${t(descKey)}</li>`;
@@ -159,23 +151,6 @@ const methodology = (
   <p class="mt-4 text-gray-500 dark:text-gray-400 text-sm">${note}</p>`).join('') ?? ''}
 `;
 
-/** Generate methodology section from i18n keys */
-const methodologyI18n = (
-  titleKey: string,
-  descKey: string,
-  detailKeys: { labelKey: string; value: string }[],
-  noteKeys?: string[]
-): string => `
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${t(titleKey)}</h3>
-  <p class="text-gray-500 dark:text-gray-400 mb-4">${t(descKey)}</p>
-  <ul class="space-y-2 text-gray-500 dark:text-gray-400">
-    ${li(t('bench-hardware'), HARDWARE)}
-    ${detailKeys.map(d => liI18n(d.labelKey, d.value)).join('\n    ')}
-  </ul>
-  ${noteKeys?.map(key => `
-  <p class="mt-4 text-gray-500 dark:text-gray-400 text-sm">${t(key)}</p>`).join('') ?? ''}
-`;
-
 /** Generate discussion section with multiple subsections */
 const discussion = (sections: { title: string; content: string }[]): string => `
   <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${t('bench-analysis-roadmap')}</h3>
@@ -183,18 +158,6 @@ const discussion = (sections: { title: string; content: string }[]): string => `
   <h4 class="text-md font-medium text-gray-900 dark:text-gray-100 mt-4 mb-2">${title}</h4>
   ${content}`).join('')}
 `;
-
-/** Generate discussion section from i18n keys */
-const discussionI18n = (sections: { titleKey: string; contentKey?: string; content?: string }[]): string => `
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">${t('bench-analysis-roadmap')}</h3>
-  ${sections.map(({ titleKey, contentKey, content }) => `
-  <h4 class="text-md font-medium text-gray-900 dark:text-gray-100 mt-4 mb-2">${t(titleKey)}</h4>
-  ${contentKey ? pI18n(contentKey) : content ?? ''}`).join('')}
-`;
-
-/** Generate a paragraph */
-const p = (text: string): string =>
-  `<p class="text-gray-500 dark:text-gray-400 mb-2">${text}</p>`;
 
 /** Generate a paragraph from i18n key */
 const pI18n = (key: string): string =>
@@ -1994,30 +1957,15 @@ function renderTPCDSTable(data: TPCDSResults): void {
 
   const config = SUITE_CONFIGS['tpcds'];
 
-  // Check if we have comparison data
-  const hasSQLite = data.benchmarks.some(b => b.name.endsWith('_sqlite'));
-  const hasDuckDB = data.benchmarks.some(b => b.name.endsWith('_duckdb'));
-
-  // Update table headers for TPC-DS view
+  // Update table headers for TPC-DS comparison view
   const thead = table.querySelector('thead tr');
   if (thead) {
-    if (hasSQLite || hasDuckDB) {
-      // Comparison mode: show all engines
-      thead.innerHTML = `
-        <th class="px-4 py-3">${t('bench-table-query')}</th>
-        <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>
-        <th class="px-4 py-3 text-right">${t('bench-table-sqlite')}</th>
-        <th class="px-4 py-3 text-right">${t('bench-table-duckdb')}</th>
-      `;
-    } else {
-      // VibeSQL only mode
-      thead.innerHTML = `
-        <th class="px-4 py-3">Query</th>
-        <th class="px-4 py-3 text-right">Execution Time</th>
-        <th class="px-4 py-3 text-right">Rows</th>
-        <th class="px-4 py-3 text-center">Status</th>
-      `;
-    }
+    thead.innerHTML = `
+      <th class="px-4 py-3">${t('bench-table-query')}</th>
+      <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>
+      <th class="px-4 py-3 text-right">${t('bench-table-sqlite')}</th>
+      <th class="px-4 py-3 text-right">${t('bench-table-duckdb')}</th>
+    `;
   }
 
   tbody.innerHTML = '';
@@ -2033,15 +1981,11 @@ function renderTPCDSTable(data: TPCDSResults): void {
 
   const sqliteSpeedup = { total: 0, count: 0 };
   const duckdbSpeedup = { total: 0, count: 0 };
-  let passedCount = 0;
 
   for (const [queryNum, databases] of sortedQueries) {
     const vibesql = databases.get('vibesql');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
-
-    // Only count VibeSQL queries for pass rate
-    if (vibesql?.stats.status === 'passed') passedCount++;
 
     const row = document.createElement('tr');
     row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
@@ -2057,128 +2001,65 @@ function renderTPCDSTable(data: TPCDSResults): void {
     }
     row.appendChild(queryCell);
 
-    if (hasSQLite || hasDuckDB) {
-      // Comparison mode: show timing for each engine
-      // Determine which engine is fastest for this query
-      const times = [
-        { name: 'vibesql', time: vibesql?.stats.mean || Infinity },
-        { name: 'sqlite', time: sqlite?.stats.mean || Infinity },
-        { name: 'duckdb', time: duckdb?.stats.mean || Infinity },
-      ].filter(t => t.time !== Infinity);
-      const fastest = times.length > 0 ? times.reduce((a, b) => a.time < b.time ? a : b).name : null;
+    // Determine which engine is fastest for this query
+    const times = [
+      { name: 'vibesql', time: vibesql?.stats.mean || Infinity },
+      { name: 'sqlite', time: sqlite?.stats.mean || Infinity },
+      { name: 'duckdb', time: duckdb?.stats.mean || Infinity },
+    ].filter(t => t.time !== Infinity);
+    const fastest = times.length > 0 ? times.reduce((a, b) => a.time < b.time ? a : b).name : null;
 
-      // VibeSQL time
-      const vibesqlCell = document.createElement('td');
-      const vibesqlIsFastest = fastest === 'vibesql';
-      vibesqlCell.className = vibesqlIsFastest
-        ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
-        : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-      vibesqlCell.textContent = vibesql && vibesql.stats.mean > 0
-        ? formatTime(vibesql.stats.mean, vibesql.stats.stddev) || t('bench-na')
-        : t('bench-na');
-      row.appendChild(vibesqlCell);
+    // VibeSQL time
+    const vibesqlCell = document.createElement('td');
+    const vibesqlIsFastest = fastest === 'vibesql';
+    vibesqlCell.className = vibesqlIsFastest
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+    vibesqlCell.textContent = vibesql && vibesql.stats.mean > 0
+      ? formatTime(vibesql.stats.mean, vibesql.stats.stddev) || t('bench-na')
+      : t('bench-na');
+    row.appendChild(vibesqlCell);
 
-      // SQLite time
-      const sqliteCell = document.createElement('td');
-      const sqliteIsFastest = fastest === 'sqlite';
-      sqliteCell.className = sqliteIsFastest
-        ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
-        : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-      sqliteCell.textContent = sqlite && sqlite.stats.mean > 0
-        ? formatTime(sqlite.stats.mean) || t('bench-na')
-        : t('bench-na');
-      row.appendChild(sqliteCell);
+    // SQLite time
+    const sqliteCell = document.createElement('td');
+    const sqliteIsFastest = fastest === 'sqlite';
+    sqliteCell.className = sqliteIsFastest
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+    sqliteCell.textContent = sqlite && sqlite.stats.mean > 0
+      ? formatTime(sqlite.stats.mean) || t('bench-na')
+      : t('bench-na');
+    row.appendChild(sqliteCell);
 
-      // DuckDB time
-      const duckdbCell = document.createElement('td');
-      const duckdbIsFastest = fastest === 'duckdb';
-      duckdbCell.className = duckdbIsFastest
-        ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
-        : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-      duckdbCell.textContent = duckdb && duckdb.stats.mean > 0
-        ? formatTime(duckdb.stats.mean) || t('bench-na')
-        : t('bench-na');
-      row.appendChild(duckdbCell);
+    // DuckDB time
+    const duckdbCell = document.createElement('td');
+    const duckdbIsFastest = fastest === 'duckdb';
+    duckdbCell.className = duckdbIsFastest
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+    duckdbCell.textContent = duckdb && duckdb.stats.mean > 0
+      ? formatTime(duckdb.stats.mean) || t('bench-na')
+      : t('bench-na');
+    row.appendChild(duckdbCell);
 
-      // Calculate speedup (lower time is better, so sqlite/vibesql for speedup)
-      if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
-        const speedup = sqlite.stats.mean / vibesql.stats.mean;
-        sqliteSpeedup.total += speedup;
-        sqliteSpeedup.count++;
-      }
-      if (vibesql && duckdb && vibesql.stats.mean > 0 && duckdb.stats.mean > 0) {
-        const speedup = duckdb.stats.mean / vibesql.stats.mean;
-        duckdbSpeedup.total += speedup;
-        duckdbSpeedup.count++;
-      }
-    } else {
-      // VibeSQL only mode
-      const isPassed = vibesql?.stats.status === 'passed';
-
-      // Execution time
-      const timeCell = document.createElement('td');
-      timeCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-      if (isPassed && vibesql && vibesql.stats.mean > 0) {
-        timeCell.textContent = formatTime(vibesql.stats.mean, vibesql.stats.stddev) || t('bench-na');
-      } else {
-        timeCell.textContent = '-';
-      }
-      row.appendChild(timeCell);
-
-      // Rows returned
-      const rowsCell = document.createElement('td');
-      rowsCell.className = 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
-      rowsCell.textContent = vibesql?.stats.rows?.toLocaleString() || '0';
-      row.appendChild(rowsCell);
-
-      // Status
-      const statusCell = document.createElement('td');
-      statusCell.className = 'px-4 py-3 text-center text-2xl';
-      if (vibesql?.stats.status === 'passed') {
-        statusCell.textContent = '✅';
-        statusCell.title = 'Query passed';
-      } else if (vibesql?.stats.status === 'timeout') {
-        statusCell.textContent = '⏱️';
-        statusCell.title = 'Query timed out';
-      } else {
-        statusCell.textContent = '❌';
-        statusCell.title = 'Query failed';
-      }
-      row.appendChild(statusCell);
+    // Calculate speedup (lower time is better, so sqlite/vibesql for speedup)
+    if (vibesql && sqlite && vibesql.stats.mean > 0 && sqlite.stats.mean > 0) {
+      const speedup = sqlite.stats.mean / vibesql.stats.mean;
+      sqliteSpeedup.total += speedup;
+      sqliteSpeedup.count++;
+    }
+    if (vibesql && duckdb && vibesql.stats.mean > 0 && duckdb.stats.mean > 0) {
+      const speedup = duckdb.stats.mean / vibesql.stats.mean;
+      duckdbSpeedup.total += speedup;
+      duckdbSpeedup.count++;
     }
 
     tbody.appendChild(row);
   }
 
-  // Update summary cards based on comparison mode
-  if (hasSQLite || hasDuckDB) {
-    // Show speedup ratios like TPC-C
-    resetSummaryCardHeaders();
-    updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
-  } else {
-    // Show pass rate for VibeSQL-only mode
-    const sqliteEl = document.getElementById('avg-speedup-sqlite');
-    if (sqliteEl) {
-      const passRate = (passedCount / sortedQueries.length * 100).toFixed(0);
-      sqliteEl.textContent = `${passRate}%`;
-      sqliteEl.className = 'text-3xl font-bold text-green-600 dark:text-green-400';
-    }
-    const sqliteHeader = sqliteEl?.parentElement?.querySelector('h3');
-    if (sqliteHeader) sqliteHeader.textContent = t('bench-pass-rate');
-    const sqliteLabelEl = document.getElementById('avg-speedup-sqlite-label');
-    if (sqliteLabelEl) sqliteLabelEl.textContent = t('bench-queries-passing');
-
-    // Show passed/total in DuckDB slot
-    const duckdbEl = document.getElementById('avg-speedup-duckdb');
-    if (duckdbEl) {
-      duckdbEl.textContent = `${passedCount}/${sortedQueries.length}`;
-      duckdbEl.className = 'text-3xl font-bold text-primary-light dark:text-primary-dark';
-    }
-    const duckdbHeader = duckdbEl?.parentElement?.querySelector('h3');
-    if (duckdbHeader) duckdbHeader.textContent = t('bench-queries');
-    const duckdbLabelEl = document.getElementById('avg-speedup-duckdb-label');
-    if (duckdbLabelEl) duckdbLabelEl.textContent = t('bench-passed-total');
-  }
+  // Always show speedup ratios (comparison mode)
+  resetSummaryCardHeaders();
+  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -2192,7 +2073,7 @@ function renderTPCDSTable(data: TPCDSResults): void {
 }
 
 /**
- * Render TPC-DS performance chart
+ * Render TPC-DS performance chart with comparison data
  */
 function renderTPCDSChart(data: TPCDSResults): void {
   const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
@@ -2204,30 +2085,64 @@ function renderTPCDSChart(data: TPCDSResults): void {
     currentChart = null;
   }
 
-  // Sort benchmarks by query number and filter to passed queries
-  const sortedBenchmarks = [...data.benchmarks]
-    .filter(b => b.stats.status === 'passed' && b.stats.mean > 0)
-    .sort((a, b) => {
-      const aNum = parseInt(parseTPCDSBenchmarkName(a.name).queryNum.replace('q', ''));
-      const bNum = parseInt(parseTPCDSBenchmarkName(b.name).queryNum.replace('q', ''));
-      return aNum - bNum;
-    });
+  // Group by query and show all engines (always comparison mode)
+  const grouped = groupTPCDSBenchmarksByQuery(data.benchmarks);
 
-  const labels = sortedBenchmarks.map(b => {
-    const { queryNum } = parseTPCDSBenchmarkName(b.name);
-    return queryNum.toUpperCase();
+  const labels: string[] = [];
+  const vibesqlData: number[] = [];
+  const sqliteData: number[] = [];
+  const duckdbData: number[] = [];
+
+  // Sort by query number
+  const sortedQueries = [...grouped.entries()].sort((a, b) => {
+    const aNum = parseInt(a[0].replace('q', ''));
+    const bNum = parseInt(b[0].replace('q', ''));
+    return aNum - bNum;
   });
 
-  const vibesqlData = sortedBenchmarks.map(b => b.stats.mean * 1000); // Convert to ms
+  for (const [queryNum, databases] of sortedQueries) {
+    const vibesql = databases.get('vibesql');
+    const sqlite = databases.get('sqlite');
+    const duckdb = databases.get('duckdb');
+
+    // Only include queries where at least one engine has data
+    const vibesqlTime = vibesql?.stats.status === 'passed' && vibesql.stats.mean > 0 ? vibesql.stats.mean * 1000 : 0;
+    const sqliteTime = sqlite?.stats.status === 'passed' && sqlite.stats.mean > 0 ? sqlite.stats.mean * 1000 : 0;
+    const duckdbTime = duckdb?.stats.status === 'passed' && duckdb.stats.mean > 0 ? duckdb.stats.mean * 1000 : 0;
+
+    if (vibesqlTime > 0 || sqliteTime > 0 || duckdbTime > 0) {
+      labels.push(queryNum.toUpperCase());
+      vibesqlData.push(vibesqlTime);
+      sqliteData.push(sqliteTime);
+      duckdbData.push(duckdbTime);
+    }
+  }
+
+  // Always include all three datasets (show N/A bars when data is missing)
+  const datasets = [
+    createDataset('vibesql', vibesqlData),
+    createDataset('sqlite', sqliteData),
+    createDataset('duckdb', duckdbData),
+  ];
 
   currentChart = new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [createDataset('vibesql', vibesqlData)],
-    },
+    data: { labels, datasets },
     options: {
       ...getLogScaleChartOptions('Execution Time (ms) - Log Scale'),
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: {
+          callbacks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: (context: any) => {
+              const value = context.parsed.y;
+              if (value === 0) return `${context.dataset.label}: N/A`;
+              return `${context.dataset.label}: ${value.toFixed(2)} ms`;
+            },
+          },
+        },
+      },
       scales: {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...(getLogScaleChartOptions('') as any).scales,

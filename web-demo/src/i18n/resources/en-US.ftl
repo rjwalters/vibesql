@@ -251,6 +251,7 @@ bench-no-wasm-data = No WASM data available
 
 # Table headers
 bench-table-operation = Operation
+bench-table-query = Query
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite

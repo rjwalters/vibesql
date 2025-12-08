@@ -102,11 +102,13 @@ echo "" >> "$OUTPUT_FILE"
 echo ""
 
 # Phase 3: Run DuckDB comparison benchmark (in separate process)
+# Note: duckdb-comparison feature must be explicitly enabled (not included in benchmark-comparison)
+# See Cargo.toml comment: "For DuckDB comparisons (OLAP), use: --features benchmark-comparison,duckdb-comparison"
 echo -e "${YELLOW}Phase 3: Running DuckDB comparison benchmark...${NC}"
 echo ""
 echo "--- Phase 3: DuckDB comparison ---" >> "$OUTPUT_FILE"
 
-if TPCDS_ENGINE=duckdb cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
+if TPCDS_ENGINE=duckdb cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison,duckdb-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ DuckDB comparison completed${NC}"
     ((ENGINES_PASSED++))
@@ -118,12 +120,13 @@ echo "" >> "$OUTPUT_FILE"
 echo ""
 
 # Phase 4: Run MySQL comparison benchmark (optional, requires MYSQL_URL)
+# Note: mysql-comparison feature must be explicitly enabled (not included in benchmark-comparison)
 if [ -n "$MYSQL_URL" ]; then
     echo -e "${YELLOW}Phase 4: Running MySQL comparison benchmark...${NC}"
     echo ""
     echo "--- Phase 4: MySQL comparison ---" >> "$OUTPUT_FILE"
 
-    if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
+    if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison,mysql-comparison -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
         strip_quarantine
         echo -e "${GREEN}✓ MySQL comparison completed${NC}"
         ((ENGINES_PASSED++))

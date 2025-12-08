@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,76 @@ from vibesql_db import get_connection, get_db_path
 def get_repo_root() -> Path:
     """Get the repository root directory."""
     return Path(__file__).parent.parent
+
+
+def get_git_info() -> tuple:
+    """Get current git commit hash and timestamp."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True
+        ).strip()
+    except:
+        commit = "unknown"
+    timestamp = datetime.now().isoformat()
+    return commit, timestamp
+
+
+def read_criterion_estimates(estimates_file: Path) -> Optional[Dict]:
+    """Read Criterion estimates.json file and extract timing data."""
+    if not estimates_file.exists():
+        return None
+    try:
+        with open(estimates_file) as f:
+            data = json.load(f)
+        # Criterion stores times in nanoseconds
+        mean_ns = data.get("mean", {}).get("point_estimate", 0)
+        return {"mean_ns": mean_ns}
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def get_criterion_tpcds_data(engine: str) -> List[Dict]:
+    """
+    Read TPC-DS benchmark data from Criterion output directories.
+
+    Looks in target/criterion/tpcds_queries_comparison/{engine}/ for results.
+    Returns list of benchmark entries with query name and timing stats.
+    """
+    repo_root = get_repo_root()
+    results = []
+
+    # Try comparison directory first
+    criterion_dir = repo_root / "target" / "criterion" / "tpcds_queries_comparison" / engine
+    if not criterion_dir.exists():
+        # Fallback to non-comparison directory
+        criterion_dir = repo_root / "target" / "criterion" / "tpcds_queries" / engine
+
+    if not criterion_dir.exists():
+        return results
+
+    for query_dir in sorted(criterion_dir.iterdir()):
+        if not query_dir.is_dir():
+            continue
+        query_name = query_dir.name
+
+        # Look for estimates.json in new/ subdirectory (Criterion format)
+        estimates_file = query_dir / "new" / "estimates.json"
+        data = read_criterion_estimates(estimates_file)
+
+        if data:
+            # Convert nanoseconds to seconds
+            mean_s = data["mean_ns"] / 1_000_000_000
+            results.append({
+                "name": f"tpcds_{query_name.lower()}_{engine}",
+                "stats": {
+                    "mean": mean_s,
+                    "status": "passed"
+                }
+            })
+
+    return results
 
 
 def get_latest_run(cursor: Any, suite: str) -> Optional[tuple]:
@@ -176,72 +247,88 @@ def export_sysbench_results(cursor: Any) -> Optional[Dict]:
 
 
 def export_tpcds_results(cursor: Any) -> Optional[Dict]:
-    """Export TPC-DS results to JSON format."""
-    # Get the latest TPC-DS run
-    run = get_latest_run(cursor, 'tpcds')
-    if not run:
-        print("  No TPC-DS runs found")
-        return None
+    """Export TPC-DS results to JSON format.
 
-    # Unpack full row: RUN_ID, RUN_TIMESTAMP, GIT_COMMIT, GIT_BRANCH, BENCHMARK_SUITE,
-    #                  SCALE_FACTOR, TIMEOUT_SECS, TOTAL_QUERIES, PASSED_QUERIES, ...
-    run_id, timestamp, commit, _, _, scale, _, total, passed = run[:9]
-    print(f"  Latest TPC-DS run: {timestamp} ({commit}) - {passed}/{total} queries")
-
-    # Get TPC-DS results using helper (Python-side filtering)
-    results = get_results_for_run(cursor, 'benchmark_results', run_id)
-
-    # Aggregate results by query name (handle multiple iterations per query)
-    # The benchmark runner may execute each query multiple times for statistical reliability
-    query_data: Dict[str, List[tuple]] = {}
-    for row in results:
-        # Columns: RESULT_ID, RUN_ID, QUERY_NAME, STATUS, PARSE_TIME_MS, EXECUTOR_CREATION_TIME_MS,
-        #          EXECUTION_TIME_MS, TOTAL_TIME_MS, ROW_COUNT, ERROR_MESSAGE
-        _, _, query, status, parse_ms, _, exec_ms, total_ms, rows, error = row
-
-        # Skip sanity checks
-        if query.startswith('sanity'):
-            continue
-
-        if query not in query_data:
-            query_data[query] = []
-        query_data[query].append((exec_ms, total_ms, rows, status))
-
+    Combines data from:
+    1. VibeSQL database (if available)
+    2. Criterion output directories for VibeSQL, SQLite, and DuckDB comparisons
+    """
     benchmarks = []
-    for query, iterations in sorted(query_data.items()):
-        # Calculate mean execution time from all iterations
-        exec_times = [it[0] for it in iterations if it[0] is not None]
-        total_times = [it[1] for it in iterations if it[1] is not None]
+    commit, timestamp = get_git_info()
+    scale = "0.01"  # Default scale factor
 
-        # Use the most common status (should all be the same)
-        statuses = [it[3] for it in iterations]
-        status = max(set(statuses), key=statuses.count)
+    # Try to get data from VibeSQL database first
+    run = get_latest_run(cursor, 'tpcds')
+    if run:
+        run_id, db_timestamp, db_commit, _, _, db_scale, _, total, passed = run[:9]
+        print(f"  Latest TPC-DS run from DB: {db_timestamp} ({db_commit}) - {passed}/{total} queries")
+        timestamp = db_timestamp
+        commit = db_commit
+        scale = db_scale
 
-        # Use rows from first iteration (should all be the same)
-        rows = iterations[0][2] if iterations else 0
+        # Get TPC-DS results using helper (Python-side filtering)
+        results = get_results_for_run(cursor, 'benchmark_results', run_id)
 
-        # Convert to seconds
-        mean_exec_s = (sum(exec_times) / len(exec_times) / 1000) if exec_times else 0
-        mean_total_s = (sum(total_times) / len(total_times) / 1000) if total_times else 0
+        # Aggregate results by query name (handle multiple iterations per query)
+        query_data: Dict[str, List[tuple]] = {}
+        for row in results:
+            _, _, query, status, parse_ms, _, exec_ms, total_ms, rows, error = row
+            if query.startswith('sanity'):
+                continue
+            if query not in query_data:
+                query_data[query] = []
+            query_data[query].append((exec_ms, total_ms, rows, status))
 
-        benchmarks.append({
-            "name": f"tpcds_{query.lower()}_vibesql",
-            "stats": {
-                "mean": mean_exec_s,
-                "total": mean_total_s,
-                "rows": rows or 0,
-                "status": status,
-                "iterations": len(iterations)
-            }
-        })
+        for query, iterations in sorted(query_data.items()):
+            exec_times = [it[0] for it in iterations if it[0] is not None]
+            total_times = [it[1] for it in iterations if it[1] is not None]
+            statuses = [it[3] for it in iterations]
+            status = max(set(statuses), key=statuses.count)
+            rows = iterations[0][2] if iterations else 0
+            mean_exec_s = (sum(exec_times) / len(exec_times) / 1000) if exec_times else 0
+            mean_total_s = (sum(total_times) / len(total_times) / 1000) if total_times else 0
+
+            benchmarks.append({
+                "name": f"tpcds_{query.lower()}_vibesql",
+                "stats": {
+                    "mean": mean_exec_s,
+                    "total": mean_total_s,
+                    "rows": rows or 0,
+                    "status": status,
+                    "iterations": len(iterations)
+                }
+            })
+        print(f"  Found {len(benchmarks)} VibeSQL results from database")
+
+    # If no database results, try Criterion directory for VibeSQL
+    if not benchmarks:
+        print("  No database results, checking Criterion directories...")
+        vibesql_criterion = get_criterion_tpcds_data("vibesql")
+        if vibesql_criterion:
+            benchmarks.extend(vibesql_criterion)
+            print(f"  Found {len(vibesql_criterion)} VibeSQL results from Criterion")
+
+    # Add SQLite comparison data from Criterion
+    sqlite_criterion = get_criterion_tpcds_data("sqlite")
+    if sqlite_criterion:
+        benchmarks.extend(sqlite_criterion)
+        print(f"  Found {len(sqlite_criterion)} SQLite results from Criterion")
+
+    # Add DuckDB comparison data from Criterion
+    duckdb_criterion = get_criterion_tpcds_data("duckdb")
+    if duckdb_criterion:
+        benchmarks.extend(duckdb_criterion)
+        print(f"  Found {len(duckdb_criterion)} DuckDB results from Criterion")
 
     if not benchmarks:
-        print("  No TPC-DS results found")
+        print("  No TPC-DS results found in database or Criterion directories")
         return None
 
-    unique_queries = len(benchmarks)
-    total_iterations = sum(len(v) for v in query_data.values())
-    print(f"  Exported {unique_queries} unique TPC-DS queries (from {total_iterations} total iterations)")
+    # Count by engine
+    vibesql_count = sum(1 for b in benchmarks if b["name"].endswith("_vibesql"))
+    sqlite_count = sum(1 for b in benchmarks if b["name"].endswith("_sqlite"))
+    duckdb_count = sum(1 for b in benchmarks if b["name"].endswith("_duckdb"))
+    print(f"  Total: {len(benchmarks)} benchmarks (VibeSQL: {vibesql_count}, SQLite: {sqlite_count}, DuckDB: {duckdb_count})")
     return {
         "benchmarks": benchmarks,
         "metadata": {
@@ -249,8 +336,11 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
             "timestamp": timestamp,
             "git_commit": commit,
             "scale_factor": scale,
-            "total_queries": unique_queries,
-            "passed_queries": sum(1 for b in benchmarks if b["stats"]["status"] == "passed")
+            "total_queries": vibesql_count,
+            "passed_queries": sum(1 for b in benchmarks if b["stats"].get("status") == "passed"),
+            "vibesql_queries": vibesql_count,
+            "sqlite_queries": sqlite_count,
+            "duckdb_queries": duckdb_count
         }
     }
 

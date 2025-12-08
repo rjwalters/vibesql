@@ -989,6 +989,608 @@
         "status": "passed",
         "iterations": 4
       }
+    },
+    {
+      "name": "tpcds_q1_sqlite",
+      "stats": {
+        "mean": 0.000361183488818384,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q10_sqlite",
+      "stats": {
+        "mean": 0.075786552105,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q11_sqlite",
+      "stats": {
+        "mean": 0.012210566719999996,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q12_sqlite",
+      "stats": {
+        "mean": 0.00033372372946595245,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q13_sqlite",
+      "stats": {
+        "mean": 0.00036741482464600436,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q15_sqlite",
+      "stats": {
+        "mean": 0.0002720274144856692,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q16_sqlite",
+      "stats": {
+        "mean": 0.00023221951915184085,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q19_sqlite",
+      "stats": {
+        "mean": 0.0006113009455518887,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q20_sqlite",
+      "stats": {
+        "mean": 0.0003141775617604619,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q21_sqlite",
+      "stats": {
+        "mean": 0.00043488830345377055,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q23_sqlite",
+      "stats": {
+        "mean": 0.0025382179737214365,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q24_sqlite",
+      "stats": {
+        "mean": 0.0010894926846150912,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q25_sqlite",
+      "stats": {
+        "mean": 0.000515359350041256,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q26_sqlite",
+      "stats": {
+        "mean": 0.000802519158508338,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q27_sqlite",
+      "stats": {
+        "mean": 0.000654208232953018,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q28_sqlite",
+      "stats": {
+        "mean": 0.00032286128792628023,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q29_sqlite",
+      "stats": {
+        "mean": 0.0011110437834241157,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q3_sqlite",
+      "stats": {
+        "mean": 0.00044445109104343153,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q30_sqlite",
+      "stats": {
+        "mean": 3.0848886754947934e-05,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q31_sqlite",
+      "stats": {
+        "mean": 0.0017425492630953525,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q32_sqlite",
+      "stats": {
+        "mean": 0.0002116439893477083,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q33_sqlite",
+      "stats": {
+        "mean": 0.0010207861893476243,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q34_sqlite",
+      "stats": {
+        "mean": 0.000851159195912889,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q35_sqlite",
+      "stats": {
+        "mean": 0.00013687466375764706,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q37_sqlite",
+      "stats": {
+        "mean": 0.0005071918398008131,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q38_sqlite",
+      "stats": {
+        "mean": 0.008248458819230772,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q39_sqlite",
+      "stats": {
+        "mean": 0.000599829082658378,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q4_sqlite",
+      "stats": {
+        "mean": 0.01838250694666668,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q40_sqlite",
+      "stats": {
+        "mean": 0.0007622956216671862,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q41_sqlite",
+      "stats": {
+        "mean": 0.00012885442062258214,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q42_sqlite",
+      "stats": {
+        "mean": 0.0005275489467548798,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q43_sqlite",
+      "stats": {
+        "mean": 0.0013724304229655248,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q44_sqlite",
+      "stats": {
+        "mean": 0.003296762726583215,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q45_sqlite",
+      "stats": {
+        "mean": 0.00013840152500659329,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q46_sqlite",
+      "stats": {
+        "mean": 0.0006913336671213035,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q47_sqlite",
+      "stats": {
+        "mean": 0.002337273266515318,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q48_sqlite",
+      "stats": {
+        "mean": 0.0010482579360465763,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q49_sqlite",
+      "stats": {
+        "mean": 0.0016261500683680482,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q50_sqlite",
+      "stats": {
+        "mean": 0.00018641080196825122,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q51_sqlite",
+      "stats": {
+        "mean": 0.0026643967284362058,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q52_sqlite",
+      "stats": {
+        "mean": 0.0005294944227081288,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q53_sqlite",
+      "stats": {
+        "mean": 0.0010315080277030592,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q54_sqlite",
+      "stats": {
+        "mean": 0.0030564898112118203,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q55_sqlite",
+      "stats": {
+        "mean": 0.00042490079681323586,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q56_sqlite",
+      "stats": {
+        "mean": 0.0006640265578470703,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q57_sqlite",
+      "stats": {
+        "mean": 0.004675716160331705,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q58_sqlite",
+      "stats": {
+        "mean": 0.0013041525778154088,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q59_sqlite",
+      "stats": {
+        "mean": 0.004700732381668702,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q60_sqlite",
+      "stats": {
+        "mean": 0.00012093715241575951,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q61_sqlite",
+      "stats": {
+        "mean": 0.0006681192968538826,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q62_sqlite",
+      "stats": {
+        "mean": 0.0002833653049855204,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q63_sqlite",
+      "stats": {
+        "mean": 0.0005599344926196603,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q64_sqlite",
+      "stats": {
+        "mean": 0.0003228471873956747,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q65_sqlite",
+      "stats": {
+        "mean": 0.0003704534965451145,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q66_sqlite",
+      "stats": {
+        "mean": 0.00021066471755600016,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q68_sqlite",
+      "stats": {
+        "mean": 0.0005023060888915304,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q69_sqlite",
+      "stats": {
+        "mean": 0.07170222231578043,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q7_sqlite",
+      "stats": {
+        "mean": 0.0005482771390343919,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q71_sqlite",
+      "stats": {
+        "mean": 0.0004959964279832369,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q72_sqlite",
+      "stats": {
+        "mean": 0.0005493155466076065,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q73_sqlite",
+      "stats": {
+        "mean": 0.0005045010371464745,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q74_sqlite",
+      "stats": {
+        "mean": 0.0034633081819690553,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q75_sqlite",
+      "stats": {
+        "mean": 0.0024454526728462872,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q76_sqlite",
+      "stats": {
+        "mean": 0.00022393685042764374,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q78_sqlite",
+      "stats": {
+        "mean": 0.009966726664545457,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q79_sqlite",
+      "stats": {
+        "mean": 0.0007058012604526477,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q8_sqlite",
+      "stats": {
+        "mean": 0.0003510688003304061,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q81_sqlite",
+      "stats": {
+        "mean": 0.00013000215355140536,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q82_sqlite",
+      "stats": {
+        "mean": 1.2731370137780107e-05,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q83_sqlite",
+      "stats": {
+        "mean": 0.00010030480892358338,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q84_sqlite",
+      "stats": {
+        "mean": 2.0411170089808735e-05,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q85_sqlite",
+      "stats": {
+        "mean": 0.00012738289858711845,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q87_sqlite",
+      "stats": {
+        "mean": 0.0003680181036164492,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q88_sqlite",
+      "stats": {
+        "mean": 0.003321754649337029,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q89_sqlite",
+      "stats": {
+        "mean": 0.001756531957719448,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q9_sqlite",
+      "stats": {
+        "mean": 0.003290673629915653,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q90_sqlite",
+      "stats": {
+        "mean": 0.0004568868183498398,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q91_sqlite",
+      "stats": {
+        "mean": 2.8233518027791977e-05,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q92_sqlite",
+      "stats": {
+        "mean": 0.0001536597154204935,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q93_sqlite",
+      "stats": {
+        "mean": 0.0018013906273490507,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q94_sqlite",
+      "stats": {
+        "mean": 0.011868121573333331,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q95_sqlite",
+      "stats": {
+        "mean": 0.0027091905772306775,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q96_sqlite",
+      "stats": {
+        "mean": 0.0014047568832382057,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q97_sqlite",
+      "stats": {
+        "mean": 0.0021778531027986797,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q98_sqlite",
+      "stats": {
+        "mean": 0.0012550124786209946,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpcds_q99_sqlite",
+      "stats": {
+        "mean": 0.0007529433229146911,
+        "status": "passed"
+      }
     }
   ],
   "metadata": {
@@ -997,6 +1599,9 @@
     "git_commit": "151801ee",
     "scale_factor": "0.01",
     "total_queries": 99,
-    "passed_queries": 99
+    "passed_queries": 185,
+    "vibesql_queries": 99,
+    "sqlite_queries": 86,
+    "duckdb_queries": 0
   }
 }

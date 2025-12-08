@@ -208,332 +208,332 @@ subqueries-ex-correlated = 相関サブクエリ
 subqueries-ex-nested = ネストされたサブクエリ
 
 # =============================================================================
-# Benchmarks Page
+# ベンチマークページ
 # =============================================================================
 
-# Section headers
-bench-section-embedded = Embedded
-bench-section-server = Server
-bench-results-title = Benchmark Results
-bench-perf-comparison = Performance Comparison
-bench-methodology-title = Methodology
-bench-analysis-roadmap = Analysis & Roadmap
+# セクションヘッダー
+bench-section-embedded = 組み込み
+bench-section-server = サーバー
+bench-results-title = ベンチマーク結果
+bench-perf-comparison = パフォーマンス比較
+bench-methodology-title = 測定方法
+bench-analysis-roadmap = 分析とロードマップ
 
-# Summary cards
+# サマリーカード
 bench-vs-sqlite = vs SQLite
 bench-vs-duckdb = vs DuckDB
 bench-vs-mysql = vs MySQL
-bench-ops-tested = Operations Tested
-bench-last-updated = Last Updated
-bench-avg-speedup = average speedup
-bench-from-main = from main branch
-bench-loading = Loading...
+bench-ops-tested = テスト済み操作
+bench-last-updated = 最終更新
+bench-avg-speedup = 平均高速化率
+bench-from-main = mainブランチから
+bench-loading = 読み込み中...
 bench-na = N/A
-bench-faster = { $value }x faster
-bench-slower = { $value }x slower
-bench-speedup = { $value }x
-bench-startup-time-label = startup time
-bench-download-size = download size
-bench-uncompressed = uncompressed
-bench-size-metrics = size metrics
-bench-failed = FAILED
-bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-faster = { $value }倍高速
+bench-slower = { $value }倍低速
+bench-speedup = { $value }倍
+bench-startup-time-label = 起動時間
+bench-download-size = ダウンロードサイズ
+bench-uncompressed = 非圧縮
+bench-size-metrics = サイズ指標
+bench-failed = 失敗
+bench-failed-title = クエリ失敗（タイムアウトまたはエラー）
+bench-no-wasm-data = WASMデータがありません
 
-# Table headers
-bench-table-operation = Operation
+# テーブルヘッダー
+bench-table-operation = 操作
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite
 bench-table-duckdb = DuckDB
 bench-table-mysql = MySQL
-bench-table-loading = Loading benchmark results...
-bench-vibesql-server-title = VibeSQL via PostgreSQL wire protocol
+bench-table-loading = ベンチマーク結果を読み込み中...
+bench-vibesql-server-title = PostgreSQLワイヤープロトコル経由のVibeSQL
 
-# Common benchmark terms
-bench-hardware = Hardware
-bench-benchmark-framework = Benchmark Framework
-bench-scale-factor = Scale Factor
-bench-data = Data
-bench-databases-tested = Databases Tested
-bench-execution-mode = Execution Mode
-bench-measurement = Measurement
-bench-workload = Workload
-bench-transaction-mix = Transaction Mix
-bench-warehouses = Warehouses
-bench-concurrency = Concurrency
-bench-acid-compliance = ACID Compliance
-bench-mode = Mode
-bench-workload-types = Workload Types
-bench-table-size = Table Size
-bench-index-types = Index Types
-bench-operations = Operations
-bench-databases = Databases
-bench-protocol-overhead = Protocol Overhead
-bench-binary-size = Binary Size
-bench-startup-time = Startup Time
-bench-peak-memory = Peak Memory
-bench-schema = Schema
-bench-query-count = Query Count
-bench-query-types = Query Types
-bench-sql-features = SQL Features
-bench-wasm-size = WASM Size
+# 共通ベンチマーク用語
+bench-hardware = ハードウェア
+bench-benchmark-framework = ベンチマークフレームワーク
+bench-scale-factor = スケールファクター
+bench-data = データ
+bench-databases-tested = テスト対象データベース
+bench-execution-mode = 実行モード
+bench-measurement = 測定
+bench-workload = ワークロード
+bench-transaction-mix = トランザクション構成
+bench-warehouses = ウェアハウス数
+bench-concurrency = 同時実行性
+bench-acid-compliance = ACID準拠
+bench-mode = モード
+bench-workload-types = ワークロードタイプ
+bench-table-size = テーブルサイズ
+bench-index-types = インデックスタイプ
+bench-operations = 操作
+bench-databases = データベース
+bench-protocol-overhead = プロトコルオーバーヘッド
+bench-binary-size = バイナリサイズ
+bench-startup-time = 起動時間
+bench-peak-memory = ピークメモリ
+bench-schema = スキーマ
+bench-query-count = クエリ数
+bench-query-types = クエリタイプ
+bench-sql-features = SQL機能
+bench-wasm-size = WASMサイズ
 bench-wasm-gzip = WASM (gzip)
 bench-wasm-brotli = WASM (brotli)
 
-# TPC-H specific
+# TPC-H固有
 bench-tpch-name = TPC-H
-bench-tpch-title = TPC-H Decision Support Benchmark
-bench-tpch-description = These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>, which simulates real-world decision support workloads with complex analytical queries involving aggregations, joins, subqueries, and sorting.
-bench-tpch-ops-label = TPC-H queries
-bench-tpch-note-intro = All benchmarks measure end-to-end query execution time including parsing, planning, execution, and result materialization. This represents <strong>real-world SQL engine performance</strong> for analytical workloads.
-bench-tpch-note-queries = <strong>Note:</strong> TPC-H queries test different aspects of SQL performance: simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15), and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+bench-tpch-title = TPC-H 意思決定支援ベンチマーク
+bench-tpch-description = これらのベンチマークは業界標準の<strong>TPC-Hベンチマークスイート</strong>を使用しています。集約、結合、サブクエリ、ソートを含む複雑な分析クエリで実際の意思決定支援ワークロードをシミュレートします。
+bench-tpch-ops-label = TPC-Hクエリ
+bench-tpch-note-intro = すべてのベンチマークは、解析、計画、実行、結果の具体化を含むエンドツーエンドのクエリ実行時間を測定します。これは分析ワークロードにおける<strong>実際のSQLエンジンパフォーマンス</strong>を表しています。
+bench-tpch-note-queries = <strong>注:</strong> TPC-Hクエリは、SQLパフォーマンスの異なる側面をテストします：単純な集約（Q1、Q6）、複雑な結合（Q2-Q5、Q7-Q10）、サブクエリ（Q11-Q15）、高度な分析（Q16-Q22）。上の表のクエリ名にマウスを合わせると説明が表示されます。
 
-# TPC-H Discussion
-bench-tpch-disc-excels-title = Where VibeSQL Excels
-bench-tpch-disc-excels = VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20) where our columnar execution engine and SIMD-accelerated aggregations shine. These queries involve filtering large tables and computing aggregates without complex join patterns.
-bench-tpch-disc-targets-title = Current Optimization Targets
-bench-tpch-disc-targets = Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's decades-refined B-tree joins. Specific areas under active development:
-bench-tpch-disc-join-ordering = Improved cardinality estimation for better join order selection
-bench-tpch-disc-hash-sizing = Adaptive hash table growth and spill-to-disk for large joins
-bench-tpch-disc-vectorized = Batch processing in the join inner loop to improve cache utilization
-bench-tpch-disc-inl-joins = Leveraging B-tree indexes when beneficial
-bench-tpch-disc-path-title = Path to Leadership
-bench-tpch-disc-path = VibeSQL's architecture is designed for modern hardware with features like columnar storage, vectorized execution, and lock-free concurrency. As these optimizations mature, we expect VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.
+# TPC-H ディスカッション
+bench-tpch-disc-excels-title = VibeSQLが優れている点
+bench-tpch-disc-excels = VibeSQLは<strong>スキャン集約型クエリ</strong>（Q1、Q6、Q14、Q15、Q20）で強力なパフォーマンスを発揮します。これらのクエリでは、列指向実行エンジンとSIMD加速集約が力を発揮します。大規模テーブルのフィルタリングと複雑な結合パターンなしでの集約計算が含まれます。
+bench-tpch-disc-targets-title = 現在の最適化対象
+bench-tpch-disc-targets = 複数テーブル結合クエリ（Q3、Q5、Q7-Q10、Q18、Q19、Q21）は現在SQLiteがリードしています。主なボトルネックはハッシュ結合実装で、SQLiteの数十年にわたって改良されたB-tree結合と同レベルの最適化がまだ適用されていません。現在積極的に開発中の領域：
+bench-tpch-disc-join-ordering = より良い結合順序選択のためのカーディナリティ推定の改善
+bench-tpch-disc-hash-sizing = 大規模結合のための適応型ハッシュテーブル拡張とディスクスピル
+bench-tpch-disc-vectorized = キャッシュ利用率向上のための結合内部ループでのバッチ処理
+bench-tpch-disc-inl-joins = 有益な場合のB-treeインデックス活用
+bench-tpch-disc-path-title = リーダーシップへの道
+bench-tpch-disc-path = VibeSQLのアーキテクチャは、列指向ストレージ、ベクトル化実行、ロックフリー並行性などの機能を備え、最新のハードウェア向けに設計されています。これらの最適化が成熟するにつれて、VibeSQLはすべてのTPC-Hクエリで一貫したリーダーシップを達成すると期待しています。基本設計は、従来の行ストアデータベースでは簡単に後付けできない並列処理とSIMDをサポートしています。
 
-# TPC-H Query Descriptions
-bench-tpch-q1 = Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY
-bench-tpch-q2 = Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT
-bench-tpch-q3 = Shipping Priority - 3-table JOIN with aggregation
-bench-tpch-q4 = Order Priority Checking - Correlated EXISTS subquery
-bench-tpch-q5 = Local Supplier Volume - 6-table JOIN with complex filtering
-bench-tpch-q6 = Forecasting Revenue Change - WHERE filters with BETWEEN and SUM
-bench-tpch-q7 = Volume Shipping - 6-table JOIN with SUBSTR and date filtering
-bench-tpch-q8 = National Market Share - 7-table JOIN with CASE expressions
-bench-tpch-q9 = Product Type Profit Measure - 4-table JOIN with aggregation
-bench-tpch-q10 = Returned Item Reporting - 4-table JOIN with TOP-N LIMIT
-bench-tpch-q11 = Important Stock Identification - Subquery in HAVING clause
-bench-tpch-q12 = Shipping Modes Priority - CASE aggregation with date logic
-bench-tpch-q13 = Customer Distribution - LEFT OUTER JOIN with subquery
-bench-tpch-q14 = Promotion Effect - Conditional aggregation with CASE
-bench-tpch-q15 = Top Supplier - Nested subqueries with MAX
-bench-tpch-q16 = Parts/Supplier Relationship - NOT IN subquery with DISTINCT
-bench-tpch-q17 = Small-Quantity-Order Revenue - Correlated subquery in WHERE
-bench-tpch-q18 = Large Volume Customer - GROUP BY with HAVING
-bench-tpch-q19 = Discounted Revenue - Complex OR conditions
-bench-tpch-q20 = Potential Part Promotion - IN subquery with GROUP BY/HAVING
-bench-tpch-q21 = Suppliers Who Kept Orders Waiting - Multi-table EXISTS
-bench-tpch-q22 = Global Sales Opportunity - SUBSTR with NOT EXISTS subquery
+# TPC-H クエリ説明
+bench-tpch-q1 = 価格要約レポート - GROUP BYとORDER BYによる価格集約
+bench-tpch-q2 = 最小コスト仕入先 - ORDER BYとLIMITを含む3テーブルJOIN
+bench-tpch-q3 = 出荷優先度 - 集約を含む3テーブルJOIN
+bench-tpch-q4 = 注文優先度チェック - 相関EXISTSサブクエリ
+bench-tpch-q5 = 地域仕入先売上 - 複雑なフィルタリングを含む6テーブルJOIN
+bench-tpch-q6 = 収益変化予測 - BETWEENとSUMを含むWHEREフィルター
+bench-tpch-q7 = 出荷量 - SUBSTRと日付フィルタリングを含む6テーブルJOIN
+bench-tpch-q8 = 国内市場シェア - CASE式を含む7テーブルJOIN
+bench-tpch-q9 = 製品タイプ利益測定 - 集約を含む4テーブルJOIN
+bench-tpch-q10 = 返品レポート - TOP-N LIMITを含む4テーブルJOIN
+bench-tpch-q11 = 重要在庫識別 - HAVING句内のサブクエリ
+bench-tpch-q12 = 出荷モード優先度 - 日付ロジックを含むCASE集約
+bench-tpch-q13 = 顧客分布 - サブクエリを含むLEFT OUTER JOIN
+bench-tpch-q14 = プロモーション効果 - CASEによる条件付き集約
+bench-tpch-q15 = トップ仕入先 - MAXを含むネストされたサブクエリ
+bench-tpch-q16 = 部品/仕入先関係 - DISTINCTを含むNOT INサブクエリ
+bench-tpch-q17 = 少量注文収益 - WHERE内の相関サブクエリ
+bench-tpch-q18 = 大口顧客 - HAVINGを含むGROUP BY
+bench-tpch-q19 = 割引収益 - 複雑なOR条件
+bench-tpch-q20 = 潜在的部品プロモーション - GROUP BY/HAVINGを含むINサブクエリ
+bench-tpch-q21 = 注文を遅延させた仕入先 - 複数テーブルEXISTS
+bench-tpch-q22 = グローバル販売機会 - NOT EXISTSサブクエリを含むSUBSTR
 
-# TPC-DS specific
+# TPC-DS固有
 bench-tpcds-name = TPC-DS
-bench-tpcds-title = TPC-DS Decision Support Benchmark
-bench-tpcds-description = <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model a modern decision support system with significantly more complex query patterns including multiple fact tables, snow-flake schema, and advanced SQL features.
-bench-tpcds-ops-label = TPC-DS queries
-bench-tpcds-note-intro = TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features like window functions, common table expressions (WITH clause), and complex join patterns across multiple fact and dimension tables.
-bench-tpcds-note-remaining = <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or specific date arithmetic functions not yet implemented.
+bench-tpcds-title = TPC-DS 意思決定支援ベンチマーク
+bench-tpcds-description = <strong>TPC-DS</strong>はTPC-Hの後継で、複数のファクトテーブル、スノーフレークスキーマ、高度なSQL機能を含む、より複雑なクエリパターンで現代の意思決定支援システムをモデル化した99のクエリを特徴としています。
+bench-tpcds-ops-label = TPC-DSクエリ
+bench-tpcds-note-intro = TPC-DSクエリはTPC-Hよりも大幅に複雑で、ウィンドウ関数、共通テーブル式（WITH句）、複数のファクトテーブルとディメンションテーブルにまたがる複雑な結合パターンなど、高度なSQL機能をテストします。
+bench-tpcds-note-remaining = <strong>注:</strong> 残りのサポートされていないクエリには、まだ実装されていないINTERSECT/EXCEPTや特定の日付算術関数などの機能が必要です。
 
-# TPC-DS Discussion
-bench-tpcds-disc-coverage-title = SQL:1999 Feature Coverage
-bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>, demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
-bench-tpcds-disc-optimization-title = Complex Query Optimization
-bench-tpcds-disc-optimization = TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
-bench-tpcds-disc-cte = Intelligent decision between materialized and inline CTEs
-bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when beneficial
-bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
-bench-tpcds-disc-toward-title = Toward 99/99
-bench-tpcds-disc-toward = INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set operations fit naturally into our existing query algebra and will be implemented as hash-based operators similar to our DISTINCT processing.
+# TPC-DS ディスカッション
+bench-tpcds-disc-coverage-title = SQL:1999機能カバレッジ
+bench-tpcds-disc-coverage = TPC-DSは最も要求の厳しいSQL機能を検証します。VibeSQLは<strong>99クエリ中88</strong>をパスし、ROLLUP、CUBE、GROUPING()、複雑なフレーミングを持つウィンドウ関数、再帰CTEを含むSQL:1999の幅広いカバレッジを実証しています。残りのクエリにはINTERSECT/EXCEPT集合演算が必要です。
+bench-tpcds-disc-optimization-title = 複雑なクエリ最適化
+bench-tpcds-disc-optimization = TPC-DSクエリは、相関サブクエリを含む10以上のテーブルを結合することがよくあります。現在の重点領域：
+bench-tpcds-disc-cte = マテリアライズCTEとインラインCTEの賢明な選択
+bench-tpcds-disc-decorrelation = 有益な場合に相関サブクエリを結合に変換
+bench-tpcds-disc-star = 分析パターンのためのファクト-ディメンション結合順序
+bench-tpcds-disc-toward-title = 99/99に向けて
+bench-tpcds-disc-toward = INTERSECTとEXCEPTは、残りのクエリを有効にする計画された追加機能です。これらの集合演算は既存のクエリ代数に自然に適合し、DISTINCT処理と同様のハッシュベースの演算子として実装されます。
 
-# TPC-C specific
+# TPC-C固有
 bench-tpcc-name = TPC-C
-bench-tpcc-title = TPC-C Online Transaction Processing Benchmark
-bench-tpcc-description = The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment with a mix of complex transactions including order entry, payment processing, order status queries, delivery processing, and stock level monitoring.
-bench-tpcc-ops-label = TPC-C transactions
-bench-tpcc-note-intro = TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle concurrent transactions with complex business logic. This benchmark is critical for evaluating <strong>transactional workload performance</strong>.
-bench-tpcc-note-results = <strong>Note:</strong> Results show average transaction latency. Lower is better. TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
+bench-tpcc-title = TPC-C オンライントランザクション処理ベンチマーク
+bench-tpcc-description = <strong>TPC-Cベンチマーク</strong>は、注文入力、支払い処理、注文状況クエリ、配送処理、在庫レベル監視を含む複雑なトランザクションの組み合わせで、完全な注文入力環境をシミュレートします。
+bench-tpcc-ops-label = TPC-Cトランザクション
+bench-tpcc-note-intro = TPC-Cは1分あたりのトランザクション数（tpmC）を測定し、複雑なビジネスロジックを持つ並行トランザクションを処理するデータベースの能力をテストします。このベンチマークは<strong>トランザクションワークロードパフォーマンス</strong>の評価に重要です。
+bench-tpcc-note-results = <strong>注:</strong> 結果は平均トランザクションレイテンシを示しています。低いほど良いです。TPC-Cは、厳格な一貫性要件を持つ書き込み集中型ワークロードに対して特に要求が厳しいです。
 
-# TPC-C Transaction Descriptions
-bench-tpcc-new-order = New Order - Complex transaction with inventory checks and order creation
-bench-tpcc-payment = Payment - Update customer balance and warehouse/district totals
-bench-tpcc-order-status = Order Status - Read-only query for customer order history
-bench-tpcc-delivery = Delivery - Batch processing of pending orders
-bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
+# TPC-C トランザクション説明
+bench-tpcc-new-order = 新規注文 - 在庫チェックと注文作成を含む複雑なトランザクション
+bench-tpcc-payment = 支払い - 顧客残高とウェアハウス/地区合計の更新
+bench-tpcc-order-status = 注文状況 - 顧客注文履歴の読み取り専用クエリ
+bench-tpcc-delivery = 配送 - 保留中の注文のバッチ処理
+bench-tpcc-stock-level = 在庫レベル - 最近の注文でしきい値を下回る品目のカウント
 
-# TPC-C Discussion
-bench-tpcc-disc-faster-title = 42x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS, a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
-bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
-bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
-bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution
-bench-tpcc-disc-btree = Purpose-built index structure optimized for in-memory workloads
-bench-tpcc-disc-prepared = Query plans are compiled once and reused
-bench-tpcc-disc-scaling-title = Scaling Further
-bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect near-linear scaling as we add parallel execution support. Our goal is to achieve 500K+ TPS on modern multi-core hardware.
+# TPC-C ディスカッション
+bench-tpcc-disc-faster-title = SQLiteより42倍高速
+bench-tpcc-disc-faster = VibeSQLは、SQLiteの約1,900 TPSと比較して<strong>約79,000トランザクション/秒</strong>を達成し、42倍の改善です。この劇的な高速化は、すべての書き込み操作でSQLiteの粗粒度ロックを回避するロックフリーMVCCアーキテクチャによるものです。
+bench-tpcc-disc-dominates-title = VibeSQLがOLTPで優位な理由
+bench-tpcc-disc-lockfree = MVCCにより、リーダーとライターがブロックなしで同時に進行可能
+bench-tpcc-disc-optimistic = トランザクションは実行中ではなくコミット時にのみ競合
+bench-tpcc-disc-btree = インメモリワークロード向けに最適化された専用インデックス構造
+bench-tpcc-disc-prepared = クエリプランは一度コンパイルされ再利用
+bench-tpcc-disc-scaling-title = さらなるスケーリング
+bench-tpcc-disc-scaling = 現在の結果はシングルスレッドです。VibeSQLのアーキテクチャはマルチスレッドトランザクション処理をサポートしており、並列実行サポートを追加することでほぼ線形のスケーリングが期待されます。目標は最新のマルチコアハードウェアで500K以上のTPSを達成することです。
 
-# Sysbench Embedded specific
-bench-sysbench-embedded-name = Sysbench (Embedded)
-bench-sysbench-embedded-title = Sysbench Micro-Benchmarks (Embedded)
-bench-sysbench-embedded-description = <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific database operations. These tests measure raw performance for fundamental operations without the complexity of full transaction workloads.
-bench-sysbench-embedded-ops-label = Sysbench operations
-bench-sysbench-embedded-note = Embedded mode runs the database in-process with zero network overhead, ideal for single-process applications where minimal latency is critical.
+# Sysbench組み込み固有
+bench-sysbench-embedded-name = Sysbench（組み込み）
+bench-sysbench-embedded-title = Sysbenchマイクロベンチマーク（組み込み）
+bench-sysbench-embedded-description = <strong>Sysbench</strong>は、特定のデータベース操作を分離するフォーカスされたマイクロベンチマークを提供します。これらのテストは、完全なトランザクションワークロードの複雑さなしに、基本的な操作の生のパフォーマンスを測定します。
+bench-sysbench-embedded-ops-label = Sysbench操作
+bench-sysbench-embedded-note = 組み込みモードは、ネットワークオーバーヘッドなしでプロセス内でデータベースを実行し、最小レイテンシが重要な単一プロセスアプリケーションに最適です。
 
-# Sysbench Operation Descriptions
-bench-sysbench-point-select = Point Select - Single row lookup by primary key
-bench-sysbench-insert = Insert - Insert new rows into table
-bench-sysbench-update-index = Update Index - Update indexed column (k = k + 1)
-bench-sysbench-update-non-index = Update Non-Index - Update non-indexed column
-bench-sysbench-delete = Delete - Remove rows by primary key
-bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
+# Sysbench操作説明
+bench-sysbench-point-select = ポイント選択 - プライマリキーによる単一行検索
+bench-sysbench-insert = 挿入 - テーブルへの新しい行の挿入
+bench-sysbench-update-index = インデックス更新 - インデックス付き列の更新（k = k + 1）
+bench-sysbench-update-non-index = 非インデックス更新 - 非インデックス列の更新
+bench-sysbench-delete = 削除 - プライマリキーによる行の削除
+bench-sysbench-range-queries = 範囲クエリ - シンプル、SUM、ORDER BY、DISTINCTの範囲スキャン
 
-# Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = Point Lookups: VibeSQL Leads
-bench-sysbench-emb-disc-point = VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
-bench-sysbench-emb-disc-index-title = Index Updates: 2x Faster
-bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design allows in-place index updates without write-ahead logging overhead for each operation.
-bench-sysbench-emb-disc-improve-title = Areas for Improvement
-bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
-bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need predicate pushdown optimization
-bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
-bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
-bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
+# Sysbench組み込みディスカッション
+bench-sysbench-emb-disc-point-title = ポイント検索: VibeSQLがリード
+bench-sysbench-emb-disc-point = VibeSQLの直接APIは<strong>ポイント選択あたり約137ns</strong>を達成し、SQLiteに匹敵し、DuckDB（約140µs）を大幅に上回ります。B-tree実装は、最小限のポインタチェイスとキャッシュフレンドリーなノードレイアウトで単一行検索に最適化されています。
+bench-sysbench-emb-disc-index-title = インデックス更新: 2倍高速
+bench-sysbench-emb-disc-index = VibeSQLのインデックス更新は<strong>約740ns vs SQLiteの約1.6µs</strong>で実行されます。MVCC設計により、各操作のwrite-aheadロギングオーバーヘッドなしでインプレースインデックス更新が可能です。
+bench-sysbench-emb-disc-improve-title = 改善領域
+bench-sysbench-emb-disc-bulk = SQLiteのバッチ挿入パスは高度に最適化されており、バッチB-tree操作を追加中
+bench-sysbench-emb-disc-nonindex = 非インデックス列のフルテーブルスキャンにはプレディケートプッシュダウン最適化が必要
+bench-sysbench-emb-disc-deletes = トゥームストーンベースの削除にはクリーンアップオーバーヘッドがあり、コンパクション改善を計画中
+bench-sysbench-emb-disc-duckdb-title = DuckDB比較
+bench-sysbench-emb-disc-duckdb = DuckDBは分析ワークロード向けに最適化されており、マイクロ操作向けではありません。ここでの100-1000倍遅い結果は、単一行レイテンシをバルクスループットと引き換えにするアーキテクチャの選択（列指向ストレージ、ベクトル化実行）を反映しています。VibeSQLは両方のユースケースを対象としています。
 
-# Sysbench Server specific
-bench-sysbench-server-name = Sysbench (Server)
-bench-sysbench-server-title = Sysbench Micro-Benchmarks (Server)
-bench-sysbench-server-description = <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol) against MySQL, measuring performance for multi-client database deployments.
-bench-sysbench-server-ops-label = Sysbench operations
-bench-sysbench-server-note = Server mode uses the PostgreSQL wire protocol, enabling multi-client access and compatibility with existing PostgreSQL tooling and drivers.
+# Sysbenchサーバー固有
+bench-sysbench-server-name = Sysbench（サーバー）
+bench-sysbench-server-title = Sysbenchマイクロベンチマーク（サーバー）
+bench-sysbench-server-description = <strong>Sysbench</strong>サーバーベンチマークは、VibeSQL Server（PostgreSQLワイヤープロトコル）とMySQLを比較し、マルチクライアントデータベースデプロイメントのパフォーマンスを測定します。
+bench-sysbench-server-ops-label = Sysbench操作
+bench-sysbench-server-note = サーバーモードはPostgreSQLワイヤープロトコルを使用し、マルチクライアントアクセスと既存のPostgreSQLツールやドライバーとの互換性を実現します。
 
-# Sysbench Server Discussion
-bench-sysbench-srv-disc-protocol-title = PostgreSQL Wire Protocol
-bench-sysbench-srv-disc-protocol = VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query compared to embedded mode, but enables multi-client deployments.
-bench-sysbench-srv-disc-mysql-title = MySQL Comparison
-bench-sysbench-srv-disc-mysql = Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement for traditional client-server databases. Results vary by operation type, with VibeSQL showing advantages in read-heavy workloads.
-bench-sysbench-srv-disc-roadmap-title = Server Roadmap
-bench-sysbench-srv-disc-pooling = Reduce connection establishment overhead for high-throughput scenarios
-bench-sysbench-srv-disc-caching = Server-side caching of query plans across connections
-bench-sysbench-srv-disc-extended = Full PostgreSQL extended query protocol support for batch operations
+# Sysbenchサーバーディスカッション
+bench-sysbench-srv-disc-protocol-title = PostgreSQLワイヤープロトコル
+bench-sysbench-srv-disc-protocol = VibeSQL ServerはPostgreSQLワイヤープロトコルを実装し、既存のPostgreSQLドライバーやツールとの互換性を実現します。これにより、組み込みモードと比較してクエリあたり約10-50µsのプロトコルオーバーヘッドが追加されますが、マルチクライアントデプロイメントが可能になります。
+bench-sysbench-srv-disc-mysql-title = MySQL比較
+bench-sysbench-srv-disc-mysql = サーバーベンチマークは、従来のクライアントサーバーデータベースの代替としてVibeSQLを評価するためにMySQLと比較します。結果は操作タイプによって異なり、VibeSQLは読み取り集中型ワークロードで優位性を示しています。
+bench-sysbench-srv-disc-roadmap-title = サーバーロードマップ
+bench-sysbench-srv-disc-pooling = 高スループットシナリオの接続確立オーバーヘッドを削減
+bench-sysbench-srv-disc-caching = 接続間でのクエリプランのサーバーサイドキャッシング
+bench-sysbench-srv-disc-extended = バッチ操作のための完全なPostgreSQL拡張クエリプロトコルサポート
 
-# Footprint Embedded specific
-bench-footprint-embedded-name = Footprint (Embedded)
-bench-footprint-embedded-title = Native Binary Footprint
-bench-footprint-embedded-description = <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries, comparing binary size, cold startup time, and peak memory usage.
-bench-footprint-embedded-ops-label = databases compared
-bench-footprint-embedded-note = Native binary footprint is critical for <strong>embedded and edge deployments</strong> where binary size, startup latency, and memory consumption directly impact deployment feasibility.
+# フットプリント組み込み固有
+bench-footprint-embedded-name = フットプリント（組み込み）
+bench-footprint-embedded-title = ネイティブバイナリフットプリント
+bench-footprint-embedded-description = <strong>組み込みフットプリントベンチマーク</strong>は、バイナリサイズ、コールドスタートアップ時間、ピークメモリ使用量を比較して、ネイティブデータベースバイナリのリソース効率を測定します。
+bench-footprint-embedded-ops-label = 比較データベース
+bench-footprint-embedded-note = ネイティブバイナリフットプリントは、バイナリサイズ、起動レイテンシ、メモリ消費がデプロイメントの実現可能性に直接影響する<strong>組み込みおよびエッジデプロイメント</strong>にとって重要です。
 
-# Footprint Embedded Descriptions
-bench-footprint-binary-size = Binary Size - Size of the compiled database binary on disk
-bench-footprint-startup-time = Startup Time - Time to cold-start and execute first query
-bench-footprint-peak-memory = Peak Memory - Maximum resident set size during initialization
+# フットプリント組み込み説明
+bench-footprint-binary-size = バイナリサイズ - ディスク上のコンパイル済みデータベースバイナリのサイズ
+bench-footprint-startup-time = 起動時間 - コールドスタートして最初のクエリを実行するまでの時間
+bench-footprint-peak-memory = ピークメモリ - 初期化中の最大常駐セットサイズ
 
-# Footprint Embedded Discussion
-bench-footprint-emb-disc-size-title = Binary Size: Middle Ground
-bench-footprint-emb-disc-size = VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects our choice to include advanced features (window functions, CTEs, columnar execution) while keeping the binary manageable for embedded deployments.
-bench-footprint-emb-disc-startup-title = Startup: Fastest Cold Start
-bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only essential metadata structures on startup.
-bench-footprint-emb-disc-memory-title = Memory Efficiency
-bench-footprint-emb-disc-memory = Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB. The difference from SQLite reflects our more sophisticated query optimizer and columnar execution infrastructure that's allocated upfront.
-bench-footprint-emb-disc-roadmap-title = Size Reduction Roadmap
-bench-footprint-emb-disc-flags = Compile-time feature selection to exclude unused functionality
-bench-footprint-emb-disc-lto = Whole-program link-time optimization for dead code elimination
-bench-footprint-emb-disc-modular = Separate core engine from optional features (e.g., window functions)
+# フットプリント組み込みディスカッション
+bench-footprint-emb-disc-size-title = バイナリサイズ: 中間
+bench-footprint-emb-disc-size = VibeSQLは<strong>約17MB</strong>で、SQLite（約5MB）とDuckDB（約45MB）の間に位置しています。これは、高度な機能（ウィンドウ関数、CTE、列指向実行）を含めつつ、組み込みデプロイメント向けにバイナリを管理可能に保つという選択を反映しています。
+bench-footprint-emb-disc-startup-title = 起動: 最速のコールドスタート
+bench-footprint-emb-disc-startup = VibeSQLは<strong>約7.7msのコールドスタート</strong>を達成し、SQLite（約8.2ms）よりわずかに速く、DuckDB（約14.6ms）より大幅に速いです。最小限の初期化パスは、起動時に必須のメタデータ構造のみをロードします。
+bench-footprint-emb-disc-memory-title = メモリ効率
+bench-footprint-emb-disc-memory = 起動時のピークメモリは、VibeSQLが約7MB、SQLiteが約3MB、DuckDBが約11MBです。SQLiteとの差は、事前に割り当てられるより洗練されたクエリオプティマイザと列指向実行インフラストラクチャを反映しています。
+bench-footprint-emb-disc-roadmap-title = サイズ削減ロードマップ
+bench-footprint-emb-disc-flags = 未使用機能を除外するためのコンパイル時機能選択
+bench-footprint-emb-disc-lto = デッドコード除去のためのプログラム全体のリンク時最適化
+bench-footprint-emb-disc-modular = コアエンジンとオプション機能（例：ウィンドウ関数）の分離
 
-# Footprint Server/WASM specific
-bench-footprint-server-name = Footprint (Server/WASM)
-bench-footprint-server-title = WASM Footprint
-bench-footprint-server-description = <strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment, critical for web applications where download size impacts user experience.
-bench-footprint-server-ops-label = deployment targets
-bench-footprint-server-note = WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.
-bench-footprint-server-note2 = <strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining full SQL:1999 compliance in the browser.
+# フットプリントサーバー/WASM固有
+bench-footprint-server-name = フットプリント（サーバー/WASM）
+bench-footprint-server-title = WASMフットプリント
+bench-footprint-server-description = <strong>WASMフットプリントベンチマーク</strong>は、ダウンロードサイズがユーザーエクスペリエンスに影響するWebアプリケーションにとって重要な、ブラウザデプロイメント用のWebAssemblyモジュールサイズを測定します。
+bench-footprint-server-ops-label = デプロイメントターゲット
+bench-footprint-server-note = WASMサイズは、ダウンロード時間がインタラクティブになるまでの時間に直接影響する<strong>Webデプロイメント</strong>にとって重要です。ブラウザはgzipコンテンツを自動的に解凍するため、gzipサイズが最も関連性があります。
+bench-footprint-server-note2 = <strong>注:</strong> VibeSQL WASMは、ブラウザでの完全なSQL:1999準拠を維持しながら、最小ダウンロードサイズ向けに設計されています。
 
-# Footprint Server Descriptions
-bench-footprint-wasm-size = WASM Size - Size of the WebAssembly module for browser deployment
-bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
+# フットプリントサーバー説明
+bench-footprint-wasm-size = WASMサイズ - ブラウザデプロイメント用WebAssemblyモジュールのサイズ
+bench-footprint-wasm-gzip = WASM (gzip) - Web配信用の圧縮サイズ
 
-# Footprint Server Discussion
-bench-footprint-srv-disc-wasm-title = WASM: 2.2MB Compressed
-bench-footprint-srv-disc-wasm = VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast initial page loads. This is a full SQL:1999 database with window functions, CTEs, and ACID transactions running entirely in the browser.
-bench-footprint-srv-disc-included-title = What's Included
-bench-footprint-srv-disc-parser = Complete SQL parser and query optimizer
-bench-footprint-srv-disc-btree = B-tree storage engine with MVCC
-bench-footprint-srv-disc-window = Window functions and advanced aggregations
-bench-footprint-srv-disc-cte = Common table expressions (WITH clause)
-bench-footprint-srv-disc-acid = Full ACID transaction support
-bench-footprint-srv-disc-benefits-title = Browser Deployment Benefits
-bench-footprint-srv-disc-benefits = Running SQL in the browser eliminates round-trip latency to servers, enables offline-first applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is designed for this use case with minimal dependencies and efficient memory usage.
-bench-footprint-srv-disc-roadmap-title = WASM Roadmap
-bench-footprint-srv-disc-streaming = Start executing while the module downloads
-bench-footprint-srv-disc-indexeddb = Durable storage across browser sessions
-bench-footprint-srv-disc-worker = Run queries off the main thread for responsive UIs
+# フットプリントサーバーディスカッション
+bench-footprint-srv-disc-wasm-title = WASM: 2.2MB圧縮
+bench-footprint-srv-disc-wasm = VibeSQLのWebAssemblyモジュールは<strong>gzip圧縮で約2.2MB</strong>で、高速な初期ページロードを実現します。これは、ウィンドウ関数、CTE、ACIDトランザクションを備えた完全なSQL:1999データベースがブラウザ内で完全に動作します。
+bench-footprint-srv-disc-included-title = 含まれるもの
+bench-footprint-srv-disc-parser = 完全なSQLパーサーとクエリオプティマイザ
+bench-footprint-srv-disc-btree = MVCCを備えたB-treeストレージエンジン
+bench-footprint-srv-disc-window = ウィンドウ関数と高度な集約
+bench-footprint-srv-disc-cte = 共通テーブル式（WITH句）
+bench-footprint-srv-disc-acid = 完全なACIDトランザクションサポート
+bench-footprint-srv-disc-benefits-title = ブラウザデプロイメントの利点
+bench-footprint-srv-disc-benefits = ブラウザでSQLを実行することで、サーバーへのラウンドトリップレイテンシが排除され、オフラインファーストアプリケーションが可能になり、機密データがユーザーのデバイスに保持されます。VibeSQLのWASMビルドは、最小限の依存関係と効率的なメモリ使用でこのユースケース向けに設計されています。
+bench-footprint-srv-disc-roadmap-title = WASMロードマップ
+bench-footprint-srv-disc-streaming = モジュールのダウンロード中に実行を開始
+bench-footprint-srv-disc-indexeddb = ブラウザセッション間の永続ストレージ
+bench-footprint-srv-disc-worker = レスポンシブUIのためのメインスレッド外でのクエリ実行
 
-# Bullet point labels (used with descriptions)
-bench-bullet-join-ordering = Join ordering
-bench-bullet-hash-sizing = Hash table sizing
-bench-bullet-vectorized = Vectorized joins
-bench-bullet-inl-joins = Index-nested-loop joins
-bench-bullet-cte-materialization = CTE materialization
-bench-bullet-decorrelation = Subquery decorrelation
-bench-bullet-star-optimization = Star schema optimization
-bench-bullet-lock-free = Lock-free reads
-bench-bullet-optimistic = Optimistic concurrency
-bench-bullet-btree = In-memory B-tree
-bench-bullet-prepared = Prepared statement caching
-bench-bullet-bulk-inserts = Bulk inserts
-bench-bullet-non-indexed = Non-indexed updates
-bench-bullet-deletes = Deletes
-bench-bullet-connection-pooling = Connection pooling
-bench-bullet-stmt-caching = Prepared statement caching
-bench-bullet-extended-protocol = Extended query protocol
-bench-bullet-feature-flags = Feature flags
-bench-bullet-lto = LTO optimization
-bench-bullet-modular = Modular builds
-bench-bullet-streaming = Streaming compilation
-bench-bullet-indexeddb = IndexedDB persistence
-bench-bullet-worker = Worker thread support
+# 箇条書きラベル（説明と共に使用）
+bench-bullet-join-ordering = 結合順序
+bench-bullet-hash-sizing = ハッシュテーブルサイジング
+bench-bullet-vectorized = ベクトル化結合
+bench-bullet-inl-joins = インデックスネステッドループ結合
+bench-bullet-cte-materialization = CTEマテリアライゼーション
+bench-bullet-decorrelation = サブクエリ非相関化
+bench-bullet-star-optimization = スタースキーマ最適化
+bench-bullet-lock-free = ロックフリー読み取り
+bench-bullet-optimistic = 楽観的同時実行制御
+bench-bullet-btree = インメモリB-tree
+bench-bullet-prepared = プリペアドステートメントキャッシング
+bench-bullet-bulk-inserts = バルク挿入
+bench-bullet-non-indexed = 非インデックス更新
+bench-bullet-deletes = 削除
+bench-bullet-connection-pooling = コネクションプーリング
+bench-bullet-stmt-caching = プリペアドステートメントキャッシング
+bench-bullet-extended-protocol = 拡張クエリプロトコル
+bench-bullet-feature-flags = 機能フラグ
+bench-bullet-lto = LTO最適化
+bench-bullet-modular = モジュラービルド
+bench-bullet-streaming = ストリーミングコンパイル
+bench-bullet-indexeddb = IndexedDB永続化
+bench-bullet-worker = ワーカースレッドサポート
 
 # =============================================================================
-# Conformance Page
+# 準拠ページ
 # =============================================================================
 
-# Overview section
-conformance-sql-conformance = SQL Conformance
-conformance-testing-against = Testing against SQLLogicTest - the industry standard SQL test suite
-conformance-full-pass-rate = 100% File Pass Rate Achieved!
-conformance-tests-passing = Tests Passing
-conformance-files-passing = Files Passing
-conformance-loading = Loading conformance report...
-conformance-error-loading = Error Loading Report
-conformance-no-data = No conformance data available
+# 概要セクション
+conformance-sql-conformance = SQL準拠
+conformance-testing-against = 業界標準のSQLテストスイートであるSQLLogicTestに対するテスト
+conformance-full-pass-rate = 100%ファイルパス率達成！
+conformance-tests-passing = テストパス
+conformance-files-passing = ファイルパス
+conformance-loading = 準拠レポートを読み込み中...
+conformance-error-loading = レポート読み込みエラー
+conformance-no-data = 準拠データがありません
 
-# Category breakdown
-conformance-category-title = Test Coverage by Category
-conformance-category-header = Category
-conformance-pass-rate-header = Pass Rate
-conformance-progress-header = Progress
-conformance-tests-header = Tests
-conformance-cat-select = SELECT Queries
-conformance-cat-aggregates = Aggregates
-conformance-cat-joins = JOINs
-conformance-cat-expressions = Expressions
-conformance-cat-subqueries = Subqueries
-conformance-cat-index = Index Operations
-conformance-cat-ddl = DDL Statements
-conformance-cat-evidence = Evidence Tests
-conformance-cat-random = Random Tests
-conformance-cat-other = Other Tests
+# カテゴリ内訳
+conformance-category-title = カテゴリ別テストカバレッジ
+conformance-category-header = カテゴリ
+conformance-pass-rate-header = パス率
+conformance-progress-header = 進捗
+conformance-tests-header = テスト
+conformance-cat-select = SELECTクエリ
+conformance-cat-aggregates = 集約
+conformance-cat-joins = JOIN
+conformance-cat-expressions = 式
+conformance-cat-subqueries = サブクエリ
+conformance-cat-index = インデックス操作
+conformance-cat-ddl = DDLステートメント
+conformance-cat-evidence = エビデンステスト
+conformance-cat-random = ランダムテスト
+conformance-cat-other = その他のテスト
 
-# Timeline
-conformance-timeline-title = Pass Rate History
-conformance-timeline-desc = Conformance progress over the last 90 days
-conformance-timeline-loading = Loading chart data...
+# タイムライン
+conformance-timeline-title = パス率履歴
+conformance-timeline-desc = 過去90日間の準拠進捗
+conformance-timeline-loading = チャートデータを読み込み中...
 
-# Milestones
-conformance-milestones-title = Milestones
+# マイルストーン
+conformance-milestones-title = マイルストーン
 
-# Running tests locally
-conformance-running-locally-title = Running Tests Locally
-conformance-run-sqltest = # Run SQL:1999 conformance tests
-conformance-run-sqllogictest = # Run SQLLogicTest suite (takes hours)
-conformance-generate-coverage = # Generate coverage report
-conformance-open-coverage = # Open coverage report
+# ローカルでのテスト実行
+conformance-running-locally-title = ローカルでのテスト実行
+conformance-run-sqltest = # SQL:1999準拠テストを実行
+conformance-run-sqllogictest = # SQLLogicTestスイートを実行（数時間かかります）
+conformance-generate-coverage = # カバレッジレポートを生成
+conformance-open-coverage = # カバレッジレポートを開く
 
