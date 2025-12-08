@@ -289,19 +289,16 @@ VibeSQL includes extensive built-in profiling via environment variables. These p
 | `VIBESQL_PROFILE=1` | Enable general query profiling output |
 | `JOIN_PROFILE=1` | Profile join execution with timing breakdown |
 | `JOIN_REORDER_VERBOSE=1` | Log join reordering decisions and costs |
-| `TABLE_SCAN_DEBUG=1` | Debug table scan operations |
-| `COLUMNAR_DEBUG=1` | Debug columnar execution path |
-| `SIMD_DEBUG=1` | Debug SIMD vectorization |
+| `TABLE_SCAN_DEBUG=1` | Log index vs table scan path selection |
+| `COLUMNAR_DEBUG=1` | Log columnar filter optimization decisions |
 
 ### Index Operations
 
 | Variable | Description |
 |----------|-------------|
-| `INDEX_SELECT_DEBUG=1` | Debug index selection decisions |
+| `INDEX_SELECT_DEBUG=1` | Log index selection decisions with selectivity |
 | `RANGE_SCAN_PROFILE=1` | Profile range scan timing |
 | `RANGE_QUERY_BREAKDOWN=1` | Detailed range query timing |
-| `INL_DEBUG=1` | Debug index nested loop joins |
-| `JOIN_SCAN_DEBUG=1` | Debug join scan operations |
 
 ### DML Operations
 
@@ -310,7 +307,7 @@ VibeSQL includes extensive built-in profiling via environment variables. These p
 | `DELETE_PROFILE=1` | Collect delete timing statistics |
 | `DELETE_PROFILE_VERBOSE=1` | Per-delete timing breakdown |
 | `DELETE_PROFILE_SUMMARY=1` | Aggregate summary on thread exit |
-| `DML_COST_DEBUG=1` | Log DML cost estimation |
+| `DML_COST_DEBUG=1` | Log DML cost estimation decisions |
 
 ### Query Optimization
 
@@ -318,7 +315,6 @@ VibeSQL includes extensive built-in profiling via environment variables. These p
 |----------|-------------|
 | `SUBQUERY_TRANSFORM_VERBOSE=1` | Log subquery-to-join transformations |
 | `TABLE_ELIM_VERBOSE=1` | Log table elimination decisions |
-| `SEMI_JOIN_DEBUG=1` | Debug semi-join execution |
 
 ### Benchmark Controls
 
@@ -340,7 +336,7 @@ JOIN_PROFILE=1 JOIN_REORDER_VERBOSE=1 \
   ./target/release/deps/tpch_profiling-* Q13
 
 # Debug index selection for TPC-C
-INDEX_SELECT_DEBUG=1 INL_DEBUG=1 \
+INDEX_SELECT_DEBUG=1 \
   TPCC_SCALE_FACTOR=1 TPCC_DURATION_SECS=5 \
   ./target/release/deps/tpcc_benchmark-*
 ```

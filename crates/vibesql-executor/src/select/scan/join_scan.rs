@@ -97,12 +97,6 @@ where
     // When left side is small, use index lookups on right table instead of scanning all rows
     if matches!(join_type, vibesql_ast::JoinType::Semi) {
         let left_row_count = left_result.as_slice().len();
-        if std::env::var("INL_DEBUG").is_ok() {
-            eprintln!(
-                "[INL] SEMI join detected, left_row_count={}, threshold={}",
-                left_row_count, INL_THRESHOLD
-            );
-        }
         if left_row_count > 0 && left_row_count < INL_THRESHOLD {
             if let Some(result) =
                 try_index_nested_loop_semi_join(&left_result, right, condition, database)?
@@ -379,15 +373,6 @@ fn extract_right_only_predicates(
         return None;
     }
 
-    // Debug output
-    if std::env::var("JOIN_SCAN_DEBUG").is_ok() {
-        eprintln!(
-            "[JOIN_SCAN] Extracted {} right-only predicates for tables {:?}",
-            right_only_predicates.len(),
-            right_tables
-        );
-    }
-
     // Combine predicates with AND
     combine_with_and(right_only_predicates)
 }
@@ -478,17 +463,6 @@ fn filter_out_nullable_side_predicates(
         })
         .collect();
 
-    // Debug output
-    if std::env::var("JOIN_SCAN_DEBUG").is_ok() {
-        let original_count = flatten_conjuncts(where_expr).len();
-        eprintln!(
-            "[JOIN_SCAN] filter_out_nullable_side_predicates: kept {}/{} predicates, nullable tables: {:?}",
-            kept_predicates.len(),
-            original_count,
-            nullable_tables
-        );
-    }
-
     // Combine remaining predicates with AND (returns None if empty)
     combine_with_and(kept_predicates)
 }
@@ -572,71 +546,32 @@ fn try_index_nested_loop_semi_join(
     condition: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
 ) -> Result<Option<super::FromResult>, ExecutorError> {
-    let debug = std::env::var("INL_DEBUG").is_ok();
-
-    if debug {
-        eprintln!("[INL] try_index_nested_loop_semi_join called");
-    }
-
     // Must have a join condition
     let cond = match condition {
         Some(c) => c,
-        None => {
-            if debug {
-                eprintln!("[INL] No condition, returning None");
-            }
-            return Ok(None);
-        }
+        None => return Ok(None),
     };
 
     // Right side must be a simple table (not a join or subquery)
     let (right_table_name, _right_alias) = match right_from {
         vibesql_ast::FromClause::Table { name, alias, .. } => (name.clone(), alias.clone()),
-        _ => {
-            if debug {
-                eprintln!("[INL] Right side is not a simple table");
-            }
-            return Ok(None); // Complex right side, can't use INL
-        }
+        _ => return Ok(None), // Complex right side, can't use INL
     };
-
-    if debug {
-        eprintln!("[INL] Right table: {}", right_table_name);
-    }
 
     // Get the right table
     let right_table = match database.get_table(&right_table_name) {
         Some(t) => t,
-        None => {
-            if debug {
-                eprintln!("[INL] Table not found: {}", right_table_name);
-            }
-            return Ok(None);
-        }
+        None => return Ok(None),
     };
 
     // Parse the join condition to extract:
     // 1. The equi-join columns (left_col = right_col)
     // 2. Additional filter predicates on the right table
     let (equi_join, right_filters) =
-        match parse_semi_join_condition(cond, left_result, &right_table_name, debug) {
+        match parse_semi_join_condition(cond, left_result, &right_table_name) {
             Some(parsed) => parsed,
-            None => {
-                if debug {
-                    eprintln!("[INL] parse_semi_join_condition returned None");
-                }
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
-
-    if debug {
-        eprintln!(
-            "[INL] Parsed condition: left_col={}, right_col={}, has_right_filters={}",
-            equi_join.left_col,
-            equi_join.right_col,
-            right_filters.is_some()
-        );
-    }
 
     // Check if the right table has a usable index for point lookups
     // We need an index that starts with the join key column
@@ -653,26 +588,13 @@ fn try_index_nested_loop_semi_join(
     let constant_prefix =
         extract_constant_prefix_for_pk(&right_filters, &pk_columns, &equi_join.right_col);
 
-    if debug {
-        eprintln!("[INL] PK columns: {:?}, constant_prefix: {:?}", pk_columns, constant_prefix);
-    }
-
     // Build the index lookup key template
     // For Stock-Level: key = [s_w_id (from filter), s_i_id (from join)]
     let lookup_key_template =
         match build_lookup_key_template(&pk_columns, &equi_join.right_col, &constant_prefix) {
             Some(template) => template,
-            None => {
-                if debug {
-                    eprintln!("[INL] Cannot build lookup key template, falling back to hash join");
-                }
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
-
-    if debug {
-        eprintln!("[INL] Using INL with lookup_key_template: {:?}", lookup_key_template);
-    }
 
     // Get the primary key index
     let pk_index = match right_table.primary_key_index() {
@@ -745,14 +667,6 @@ fn try_index_nested_loop_semi_join(
         }
     }
 
-    if debug {
-        eprintln!(
-            "[INL] Found {} matching keys out of {} distinct left keys",
-            matching_keys.len(),
-            seen_keys.len()
-        );
-    }
-
     // Build result: all left rows whose join key is in matching_keys
     let result_rows: Vec<vibesql_storage::Row> = left_slice
         .iter()
@@ -777,20 +691,11 @@ fn parse_semi_join_condition(
     cond: &vibesql_ast::Expression,
     left_result: &super::FromResult,
     right_table_name: &str,
-    debug: bool,
 ) -> Option<(EquiJoinInfo, Option<vibesql_ast::Expression>)> {
     let conjuncts = flatten_conjuncts(cond);
 
-    if debug {
-        eprintln!("[INL] Parsing condition with {} conjuncts", conjuncts.len());
-    }
-
     let left_tables: HashSet<String> =
         left_result.schema.table_schemas.keys().map(|s| s.to_uppercase()).collect();
-
-    if debug {
-        eprintln!("[INL] Left tables: {:?}", left_tables);
-    }
 
     let right_table_upper = right_table_name.to_uppercase();
 
@@ -798,10 +703,6 @@ fn parse_semi_join_condition(
     let mut right_only_preds: Vec<vibesql_ast::Expression> = Vec::new();
 
     for pred in conjuncts {
-        if debug {
-            eprintln!("[INL] Analyzing predicate: {:?}", pred);
-        }
-
         // Check if this is an equi-join predicate (col1 = col2)
         if let vibesql_ast::Expression::BinaryOp {
             left,
@@ -819,14 +720,6 @@ fn parse_semi_join_condition(
                 let right_tbl_upper = right_tbl.as_ref().map(|s| s.to_uppercase());
 
                 let left_col_upper = left_col.to_uppercase();
-                let _right_col_upper = right_col.to_uppercase();
-
-                if debug {
-                    eprintln!(
-                        "[INL] Found column=column eq: left=({:?}, {}), right=({:?}, {})",
-                        left_tbl_upper, left_col, right_tbl_upper, right_col
-                    );
-                }
 
                 // Check if left_col is from left tables and right_col is from right table
                 // When table qualifier is None, check if column exists in any left table's schema
@@ -837,13 +730,6 @@ fn parse_semi_join_condition(
                         });
                 let right_is_right =
                     right_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
-
-                if debug {
-                    eprintln!(
-                        "[INL] left_is_left={}, right_is_right={}",
-                        left_is_left, right_is_right
-                    );
-                }
 
                 if left_is_left && right_is_right && equi_join.is_none() {
                     equi_join = Some(EquiJoinInfo {
@@ -872,10 +758,6 @@ fn parse_semi_join_condition(
         // Check if this predicate references only the right table
         // (We'll add it to right_only_preds)
         right_only_preds.push(pred);
-    }
-
-    if debug && equi_join.is_none() {
-        eprintln!("[INL] No equi-join predicate found");
     }
 
     equi_join.map(|ej| {
