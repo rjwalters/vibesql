@@ -41,6 +41,11 @@ Configuration values are resolved in this order (highest to lowest priority):
 | `VIBESQL_HTTP_ENABLED` | `http.enabled` | `true` |
 | `VIBESQL_HTTP_HOST` | `http.host` | `0.0.0.0` |
 | `VIBESQL_HTTP_PORT` | `http.port` | `8080` |
+| `VIBESQL_HTTP_AUTH_ENABLED` | `http.auth.enabled` | `true` |
+| `VIBESQL_HTTP_AUTH_JWT_SECRET` | `http.auth.jwt.secret` | `your-secret-key` |
+| `VIBESQL_HTTP_AUTH_JWT_ISSUER` | `http.auth.jwt.issuer` | `vibesql` |
+| `VIBESQL_HTTP_AUTH_JWT_AUDIENCE` | `http.auth.jwt.audience` | `vibesql-api` |
+| `VIBESQL_HTTP_AUTH_JWT_EXPIRATION` | `http.auth.jwt.expiration_secs` | `3600` |
 
 ### Boolean Values
 
@@ -87,6 +92,18 @@ spec:
         configMapKeyRef:
           name: vibesql-config
           key: log-level
+    # JWT configuration - inject secrets securely
+    - name: VIBESQL_HTTP_AUTH_ENABLED
+      value: "true"
+    - name: VIBESQL_HTTP_AUTH_JWT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: vibesql-secrets
+          key: jwt-secret
+    - name: VIBESQL_HTTP_AUTH_JWT_ISSUER
+      value: "vibesql"
+    - name: VIBESQL_HTTP_AUTH_JWT_AUDIENCE
+      value: "vibesql-api"
 ```
 
 ## Configuration Format
