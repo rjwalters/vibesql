@@ -37,6 +37,7 @@ curl http://localhost:8080/api/tables/users/rows?limit=10
 | `/api/storage/:id` | GET | Download blob |
 | `/api/storage/:id` | DELETE | Delete blob |
 | `/api/storage/:id/metadata` | GET | Get blob metadata |
+| `/stats/subscriptions/efficiency` | GET | Subscription partial update efficiency stats |
 
 ## SQL Query Endpoint
 
@@ -358,6 +359,57 @@ GET /api/tables/users
 }
 ```
 
+## Stats Endpoints
+
+### Subscription Efficiency Stats
+
+Get metrics about subscription partial update efficiency:
+
+```bash
+GET /stats/subscriptions/efficiency
+```
+
+**Response (200 OK):**
+```json
+{
+  "partial_update_efficiency": 0.72,
+  "total_bytes_saved": 1234567,
+  "fallbacks": {
+    "disabled": 0,
+    "threshold_exceeded": 42,
+    "row_count_mismatch": 15,
+    "pk_mismatch": 3,
+    "no_changes": 100
+  },
+  "partial_updates_sent": 5000,
+  "full_updates_sent": 200
+}
+```
+
+**Response (503 Service Unavailable):**
+
+Returned when metrics are not available (server started without metrics enabled).
+
+```json
+{
+  "error": "Metrics not available"
+}
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `partial_update_efficiency` | float | Ratio of columns NOT sent (bandwidth saved), 0.0-1.0 |
+| `total_bytes_saved` | u64 | Cumulative bytes saved by partial updates |
+| `fallbacks.disabled` | u64 | Fallbacks due to partial updates being disabled |
+| `fallbacks.threshold_exceeded` | u64 | Fallbacks due to changed column ratio exceeding threshold |
+| `fallbacks.row_count_mismatch` | u64 | Fallbacks due to row count mismatch |
+| `fallbacks.pk_mismatch` | u64 | Fallbacks due to primary key mismatch |
+| `fallbacks.no_changes` | u64 | Updates where no columns changed |
+| `partial_updates_sent` | u64 | Total partial updates sent |
+| `full_updates_sent` | u64 | Total full updates sent (fallbacks) |
+
 ## Error Handling
 
 All endpoints return consistent error responses:
@@ -377,6 +429,7 @@ All endpoints return consistent error responses:
 - `400` - Bad request (invalid query/parameters)
 - `404` - Not found (table or row doesn't exist)
 - `500` - Internal server error
+- `503` - Service unavailable (metrics not enabled)
 
 ## Configuration
 
