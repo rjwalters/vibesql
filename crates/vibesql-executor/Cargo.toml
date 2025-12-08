@@ -21,7 +21,7 @@ rayon = { version = "1.10", optional = true }
 indexmap = "2.0"
 hex = "0.4"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
-geo = { version = "0.31", optional = true }
+geo = { version = "0.32", optional = true }
 wkt = { version = "0.14", optional = true }
 rstar = { version = "0.12", optional = true }
 lru = "0.16"

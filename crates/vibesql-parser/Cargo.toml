@@ -17,7 +17,7 @@ bumpalo = { version = "3.16", features = ["collections"] }
 arcstr = "1.2"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "parser_benchmark"
