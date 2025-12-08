@@ -13,9 +13,9 @@ use crate::errors::ExecutorError;
 
 // Re-export public types and functions
 pub(super) use comparison::parse_date_string;
-pub use evaluation::{evaluate_predicate, evaluate_predicate_tree};
+pub use evaluation::{evaluate_column_compare, evaluate_predicate, evaluate_predicate_tree};
 pub use predicates::{
-    extract_column_predicates, extract_predicate_tree, ColumnPredicate, PredicateTree,
+    extract_column_predicates, extract_predicate_tree, ColumnPredicate, CompareOp, PredicateTree,
 };
 
 /// Apply a filter to row indices based on a predicate tree
@@ -93,6 +93,19 @@ where
     // Evaluate each row against all predicates (AND logic)
     for row_idx in 0..row_count {
         for predicate in predicates.iter() {
+            // Handle ColumnCompare specially - needs two column values
+            if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } =
+                predicate
+            {
+                let left_val = get_value(row_idx, *left_column_idx);
+                let right_val = get_value(row_idx, *right_column_idx);
+                if !evaluate_column_compare(*op, left_val, right_val) {
+                    bitmap[row_idx] = false;
+                    break;
+                }
+                continue;
+            }
+
             let column_idx = match predicate {
                 ColumnPredicate::LessThan { column_idx, .. } => *column_idx,
                 ColumnPredicate::GreaterThan { column_idx, .. } => *column_idx,
@@ -103,6 +116,7 @@ where
                 ColumnPredicate::Between { column_idx, .. } => *column_idx,
                 ColumnPredicate::Like { column_idx, .. } => *column_idx,
                 ColumnPredicate::InList { column_idx, .. } => *column_idx,
+                ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
             };
 
             if let Some(value) = get_value(row_idx, column_idx) {

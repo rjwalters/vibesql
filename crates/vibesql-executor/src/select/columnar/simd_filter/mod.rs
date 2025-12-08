@@ -15,7 +15,7 @@ mod mask;
 mod string;
 
 use super::batch::{ColumnArray, ColumnarBatch};
-use super::filter::ColumnPredicate;
+use super::filter::{evaluate_column_compare, ColumnPredicate, CompareOp};
 use super::simd_ops::{self, PackedMask};
 use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
@@ -46,6 +46,9 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         ColumnPredicate::InList { values, .. } => {
             values.iter().any(|v| matches!(v, SqlValue::Null))
         }
+        // Column-to-column comparisons don't have literal NULLs
+        // (NULL columns are handled during evaluation)
+        ColumnPredicate::ColumnCompare { .. } => false,
     }
 }
 
@@ -159,6 +162,12 @@ fn evaluate_predicate_simd_packed(
         return Ok(PackedMask::new_all_clear(batch.row_count()));
     }
 
+    // Handle ColumnCompare specially - needs two columns
+    if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
+        let bool_mask = evaluate_column_compare_simd(batch, *left_column_idx, *op, *right_column_idx)?;
+        return Ok(PackedMask::from_bool_slice(&bool_mask));
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -169,6 +178,7 @@ fn evaluate_predicate_simd_packed(
         | ColumnPredicate::Between { column_idx, .. }
         | ColumnPredicate::Like { column_idx, .. }
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
+        ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -216,6 +226,11 @@ fn evaluate_predicate_simd(
         return Ok(vec![false; batch.row_count()]);
     }
 
+    // Handle ColumnCompare specially - needs two columns
+    if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
+        return evaluate_column_compare_simd(batch, *left_column_idx, *op, *right_column_idx);
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -226,6 +241,7 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::Between { column_idx, .. }
         | ColumnPredicate::Like { column_idx, .. }
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
+        ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -267,6 +283,278 @@ fn evaluate_predicate_simd(
         // Scalar fallback for other column types
         _ => evaluate_predicate_scalar(batch, predicate, column_idx),
     }
+}
+
+/// Evaluate a column-to-column comparison using vectorized operations where possible
+///
+/// This is the main optimization for predicates like `l_commitdate < l_receiptdate` in TPC-H Q4.
+/// For Date columns (i32), this uses a tight scalar loop that the compiler can auto-vectorize.
+fn evaluate_column_compare_simd(
+    batch: &ColumnarBatch,
+    left_column_idx: usize,
+    op: CompareOp,
+    right_column_idx: usize,
+) -> Result<Vec<bool>, ExecutorError> {
+    let row_count = batch.row_count();
+
+    let left_column =
+        batch.column(left_column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: left_column_idx,
+            batch_columns: batch.column_count(),
+        })?;
+
+    let right_column =
+        batch.column(right_column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: right_column_idx,
+            batch_columns: batch.column_count(),
+        })?;
+
+    // Try SIMD path for matching column types
+    match (left_column, right_column) {
+        // Date columns (i32) - common case for TPC-H Q4 (l_commitdate < l_receiptdate)
+        (ColumnArray::Date(left_values, left_nulls), ColumnArray::Date(right_values, right_nulls)) => {
+            evaluate_column_compare_i32_simd(
+                left_values,
+                left_nulls.as_ref().map(|n| n.as_slice()),
+                op,
+                right_values,
+                right_nulls.as_ref().map(|n| n.as_slice()),
+            )
+        }
+
+        // Int64 columns
+        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, right_nulls)) => {
+            evaluate_column_compare_i64_simd(
+                left_values,
+                left_nulls.as_ref().map(|n| n.as_slice()),
+                op,
+                right_values,
+                right_nulls.as_ref().map(|n| n.as_slice()),
+            )
+        }
+
+        // Float64 columns
+        (ColumnArray::Float64(left_values, left_nulls), ColumnArray::Float64(right_values, right_nulls)) => {
+            evaluate_column_compare_f64_simd(
+                left_values,
+                left_nulls.as_ref().map(|n| n.as_slice()),
+                op,
+                right_values,
+                right_nulls.as_ref().map(|n| n.as_slice()),
+            )
+        }
+
+        // Timestamp columns (i64)
+        (ColumnArray::Timestamp(left_values, left_nulls), ColumnArray::Timestamp(right_values, right_nulls)) => {
+            evaluate_column_compare_i64_simd(
+                left_values,
+                left_nulls.as_ref().map(|n| n.as_slice()),
+                op,
+                right_values,
+                right_nulls.as_ref().map(|n| n.as_slice()),
+            )
+        }
+
+        // Fallback to scalar evaluation for other types or mismatched types
+        _ => {
+            let mut result = Vec::with_capacity(row_count);
+            for row_idx in 0..row_count {
+                let left_val = batch.get_value(row_idx, left_column_idx)?;
+                let right_val = batch.get_value(row_idx, right_column_idx)?;
+                let passes = evaluate_column_compare(op, Some(&left_val), Some(&right_val));
+                result.push(passes);
+            }
+            Ok(result)
+        }
+    }
+}
+
+/// Evaluate column-to-column comparison for i32 arrays (Date columns)
+/// Uses a tight loop that LLVM can auto-vectorize
+fn evaluate_column_compare_i32_simd(
+    left_values: &[i32],
+    left_nulls: Option<&[bool]>,
+    op: CompareOp,
+    right_values: &[i32],
+    right_nulls: Option<&[bool]>,
+) -> Result<Vec<bool>, ExecutorError> {
+    let len = left_values.len();
+    let mut result = vec![false; len];
+
+    // Pre-compute null masks
+    let has_left_nulls = left_nulls.is_some();
+    let has_right_nulls = right_nulls.is_some();
+
+    match op {
+        CompareOp::LessThan => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] < right_values[i];
+            }
+        }
+        CompareOp::GreaterThan => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] > right_values[i];
+            }
+        }
+        CompareOp::LessThanOrEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] <= right_values[i];
+            }
+        }
+        CompareOp::GreaterThanOrEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] >= right_values[i];
+            }
+        }
+        CompareOp::Equal => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] == right_values[i];
+            }
+        }
+        CompareOp::NotEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] != right_values[i];
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Evaluate column-to-column comparison for i64 arrays
+fn evaluate_column_compare_i64_simd(
+    left_values: &[i64],
+    left_nulls: Option<&[bool]>,
+    op: CompareOp,
+    right_values: &[i64],
+    right_nulls: Option<&[bool]>,
+) -> Result<Vec<bool>, ExecutorError> {
+    let len = left_values.len();
+    let mut result = vec![false; len];
+
+    let has_left_nulls = left_nulls.is_some();
+    let has_right_nulls = right_nulls.is_some();
+
+    match op {
+        CompareOp::LessThan => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] < right_values[i];
+            }
+        }
+        CompareOp::GreaterThan => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] > right_values[i];
+            }
+        }
+        CompareOp::LessThanOrEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] <= right_values[i];
+            }
+        }
+        CompareOp::GreaterThanOrEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] >= right_values[i];
+            }
+        }
+        CompareOp::Equal => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] == right_values[i];
+            }
+        }
+        CompareOp::NotEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] != right_values[i];
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Evaluate column-to-column comparison for f64 arrays
+fn evaluate_column_compare_f64_simd(
+    left_values: &[f64],
+    left_nulls: Option<&[bool]>,
+    op: CompareOp,
+    right_values: &[f64],
+    right_nulls: Option<&[bool]>,
+) -> Result<Vec<bool>, ExecutorError> {
+    let len = left_values.len();
+    let mut result = vec![false; len];
+
+    let has_left_nulls = left_nulls.is_some();
+    let has_right_nulls = right_nulls.is_some();
+
+    match op {
+        CompareOp::LessThan => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] < right_values[i];
+            }
+        }
+        CompareOp::GreaterThan => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] > right_values[i];
+            }
+        }
+        CompareOp::LessThanOrEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] <= right_values[i];
+            }
+        }
+        CompareOp::GreaterThanOrEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] >= right_values[i];
+            }
+        }
+        CompareOp::Equal => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] == right_values[i];
+            }
+        }
+        CompareOp::NotEqual => {
+            for i in 0..len {
+                let is_null = (has_left_nulls && left_nulls.unwrap()[i])
+                    || (has_right_nulls && right_nulls.unwrap()[i]);
+                result[i] = !is_null && left_values[i] != right_values[i];
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// Scalar fallback for non-numeric columns
@@ -676,5 +964,171 @@ mod tests {
 
         // All 3 rows should pass all predicates
         assert_eq!(filtered.row_count(), 3, "All rows should pass from_storage_columnar path");
+    }
+
+    /// Test column-to-column comparison for Date columns (TPC-H Q4 pattern)
+    #[test]
+    fn test_simd_filter_column_compare_date() {
+        use vibesql_types::Date;
+
+        // Test case: l_commitdate < l_receiptdate (TPC-H Q4 pattern)
+        // Two date columns where we compare values within the same row
+        let rows = vec![
+            // Row 0: commitdate < receiptdate -> passes
+            Row::new(vec![
+                SqlValue::Date(Date { year: 1994, month: 6, day: 10 }), // commitdate
+                SqlValue::Date(Date { year: 1994, month: 6, day: 20 }), // receiptdate
+            ]),
+            // Row 1: commitdate == receiptdate -> fails
+            Row::new(vec![
+                SqlValue::Date(Date { year: 1994, month: 6, day: 15 }),
+                SqlValue::Date(Date { year: 1994, month: 6, day: 15 }),
+            ]),
+            // Row 2: commitdate > receiptdate -> fails
+            Row::new(vec![
+                SqlValue::Date(Date { year: 1994, month: 6, day: 25 }),
+                SqlValue::Date(Date { year: 1994, month: 6, day: 20 }),
+            ]),
+            // Row 3: commitdate < receiptdate -> passes
+            Row::new(vec![
+                SqlValue::Date(Date { year: 1995, month: 1, day: 5 }),
+                SqlValue::Date(Date { year: 1995, month: 3, day: 10 }),
+            ]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Filter: col0 < col1 (commitdate < receiptdate)
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::LessThan,
+            right_column_idx: 1,
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match rows 0 and 3
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    /// Test column-to-column comparison for Int64 columns
+    #[test]
+    fn test_simd_filter_column_compare_int64() {
+        let rows = vec![
+            // Row 0: 5 < 10 -> passes
+            Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(10)]),
+            // Row 1: 10 < 10 -> fails
+            Row::new(vec![SqlValue::Integer(10), SqlValue::Integer(10)]),
+            // Row 2: 15 < 10 -> fails
+            Row::new(vec![SqlValue::Integer(15), SqlValue::Integer(10)]),
+            // Row 3: 3 < 20 -> passes
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(20)]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::LessThan,
+            right_column_idx: 1,
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match rows 0 and 3
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    /// Test column-to-column comparison with NULL handling
+    #[test]
+    fn test_simd_filter_column_compare_with_nulls() {
+        use vibesql_types::Date;
+
+        let rows = vec![
+            // Row 0: commitdate < receiptdate -> passes
+            Row::new(vec![
+                SqlValue::Date(Date { year: 1994, month: 6, day: 10 }),
+                SqlValue::Date(Date { year: 1994, month: 6, day: 20 }),
+            ]),
+            // Row 1: NULL < receiptdate -> fails (NULL comparison)
+            Row::new(vec![SqlValue::Null, SqlValue::Date(Date { year: 1994, month: 6, day: 20 })]),
+            // Row 2: commitdate < NULL -> fails (NULL comparison)
+            Row::new(vec![SqlValue::Date(Date { year: 1994, month: 6, day: 10 }), SqlValue::Null]),
+            // Row 3: commitdate < receiptdate -> passes
+            Row::new(vec![
+                SqlValue::Date(Date { year: 1995, month: 1, day: 5 }),
+                SqlValue::Date(Date { year: 1995, month: 3, day: 10 }),
+            ]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::LessThan,
+            right_column_idx: 1,
+        }];
+
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+
+        // Should match rows 0 and 3 (NULL rows fail)
+        assert_eq!(filtered.row_count(), 2);
+    }
+
+    /// Test different comparison operators for column-to-column
+    #[test]
+    fn test_simd_filter_column_compare_operators() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(10)]),
+            Row::new(vec![SqlValue::Integer(10), SqlValue::Integer(10)]),
+            Row::new(vec![SqlValue::Integer(15), SqlValue::Integer(10)]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Test Equal
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::Equal,
+            right_column_idx: 1,
+        }];
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+        assert_eq!(filtered.row_count(), 1); // Only row 1
+
+        // Test GreaterThan
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::GreaterThan,
+            right_column_idx: 1,
+        }];
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+        assert_eq!(filtered.row_count(), 1); // Only row 2
+
+        // Test GreaterThanOrEqual
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::GreaterThanOrEqual,
+            right_column_idx: 1,
+        }];
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+        assert_eq!(filtered.row_count(), 2); // Rows 1 and 2
+
+        // Test LessThanOrEqual
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::LessThanOrEqual,
+            right_column_idx: 1,
+        }];
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+        assert_eq!(filtered.row_count(), 2); // Rows 0 and 1
+
+        // Test NotEqual
+        let predicates = vec![ColumnPredicate::ColumnCompare {
+            left_column_idx: 0,
+            op: CompareOp::NotEqual,
+            right_column_idx: 1,
+        }];
+        let filtered = simd_filter_batch(&batch, &predicates).unwrap();
+        assert_eq!(filtered.row_count(), 2); // Rows 0 and 2
     }
 }

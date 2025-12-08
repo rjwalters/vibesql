@@ -3,6 +3,17 @@ use crate::schema::CombinedSchema;
 use vibesql_ast::{BinaryOperator, Expression, UnaryOperator};
 use vibesql_types::{SqlMode, SqlValue};
 
+/// Comparison operator for column-to-column predicates
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompareOp {
+    LessThan,
+    GreaterThan,
+    LessThanOrEqual,
+    GreaterThanOrEqual,
+    Equal,
+    NotEqual,
+}
+
 /// A predicate tree representing complex logical expressions
 ///
 /// Supports nested AND/OR combinations for efficient columnar evaluation.
@@ -59,6 +70,14 @@ pub enum ColumnPredicate {
 
     /// column IN (value1, value2, ...)
     InList { column_idx: usize, values: Vec<SqlValue>, negated: bool },
+
+    /// column1 op column2 (column-to-column comparison)
+    /// Used for predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
+    ColumnCompare {
+        left_column_idx: usize,
+        op: CompareOp,
+        right_column_idx: usize,
+    },
 }
 
 /// Extract column predicates as a tree from a WHERE clause expression
@@ -277,6 +296,31 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                 }
             }
 
+            // Try: column op column (column-to-column comparison)
+            // This handles predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
+            if let (
+                Expression::ColumnRef { table: t1, column: c1 },
+                Expression::ColumnRef { table: t2, column: c2 },
+            ) = (left.as_ref(), right.as_ref())
+            {
+                let left_idx = schema.get_column_index(t1.as_deref(), c1)?;
+                let right_idx = schema.get_column_index(t2.as_deref(), c2)?;
+                let compare_op = match op {
+                    BinaryOperator::LessThan => CompareOp::LessThan,
+                    BinaryOperator::GreaterThan => CompareOp::GreaterThan,
+                    BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
+                    BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
+                    BinaryOperator::Equal => CompareOp::Equal,
+                    BinaryOperator::NotEqual => CompareOp::NotEqual,
+                    _ => return None,
+                };
+                return Some(PredicateTree::Leaf(ColumnPredicate::ColumnCompare {
+                    left_column_idx: left_idx,
+                    op: compare_op,
+                    right_column_idx: right_idx,
+                }));
+            }
+
             None
         }
 
@@ -434,7 +478,37 @@ fn extract_predicates_recursive(
                 }
             }
 
-            // Skip cross-table predicates (column op column) - not a failure
+            // Try: column op column (column-to-column comparison within same table)
+            // This handles predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
+            if let (
+                Expression::ColumnRef { table: t1, column: c1 },
+                Expression::ColumnRef { table: t2, column: c2 },
+            ) = (left.as_ref(), right.as_ref())
+            {
+                // Only add if BOTH columns are in schema (same-table comparison)
+                if let (Some(left_idx), Some(right_idx)) = (
+                    schema.get_column_index(t1.as_deref(), c1),
+                    schema.get_column_index(t2.as_deref(), c2),
+                ) {
+                    let compare_op = match op {
+                        BinaryOperator::LessThan => CompareOp::LessThan,
+                        BinaryOperator::GreaterThan => CompareOp::GreaterThan,
+                        BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
+                        BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
+                        BinaryOperator::Equal => CompareOp::Equal,
+                        BinaryOperator::NotEqual => CompareOp::NotEqual,
+                        _ => return Some(()), // Skip unsupported operator
+                    };
+                    predicates.push(ColumnPredicate::ColumnCompare {
+                        left_column_idx: left_idx,
+                        op: compare_op,
+                        right_column_idx: right_idx,
+                    });
+                }
+                return Some(());
+            }
+
+            // Skip other unsupported expressions
             Some(())
         }
 
@@ -725,5 +799,110 @@ mod tests {
 
         let tree = extract_predicate_tree(&expr, &schema);
         assert!(tree.is_none());
+    }
+
+    #[test]
+    fn test_column_to_column_comparison() {
+        let schema = create_test_schema();
+
+        // col0 < col1 (column-to-column comparison)
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
+            op: BinaryOperator::LessThan,
+            right: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
+        };
+
+        let tree = extract_predicate_tree(&expr, &schema);
+        assert!(tree.is_some());
+
+        match tree.unwrap() {
+            PredicateTree::Leaf(ColumnPredicate::ColumnCompare {
+                left_column_idx,
+                op,
+                right_column_idx,
+            }) => {
+                assert_eq!(left_column_idx, 0);
+                assert_eq!(op, CompareOp::LessThan);
+                assert_eq!(right_column_idx, 1);
+            }
+            _ => panic!("Expected ColumnCompare predicate"),
+        }
+    }
+
+    #[test]
+    fn test_column_to_column_all_operators() {
+        let schema = create_test_schema();
+
+        let operators = [
+            (BinaryOperator::LessThan, CompareOp::LessThan),
+            (BinaryOperator::GreaterThan, CompareOp::GreaterThan),
+            (BinaryOperator::LessThanOrEqual, CompareOp::LessThanOrEqual),
+            (BinaryOperator::GreaterThanOrEqual, CompareOp::GreaterThanOrEqual),
+            (BinaryOperator::Equal, CompareOp::Equal),
+            (BinaryOperator::NotEqual, CompareOp::NotEqual),
+        ];
+
+        for (binary_op, expected_compare_op) in operators {
+            let expr = Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                op: binary_op,
+                right: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
+            };
+
+            let tree = extract_predicate_tree(&expr, &schema);
+            assert!(tree.is_some(), "Should extract predicate for operator {:?}", binary_op);
+
+            match tree.unwrap() {
+                PredicateTree::Leaf(ColumnPredicate::ColumnCompare { op, .. }) => {
+                    assert_eq!(op, expected_compare_op, "Operator mismatch for {:?}", binary_op);
+                }
+                _ => panic!("Expected ColumnCompare predicate for {:?}", binary_op),
+            }
+        }
+    }
+
+    #[test]
+    fn test_column_to_column_legacy_path() {
+        let schema = create_test_schema();
+
+        // col0 < col1 AND col0 > 5 (mix of column-to-column and column-to-value)
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                op: BinaryOperator::LessThan,
+                right: Box::new(Expression::ColumnRef { table: None, column: "col1".to_string() }),
+            }),
+            op: BinaryOperator::And,
+            right: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
+                op: BinaryOperator::GreaterThan,
+                right: Box::new(Expression::Literal(SqlValue::Integer(5))),
+            }),
+        };
+
+        let predicates = extract_column_predicates(&expr, &schema);
+        assert!(predicates.is_some());
+
+        let predicates = predicates.unwrap();
+        assert_eq!(predicates.len(), 2);
+
+        // First predicate should be column-to-column
+        match &predicates[0] {
+            ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } => {
+                assert_eq!(*left_column_idx, 0);
+                assert_eq!(*op, CompareOp::LessThan);
+                assert_eq!(*right_column_idx, 1);
+            }
+            _ => panic!("Expected ColumnCompare predicate"),
+        }
+
+        // Second predicate should be column-to-value
+        match &predicates[1] {
+            ColumnPredicate::GreaterThan { column_idx, value } => {
+                assert_eq!(*column_idx, 0);
+                assert_eq!(*value, SqlValue::Integer(5));
+            }
+            _ => panic!("Expected GreaterThan predicate"),
+        }
     }
 }
