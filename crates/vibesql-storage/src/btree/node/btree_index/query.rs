@@ -534,4 +534,156 @@ impl BTreeIndex {
 
         Ok(None)
     }
+
+    /// Get distinct values of the first column in a composite index
+    ///
+    /// This is used for skip-scan optimization to enumerate the prefix values.
+    ///
+    /// # Returns
+    /// Vector of distinct first-column values in sorted order
+    ///
+    /// # Performance
+    /// O(n) where n is the number of unique keys - must scan all leaves
+    pub fn get_distinct_first_column_values(
+        &self,
+    ) -> Result<Vec<vibesql_types::SqlValue>, StorageError> {
+        let mut distinct_values = Vec::new();
+        let mut last_first_col: Option<vibesql_types::SqlValue> = None;
+
+        // Start from leftmost leaf
+        let mut current_leaf = self.find_leftmost_leaf()?;
+
+        loop {
+            for (key, _) in &current_leaf.entries {
+                if let Some(first_val) = key.first() {
+                    let is_new = match &last_first_col {
+                        None => true,
+                        Some(last) => first_val != last,
+                    };
+                    if is_new {
+                        distinct_values.push(first_val.clone());
+                        last_first_col = Some(first_val.clone());
+                    }
+                }
+            }
+
+            // Move to next leaf
+            if current_leaf.next_leaf == super::super::super::NULL_PAGE_ID {
+                break;
+            }
+            current_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
+        }
+
+        Ok(distinct_values)
+    }
+
+    /// Skip-scan equality lookup on a non-prefix column
+    ///
+    /// Scans all entries and returns rows where the specified column matches.
+    ///
+    /// # Arguments
+    /// * `filter_column_idx` - Index of the column to filter on (0-based)
+    /// * `filter_value` - Value to match
+    ///
+    /// # Returns
+    /// Vector of row indices matching the filter
+    ///
+    /// # Performance
+    /// O(n) where n is total entries - scans all leaves
+    pub fn skip_scan_equality(
+        &self,
+        filter_column_idx: usize,
+        filter_value: &vibesql_types::SqlValue,
+    ) -> Result<Vec<RowId>, StorageError> {
+        let mut result = Vec::new();
+
+        // Start from leftmost leaf
+        let mut current_leaf = self.find_leftmost_leaf()?;
+
+        loop {
+            for (key, row_ids) in &current_leaf.entries {
+                if key.len() > filter_column_idx && &key[filter_column_idx] == filter_value {
+                    result.extend(row_ids.iter().copied());
+                }
+            }
+
+            // Move to next leaf
+            if current_leaf.next_leaf == super::super::super::NULL_PAGE_ID {
+                break;
+            }
+            current_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
+        }
+
+        Ok(result)
+    }
+
+    /// Skip-scan range lookup on a non-prefix column
+    ///
+    /// Scans all entries and returns rows where the specified column is in range.
+    ///
+    /// # Arguments
+    /// * `filter_column_idx` - Index of the column to filter on (0-based)
+    /// * `lower_bound` - Optional lower bound
+    /// * `inclusive_lower` - Whether lower bound is inclusive
+    /// * `upper_bound` - Optional upper bound
+    /// * `inclusive_upper` - Whether upper bound is inclusive
+    ///
+    /// # Returns
+    /// Vector of row indices matching the range filter
+    pub fn skip_scan_range(
+        &self,
+        filter_column_idx: usize,
+        lower_bound: Option<&vibesql_types::SqlValue>,
+        inclusive_lower: bool,
+        upper_bound: Option<&vibesql_types::SqlValue>,
+        inclusive_upper: bool,
+    ) -> Result<Vec<RowId>, StorageError> {
+        let mut result = Vec::new();
+
+        // Start from leftmost leaf
+        let mut current_leaf = self.find_leftmost_leaf()?;
+
+        loop {
+            for (key, row_ids) in &current_leaf.entries {
+                if key.len() > filter_column_idx {
+                    let key_val = &key[filter_column_idx];
+
+                    // Check bounds
+                    let passes_lower = match lower_bound {
+                        None => true,
+                        Some(lb) => {
+                            if inclusive_lower {
+                                key_val >= lb
+                            } else {
+                                key_val > lb
+                            }
+                        }
+                    };
+
+                    let passes_upper = match upper_bound {
+                        None => true,
+                        Some(ub) => {
+                            if inclusive_upper {
+                                key_val <= ub
+                            } else {
+                                key_val < ub
+                            }
+                        }
+                    };
+
+                    if passes_lower && passes_upper {
+                        result.extend(row_ids.iter().copied());
+                    }
+                }
+            }
+
+            // Move to next leaf
+            if current_leaf.next_leaf == super::super::super::NULL_PAGE_ID {
+                break;
+            }
+            current_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
+        }
+
+        Ok(result)
+    }
 }
