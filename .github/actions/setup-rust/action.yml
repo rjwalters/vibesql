@@ -18,7 +18,7 @@ runs:
   using: 'composite'
   steps:
     - name: Setup sccache
-      uses: mozilla-actions/sccache-action@v0.0.6
+      uses: mozilla-actions/sccache-action@v0.0.9
 
     - name: Enable sccache GHA cache
       shell: bash
