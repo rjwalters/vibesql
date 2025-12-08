@@ -104,13 +104,37 @@ def get_compressed_size(path: str, compression: str = 'gzip') -> Optional[int]:
             compressed = gzip.compress(data, compresslevel=9)
             return len(compressed)
         elif compression == 'brotli':
-            # Try to import brotli, but don't fail if not available
+            # Try to import brotli Python module first
             try:
                 import brotli
                 compressed = brotli.compress(data, quality=11)
                 return len(compressed)
             except ImportError:
-                return None
+                pass
+
+            # Fall back to brotli CLI tool if available
+            brotli_cmd = shutil.which('brotli')
+            if brotli_cmd:
+                try:
+                    with tempfile.NamedTemporaryFile(suffix='.br', delete=False) as tmp:
+                        tmp_path = tmp.name
+                    # Remove the temp file since brotli won't overwrite
+                    os.unlink(tmp_path)
+                    # Use brotli CLI with quality 11 (max compression)
+                    result = subprocess.run(
+                        [brotli_cmd, '-q', '11', '-o', tmp_path, path],
+                        capture_output=True,
+                        timeout=60
+                    )
+                    if result.returncode == 0 and os.path.exists(tmp_path):
+                        size = os.path.getsize(tmp_path)
+                        os.unlink(tmp_path)
+                        return size
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except Exception:
+                    pass
+            return None
     except Exception:
         return None
 
