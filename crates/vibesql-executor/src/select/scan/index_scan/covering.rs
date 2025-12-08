@@ -50,12 +50,13 @@ pub(crate) struct CoveringIndexInfo {
 /// * `needed_columns` - Column names needed for the SELECT result
 ///
 /// # Example
-/// ```rust,ignore
+/// ```rust,no_run
+/// // This is a crate-internal function, example for documentation only
 /// // Index: (s_w_id, s_quantity, s_i_id)
 /// // Needed: [s_i_id]
-/// let info = check_covering_index(&["s_w_id", "s_quantity", "s_i_id"], &["s_i_id"]);
-/// assert!(info.is_some());
-/// assert_eq!(info.unwrap().column_to_key_position["s_i_id"], 2);
+/// // let info = check_covering_index(&["s_w_id", "s_quantity", "s_i_id"], &["s_i_id"]);
+/// // assert!(info.is_some());
+/// // assert_eq!(info.unwrap().column_to_key_position["s_i_id"], 2);
 /// ```
 pub(crate) fn check_covering_index(
     index_column_names: &[&str],
