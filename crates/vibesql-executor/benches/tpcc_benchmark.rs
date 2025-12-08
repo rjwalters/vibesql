@@ -785,6 +785,498 @@ fn run_mysql_benchmark(
     results
 }
 
+/// Run SQLite benchmark with multiple parallel clients.
+/// Each client gets its own in-memory database with loaded data.
+#[cfg(feature = "benchmark-comparison")]
+fn run_sqlite_parallel_benchmark(
+    scale_factor: f64,
+    transaction_type: TransactionType,
+    num_warehouses: i32,
+    num_clients: usize,
+    duration: Duration,
+    warmup: Duration,
+    print_phases: bool,
+) -> (Vec<TPCCBenchmarkResults>, TPCCBenchmarkResults) {
+    use tpcc::schema::load_sqlite;
+
+    if print_phases {
+        eprintln!(
+            "Running {} SQLite clients in parallel (warmup: {:?}, duration: {:?})...",
+            num_clients, warmup, duration
+        );
+        eprintln!("Note: Each client loads its own in-memory database");
+    }
+
+    // Run all clients in parallel, each with its own connection and data
+    let client_results: Vec<TPCCBenchmarkResults> = (0..num_clients)
+        .into_par_iter()
+        .map(|client_id| {
+            // Each client gets its own connection with loaded data
+            let conn = load_sqlite(scale_factor);
+            let executor = SqliteTransactionExecutor::new(&conn);
+
+            // Use client-specific seed for reproducibility
+            let seed = 42 + client_id as u64 * 1000;
+            let mut workload = TPCCWorkload::new(seed, num_warehouses);
+
+            let mut results = TPCCBenchmarkResults::new();
+            let mut new_order_times: Vec<u64> = Vec::new();
+            let mut payment_times: Vec<u64> = Vec::new();
+            let mut order_status_times: Vec<u64> = Vec::new();
+            let mut delivery_times: Vec<u64> = Vec::new();
+            let mut stock_level_times: Vec<u64> = Vec::new();
+
+            // Warmup phase
+            let warmup_start = Instant::now();
+            while warmup_start.elapsed() < warmup {
+                let txn_type = match transaction_type {
+                    TransactionType::Mixed => workload.next_transaction_type(),
+                    TransactionType::NewOrder => 0,
+                    TransactionType::Payment => 1,
+                    TransactionType::OrderStatus => 2,
+                    TransactionType::Delivery => 3,
+                    TransactionType::StockLevel => 4,
+                };
+
+                match txn_type {
+                    0 => {
+                        let _ = executor.new_order(&workload.generate_new_order());
+                    }
+                    1 => {
+                        let _ = executor.payment(&workload.generate_payment());
+                    }
+                    2 => {
+                        let _ = executor.order_status(&workload.generate_order_status());
+                    }
+                    3 => {
+                        let _ = executor.delivery(&workload.generate_delivery());
+                    }
+                    4 => {
+                        let _ = executor.stock_level(&workload.generate_stock_level());
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            // Measurement phase
+            let benchmark_start = Instant::now();
+            while benchmark_start.elapsed() < duration {
+                let txn_type = match transaction_type {
+                    TransactionType::Mixed => workload.next_transaction_type(),
+                    TransactionType::NewOrder => 0,
+                    TransactionType::Payment => 1,
+                    TransactionType::OrderStatus => 2,
+                    TransactionType::Delivery => 3,
+                    TransactionType::StockLevel => 4,
+                };
+
+                let result = match txn_type {
+                    0 => {
+                        let r = executor.new_order(&workload.generate_new_order());
+                        new_order_times.push(r.duration_us);
+                        r
+                    }
+                    1 => {
+                        let r = executor.payment(&workload.generate_payment());
+                        payment_times.push(r.duration_us);
+                        r
+                    }
+                    2 => {
+                        let r = executor.order_status(&workload.generate_order_status());
+                        order_status_times.push(r.duration_us);
+                        r
+                    }
+                    3 => {
+                        let r = executor.delivery(&workload.generate_delivery());
+                        delivery_times.push(r.duration_us);
+                        r
+                    }
+                    4 => {
+                        let r = executor.stock_level(&workload.generate_stock_level());
+                        stock_level_times.push(r.duration_us);
+                        r
+                    }
+                    _ => unreachable!(),
+                };
+
+                results.total_transactions += 1;
+                if result.success {
+                    results.successful_transactions += 1;
+                } else {
+                    results.failed_transactions += 1;
+                }
+            }
+
+            results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
+            if results.total_duration_ms > 0 {
+                results.transactions_per_second =
+                    results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
+            }
+
+            // Calculate averages
+            if !new_order_times.is_empty() {
+                results.new_order_count = new_order_times.len() as u64;
+                results.new_order_avg_us =
+                    new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
+            }
+            if !payment_times.is_empty() {
+                results.payment_count = payment_times.len() as u64;
+                results.payment_avg_us =
+                    payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
+            }
+            if !order_status_times.is_empty() {
+                results.order_status_count = order_status_times.len() as u64;
+                results.order_status_avg_us =
+                    order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
+            }
+            if !delivery_times.is_empty() {
+                results.delivery_count = delivery_times.len() as u64;
+                results.delivery_avg_us =
+                    delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
+            }
+            if !stock_level_times.is_empty() {
+                results.stock_level_count = stock_level_times.len() as u64;
+                results.stock_level_avg_us =
+                    stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
+            }
+
+            results
+        })
+        .collect();
+
+    // Aggregate results
+    let aggregate = aggregate_results(&client_results);
+
+    (client_results, aggregate)
+}
+
+/// Run DuckDB benchmark with multiple parallel clients.
+/// Each client gets its own in-memory database with loaded data.
+#[cfg(feature = "duckdb-comparison")]
+fn run_duckdb_parallel_benchmark(
+    scale_factor: f64,
+    transaction_type: TransactionType,
+    num_warehouses: i32,
+    num_clients: usize,
+    duration: Duration,
+    warmup: Duration,
+    print_phases: bool,
+) -> (Vec<TPCCBenchmarkResults>, TPCCBenchmarkResults) {
+    use tpcc::schema::load_duckdb;
+
+    if print_phases {
+        eprintln!(
+            "Running {} DuckDB clients in parallel (warmup: {:?}, duration: {:?})...",
+            num_clients, warmup, duration
+        );
+        eprintln!("Note: Each client loads its own in-memory database");
+    }
+
+    // Run all clients in parallel, each with its own connection and data
+    let client_results: Vec<TPCCBenchmarkResults> = (0..num_clients)
+        .into_par_iter()
+        .map(|client_id| {
+            // Each client gets its own connection with loaded data
+            let conn = load_duckdb(scale_factor);
+            let executor = DuckdbTransactionExecutor::new(&conn);
+
+            // Use client-specific seed for reproducibility
+            let seed = 42 + client_id as u64 * 1000;
+            let mut workload = TPCCWorkload::new(seed, num_warehouses);
+
+            let mut results = TPCCBenchmarkResults::new();
+            let mut new_order_times: Vec<u64> = Vec::new();
+            let mut payment_times: Vec<u64> = Vec::new();
+            let mut order_status_times: Vec<u64> = Vec::new();
+            let mut delivery_times: Vec<u64> = Vec::new();
+            let mut stock_level_times: Vec<u64> = Vec::new();
+
+            // Warmup phase
+            let warmup_start = Instant::now();
+            while warmup_start.elapsed() < warmup {
+                let txn_type = match transaction_type {
+                    TransactionType::Mixed => workload.next_transaction_type(),
+                    TransactionType::NewOrder => 0,
+                    TransactionType::Payment => 1,
+                    TransactionType::OrderStatus => 2,
+                    TransactionType::Delivery => 3,
+                    TransactionType::StockLevel => 4,
+                };
+
+                match txn_type {
+                    0 => {
+                        let _ = executor.new_order(&workload.generate_new_order());
+                    }
+                    1 => {
+                        let _ = executor.payment(&workload.generate_payment());
+                    }
+                    2 => {
+                        let _ = executor.order_status(&workload.generate_order_status());
+                    }
+                    3 => {
+                        let _ = executor.delivery(&workload.generate_delivery());
+                    }
+                    4 => {
+                        let _ = executor.stock_level(&workload.generate_stock_level());
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            // Measurement phase
+            let benchmark_start = Instant::now();
+            while benchmark_start.elapsed() < duration {
+                let txn_type = match transaction_type {
+                    TransactionType::Mixed => workload.next_transaction_type(),
+                    TransactionType::NewOrder => 0,
+                    TransactionType::Payment => 1,
+                    TransactionType::OrderStatus => 2,
+                    TransactionType::Delivery => 3,
+                    TransactionType::StockLevel => 4,
+                };
+
+                let result = match txn_type {
+                    0 => {
+                        let r = executor.new_order(&workload.generate_new_order());
+                        new_order_times.push(r.duration_us);
+                        r
+                    }
+                    1 => {
+                        let r = executor.payment(&workload.generate_payment());
+                        payment_times.push(r.duration_us);
+                        r
+                    }
+                    2 => {
+                        let r = executor.order_status(&workload.generate_order_status());
+                        order_status_times.push(r.duration_us);
+                        r
+                    }
+                    3 => {
+                        let r = executor.delivery(&workload.generate_delivery());
+                        delivery_times.push(r.duration_us);
+                        r
+                    }
+                    4 => {
+                        let r = executor.stock_level(&workload.generate_stock_level());
+                        stock_level_times.push(r.duration_us);
+                        r
+                    }
+                    _ => unreachable!(),
+                };
+
+                results.total_transactions += 1;
+                if result.success {
+                    results.successful_transactions += 1;
+                } else {
+                    results.failed_transactions += 1;
+                }
+            }
+
+            results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
+            if results.total_duration_ms > 0 {
+                results.transactions_per_second =
+                    results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
+            }
+
+            // Calculate averages
+            if !new_order_times.is_empty() {
+                results.new_order_count = new_order_times.len() as u64;
+                results.new_order_avg_us =
+                    new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
+            }
+            if !payment_times.is_empty() {
+                results.payment_count = payment_times.len() as u64;
+                results.payment_avg_us =
+                    payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
+            }
+            if !order_status_times.is_empty() {
+                results.order_status_count = order_status_times.len() as u64;
+                results.order_status_avg_us =
+                    order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
+            }
+            if !delivery_times.is_empty() {
+                results.delivery_count = delivery_times.len() as u64;
+                results.delivery_avg_us =
+                    delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
+            }
+            if !stock_level_times.is_empty() {
+                results.stock_level_count = stock_level_times.len() as u64;
+                results.stock_level_avg_us =
+                    stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
+            }
+
+            results
+        })
+        .collect();
+
+    // Aggregate results
+    let aggregate = aggregate_results(&client_results);
+
+    (client_results, aggregate)
+}
+
+/// Run MySQL benchmark with multiple parallel clients.
+/// Each client gets its own connection from the pool.
+#[cfg(feature = "mysql-comparison")]
+fn run_mysql_parallel_benchmark(
+    pool: &mysql::Pool,
+    transaction_type: TransactionType,
+    num_warehouses: i32,
+    num_clients: usize,
+    duration: Duration,
+    warmup: Duration,
+    print_phases: bool,
+) -> (Vec<TPCCBenchmarkResults>, TPCCBenchmarkResults) {
+    if print_phases {
+        eprintln!(
+            "Running {} MySQL clients in parallel (warmup: {:?}, duration: {:?})...",
+            num_clients, warmup, duration
+        );
+    }
+
+    // Run all clients in parallel, each with its own connection
+    let client_results: Vec<TPCCBenchmarkResults> = (0..num_clients)
+        .into_par_iter()
+        .map(|client_id| {
+            // Each client gets its own connection from the pool
+            let mut conn = pool.get_conn().expect("Failed to get MySQL connection from pool");
+
+            // Use client-specific seed for reproducibility
+            let seed = 42 + client_id as u64 * 1000;
+            let mut workload = TPCCWorkload::new(seed, num_warehouses);
+            let executor = MysqlTransactionExecutor::new(&mut conn);
+
+            let mut results = TPCCBenchmarkResults::new();
+            let mut new_order_times: Vec<u64> = Vec::new();
+            let mut payment_times: Vec<u64> = Vec::new();
+            let mut order_status_times: Vec<u64> = Vec::new();
+            let mut delivery_times: Vec<u64> = Vec::new();
+            let mut stock_level_times: Vec<u64> = Vec::new();
+
+            // Warmup phase
+            let warmup_start = Instant::now();
+            while warmup_start.elapsed() < warmup {
+                let txn_type = match transaction_type {
+                    TransactionType::Mixed => workload.next_transaction_type(),
+                    TransactionType::NewOrder => 0,
+                    TransactionType::Payment => 1,
+                    TransactionType::OrderStatus => 2,
+                    TransactionType::Delivery => 3,
+                    TransactionType::StockLevel => 4,
+                };
+
+                match txn_type {
+                    0 => {
+                        let _ = executor.new_order(&workload.generate_new_order());
+                    }
+                    1 => {
+                        let _ = executor.payment(&workload.generate_payment());
+                    }
+                    2 => {
+                        let _ = executor.order_status(&workload.generate_order_status());
+                    }
+                    3 => {
+                        let _ = executor.delivery(&workload.generate_delivery());
+                    }
+                    4 => {
+                        let _ = executor.stock_level(&workload.generate_stock_level());
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            // Measurement phase
+            let benchmark_start = Instant::now();
+            while benchmark_start.elapsed() < duration {
+                let txn_type = match transaction_type {
+                    TransactionType::Mixed => workload.next_transaction_type(),
+                    TransactionType::NewOrder => 0,
+                    TransactionType::Payment => 1,
+                    TransactionType::OrderStatus => 2,
+                    TransactionType::Delivery => 3,
+                    TransactionType::StockLevel => 4,
+                };
+
+                let result = match txn_type {
+                    0 => {
+                        let r = executor.new_order(&workload.generate_new_order());
+                        new_order_times.push(r.duration_us);
+                        r
+                    }
+                    1 => {
+                        let r = executor.payment(&workload.generate_payment());
+                        payment_times.push(r.duration_us);
+                        r
+                    }
+                    2 => {
+                        let r = executor.order_status(&workload.generate_order_status());
+                        order_status_times.push(r.duration_us);
+                        r
+                    }
+                    3 => {
+                        let r = executor.delivery(&workload.generate_delivery());
+                        delivery_times.push(r.duration_us);
+                        r
+                    }
+                    4 => {
+                        let r = executor.stock_level(&workload.generate_stock_level());
+                        stock_level_times.push(r.duration_us);
+                        r
+                    }
+                    _ => unreachable!(),
+                };
+
+                results.total_transactions += 1;
+                if result.success {
+                    results.successful_transactions += 1;
+                } else {
+                    results.failed_transactions += 1;
+                }
+            }
+
+            results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
+            if results.total_duration_ms > 0 {
+                results.transactions_per_second =
+                    results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
+            }
+
+            // Calculate averages
+            if !new_order_times.is_empty() {
+                results.new_order_count = new_order_times.len() as u64;
+                results.new_order_avg_us =
+                    new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
+            }
+            if !payment_times.is_empty() {
+                results.payment_count = payment_times.len() as u64;
+                results.payment_avg_us =
+                    payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
+            }
+            if !order_status_times.is_empty() {
+                results.order_status_count = order_status_times.len() as u64;
+                results.order_status_avg_us =
+                    order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
+            }
+            if !delivery_times.is_empty() {
+                results.delivery_count = delivery_times.len() as u64;
+                results.delivery_avg_us =
+                    delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
+            }
+            if !stock_level_times.is_empty() {
+                results.stock_level_count = stock_level_times.len() as u64;
+                results.stock_level_avg_us =
+                    stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
+            }
+
+            results
+        })
+        .collect();
+
+    // Aggregate results
+    let aggregate = aggregate_results(&client_results);
+
+    (client_results, aggregate)
+}
+
 fn main() {
     eprintln!("=== TPC-C Benchmark Profiling ===");
 
@@ -931,41 +1423,75 @@ fn main() {
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
-        eprintln!("Loading SQLite database...");
-        let sqlite_load_start = Instant::now();
-        let sqlite_conn = load_sqlite(scale_factor);
-        eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
+        let sqlite_results = if num_clients > 1 {
+            // Parallel multi-client execution (each client gets its own DB)
+            let (client_results, aggregate) = run_sqlite_parallel_benchmark(
+                scale_factor,
+                transaction_type,
+                num_warehouses,
+                num_clients,
+                duration,
+                warmup,
+                true,
+            );
+            print_parallel_results(&client_results, &aggregate, transaction_type);
+            aggregate
+        } else {
+            // Single-client execution
+            eprintln!("Loading SQLite database...");
+            let sqlite_load_start = Instant::now();
+            let sqlite_conn = load_sqlite(scale_factor);
+            eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
 
-        let sqlite_executor = SqliteTransactionExecutor::new(&sqlite_conn);
-        let sqlite_results = run_benchmark(
-            &sqlite_executor,
-            transaction_type,
-            num_warehouses,
-            duration,
-            warmup,
-            true,
-        );
-        print_results(&sqlite_results, transaction_type);
-
-        // DuckDB benchmark (requires duckdb-comparison feature)
-        #[cfg(feature = "duckdb-comparison")]
-        let duckdb_results = {
-            eprintln!("\n\n--- DuckDB Benchmark ---");
-            eprintln!("Loading DuckDB database...");
-            let duckdb_load_start = Instant::now();
-            let duckdb_conn = load_duckdb(scale_factor);
-            eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
-
-            let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
-            let duckdb_results = run_benchmark(
-                &duckdb_executor,
+            let sqlite_executor = SqliteTransactionExecutor::new(&sqlite_conn);
+            let results = run_benchmark(
+                &sqlite_executor,
                 transaction_type,
                 num_warehouses,
                 duration,
                 warmup,
                 true,
             );
-            print_results(&duckdb_results, transaction_type);
+            print_results(&results, transaction_type);
+            results
+        };
+
+        // DuckDB benchmark (requires duckdb-comparison feature)
+        #[cfg(feature = "duckdb-comparison")]
+        let duckdb_results = {
+            eprintln!("\n\n--- DuckDB Benchmark ---");
+            let duckdb_results = if num_clients > 1 {
+                // Parallel multi-client execution (each client gets its own DB)
+                let (client_results, aggregate) = run_duckdb_parallel_benchmark(
+                    scale_factor,
+                    transaction_type,
+                    num_warehouses,
+                    num_clients,
+                    duration,
+                    warmup,
+                    true,
+                );
+                print_parallel_results(&client_results, &aggregate, transaction_type);
+                aggregate
+            } else {
+                // Single-client execution
+                eprintln!("Loading DuckDB database...");
+                let duckdb_load_start = Instant::now();
+                let duckdb_conn = load_duckdb(scale_factor);
+                eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
+
+                let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
+                let results = run_benchmark(
+                    &duckdb_executor,
+                    transaction_type,
+                    num_warehouses,
+                    duration,
+                    warmup,
+                    true,
+                );
+                print_results(&results, transaction_type);
+                results
+            };
             Some(duckdb_results)
         };
         #[cfg(not(feature = "duckdb-comparison"))]
@@ -977,16 +1503,48 @@ fn main() {
             eprintln!("\n\n--- MySQL Benchmark ---");
             eprintln!("MySQL connected and loaded");
 
-            // MySQL requires &mut self, so we run it manually instead of using run_benchmark
-            let mysql_results = run_mysql_benchmark(
-                &mut mysql_conn,
-                transaction_type,
-                num_warehouses,
-                duration,
-                warmup,
-                true,
-            );
-            print_results(&mysql_results, transaction_type);
+            let mysql_results = if num_clients > 1 {
+                // Parallel multi-client execution with connection pool
+                use tpcc::schema::get_mysql_pool;
+                if let Some(pool) = get_mysql_pool() {
+                    let (client_results, aggregate) = run_mysql_parallel_benchmark(
+                        &pool,
+                        transaction_type,
+                        num_warehouses,
+                        num_clients,
+                        duration,
+                        warmup,
+                        true,
+                    );
+                    print_parallel_results(&client_results, &aggregate, transaction_type);
+                    aggregate
+                } else {
+                    eprintln!("Warning: Failed to create MySQL connection pool for parallel execution");
+                    eprintln!("Falling back to single-client execution");
+                    let results = run_mysql_benchmark(
+                        &mut mysql_conn,
+                        transaction_type,
+                        num_warehouses,
+                        duration,
+                        warmup,
+                        true,
+                    );
+                    print_results(&results, transaction_type);
+                    results
+                }
+            } else {
+                // Single-client execution
+                let results = run_mysql_benchmark(
+                    &mut mysql_conn,
+                    transaction_type,
+                    num_warehouses,
+                    duration,
+                    warmup,
+                    true,
+                );
+                print_results(&results, transaction_type);
+                results
+            };
             Some(mysql_results)
         } else {
             eprintln!("\n\n--- MySQL Benchmark ---");
@@ -999,8 +1557,8 @@ fn main() {
         // Summary comparison
         eprintln!("\n\n=== Comparison Summary ===");
         eprintln!("Transaction type: {}", transaction_type.name());
-        eprintln!("{:<12} {:>12} {:>12}", "Database", "TPS", "Avg (us)");
-        eprintln!("{:-<12} {:->12} {:->12}", "", "", "");
+        eprintln!("{:<12} {:>12} {:>12} {:>10}", "Database", "TPS", "Avg (us)", "Clients");
+        eprintln!("{:-<12} {:->12} {:->12} {:->10}", "", "", "", "");
 
         fn compute_avg(results: &TPCCBenchmarkResults) -> f64 {
             if results.total_transactions > 0 {
@@ -1016,31 +1574,35 @@ fn main() {
         }
 
         eprintln!(
-            "{:<12} {:>12.2} {:>12.2}",
+            "{:<12} {:>12.2} {:>12.2} {:>10}",
             "VibeSQL",
             vibesql_results.transactions_per_second,
-            compute_avg(&vibesql_results)
+            compute_avg(&vibesql_results),
+            num_clients
         );
         eprintln!(
-            "{:<12} {:>12.2} {:>12.2}",
+            "{:<12} {:>12.2} {:>12.2} {:>10}",
             "SQLite",
             sqlite_results.transactions_per_second,
-            compute_avg(&sqlite_results)
+            compute_avg(&sqlite_results),
+            num_clients
         );
         if let Some(ref duckdb_res) = duckdb_results {
             eprintln!(
-                "{:<12} {:>12.2} {:>12.2}",
+                "{:<12} {:>12.2} {:>12.2} {:>10}",
                 "DuckDB",
                 duckdb_res.transactions_per_second,
-                compute_avg(duckdb_res)
+                compute_avg(duckdb_res),
+                num_clients
             );
         }
         if let Some(ref mysql_res) = mysql_results {
             eprintln!(
-                "{:<12} {:>12.2} {:>12.2}",
+                "{:<12} {:>12.2} {:>12.2} {:>10}",
                 "MySQL",
                 mysql_res.transactions_per_second,
-                compute_avg(mysql_res)
+                compute_avg(mysql_res),
+                num_clients
             );
         }
     }
@@ -1062,13 +1624,14 @@ fn main() {
         }
         eprintln!("\n=== Summary ===");
         eprintln!("Transaction type: {}", transaction_type.name());
-        eprintln!("{:<12} {:>12} {:>12}", "Database", "TPS", "Avg (us)");
-        eprintln!("{:-<12} {:->12} {:->12}", "", "", "");
+        eprintln!("{:<12} {:>12} {:>12} {:>10}", "Database", "TPS", "Avg (us)", "Clients");
+        eprintln!("{:-<12} {:->12} {:->12} {:->10}", "", "", "", "");
         eprintln!(
-            "{:<12} {:>12.2} {:>12.2}",
+            "{:<12} {:>12.2} {:>12.2} {:>10}",
             "VibeSQL",
             vibesql_results.transactions_per_second,
-            compute_avg(&vibesql_results)
+            compute_avg(&vibesql_results),
+            num_clients
         );
     }
 
