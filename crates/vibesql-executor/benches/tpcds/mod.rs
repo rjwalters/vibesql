@@ -1,3 +1,11 @@
+// ============================================================================
+// ⚠️  BENCHMARK INTEGRITY WARNING ⚠️
+// ============================================================================
+// DO NOT add "fast paths", "optimizations", or shortcuts that bypass SQL
+// execution in benchmark code. Benchmarks MUST execute actual SQL to produce
+// meaningful results. "Optimizing" benchmarks this way is cheating.
+// ============================================================================
+
 //! TPC-DS Benchmark Module
 //!
 //! This module provides TPC-DS benchmark utilities including:

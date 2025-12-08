@@ -1,3 +1,11 @@
+// ============================================================================
+// ⚠️  BENCHMARK INTEGRITY WARNING ⚠️
+// ============================================================================
+// DO NOT add "fast paths", "optimizations", or shortcuts that bypass SQL
+// execution in benchmark code. Benchmarks MUST execute actual SQL to produce
+// meaningful results. "Optimizing" benchmarks this way is cheating.
+// ============================================================================
+
 //! TPC-DS Benchmark Suite - Native Rust Implementation
 //!
 //! This benchmark tests TPC-DS queries across three phases:
