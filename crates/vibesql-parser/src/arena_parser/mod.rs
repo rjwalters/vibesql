@@ -16,11 +16,11 @@
 //! ```
 //!
 //! For standard heap-allocated AST (convenient, with arena parsing benefits):
-//! ```ignore
+//! ```
 //! use vibesql_parser::arena_parser::parse_select_to_owned;
 //!
 //! // Parse with arena internally, convert to owned SelectStmt
-//! let stmt = parse_select_to_owned("SELECT * FROM users")?;
+//! let stmt = parse_select_to_owned("SELECT * FROM users").unwrap();
 //! ```
 
 mod ddl;
@@ -634,10 +634,10 @@ impl<'arena> ArenaParser<'arena> {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use vibesql_parser::arena_parser::parse_select_to_owned;
 ///
-/// let stmt = parse_select_to_owned("SELECT * FROM users")?;
+/// let stmt = parse_select_to_owned("SELECT * FROM users").unwrap();
 /// // stmt is a standard SelectStmt, no lifetime constraints
 /// ```
 pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, ParseError> {
@@ -659,10 +659,10 @@ pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, Par
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use vibesql_parser::arena_parser::parse_expression_to_owned;
 ///
-/// let expr = parse_expression_to_owned("a + b * 2")?;
+/// let expr = parse_expression_to_owned("a + b * 2").unwrap();
 /// ```
 pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression, ParseError> {
     let arena = Bump::new();
@@ -683,10 +683,10 @@ pub fn parse_expression_to_owned(input: &str) -> Result<vibesql_ast::Expression,
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use vibesql_parser::arena_parser::parse_insert_to_owned;
 ///
-/// let stmt = parse_insert_to_owned("INSERT INTO users (name) VALUES ('Alice')")?;
+/// let stmt = parse_insert_to_owned("INSERT INTO users (name) VALUES ('Alice')").unwrap();
 /// ```
 pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, ParseError> {
     let arena = Bump::new();
@@ -707,10 +707,10 @@ pub fn parse_insert_to_owned(input: &str) -> Result<vibesql_ast::InsertStmt, Par
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use vibesql_parser::arena_parser::parse_update_to_owned;
 ///
-/// let stmt = parse_update_to_owned("UPDATE users SET name = 'Bob' WHERE id = 1")?;
+/// let stmt = parse_update_to_owned("UPDATE users SET name = 'Bob' WHERE id = 1").unwrap();
 /// ```
 pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, ParseError> {
     let arena = Bump::new();
@@ -731,10 +731,10 @@ pub fn parse_update_to_owned(input: &str) -> Result<vibesql_ast::UpdateStmt, Par
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use vibesql_parser::arena_parser::parse_delete_to_owned;
 ///
-/// let stmt = parse_delete_to_owned("DELETE FROM users WHERE id = 1")?;
+/// let stmt = parse_delete_to_owned("DELETE FROM users WHERE id = 1").unwrap();
 /// ```
 pub fn parse_delete_to_owned(input: &str) -> Result<vibesql_ast::DeleteStmt, ParseError> {
     let arena = Bump::new();

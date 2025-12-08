@@ -15,10 +15,10 @@
 //! best of both worlds: arena performance where it helps most (complex queries)
 //! and full feature support for all SQL statements.
 //!
-//! ```ignore
+//! ```
 //! use vibesql_parser::parse_with_arena_fallback;
 //!
-//! let stmt = parse_with_arena_fallback("SELECT * FROM users")?;
+//! let stmt = parse_with_arena_fallback("SELECT * FROM users").unwrap();
 //! // Uses arena parsing internally, converts to standard Statement
 //! ```
 
@@ -65,14 +65,14 @@ use vibesql_ast::Statement;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use vibesql_parser::parse_with_arena_fallback;
 ///
 /// // Uses arena parsing
-/// let select = parse_with_arena_fallback("SELECT * FROM users WHERE id = 1")?;
+/// let select = parse_with_arena_fallback("SELECT * FROM users WHERE id = 1").unwrap();
 ///
 /// // Falls back to standard parsing
-/// let insert = parse_with_arena_fallback("INSERT INTO users VALUES (1, 'Alice')")?;
+/// let insert = parse_with_arena_fallback("INSERT INTO users VALUES (1, 'Alice')").unwrap();
 /// ```
 pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
     // Tokenize to detect statement type

@@ -68,7 +68,7 @@ impl Parser {
     /// * `Err(ParseError)` - Error parsing an item
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// // Parse comma-separated expressions (for GROUP BY)
     /// let exprs = self.parse_comma_separated_list(|p| p.parse_expression())?;
     ///
