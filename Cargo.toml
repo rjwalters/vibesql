@@ -438,5 +438,10 @@ inherits = "release"
 debug = 2                 # Full debug info for detailed profiling
 strip = false             # Keep all symbols
 
+# Bench profile - enable debug symbols for flamegraph profiling
+# This adds ~10% to binary size but enables meaningful stack traces
+[profile.bench]
+debug = 1                 # Line tables only (smaller than debug=2)
+
 [patch.crates-io]
 sqllogictest = { path = "crates/vibesql-sqllogictest" }
