@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-ignored test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze flamegraph-tpch flamegraph-tpcc flamegraph-sysbench flamegraph-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -74,7 +74,6 @@ help:
 	@echo "  make test               - Run all tests (workspace includes sqllogictest suite)"
 	@echo "  make test-unit          - Run unit tests only (lib tests)"
 	@echo "  make test-workspace     - Run all workspace tests (unit + integration + sqllogictest)"
-	@echo "  make test-ignored       - Run only ignored/slow tests (disk-backed indexes, etc.)"
 	@echo "  make test-sqllogictest  - Run SQLLogicTest standalone (with JSON output)"
 	@echo "  make test-sqllogictest-halting - Run SQLLogicTest, stop on first failure"
 	@echo ""
@@ -187,14 +186,6 @@ test-workspace:
 	cargo test --release --workspace --no-run
 	@$(MAKE) strip-quarantine
 	cargo test --release --workspace
-
-# Run only ignored/slow tests (disk-backed indexes, unimplemented features, etc.)
-test-ignored:
-	@echo "Running ignored tests only..."
-	@echo "These are slow tests that are skipped during normal test runs"
-	cargo test --release --workspace --no-run
-	@$(MAKE) strip-quarantine
-	cargo test --release --workspace -- --ignored
 
 # Run SQLLogicTest suite (parallel mode recommended)
 test-sqllogictest:

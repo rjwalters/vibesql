@@ -41,7 +41,6 @@ fn test_parse_create_table_time_with_timezone() {
 }
 
 #[test]
-#[ignore = "TIME WITHOUT TIME ZONE syntax not yet implemented"]
 fn test_parse_create_table_time_without_timezone_explicit() {
     let result = Parser::parse_sql("CREATE TABLE events (start_time TIME WITHOUT TIME ZONE);");
     if let Err(ref e) = result {
@@ -64,7 +63,6 @@ fn test_parse_create_table_time_without_timezone_explicit() {
 }
 
 #[test]
-#[ignore = "TIMESTAMP WITH/WITHOUT TIME ZONE syntax not yet implemented"]
 fn test_parse_create_table_timestamp_types() {
     let result = Parser::parse_sql(
         "CREATE TABLE logs (
