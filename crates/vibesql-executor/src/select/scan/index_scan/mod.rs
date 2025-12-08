@@ -24,5 +24,8 @@ pub(crate) mod selection;
 
 // Re-export public APIs
 pub(crate) use execution::execute_index_scan;
+pub(crate) use execution::execute_skip_scan;
 pub(crate) use selection::cost_based_index_selection;
+pub(crate) use selection::select_index_scan_method;
+pub(crate) use selection::IndexScanChoice;
 // predicate types are accessed directly via predicate::* for better type clarity

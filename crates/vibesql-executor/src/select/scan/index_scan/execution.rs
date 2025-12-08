@@ -919,3 +919,389 @@ fn where_clause_fully_satisfied_by_index(
         _ => false,
     }
 }
+
+/// Execute a skip-scan index operation
+///
+/// Skip-scan enables using a composite index when the WHERE clause filters on
+/// non-prefix columns. It works by:
+/// 1. Getting distinct values of the prefix column(s)
+/// 2. For each prefix value, seeking to (prefix, filter_value) in the index
+/// 3. Returning matching rows
+///
+/// # Arguments
+/// * `table_name` - Name of the table being queried
+/// * `index_name` - Name of the index to use
+/// * `alias` - Optional table alias
+/// * `where_clause` - WHERE clause predicate (required for skip-scan)
+/// * `skip_scan_info` - Skip-scan configuration from planning phase
+/// * `database` - Database reference
+/// * `cte_results` - CTE context for subqueries
+///
+/// # Performance
+/// Cost = O(prefix_cardinality × log n + k) vs O(n) for table scan
+/// Beneficial when prefix columns have low cardinality and filter is selective.
+pub(crate) fn execute_skip_scan(
+    table_name: &str,
+    index_name: &str,
+    alias: Option<&String>,
+    where_clause: &Expression,
+    skip_scan_info: &crate::optimizer::index_planner::SkipScanInfo,
+    database: &Database,
+    cte_results: &HashMap<String, CteResult>,
+) -> Result<super::super::FromResult, ExecutorError> {
+    // Get table and index
+    let table = database
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    let _index_metadata = database
+        .get_index(index_name)
+        .ok_or_else(|| ExecutorError::IndexNotFound(index_name.to_string()))?;
+
+    let index_data = database
+        .get_index_data(index_name)
+        .ok_or_else(|| ExecutorError::IndexNotFound(index_name.to_string()))?;
+
+    // Extract the filter value from the WHERE clause for the filter column
+    let filter_column = &skip_scan_info.filter_column;
+    let filter_column_idx = skip_scan_info.skip_columns; // The column index in the composite key
+
+    // Extract predicate from WHERE clause for the filter column
+    let skip_scan_predicate = extract_skip_scan_predicate(where_clause, filter_column);
+
+    // Execute skip-scan based on predicate type
+    let matching_row_indices: Vec<usize> = match skip_scan_predicate {
+        SkipScanPredicate::Equality(value) => {
+            if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+                eprintln!(
+                    "[SKIP_SCAN] Executing equality skip-scan: index={}, filter_col={}, filter_col_idx={}, value={:?}",
+                    index_name, filter_column, filter_column_idx, value
+                );
+            }
+            index_data.skip_scan_equality(filter_column_idx, &value)
+        }
+        SkipScanPredicate::Range { lower, inclusive_lower, upper, inclusive_upper } => {
+            if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+                eprintln!(
+                    "[SKIP_SCAN] Executing range skip-scan: index={}, filter_col={}, filter_col_idx={}, lower={:?}, upper={:?}",
+                    index_name, filter_column, filter_column_idx, lower, upper
+                );
+            }
+            index_data.skip_scan_range(
+                filter_column_idx,
+                lower.as_ref(),
+                inclusive_lower,
+                upper.as_ref(),
+                inclusive_upper,
+            )
+        }
+        SkipScanPredicate::None => {
+            // No suitable predicate found - fall back to empty result
+            // This shouldn't happen if planning was done correctly
+            if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+                eprintln!(
+                    "[SKIP_SCAN] Warning: No predicate extracted for filter column '{}', returning empty",
+                    filter_column
+                );
+            }
+            vec![]
+        }
+    };
+
+    if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+        eprintln!(
+            "[SKIP_SCAN] Found {} matching rows from skip-scan",
+            matching_row_indices.len()
+        );
+    }
+
+    // Build schema
+    let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+    let schema = CombinedSchema::from_table(effective_name.clone(), table.schema.clone());
+
+    // Fetch matching rows
+    // Issue #3790: Use get_row() which returns None for deleted rows
+    let row_refs: Vec<&Row> =
+        matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
+
+    // Skip-scan doesn't fully satisfy WHERE clause, so we need to apply post-filtering
+    // This handles any additional predicates not covered by the skip-scan
+    let predicate_plan = PredicatePlan::from_where_clause(Some(where_clause), &schema)
+        .map_err(ExecutorError::InvalidWhereClause)?;
+
+    // Apply WHERE filtering
+    let filtered_row_refs = apply_where_filter_for_skip_scan(
+        row_refs,
+        &schema,
+        &predicate_plan,
+        table_name,
+        database,
+        cte_results,
+    )?;
+
+    // Clone only the filtered rows
+    let rows: Vec<Row> = filtered_row_refs.into_iter().cloned().collect();
+
+    // Skip-scan doesn't provide sorted output
+    Ok(super::super::FromResult::from_rows(schema, rows))
+}
+
+/// Predicate type extracted for skip-scan execution
+#[derive(Debug)]
+enum SkipScanPredicate {
+    /// Equality: filter_col = value
+    Equality(vibesql_types::SqlValue),
+    /// Range: filter_col > lower AND/OR filter_col < upper
+    Range {
+        lower: Option<vibesql_types::SqlValue>,
+        inclusive_lower: bool,
+        upper: Option<vibesql_types::SqlValue>,
+        inclusive_upper: bool,
+    },
+    /// No suitable predicate found
+    None,
+}
+
+/// Extract predicate for skip-scan filter column from WHERE clause
+fn extract_skip_scan_predicate(where_clause: &Expression, filter_column: &str) -> SkipScanPredicate {
+    use super::selection::is_column_reference;
+    use vibesql_ast::BinaryOperator;
+
+    match where_clause {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                BinaryOperator::Equal => {
+                    // col = value or value = col
+                    if is_column_reference(left, filter_column) {
+                        if let Expression::Literal(value) = right.as_ref() {
+                            return SkipScanPredicate::Equality(value.clone());
+                        }
+                    }
+                    if is_column_reference(right, filter_column) {
+                        if let Expression::Literal(value) = left.as_ref() {
+                            return SkipScanPredicate::Equality(value.clone());
+                        }
+                    }
+                }
+                BinaryOperator::GreaterThan => {
+                    if is_column_reference(left, filter_column) {
+                        if let Expression::Literal(value) = right.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: Some(value.clone()),
+                                inclusive_lower: false,
+                                upper: None,
+                                inclusive_upper: false,
+                            };
+                        }
+                    }
+                    if is_column_reference(right, filter_column) {
+                        if let Expression::Literal(value) = left.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: None,
+                                inclusive_lower: false,
+                                upper: Some(value.clone()),
+                                inclusive_upper: false,
+                            };
+                        }
+                    }
+                }
+                BinaryOperator::GreaterThanOrEqual => {
+                    if is_column_reference(left, filter_column) {
+                        if let Expression::Literal(value) = right.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: Some(value.clone()),
+                                inclusive_lower: true,
+                                upper: None,
+                                inclusive_upper: false,
+                            };
+                        }
+                    }
+                    if is_column_reference(right, filter_column) {
+                        if let Expression::Literal(value) = left.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: None,
+                                inclusive_lower: false,
+                                upper: Some(value.clone()),
+                                inclusive_upper: true,
+                            };
+                        }
+                    }
+                }
+                BinaryOperator::LessThan => {
+                    if is_column_reference(left, filter_column) {
+                        if let Expression::Literal(value) = right.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: None,
+                                inclusive_lower: false,
+                                upper: Some(value.clone()),
+                                inclusive_upper: false,
+                            };
+                        }
+                    }
+                    if is_column_reference(right, filter_column) {
+                        if let Expression::Literal(value) = left.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: Some(value.clone()),
+                                inclusive_lower: false,
+                                upper: None,
+                                inclusive_upper: false,
+                            };
+                        }
+                    }
+                }
+                BinaryOperator::LessThanOrEqual => {
+                    if is_column_reference(left, filter_column) {
+                        if let Expression::Literal(value) = right.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: None,
+                                inclusive_lower: false,
+                                upper: Some(value.clone()),
+                                inclusive_upper: true,
+                            };
+                        }
+                    }
+                    if is_column_reference(right, filter_column) {
+                        if let Expression::Literal(value) = left.as_ref() {
+                            return SkipScanPredicate::Range {
+                                lower: Some(value.clone()),
+                                inclusive_lower: true,
+                                upper: None,
+                                inclusive_upper: false,
+                            };
+                        }
+                    }
+                }
+                BinaryOperator::And => {
+                    // Try to find predicates on the filter column in both sides
+                    let left_pred = extract_skip_scan_predicate(left, filter_column);
+                    let right_pred = extract_skip_scan_predicate(right, filter_column);
+
+                    // Merge range predicates if both are ranges
+                    match (left_pred, right_pred) {
+                        (SkipScanPredicate::Equality(v), SkipScanPredicate::None) => {
+                            return SkipScanPredicate::Equality(v);
+                        }
+                        (SkipScanPredicate::None, SkipScanPredicate::Equality(v)) => {
+                            return SkipScanPredicate::Equality(v);
+                        }
+                        (SkipScanPredicate::Range { lower: l1, inclusive_lower: il1, upper: u1, inclusive_upper: iu1 },
+                         SkipScanPredicate::Range { lower: l2, inclusive_lower: il2, upper: u2, inclusive_upper: iu2 }) => {
+                            // Merge ranges: take the more restrictive bounds
+                            let (lower, inclusive_lower) = match (l1, l2) {
+                                (Some(v1), Some(v2)) => {
+                                    // Take the larger lower bound (more restrictive)
+                                    if v1 >= v2 { (Some(v1), il1) } else { (Some(v2), il2) }
+                                }
+                                (Some(v), None) | (None, Some(v)) => (Some(v), il1 || il2),
+                                (None, None) => (None, false),
+                            };
+                            let (upper, inclusive_upper) = match (u1, u2) {
+                                (Some(v1), Some(v2)) => {
+                                    // Take the smaller upper bound (more restrictive)
+                                    if v1 <= v2 { (Some(v1), iu1) } else { (Some(v2), iu2) }
+                                }
+                                (Some(v), None) | (None, Some(v)) => (Some(v), iu1 || iu2),
+                                (None, None) => (None, false),
+                            };
+                            return SkipScanPredicate::Range { lower, inclusive_lower, upper, inclusive_upper };
+                        }
+                        (r @ SkipScanPredicate::Range { .. }, SkipScanPredicate::None) => return r,
+                        (SkipScanPredicate::None, r @ SkipScanPredicate::Range { .. }) => return r,
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Expression::Between { expr, low, high, negated: false, .. } => {
+            if is_column_reference(expr, filter_column) {
+                if let (Expression::Literal(low_val), Expression::Literal(high_val)) =
+                    (low.as_ref(), high.as_ref())
+                {
+                    return SkipScanPredicate::Range {
+                        lower: Some(low_val.clone()),
+                        inclusive_lower: true,
+                        upper: Some(high_val.clone()),
+                        inclusive_upper: true,
+                    };
+                }
+            }
+        }
+        _ => {}
+    }
+
+    SkipScanPredicate::None
+}
+
+/// Apply WHERE filter for skip-scan results
+///
+/// Similar to apply_where_filter_zerocopy but simplified for skip-scan use case.
+fn apply_where_filter_for_skip_scan<'a>(
+    row_refs: Vec<&'a Row>,
+    schema: &CombinedSchema,
+    predicate_plan: &PredicatePlan,
+    table_name: &str,
+    database: &Database,
+    cte_results: &HashMap<String, CteResult>,
+) -> Result<Vec<&'a Row>, ExecutorError> {
+    use crate::evaluator::compiled::CompiledPredicate;
+    use crate::evaluator::CombinedExpressionEvaluator;
+    use crate::select::scan::predicates::combine_predicates_with_and;
+
+    // Get table statistics for selectivity-based ordering
+    let table_stats_owned = database.get_table(table_name).map(|table| {
+        table.get_statistics().cloned().unwrap_or_else(|| {
+            vibesql_storage::statistics::TableStatistics::estimate_from_schema(
+                table.row_count(),
+                &table.schema,
+            )
+        })
+    });
+
+    // Get predicates ordered by selectivity
+    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
+
+    // If no table-local predicates, return all rows
+    if ordered_preds.is_empty() {
+        return Ok(row_refs);
+    }
+
+    // Combine ordered predicates with AND
+    let combined_where = combine_predicates_with_and(ordered_preds);
+
+    // Try compiled predicate path
+    let compiled = CompiledPredicate::compile(&combined_where, schema);
+    if compiled.is_fully_compiled() {
+        let mut filtered = Vec::with_capacity(row_refs.len() / 2);
+        for row_ref in row_refs {
+            if compiled.evaluate(row_ref).unwrap_or(false) {
+                filtered.push(row_ref);
+            }
+        }
+        return Ok(filtered);
+    }
+
+    // Fallback: Use full expression evaluator
+    let evaluator = if cte_results.is_empty() {
+        CombinedExpressionEvaluator::with_database(schema, database)
+    } else {
+        CombinedExpressionEvaluator::with_database_and_cte(schema, database, cte_results)
+    };
+
+    let mut filtered = Vec::new();
+    for row_ref in row_refs {
+        evaluator.clear_cse_cache();
+        let include_row = match evaluator.eval(&combined_where, row_ref)? {
+            vibesql_types::SqlValue::Boolean(true) => true,
+            vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
+            vibesql_types::SqlValue::Integer(0) => false,
+            vibesql_types::SqlValue::Integer(_) => true,
+            _ => false,
+        };
+        if include_row {
+            filtered.push(row_ref);
+        }
+    }
+
+    Ok(filtered)
+}

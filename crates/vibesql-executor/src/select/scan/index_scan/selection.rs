@@ -2,6 +2,7 @@
 //!
 //! Determines when and which index to use for query optimization.
 //! Supports both rule-based (simple) and cost-based (statistics-aware) selection.
+//! Also includes skip-scan optimization for queries filtering on non-prefix columns.
 
 use vibesql_ast::Expression;
 use vibesql_catalog::TableSchema;
@@ -9,6 +10,38 @@ use vibesql_storage::{
     statistics::{AccessMethod, CostEstimator},
     Database,
 };
+
+use crate::optimizer::index_planner::{IndexPlanner, SkipScanInfo};
+
+/// Result of index selection, distinguishing between regular and skip-scan
+#[derive(Debug, Clone)]
+pub(crate) enum IndexScanChoice {
+    /// Regular index scan using prefix columns
+    Regular {
+        index_name: String,
+        sorted_columns: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    },
+    /// Skip-scan using non-prefix column filter
+    SkipScan {
+        index_name: String,
+        skip_scan_info: SkipScanInfo,
+    },
+}
+
+impl IndexScanChoice {
+    /// Get the index name regardless of scan type
+    pub fn index_name(&self) -> &str {
+        match self {
+            IndexScanChoice::Regular { index_name, .. } => index_name,
+            IndexScanChoice::SkipScan { index_name, .. } => index_name,
+        }
+    }
+
+    /// Check if this is a skip-scan choice
+    pub fn is_skip_scan(&self) -> bool {
+        matches!(self, IndexScanChoice::SkipScan { .. })
+    }
+}
 
 /// Check if any ORDER BY column is nullable
 ///
@@ -744,6 +777,76 @@ pub(crate) fn estimate_selectivity(
         }
         _ => 0.33, // Default fallback for unsupported expressions
     }
+}
+
+/// Unified index selection that returns IndexScanChoice
+///
+/// This function first tries regular index selection, and if no suitable index is found,
+/// it attempts skip-scan optimization as a fallback. Skip-scan enables using composite
+/// indexes when the WHERE clause filters on non-prefix columns.
+///
+/// # Arguments
+/// * `table_name` - Name of the table being queried
+/// * `where_clause` - Optional WHERE clause predicate
+/// * `order_by` - Optional ORDER BY clause
+/// * `database` - Database reference for accessing statistics and indexes
+///
+/// # Returns
+/// - `Some(IndexScanChoice::Regular {...})` if a regular index scan should be used
+/// - `Some(IndexScanChoice::SkipScan {...})` if skip-scan is beneficial
+/// - `None` if table scan is more appropriate
+///
+/// # Example
+/// ```text
+/// // Query: SELECT * FROM sales WHERE date = '2024-01-01'
+/// // Index: (region, date) - a composite index
+/// //
+/// // Regular index selection fails (no filter on 'region' prefix column)
+/// // Skip-scan is considered: iterate through distinct 'region' values,
+/// // for each region, seek to entries with date = '2024-01-01'
+/// //
+/// // If skip-scan cost < table scan cost, returns IndexScanChoice::SkipScan
+/// ```
+pub(crate) fn select_index_scan_method(
+    table_name: &str,
+    where_clause: Option<&Expression>,
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    database: &Database,
+) -> Option<IndexScanChoice> {
+    // First, try regular cost-based index selection
+    if let Some((index_name, sorted_columns)) =
+        cost_based_index_selection(table_name, where_clause, order_by, database)
+    {
+        return Some(IndexScanChoice::Regular { index_name, sorted_columns });
+    }
+
+    // If regular index selection failed and we have a WHERE clause,
+    // try skip-scan optimization
+    if let Some(where_expr) = where_clause {
+        let planner = IndexPlanner::new(database);
+        if let Some(plan) = planner.plan_skip_scan(table_name, where_expr) {
+            if plan.is_skip_scan {
+                if let Some(skip_info) = plan.skip_scan_info {
+                    if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
+                        eprintln!(
+                            "[SKIP_SCAN] Selected skip-scan for table={}, index={}, filter_col={}, prefix_cardinality={}",
+                            table_name,
+                            plan.index_name,
+                            skip_info.filter_column,
+                            skip_info.prefix_cardinality
+                        );
+                    }
+                    return Some(IndexScanChoice::SkipScan {
+                        index_name: plan.index_name,
+                        skip_scan_info: skip_info,
+                    });
+                }
+            }
+        }
+    }
+
+    // No index or skip-scan option found
+    None
 }
 
 #[cfg(test)]
