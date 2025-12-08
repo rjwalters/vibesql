@@ -40,6 +40,44 @@ pub use reorder::JoinOrderAnalyzer;
 // Re-export join order search for public tests
 pub use search::JoinOrderSearch;
 
+/// Iterator over `FromData` rows without forcing full materialization
+///
+/// This enum wraps either a Vec iterator or a lazy `FromIterator`, allowing
+/// uniform iteration over rows regardless of how they were stored.
+///
+/// # Issue #4060
+///
+/// This type enables deferred row materialization for LIMIT queries:
+/// - `SELECT * FROM t LIMIT 10` only clones 10 rows, not all of `t`
+/// - Memory usage is O(LIMIT) instead of O(table_size)
+#[allow(dead_code)]
+pub(super) enum FromDataIterator {
+    /// Iterator over a materialized Vec<Row>
+    Vec(std::vec::IntoIter<vibesql_storage::Row>),
+    /// Lazy iterator from FromIterator (table scan)
+    Lazy(FromIterator),
+}
+
+impl Iterator for FromDataIterator {
+    type Item = vibesql_storage::Row;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Vec(iter) => iter.next(),
+            Self::Lazy(iter) => iter.next(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Vec(iter) => iter.size_hint(),
+            Self::Lazy(iter) => iter.size_hint(),
+        }
+    }
+}
+
 /// Data source for FROM clause results
 ///
 /// This enum allows FROM results to be either materialized (Vec<Row>) or lazy (iterator).
@@ -69,6 +107,37 @@ impl FromData {
             Self::Materialized(rows) => rows,
             Self::SharedRows(arc) => Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone()),
             Self::Iterator(iter) => iter.collect_vec(),
+        }
+    }
+
+    /// Returns an iterator over rows without forcing full materialization
+    ///
+    /// This is more efficient than `into_rows()` when you don't need all rows,
+    /// particularly for LIMIT queries where only a subset will be consumed.
+    ///
+    /// For Materialized and SharedRows variants, this returns an iterator over
+    /// the owned/cloned Vec. For Iterator variant, it returns the lazy iterator
+    /// directly without collecting.
+    ///
+    /// # Performance
+    ///
+    /// - `into_rows()`: O(n) allocation + cloning for all rows
+    /// - `into_iter()`: O(k) where k is the number of rows actually consumed
+    ///
+    /// Use `into_iter()` when:
+    /// - Processing with LIMIT (only need first N rows)
+    /// - Filtering results (may discard many rows)
+    /// - Streaming output without full materialization
+    #[allow(dead_code)]
+    pub fn into_iter(self) -> FromDataIterator {
+        match self {
+            Self::Materialized(rows) => FromDataIterator::Vec(rows.into_iter()),
+            Self::SharedRows(arc) => {
+                // Try to unwrap the Arc; if shared, clone the Vec
+                let rows = Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone());
+                FromDataIterator::Vec(rows.into_iter())
+            }
+            Self::Iterator(iter) => FromDataIterator::Lazy(iter),
         }
     }
 
@@ -185,6 +254,40 @@ impl FromResult {
     /// Get the rows, materializing if needed
     pub(super) fn into_rows(self) -> Vec<vibesql_storage::Row> {
         self.data.into_rows()
+    }
+
+    /// Returns an iterator over rows without forcing full materialization
+    ///
+    /// This delegates to `FromData::into_iter()` and is more efficient than
+    /// `into_rows()` when only a subset of rows will be consumed.
+    ///
+    /// # Example Use Cases
+    ///
+    /// - LIMIT queries: `result.into_iter().take(10).collect()`
+    /// - Filtered iteration: `result.into_iter().filter(|r| ...).collect()`
+    /// - Early termination: Stop iterating when a condition is met
+    ///
+    /// # Issue #4060
+    #[allow(dead_code)]
+    pub(super) fn into_iter(self) -> FromDataIterator {
+        self.data.into_iter()
+    }
+
+    /// Take up to N rows without full materialization
+    ///
+    /// This is a convenience method equivalent to `self.into_iter().take(n).collect()`.
+    /// It's optimized for LIMIT queries where only a small subset of rows is needed.
+    ///
+    /// # Performance
+    ///
+    /// For a table with 10,000 rows and `take(10)`:
+    /// - `into_rows()` + truncate: clones all 10,000 rows, then discards 9,990
+    /// - `take(10)`: clones only 10 rows
+    ///
+    /// # Issue #4060
+    #[allow(dead_code)]
+    pub(super) fn take(self, n: usize) -> Vec<vibesql_storage::Row> {
+        self.into_iter().take(n).collect()
     }
 
     /// Get a mutable reference to the rows, materializing if needed

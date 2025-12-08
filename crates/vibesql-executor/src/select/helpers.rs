@@ -66,3 +66,40 @@ pub(super) fn apply_limit_offset(
 
     rows.into_iter().skip(start).take(take).collect()
 }
+
+/// Apply LIMIT and OFFSET to an iterator without forcing full materialization
+///
+/// This is more efficient than `apply_limit_offset` when the input is a lazy iterator,
+/// as it only materializes the rows that will actually be returned.
+///
+/// # Performance (Issue #4060)
+///
+/// For `SELECT * FROM t LIMIT 10` on a 10,000 row table:
+/// - `apply_limit_offset(iter.collect(), Some(10), None)`: clones 10,000 rows, keeps 10
+/// - `apply_limit_offset_iter(iter, Some(10), None)`: clones only 10 rows
+///
+/// # Arguments
+///
+/// * `iter` - Iterator over rows (can be lazy or materialized)
+/// * `limit` - Maximum number of rows to return (None = unlimited)
+/// * `offset` - Number of rows to skip from the start (None = 0)
+#[allow(dead_code)]
+pub(super) fn apply_limit_offset_iter<I>(
+    iter: I,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Vec<vibesql_storage::Row>
+where
+    I: Iterator<Item = vibesql_storage::Row>,
+{
+    let start = offset.unwrap_or(0);
+
+    // Skip offset rows
+    let iter = iter.skip(start);
+
+    // Apply limit if specified
+    match limit {
+        Some(n) => iter.take(n).collect(),
+        None => iter.collect(),
+    }
+}
