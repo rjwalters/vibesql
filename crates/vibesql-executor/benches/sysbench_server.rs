@@ -1,5 +1,11 @@
 //! Sysbench Client-Server Benchmark
 //!
+//! WARNING: BENCHMARK INTEGRITY REQUIREMENT
+//! =========================================
+//! All database operations in this benchmark go through the PostgreSQL wire protocol,
+//! ensuring they use the full SQL execution path. This is inherently correct since
+//! all queries are transmitted as SQL strings over the network.
+//!
 //! This benchmark compares vibesql-server (client-server mode) against MySQL,
 //! providing a fair apples-to-apples comparison with equivalent network overhead.
 //!

@@ -3,6 +3,25 @@
 
 //! Sysbench OLTP Benchmark Runner
 //!
+//! WARNING: BENCHMARK INTEGRITY REQUIREMENT
+//! =========================================
+//! All database operations in this benchmark MUST go through the SQL execution path.
+//! Direct API calls (e.g., Table::get_by_pk, Table::insert_row) that bypass SQL parsing
+//! and planning would produce misleading benchmark results since they skip the query
+//! processing overhead that real users experience.
+//!
+//! Acceptable patterns:
+//! - SelectExecutor::new(db).execute(&stmt) - SQL execution
+//! - UpdateExecutor::execute(&stmt, db) - SQL execution
+//! - InsertExecutor::execute(db, &stmt) - SQL execution
+//! - DeleteExecutor::execute(&stmt, db) - SQL execution
+//! - session.execute_prepared() / session.execute() - SQL execution
+//!
+//! NOT acceptable in benchmark hot path:
+//! - db.get_table().get_by_pk() - bypasses SQL
+//! - table.insert_row() - bypasses SQL (OK for setup only)
+//! - table.scan_all() - bypasses SQL
+//!
 //! A standalone benchmark runner for Sysbench OLTP workloads, comparing
 //! VibeSQL against SQLite, DuckDB, and MySQL.
 //!
