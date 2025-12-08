@@ -35,16 +35,31 @@ pub(super) fn estimate_result_size(rows: &[vibesql_storage::Row]) -> usize {
 /// with SQL semantics:
 /// - NULL == NULL for grouping
 /// - NaN == NaN for grouping
+///
+/// # Optimization
+///
+/// Checks containment BEFORE cloning to avoid unnecessary allocations.
+/// Only clones row values when the row is actually unique and needs to be stored.
+/// This reduces cloning from O(n) to O(unique rows), which is significant
+/// when there are many duplicate values (common in DISTINCT queries).
 pub(super) fn apply_distinct(rows: Vec<vibesql_storage::Row>) -> Vec<vibesql_storage::Row> {
-    let mut seen = IndexSet::new();
-    let mut result = Vec::new();
+    if rows.is_empty() {
+        return Vec::new();
+    }
+
+    // Track seen values - IndexSet maintains insertion order for deterministic results
+    // Pre-allocate assuming ~50% unique rows as a reasonable default for DISTINCT queries
+    let mut seen: IndexSet<vibesql_storage::RowValues> = IndexSet::with_capacity(rows.len() / 2);
+    let mut result = Vec::with_capacity(rows.len() / 2);
 
     for row in rows {
-        // Try to insert the row's values into the set
-        // If insertion succeeds (wasn't already present), keep the row
-        if seen.insert(row.values.clone()) {
+        // Check containment first (no clone needed for lookup)
+        // Only clone if the row is actually new and needs to be stored
+        if !seen.contains(&row.values) {
+            seen.insert(row.values.clone());
             result.push(row);
         }
+        // Duplicates are skipped without any cloning
     }
 
     result
