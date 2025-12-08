@@ -1744,6 +1744,19 @@ impl SelectExecutor<'_> {
             None => return Ok(None),
         };
 
+        // Estimate result size for pre-allocation (#4059)
+        // Use heuristic based on numeric range to avoid double-scanning the index
+        let estimated_count = match (&low_value, &high_value) {
+            (SqlValue::Integer(lo), SqlValue::Integer(hi)) => {
+                // For integer PKs, estimate ~1 row per integer value
+                (hi - lo + 1).max(0) as usize
+            }
+            (SqlValue::Bigint(lo), SqlValue::Bigint(hi)) => {
+                (hi - lo + 1).max(0) as usize
+            }
+            _ => 100, // Default estimate for non-integer types
+        };
+
         // Try streaming range scan
         let streaming_iter = match pk_index_data.range_scan_streaming(
             Some(&low_value),
@@ -1756,27 +1769,31 @@ impl SelectExecutor<'_> {
         };
 
         // Stream with early projection - only clone needed columns
-        // Optimization: For single-column projection, avoid Vec allocation
-        let mut rows: Vec<Row> = if col_indices.len() == 1 {
+        // Pre-allocate Vec with estimated capacity to avoid reallocations (#4059)
+        let mut rows: Vec<Row> = Vec::with_capacity(estimated_count);
+
+        if col_indices.len() == 1 {
+            // Single-column projection: use SmallVec directly to avoid Vec allocation
             let col_idx = col_indices[0];
-            streaming_iter
-                .filter_map(|idx| {
-                    table.get_row(idx).map(|row| {
-                        Row::from_vec(vec![row.values[col_idx].clone()])
-                    })
-                })
-                .collect()
+            for idx in streaming_iter {
+                if let Some(row) = table.get_row(idx) {
+                    let mut values = vibesql_storage::RowValues::new();
+                    values.push(row.values[col_idx].clone());
+                    rows.push(Row::new(values));
+                }
+            }
         } else {
-            streaming_iter
-                .filter_map(|idx| {
-                    table.get_row(idx).map(|row| {
-                        let projected_values: Vec<SqlValue> =
-                            col_indices.iter().map(|&col_idx| row.values[col_idx].clone()).collect();
-                        Row::from_vec(projected_values)
-                    })
-                })
-                .collect()
-        };
+            // Multi-column projection: collect into SmallVec
+            for idx in streaming_iter {
+                if let Some(row) = table.get_row(idx) {
+                    let projected_values: vibesql_storage::RowValues = col_indices
+                        .iter()
+                        .map(|&col_idx| row.values[col_idx].clone())
+                        .collect();
+                    rows.push(Row::new(projected_values));
+                }
+            }
+        }
 
         // Apply DISTINCT if needed (deduplicate rows)
         // For DISTINCT + ORDER BY, sort first then deduplicate to preserve order
