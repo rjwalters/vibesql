@@ -21,6 +21,11 @@ pub(crate) fn is_null(nulls: &Option<std::sync::Arc<Vec<bool>>>, idx: usize) -> 
 ///
 /// NULL handling: NULL keys never match in equi-joins (NULL = NULL is NULL, not true).
 /// Both left and right NULL keys are skipped during probe.
+///
+/// # Bloom Filter Optimization
+///
+/// This function uses the Bloom filter (if available) to quickly reject probe keys
+/// that cannot possibly match any build-side keys, avoiding expensive hash table lookups.
 pub(crate) fn probe_columnar(
     hash_table: &ColumnarHashTable,
     left_key: &ColumnArray,
@@ -39,6 +44,12 @@ pub(crate) fn probe_columnar(
                 if is_null(left_nulls, left_idx) {
                     continue;
                 }
+
+                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
+                if !hash_table.bloom_might_contain_i64(key) {
+                    continue; // Definitely no match
+                }
+
                 for right_idx in hash_table.probe_i64(key, right_values) {
                     // Skip NULL right keys
                     if is_null(right_nulls, right_idx as usize) {
@@ -58,6 +69,12 @@ pub(crate) fn probe_columnar(
                 if is_null(left_nulls, left_idx) {
                     continue;
                 }
+
+                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
+                if !hash_table.bloom_might_contain_string(key) {
+                    continue; // Definitely no match
+                }
+
                 for right_idx in hash_table.probe_string(key, right_values) {
                     // Skip NULL right keys
                     if is_null(right_nulls, right_idx as usize) {
@@ -80,6 +97,12 @@ pub(crate) fn probe_columnar(
 }
 
 /// Probe phase for LEFT OUTER join: find matches and preserve unmatched left rows
+///
+/// # Bloom Filter Optimization
+///
+/// Uses the Bloom filter to quickly reject non-matching keys. Unlike inner join,
+/// left outer join preserves unmatched rows, so Bloom filter rejection doesn't
+/// affect correctness - it just avoids unnecessary hash table lookups.
 pub(crate) fn probe_columnar_left_outer(
     hash_table: &ColumnarHashTable,
     left_key: &ColumnArray,
@@ -99,6 +122,11 @@ pub(crate) fn probe_columnar_left_outer(
                     continue; // Will be handled as unmatched
                 }
 
+                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
+                if !hash_table.bloom_might_contain_i64(key) {
+                    continue; // Definitely no match, will be output as unmatched
+                }
+
                 let mut found_match = false;
                 for right_idx in hash_table.probe_i64(key, right_values) {
                     left_indices.push(left_idx as u32);
@@ -115,6 +143,11 @@ pub(crate) fn probe_columnar_left_outer(
                 let is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
                 if is_null {
                     continue;
+                }
+
+                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
+                if !hash_table.bloom_might_contain_string(key) {
+                    continue; // Definitely no match, will be output as unmatched
                 }
 
                 let mut found_match = false;
@@ -147,6 +180,12 @@ pub(crate) fn probe_columnar_left_outer(
 }
 
 /// Probe phase for RIGHT OUTER join: find matches and preserve unmatched right rows
+///
+/// # Bloom Filter Optimization
+///
+/// Uses the Bloom filter to quickly reject non-matching keys. Unlike inner join,
+/// right outer join preserves unmatched rows, so Bloom filter rejection doesn't
+/// affect correctness - it just avoids unnecessary hash table lookups.
 pub(crate) fn probe_columnar_right_outer(
     hash_table: &ColumnarHashTable,
     right_key: &ColumnArray,
@@ -165,6 +204,11 @@ pub(crate) fn probe_columnar_right_outer(
                     continue;
                 }
 
+                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
+                if !hash_table.bloom_might_contain_i64(key) {
+                    continue; // Definitely no match, will be output as unmatched
+                }
+
                 let mut found_match = false;
                 for left_idx in hash_table.probe_i64(key, left_values) {
                     left_indices.push(left_idx);
@@ -181,6 +225,11 @@ pub(crate) fn probe_columnar_right_outer(
                 let is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
                 if is_null {
                     continue;
+                }
+
+                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
+                if !hash_table.bloom_might_contain_string(key) {
+                    continue; // Definitely no match, will be output as unmatched
                 }
 
                 let mut found_match = false;

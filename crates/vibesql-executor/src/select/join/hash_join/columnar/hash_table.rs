@@ -1,11 +1,24 @@
 //! Hash table structures for columnar join operations
 //!
 //! This module provides hash table implementations optimized for columnar data:
-//! - `ColumnarHashTable`: Single-column hash table
+//! - `ColumnarHashTable`: Single-column hash table with optional Bloom filter
 //! - `CompositeIntHashTable`: Multi-column integer hash table
+//!
+//! # Bloom Filter Optimization
+//!
+//! The hash tables can optionally build a Bloom filter alongside the main hash
+//! structure. During probe, the Bloom filter can quickly reject keys that are
+//! definitely not in the table, avoiding expensive hash table lookups.
 
 use crate::errors::ExecutorError;
 use crate::select::columnar::ColumnArray;
+use crate::select::join::BloomFilter;
+
+/// Minimum number of build-side rows to enable Bloom filter optimization.
+const BLOOM_FILTER_MIN_ROWS: usize = 100;
+
+/// Target false positive rate for Bloom filter (1%).
+const BLOOM_FILTER_FPR: f64 = 0.01;
 
 /// Hash table for columnar join operations
 ///
@@ -17,6 +30,12 @@ use crate::select::columnar::ColumnArray;
 /// - No per-bucket Vec allocation
 /// - Entries are stored contiguously
 /// - Better cache utilization during probe
+///
+/// # Bloom Filter Optimization
+///
+/// When the table has enough rows (>= BLOOM_FILTER_MIN_ROWS), a Bloom filter
+/// is built alongside the hash table. Use `bloom_might_contain_*` methods to
+/// quickly reject probe keys before doing full hash table lookups.
 pub struct ColumnarHashTable {
     /// Number of hash buckets (power of 2)
     bucket_count: usize,
@@ -24,6 +43,8 @@ pub struct ColumnarHashTable {
     buckets: Vec<u32>,
     /// Entry array: entries[i] = (row_index, next_entry_index)
     entries: Vec<(u32, u32)>,
+    /// Optional Bloom filter for quick rejection of non-matching keys
+    bloom_filter: Option<BloomFilter>,
 }
 
 impl ColumnarHashTable {
@@ -43,11 +64,24 @@ impl ColumnarHashTable {
         // Pre-allocate entries
         let mut entries = Vec::with_capacity(row_count);
 
+        // Create Bloom filter if we have enough rows
+        let bloom_disabled = std::env::var("VIBESQL_DISABLE_BLOOM_FILTER").is_ok();
+        let mut bloom_filter = if !bloom_disabled && row_count >= BLOOM_FILTER_MIN_ROWS {
+            Some(BloomFilter::new(row_count, BLOOM_FILTER_FPR))
+        } else {
+            None
+        };
+
         // Build hash table
         for (row_idx, &value) in values.iter().enumerate() {
             // Simple hash for i64: mix the bits
             let hash = Self::hash_i64(value);
             let bucket_idx = (hash as usize) & bucket_mask;
+
+            // Insert into Bloom filter
+            if let Some(ref mut bf) = bloom_filter {
+                bf.insert_hash(hash);
+            }
 
             // Insert into linked list at this bucket
             let prev_head = buckets[bucket_idx];
@@ -55,7 +89,7 @@ impl ColumnarHashTable {
             buckets[bucket_idx] = entries.len() as u32 - 1;
         }
 
-        Self { bucket_count, buckets, entries }
+        Self { bucket_count, buckets, entries, bloom_filter }
     }
 
     /// Build a hash table from a string column
@@ -67,16 +101,29 @@ impl ColumnarHashTable {
         let mut buckets = vec![u32::MAX; bucket_count];
         let mut entries = Vec::with_capacity(row_count);
 
+        // Create Bloom filter if we have enough rows
+        let bloom_disabled = std::env::var("VIBESQL_DISABLE_BLOOM_FILTER").is_ok();
+        let mut bloom_filter = if !bloom_disabled && row_count >= BLOOM_FILTER_MIN_ROWS {
+            Some(BloomFilter::new(row_count, BLOOM_FILTER_FPR))
+        } else {
+            None
+        };
+
         for (row_idx, value) in values.iter().enumerate() {
             let hash = Self::hash_string(value);
             let bucket_idx = (hash as usize) & bucket_mask;
+
+            // Insert into Bloom filter
+            if let Some(ref mut bf) = bloom_filter {
+                bf.insert_hash(hash);
+            }
 
             let prev_head = buckets[bucket_idx];
             entries.push((row_idx as u32, prev_head));
             buckets[bucket_idx] = entries.len() as u32 - 1;
         }
 
-        Self { bucket_count, buckets, entries }
+        Self { bucket_count, buckets, entries, bloom_filter }
     }
 
     /// Build hash table from a ColumnArray
@@ -102,16 +149,29 @@ impl ColumnarHashTable {
         let mut buckets = vec![u32::MAX; bucket_count];
         let mut entries = Vec::with_capacity(row_count);
 
+        // Create Bloom filter if we have enough rows
+        let bloom_disabled = std::env::var("VIBESQL_DISABLE_BLOOM_FILTER").is_ok();
+        let mut bloom_filter = if !bloom_disabled && row_count >= BLOOM_FILTER_MIN_ROWS {
+            Some(BloomFilter::new(row_count, BLOOM_FILTER_FPR))
+        } else {
+            None
+        };
+
         for (row_idx, &value) in values.iter().enumerate() {
             let hash = Self::hash_i64(value as i64);
             let bucket_idx = (hash as usize) & bucket_mask;
+
+            // Insert into Bloom filter
+            if let Some(ref mut bf) = bloom_filter {
+                bf.insert_hash(hash);
+            }
 
             let prev_head = buckets[bucket_idx];
             entries.push((row_idx as u32, prev_head));
             buckets[bucket_idx] = entries.len() as u32 - 1;
         }
 
-        Self { bucket_count, buckets, entries }
+        Self { bucket_count, buckets, entries, bloom_filter }
     }
 
     /// Build from f64 values
@@ -123,16 +183,29 @@ impl ColumnarHashTable {
         let mut buckets = vec![u32::MAX; bucket_count];
         let mut entries = Vec::with_capacity(row_count);
 
+        // Create Bloom filter if we have enough rows
+        let bloom_disabled = std::env::var("VIBESQL_DISABLE_BLOOM_FILTER").is_ok();
+        let mut bloom_filter = if !bloom_disabled && row_count >= BLOOM_FILTER_MIN_ROWS {
+            Some(BloomFilter::new(row_count, BLOOM_FILTER_FPR))
+        } else {
+            None
+        };
+
         for (row_idx, &value) in values.iter().enumerate() {
             let hash = Self::hash_f64(value);
             let bucket_idx = (hash as usize) & bucket_mask;
+
+            // Insert into Bloom filter
+            if let Some(ref mut bf) = bloom_filter {
+                bf.insert_hash(hash);
+            }
 
             let prev_head = buckets[bucket_idx];
             entries.push((row_idx as u32, prev_head));
             buckets[bucket_idx] = entries.len() as u32 - 1;
         }
 
-        Self { bucket_count, buckets, entries }
+        Self { bucket_count, buckets, entries, bloom_filter }
     }
 
     /// Probe the hash table with an i64 key, returning matching row indices
@@ -197,6 +270,34 @@ impl ColumnarHashTable {
             hash = hash.wrapping_mul(FNV_PRIME);
         }
         hash
+    }
+
+    /// Check if an i64 key might be in the hash table using the Bloom filter.
+    ///
+    /// Returns `true` if the key MIGHT be in the table (possible false positive).
+    /// Returns `false` if the key is DEFINITELY NOT in the table.
+    /// Returns `true` if no Bloom filter is available (conservative).
+    #[inline]
+    pub fn bloom_might_contain_i64(&self, key: i64) -> bool {
+        match &self.bloom_filter {
+            Some(bf) => bf.might_contain_hash(Self::hash_i64(key)),
+            None => true, // No Bloom filter, assume might contain
+        }
+    }
+
+    /// Check if a string key might be in the hash table using the Bloom filter.
+    #[inline]
+    pub fn bloom_might_contain_string(&self, key: &str) -> bool {
+        match &self.bloom_filter {
+            Some(bf) => bf.might_contain_hash(Self::hash_string(key)),
+            None => true, // No Bloom filter, assume might contain
+        }
+    }
+
+    /// Returns true if this hash table has a Bloom filter enabled.
+    #[inline]
+    pub fn has_bloom_filter(&self) -> bool {
+        self.bloom_filter.is_some()
     }
 }
 

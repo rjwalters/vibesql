@@ -7,6 +7,7 @@ use crate::{
     schema::CombinedSchema, timeout::TimeoutContext,
 };
 
+mod bloom_filter;
 mod expression_mapper;
 mod hash_anti_join;
 pub(crate) mod hash_join;
@@ -16,6 +17,9 @@ mod join_analyzer;
 mod nested_loop;
 pub mod reorder;
 pub mod search;
+
+// Re-export Bloom filter for use in hash join implementations
+pub(crate) use bloom_filter::BloomFilter;
 
 #[cfg(test)]
 mod tests;
