@@ -30,7 +30,10 @@ use std::time::Instant;
 ///
 /// This trait abstracts over different database backends (VibeSQL, SQLite, DuckDB)
 /// allowing a single generic benchmark runner to work with any executor type.
-pub trait TPCCExecutor {
+///
+/// The `Sync` bound is required for parallel multi-client execution where
+/// multiple threads share the same executor reference.
+pub trait TPCCExecutor: Sync {
     fn new_order(&self, input: &NewOrderInput) -> TransactionResult;
     fn payment(&self, input: &PaymentInput) -> TransactionResult;
     fn order_status(&self, input: &OrderStatusInput) -> TransactionResult;
