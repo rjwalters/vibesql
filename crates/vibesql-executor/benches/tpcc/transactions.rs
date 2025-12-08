@@ -1,3 +1,20 @@
+// ============================================================================
+// ⚠️  BENCHMARK INTEGRITY WARNING ⚠️
+// ============================================================================
+// DO NOT add "fast paths", "optimizations", or shortcuts that bypass SQL
+// execution in benchmark code. This includes:
+//
+// - Direct index/table access instead of SQL queries
+// - Caching or memoization of query results
+// - Conditional logic that detects benchmarks and takes shortcuts
+// - Any code path that doesn't execute real SQL
+//
+// Benchmarks MUST execute actual SQL to produce meaningful results.
+// "Optimizing" benchmarks this way is cheating and has happened before.
+// If you're tempted to add a fast-path, DON'T. Fix the actual performance
+// issue in the query engine instead.
+// ============================================================================
+
 //! TPC-C Transaction Implementations
 //!
 //! This module implements the 5 TPC-C transactions:
@@ -296,156 +313,76 @@ impl<'a> VibesqlTransactionExecutor<'a> {
 
     /// Execute New-Order transaction (read-only simulation)
     ///
-    /// Uses fast path for direct storage API access (bypassing SQL parsing)
+    /// Executes SQL queries to simulate the New-Order transaction:
+    /// 1. SELECT warehouse tax rate
+    /// 2. SELECT district tax rate and next order ID
+    /// 3. SELECT customer discount, last name, and credit status
+    /// 4. For each order line item:
+    ///    - SELECT item price, name, and data
+    ///    - SELECT stock quantity, YTD, and order count
     pub fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
-        self.new_order_fast_path(input)
-    }
-
-    /// Fast-path implementation of New-Order transaction
-    ///
-    /// This bypasses SQL parsing and goes directly to storage APIs:
-    /// 1. Direct PK lookup on warehouse table for w_tax
-    /// 2. Direct composite PK lookup on district table for d_tax, d_next_o_id
-    /// 3. Direct composite PK lookup on customer table for c_discount, c_last, c_credit
-    /// 4. For each item (5-15 items):
-    ///    - Direct PK lookup on item table for i_price, i_name, i_data
-    ///    - Direct composite PK lookup on stock table for s_quantity, s_ytd, s_order_cnt
-    ///
-    /// Performance: ~20-30µs vs ~60µs with SQL path (2-3x faster)
-    fn new_order_fast_path(&self, input: &NewOrderInput) -> TransactionResult {
-        use vibesql_types::SqlValue;
-
         let start = Instant::now();
 
-        // Step 1: Get warehouse tax rate using direct PK lookup
-        // Warehouse PK: (w_id)
-        // Schema: w_id(0), w_name(1), w_street_1(2), w_street_2(3), w_city(4), w_state(5), w_zip(6), w_tax(7), w_ytd(8)
-        let w_pk = SqlValue::Integer(input.w_id as i64);
-        match self.db.get_row_by_pk("warehouse", &w_pk) {
-            Ok(Some(_row)) => {
-                // w_tax is column 7 - we just need to verify the row exists
-                // In a real transaction we would use the value
-            }
-            Ok(None) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("Warehouse not found".to_string()),
-                };
-            }
-            Err(e) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("Warehouse lookup failed: {}", e)),
-                };
-            }
+        // Get warehouse tax rate
+        let w_query = format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id);
+        if let Err(e) = execute_query(self.db, &w_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Warehouse query failed: {}", e)),
+            };
         }
 
-        // Step 2: Get district info using direct composite PK lookup
-        // District PK: (d_w_id, d_id)
-        // Schema: d_id(0), d_w_id(1), d_name(2), ..., d_tax(8), d_ytd(9), d_next_o_id(10)
-        let d_pk = vec![SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)];
-        match self.db.get_row_by_composite_pk("district", &d_pk) {
-            Ok(Some(_row)) => {
-                // d_tax is column 8, d_next_o_id is column 10
-                // In a real transaction we would use these values
-            }
-            Ok(None) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("District not found".to_string()),
-                };
-            }
-            Err(e) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("District lookup failed: {}", e)),
-                };
-            }
+        // Get district info
+        let d_query = format!(
+            "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+        if let Err(e) = execute_query(self.db, &d_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
         }
 
-        // Step 3: Get customer info using direct composite PK lookup
-        // Customer PK: (c_w_id, c_d_id, c_id)
-        // Schema: c_id(0), c_d_id(1), c_w_id(2), ..., c_credit(13), c_credit_lim(14), c_discount(15)
-        let c_pk = vec![
-            SqlValue::Integer(input.w_id as i64),
-            SqlValue::Integer(input.d_id as i64),
-            SqlValue::Integer(input.c_id as i64),
-        ];
-        match self.db.get_row_by_composite_pk("customer", &c_pk) {
-            Ok(Some(_row)) => {
-                // c_discount is column 15, c_last is column 5, c_credit is column 13
-            }
-            Ok(None) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("Customer not found".to_string()),
-                };
-            }
-            Err(e) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("Customer lookup failed: {}", e)),
-                };
-            }
+        // Get customer info
+        let c_query = format!(
+            "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+            input.w_id, input.d_id, input.c_id
+        );
+        if let Err(e) = execute_query(self.db, &c_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
         }
 
-        // Step 4: Process each order line
+        // Process each order line - query item and stock info
         for item in &input.items {
-            // Get item info using direct PK lookup
-            // Item PK: (i_id)
-            // Schema: i_id(0), i_im_id(1), i_name(2), i_price(3), i_data(4)
-            let i_pk = SqlValue::Integer(item.ol_i_id as i64);
-            match self.db.get_row_by_pk("item", &i_pk) {
-                Ok(Some(_row)) => {
-                    // i_price is column 3, i_name is column 2, i_data is column 4
-                }
-                Ok(None) => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some("Item not found".to_string()),
-                    };
-                }
-                Err(e) => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some(format!("Item lookup failed: {}", e)),
-                    };
-                }
+            // Get item info
+            let i_query =
+                format!("SELECT i_price, i_name, i_data FROM item WHERE i_id = {}", item.ol_i_id);
+            if let Err(e) = execute_query(self.db, &i_query) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Item query failed: {}", e)),
+                };
             }
 
-            // Get stock info using direct composite PK lookup
-            // Stock PK: (s_w_id, s_i_id)
-            // Schema: s_i_id(0), s_w_id(1), s_quantity(2), s_dist_01-10(3-12), s_ytd(13), s_order_cnt(14), s_remote_cnt(15), s_data(16)
-            let s_pk = vec![
-                SqlValue::Integer(item.ol_supply_w_id as i64),
-                SqlValue::Integer(item.ol_i_id as i64),
-            ];
-            match self.db.get_row_by_composite_pk("stock", &s_pk) {
-                Ok(Some(_row)) => {
-                    // s_quantity is column 2, s_ytd is column 13, s_order_cnt is column 14
-                }
-                Ok(None) => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some("Stock not found".to_string()),
-                    };
-                }
-                Err(e) => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some(format!("Stock lookup failed: {}", e)),
-                    };
-                }
+            // Get stock info
+            let s_query = format!(
+                "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = {} AND s_w_id = {}",
+                item.ol_i_id, item.ol_supply_w_id
+            );
+            if let Err(e) = execute_query(self.db, &s_query) {
+                return TransactionResult {
+                    success: false,
+                    duration_us: start.elapsed().as_micros() as u64,
+                    error: Some(format!("Stock query failed: {}", e)),
+                };
             }
         }
 
@@ -458,137 +395,57 @@ impl<'a> VibesqlTransactionExecutor<'a> {
 
     /// Execute Payment transaction (read-only simulation)
     ///
-    /// Uses fast path for direct storage API access (bypassing SQL parsing)
+    /// Executes SQL queries to simulate the Payment transaction:
+    /// 1. SELECT warehouse address and name
+    /// 2. SELECT district address and name
+    /// 3. SELECT customer info (by ID or last name)
     pub fn payment(&self, input: &PaymentInput) -> TransactionResult {
-        self.payment_fast_path(input)
-    }
-
-    /// Fast-path implementation of Payment transaction
-    ///
-    /// This bypasses SQL parsing and goes directly to storage APIs:
-    /// 1. Direct PK lookup on warehouse table
-    /// 2. Direct composite PK lookup on district table
-    /// 3. Direct composite PK lookup on customer table (by ID)
-    ///    OR index scan on idx_customer_name for lookup by last name
-    ///
-    /// Performance: ~5-8µs vs ~16µs with SQL path (2-3x faster)
-    fn payment_fast_path(&self, input: &PaymentInput) -> TransactionResult {
-        use vibesql_types::SqlValue;
-
         let start = Instant::now();
 
-        // Step 1: Get warehouse info using direct PK lookup
-        // Warehouse PK: (w_id)
-        let w_pk = SqlValue::Integer(input.w_id as i64);
-        match self.db.get_row_by_pk("warehouse", &w_pk) {
-            Ok(Some(_row)) => {
-                // Row found - in a real transaction we would use the values
-            }
-            Ok(None) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("Warehouse not found".to_string()),
-                };
-            }
-            Err(e) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("Warehouse lookup failed: {}", e)),
-                };
-            }
+        // Get warehouse info
+        let w_query = format!(
+            "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = {}",
+            input.w_id
+        );
+        if let Err(e) = execute_query(self.db, &w_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Warehouse query failed: {}", e)),
+            };
         }
 
-        // Step 2: Get district info using direct composite PK lookup
-        // District PK: (d_w_id, d_id)
-        let d_pk = vec![SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)];
-        match self.db.get_row_by_composite_pk("district", &d_pk) {
-            Ok(Some(_row)) => {
-                // Row found
-            }
-            Ok(None) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("District not found".to_string()),
-                };
-            }
-            Err(e) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("District lookup failed: {}", e)),
-                };
-            }
+        // Get district info
+        let d_query = format!(
+            "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = {} AND d_id = {}",
+            input.w_id, input.d_id
+        );
+        if let Err(e) = execute_query(self.db, &d_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("District query failed: {}", e)),
+            };
         }
 
-        // Step 3: Get customer info
-        // 60% by c_id (composite PK lookup), 40% by c_last (secondary index scan)
-        if let Some(c_id) = input.c_id {
-            // Customer PK: (c_w_id, c_d_id, c_id)
-            let c_pk = vec![
-                SqlValue::Integer(input.c_w_id as i64),
-                SqlValue::Integer(input.c_d_id as i64),
-                SqlValue::Integer(c_id as i64),
-            ];
-            match self.db.get_row_by_composite_pk("customer", &c_pk) {
-                Ok(Some(_row)) => {
-                    // Row found
-                }
-                Ok(None) => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some("Customer not found".to_string()),
-                    };
-                }
-                Err(e) => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some(format!("Customer lookup failed: {}", e)),
-                    };
-                }
-            }
+        // Get customer (by ID or last name)
+        let c_query = if let Some(c_id) = input.c_id {
+            format!(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
+                input.c_w_id, input.c_d_id, c_id
+            )
         } else {
-            // Lookup by last name using idx_customer_name secondary index
-            // Index: (c_w_id, c_d_id, c_last, c_first)
-            // We need to scan for matching (c_w_id, c_d_id, c_last) prefix and pick
-            // the middle row by c_first (per TPC-C spec)
-            let c_last = input.c_last.as_ref().unwrap();
-            let prefix = vec![
-                SqlValue::Integer(input.c_w_id as i64),
-                SqlValue::Integer(input.c_d_id as i64),
-                SqlValue::Varchar(arcstr::ArcStr::from(c_last.clone())),
-            ];
-
-            // Get the index data for customer name lookups
-            if let Some(idx_data) = self.db.get_index_data("idx_customer_name") {
-                // Use prefix scan to find all customers with this last name
-                // The index is ordered by (c_w_id, c_d_id, c_last, c_first),
-                // so all matching customers come out sorted by c_first
-                let row_ids = idx_data.prefix_scan(&prefix);
-
-                if row_ids.is_empty() {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some("Customer not found by last name".to_string()),
-                    };
-                }
-
-                // Per TPC-C spec, select the customer at position n/2 (middle)
-                // when multiple customers have the same last name
-                let _middle_idx = row_ids.len() / 2;
-                // In a real implementation, we'd fetch the row at row_ids[middle_idx]
-            } else {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("idx_customer_name index not found".to_string()),
-                };
-            }
+            format!(
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
+                input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()
+            )
+        };
+        if let Err(e) = execute_query(self.db, &c_query) {
+            return TransactionResult {
+                success: false,
+                duration_us: start.elapsed().as_micros() as u64,
+                error: Some(format!("Customer query failed: {}", e)),
+            };
         }
 
         TransactionResult {
@@ -644,49 +501,25 @@ impl<'a> VibesqlTransactionExecutor<'a> {
     }
 
     /// Execute Delivery transaction (read-only simulation)
+    ///
+    /// Executes SQL queries to simulate the Delivery transaction:
+    /// For each of 10 districts, SELECT the oldest new order (minimum no_o_id)
     pub fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
-        // Use fast path for direct storage API access (bypassing SQL parsing)
-        self.delivery_fast_path(input)
-    }
-
-    /// Fast-path implementation of Delivery transaction
-    ///
-    /// This bypasses SQL parsing and goes directly to storage APIs:
-    /// 1. Get the pk_new_order index
-    /// 2. For each of 10 districts, use prefix_scan_first to find minimum no_o_id
-    ///
-    /// The new_order table has PK: (no_w_id, no_d_id, no_o_id)
-    /// By scanning with a 2-column prefix [no_w_id, no_d_id], we get results
-    /// sorted by no_o_id, and prefix_scan_first returns the minimum.
-    ///
-    /// Performance: ~25-50µs vs ~2.4ms with SQL path (50-100x faster)
-    fn delivery_fast_path(&self, input: &DeliveryInput) -> TransactionResult {
-        use vibesql_types::SqlValue;
-
         let start = Instant::now();
 
-        // Get the pk_new_order index for prefix scanning
-        let pk_index_name = "pk_new_order";
-        let pk_index_data = match self.db.get_index_data(pk_index_name) {
-            Some(idx) => idx,
-            None => {
+        // Process each district - query for oldest new order
+        for d_id in 1..=10 {
+            let query = format!(
+                "SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} ORDER BY no_o_id LIMIT 1",
+                input.w_id, d_id
+            );
+            if let Err(e) = execute_query(self.db, &query) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("pk_new_order index not found".to_string()),
+                    error: Some(format!("New order query failed for district {}: {}", d_id, e)),
                 };
             }
-        };
-
-        // Process each district - find minimum no_o_id using prefix_scan_first
-        // PK index is ordered (no_w_id, no_d_id, no_o_id), so prefix_scan_first
-        // on [no_w_id, no_d_id] returns the row with minimum no_o_id
-        for d_id in 1..=10 {
-            let prefix = vec![SqlValue::Integer(input.w_id as i64), SqlValue::Integer(d_id as i64)];
-
-            // prefix_scan_first returns the first matching row (minimum no_o_id)
-            // Some districts may have no new orders - that's OK, just skip
-            let _row_idx = pk_index_data.prefix_scan_first(&prefix);
         }
 
         TransactionResult {
@@ -700,156 +533,11 @@ impl<'a> VibesqlTransactionExecutor<'a> {
     ///
     /// Per TPC-C spec 2.8, the Stock-Level transaction checks the last 20 orders
     /// for items with stock below the threshold.
-    pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
-        // Check if SQL path should be used (for testing optimizer improvements)
-        if std::env::var("TPCC_STOCK_LEVEL_SQL").is_ok() {
-            self.stock_level_sql_path(input)
-        } else {
-            // Use fast path for direct storage API access (bypassing SQL parsing)
-            self.stock_level_fast_path(input)
-        }
-    }
-
-    /// SQL-based implementation of Stock-Level transaction
     ///
-    /// This uses actual SQL execution through the query engine, unlike the fast-path
-    /// which bypasses SQL parsing. Used for testing optimizer improvements.
-    ///
-    /// The SQL queries are:
+    /// Executes SQL queries:
     /// 1. SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?
-    /// 2. SELECT COUNT(DISTINCT ol_i_id) FROM order_line
-    ///    WHERE ol_w_id = ? AND ol_d_id = ? AND ol_o_id >= ? AND ol_o_id < ?
-    ///    AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?)
-    fn stock_level_sql_path(&self, input: &StockLevelInput) -> TransactionResult {
-        use vibesql_types::SqlValue;
-        let start = Instant::now();
-        let debug = std::env::var("STOCK_LEVEL_DEBUG").is_ok();
-
-        // Query 1: Get d_next_o_id from district table
-        let query1 = format!(
-            "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
-            input.w_id, input.d_id
-        );
-
-        let stmt1 = match Parser::parse_sql(&query1) {
-            Ok(vibesql_ast::Statement::Select(s)) => s,
-            _ => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("Failed to parse district query".to_string()),
-                };
-            }
-        };
-
-        let q1_parse_time = start.elapsed();
-
-        let executor1 = SelectExecutor::new(self.db);
-        let result1 = match executor1.execute(&stmt1) {
-            Ok(rows) => rows,
-            Err(e) => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some(format!("District query failed: {}", e)),
-                };
-            }
-        };
-        let q1_exec_time = start.elapsed();
-        if debug {
-            eprintln!(
-                "[STOCK_LEVEL] Q1 parse: {:?}, exec: {:?}",
-                q1_parse_time,
-                q1_exec_time - q1_parse_time
-            );
-        }
-
-        let d_next_o_id = match result1.first() {
-            Some(row) => match &row.values[0] {
-                SqlValue::Integer(id) => *id,
-                SqlValue::Bigint(id) => *id,
-                _ => {
-                    return TransactionResult {
-                        success: false,
-                        duration_us: start.elapsed().as_micros() as u64,
-                        error: Some("d_next_o_id has unexpected type".to_string()),
-                    };
-                }
-            },
-            None => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("District not found".to_string()),
-                };
-            }
-        };
-
-        let ol_o_id_min = d_next_o_id - 20;
-        let ol_o_id_max = d_next_o_id;
-
-        // Query 2: Count distinct items in stock below threshold
-        // This is the complex query with a subquery that tests optimizer performance
-        let query2 = format!(
-            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
-             WHERE ol_w_id = {} AND ol_d_id = {} \
-             AND ol_o_id >= {} AND ol_o_id < {} \
-             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
-            input.w_id, input.d_id, ol_o_id_min, ol_o_id_max, input.w_id, input.threshold
-        );
-
-        let stmt2 = match Parser::parse_sql(&query2) {
-            Ok(vibesql_ast::Statement::Select(s)) => s,
-            _ => {
-                return TransactionResult {
-                    success: false,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: Some("Failed to parse stock query".to_string()),
-                };
-            }
-        };
-        let q2_parse_time = start.elapsed();
-
-        let executor2 = SelectExecutor::new(self.db);
-        match executor2.execute(&stmt2) {
-            Ok(_rows) => {
-                let q2_exec_time = start.elapsed();
-                if debug {
-                    eprintln!(
-                        "[STOCK_LEVEL] Q2 parse: {:?}, exec: {:?}, total: {:?}",
-                        q2_parse_time - q1_exec_time,
-                        q2_exec_time - q2_parse_time,
-                        q2_exec_time
-                    );
-                }
-                // Success - we don't need to return the count, just verify execution worked
-                TransactionResult {
-                    success: true,
-                    duration_us: start.elapsed().as_micros() as u64,
-                    error: None,
-                }
-            }
-            Err(e) => TransactionResult {
-                success: false,
-                duration_us: start.elapsed().as_micros() as u64,
-                error: Some(format!("Stock query failed: {}", e)),
-            },
-        }
-    }
-
-    /// Fast-path implementation of Stock-Level transaction
-    ///
-    /// This bypasses SQL parsing and goes directly to storage APIs:
-    /// 1. Direct PK lookup on district table for d_next_o_id
-    /// 2. Prefix scan on order_line PK index for recent orders
-    /// 3. Direct PK lookups on stock table for each item
-    /// 4. Count distinct items below threshold
-    ///
-    /// Performance: ~100-500µs vs ~12ms with SQL path (24-120x faster)
-    fn stock_level_fast_path(&self, input: &StockLevelInput) -> TransactionResult {
-        use std::collections::HashSet;
-        use vibesql_types::SqlValue;
-
+    /// 2. SELECT COUNT(DISTINCT ol_i_id) FROM order_line WHERE ... AND ol_i_id IN (SELECT ...)
+    pub fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
         let start = Instant::now();
 
         // Get district next order ID
