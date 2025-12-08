@@ -56,6 +56,7 @@ These metrics track the effectiveness of partial/selective updates, which reduce
 | `vibesql_partial_update_fallbacks_total` | Counter | fallback | `reason` | Times partial update was skipped |
 | `vibesql_partial_update_bytes_saved` | Histogram | bytes | - | Estimated bytes saved per partial update |
 | `vibesql_partial_update_efficiency` | Gauge | ratio (0-1) | - | Rolling average of column efficiency |
+| `vibesql_selective_update_bytes_saved_total` | Counter | bytes | - | Total bytes saved by using selective column updates instead of full row updates |
 
 **Fallback Reasons** (`reason` label values):
 - `disabled` - Selective updates disabled in configuration
