@@ -8,7 +8,7 @@
 //!
 //! ## Usage
 //!
-//! ```ignore
+//! ```text
 //! let mut interner = StringInterner::new(32); // threshold of 32 distinct values
 //!
 //! let s1 = interner.intern("active");

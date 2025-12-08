@@ -60,7 +60,7 @@ impl TableStatistics {
     /// * `schema` - Table schema with column definitions
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// let stats = TableStatistics::estimate_from_schema(5000, &schema);
     /// // Boolean col: n_distinct = 2
     /// // Integer col: n_distinct = sqrt(5000) ≈ 70
@@ -260,7 +260,7 @@ impl TableStatistics {
     /// - Marked as stale to indicate these are estimates
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let table_stats = table.get_statistics()
     ///     .cloned()
     ///     .unwrap_or_else(|| TableStatistics::estimate_from_row_count(table.row_count()));

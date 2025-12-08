@@ -83,7 +83,7 @@ impl BTreeIndex {
     /// A new B+ tree index with an empty root
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// use std::sync::Arc;
     /// use vibesql_storage::btree::BTreeIndex;
     /// use vibesql_storage::page::PageManager;

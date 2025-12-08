@@ -26,7 +26,7 @@ use vibesql_parser::{ParseError, Parser};
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```text
 /// use vibesql_server::subscription::extract_table_dependencies;
 ///
 /// // Simple query

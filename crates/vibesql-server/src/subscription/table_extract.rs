@@ -136,7 +136,7 @@ impl ExpressionVisitor for TableExtractor {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// use vibesql_parser::Parser;
 /// use vibesql_server::subscription::extract_table_refs;
 ///

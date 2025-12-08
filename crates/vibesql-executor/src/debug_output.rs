@@ -337,7 +337,7 @@ pub fn debug_event(category: Category, event: &'static str, tag: &'static str) -
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// debug_emit!(
 ///     optimizer, "join_reorder", "JOIN_REORDER",
 ///     text: "Optimal order: {:?}", optimal_order,

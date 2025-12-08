@@ -205,7 +205,7 @@ impl Session {
     /// SQL will return the cached prepared statement without re-parsing.
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// let stmt = session.prepare("SELECT * FROM users WHERE id = ?")?;
     /// let result = session.execute_prepared(&stmt, &[SqlValue::Integer(1)]).await?;
     /// ```

@@ -58,7 +58,7 @@ impl BTreeIndex {
     /// - **Duplicate key**: O(log n) to find + O(1) to append to existing Vec
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// use vibesql_types::SqlValue;
     ///
     /// // Insert first occurrence of key 42

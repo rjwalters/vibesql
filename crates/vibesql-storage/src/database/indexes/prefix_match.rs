@@ -77,7 +77,7 @@ impl IndexData {
     /// So prefix_scan([1, 2]) scans from [1, 2] (inclusive) to [1, 3) (exclusive).
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (w_id, d_id, o_id) - 3 columns
     /// // Find all rows where w_id=1 AND d_id=5 (2-column prefix)
     /// let rows = index_data.prefix_scan(&[SqlValue::Integer(1), SqlValue::Integer(5)]);
@@ -173,7 +173,7 @@ impl IndexData {
     /// O(log n) - only accesses the first matching entry in the BTreeMap range
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // TPC-C Delivery: find oldest new_order for warehouse 1, district 5
     /// // Index: (no_w_id, no_d_id, no_o_id)
     /// // Returns the row with minimum no_o_id for the given warehouse/district
@@ -274,7 +274,7 @@ impl IndexData {
     /// complexity, where n is the number of unique keys and k is matching keys.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (s_w_id, s_quantity, s_i_id)
     /// // Find all rows where s_w_id = 1 AND s_quantity < 10
     /// let rows = index_data.prefix_bounded_scan(
@@ -402,7 +402,7 @@ impl IndexData {
     /// Vector of row indices matching the prefix and range constraint
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (ol_w_id, ol_d_id, ol_o_id, ol_number)
     /// // Find all rows where ol_w_id = 1 AND ol_d_id = 1 AND ol_o_id >= 2981 AND ol_o_id < 3001
     /// let rows = index_data.prefix_range_scan(
@@ -588,7 +588,7 @@ impl IndexData {
     /// - With limit+reverse: Scan from end, stop after 1 = O(1)
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Find the most recent order for customer (ORDER BY o_id DESC LIMIT 1)
     /// let prefix = vec![SqlValue::Integer(w_id), SqlValue::Integer(d_id), SqlValue::Integer(c_id)];
     /// let rows = index_data.prefix_scan_limit(&prefix, Some(1), true);
@@ -739,7 +739,7 @@ impl IndexData {
     /// Vector of (prefix_index, row_indices) pairs for each prefix that has matches
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (w_id, d_id, o_id) - look up all orders for districts 1-10
     /// let prefixes: Vec<Vec<SqlValue>> = (1..=10)
     ///     .map(|d| vec![SqlValue::Integer(1), SqlValue::Integer(d)])
@@ -778,7 +778,7 @@ impl IndexData {
     /// (e.g., [s_w_id, s_quantity, s_i_id]) that matched the predicate.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Index on (s_w_id, s_quantity, s_i_id)
     /// // Query: SELECT s_i_id FROM stock WHERE s_w_id = 1 AND s_quantity < 10
     /// // This is a covering index scan - s_i_id is in the index key!

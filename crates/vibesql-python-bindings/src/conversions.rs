@@ -137,7 +137,7 @@ pub fn convert_params_to_sql_values(
 /// correct formatting for all SQL types.
 ///
 /// # Example
-/// ```ignore
+/// ```text
 /// // Input: "SELECT * FROM users WHERE id = ?"
 /// // Values: [Integer(42)]
 /// // Output: "SELECT * FROM users WHERE id = 42"

@@ -67,7 +67,7 @@ pub fn disable() {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// use vibesql_storage::progress::ProgressTracker;
 ///
 /// let mut tracker = ProgressTracker::new("Creating index 'idx_users'", Some(1_000_000));

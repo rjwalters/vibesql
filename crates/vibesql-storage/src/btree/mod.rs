@@ -35,7 +35,7 @@
 //!
 //! ## Usage Example (once #1473 is integrated):
 //!
-//! ```ignore
+//! ```text
 //! // In CREATE INDEX executor:
 //!
 //! // 1. Collect and sort all rows by index key(s)

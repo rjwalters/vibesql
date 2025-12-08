@@ -359,7 +359,7 @@ impl Database {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let rows = vec![
     ///     Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     ///     Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
@@ -436,7 +436,7 @@ impl Database {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// // Stream 100K rows in batches of 5000
     /// let rows = (0..100_000).map(|i| Row::new(vec![SqlValue::Integer(i)]));
     /// let count = db.insert_rows_iter("numbers", rows, 5000)?;
@@ -492,7 +492,7 @@ impl Database {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// // Update column 'name' for row with id=5
     /// let updated = db.update_row_by_pk(
     ///     "users",
@@ -656,7 +656,7 @@ impl Database {
     /// - Uses direct HashMap lookup on the PK index
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let row = db.get_row_by_pk("users", &SqlValue::Integer(42))?;
     /// if let Some(row) = row {
     ///     let name = &row.values[1];
@@ -785,7 +785,7 @@ impl Database {
     /// * `capacity` - Maximum number of events to buffer before old events are overwritten
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let mut db = Database::new();
     /// let mut rx = db.enable_change_events(1024);
     ///
@@ -809,7 +809,7 @@ impl Database {
     /// or None if `enable_change_events()` has not been called.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Enable broadcasting
     /// db.enable_change_events(1024);
     ///
@@ -878,7 +878,7 @@ impl Database {
     /// * `engine` - A pre-configured PersistenceEngine instance
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// use vibesql_storage::{Database, PersistenceEngine, PersistenceConfig};
     ///
     /// let mut db = Database::new();
@@ -997,7 +997,7 @@ impl Database {
     /// Returns 0 if no auto-generated values have been produced yet.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // Create table with AUTO_INCREMENT
     /// db.execute("CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100))")?;
     ///

@@ -18,7 +18,7 @@ use super::types::ColumnTypeClass;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_storage::{Row, ColumnarTable};
 /// use vibesql_types::SqlValue;
 ///

@@ -81,7 +81,7 @@ struct CacheEntry {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_storage::columnar_cache::ColumnarCache;
 ///
 /// // Create a cache with 256MB budget
@@ -115,7 +115,7 @@ impl ColumnarCache {
     /// * `max_memory` - Maximum memory budget in bytes
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // 256MB cache
     /// let cache = ColumnarCache::new(256 * 1024 * 1024);
     /// ```

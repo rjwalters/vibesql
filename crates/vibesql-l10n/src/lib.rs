@@ -5,7 +5,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use vibesql_l10n::{init, format, vibe_msg};
 //!
 //! // Initialize with system locale detection
@@ -150,7 +150,7 @@ fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nE
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_l10n::init;
 ///
 /// // Use system locale
@@ -195,7 +195,7 @@ pub fn init(locale: Option<&str>) -> Result<(), L10nError> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_l10n::format;
 /// use fluent::FluentArgs;
 ///
@@ -236,7 +236,7 @@ pub fn format(msg_id: &str, args: Option<&FluentArgs>) -> String {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_l10n::current_locale;
 ///
 /// let locale = current_locale();
@@ -252,7 +252,7 @@ pub fn current_locale() -> LanguageIdentifier {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_l10n::vibe_msg;
 ///
 /// // Simple message without arguments

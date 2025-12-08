@@ -124,7 +124,7 @@ impl QueryBufferPool {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// use vibesql_storage::QueryBufferPool;
     ///
     /// // Run a batch of queries...

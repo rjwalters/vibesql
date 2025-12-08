@@ -53,7 +53,7 @@ pub trait StringBehavior {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// assert!(!SqlMode::MySQL.default_string_comparison_case_sensitive());
     /// assert!(SqlMode::SQLite.default_string_comparison_case_sensitive());
     /// ```
@@ -63,7 +63,7 @@ pub trait StringBehavior {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// assert_eq!(SqlMode::MySQL.default_collation(), Collation::Utf8GeneralCi);
     /// assert_eq!(SqlMode::SQLite.default_collation(), Collation::Binary);
     /// ```
@@ -73,7 +73,7 @@ pub trait StringBehavior {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let mysql_collations = SqlMode::MySQL.supported_collations();
     /// assert!(mysql_collations.contains(&Collation::Utf8Binary));
     /// assert!(mysql_collations.contains(&Collation::Utf8GeneralCi));

@@ -137,7 +137,7 @@ impl DeleteResult {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_catalog::TableSchema;
 /// use vibesql_storage::Table;
 ///
@@ -341,7 +341,7 @@ impl Table {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let rows = vec![
     ///     Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
     ///     Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
@@ -439,7 +439,7 @@ impl Table {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// // Stream rows from a file reader
     /// let rows_iter = csv_reader.rows().map(|r| Row::from_csv_record(r));
     /// let count = table.insert_from_iter(rows_iter, 1000)?;
@@ -497,7 +497,7 @@ impl Table {
     /// An iterator yielding `(physical_index, &Row)` pairs for all live rows.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// for (idx, row) in table.scan_live() {
     ///     // idx is the physical index, can be used with get_row() or delete_by_indices()
     ///     process_row(idx, row);
@@ -525,7 +525,7 @@ impl Table {
     /// A Vec containing clones of all non-deleted rows.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// // For SELECT queries that need a Vec<Row>
     /// let rows = table.scan_live_vec();
     /// ```
@@ -585,7 +585,7 @@ impl Table {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let columnar = table.scan_columnar()?;
     /// // Process with SIMD-accelerated operations
     /// if let Some(ColumnData::Int64 { values, nulls }) = columnar.get_column("quantity") {

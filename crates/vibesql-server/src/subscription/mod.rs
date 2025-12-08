@@ -20,7 +20,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```text
 //! use vibesql_server::subscription::{SubscriptionManager, ChangeEvent};
 //! use tokio::sync::mpsc;
 //!
