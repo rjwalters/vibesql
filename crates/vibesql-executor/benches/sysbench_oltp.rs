@@ -1,5 +1,21 @@
 //! Sysbench OLTP Benchmark Suite - Native Rust Implementation
 //!
+//! WARNING: BENCHMARK INTEGRITY REQUIREMENT
+//! =========================================
+//! All database operations in this benchmark MUST go through the SQL execution path.
+//! Direct API calls (e.g., Table::get_by_pk, Table::insert_row) that bypass SQL parsing
+//! and planning would produce misleading benchmark results since they skip the query
+//! processing overhead that real users experience.
+//!
+//! Acceptable patterns:
+//! - session.execute_prepared() / session.execute_prepared_mut() - SQL execution
+//! - session.execute() / session.execute_mut() - SQL execution
+//!
+//! NOT acceptable in benchmark hot path:
+//! - db.get_table().get_by_pk() - bypasses SQL
+//! - table.insert_row() - bypasses SQL (OK for setup only)
+//! - table.scan_all() - bypasses SQL
+//!
 //! This benchmark measures OLTP (Online Transaction Processing) latency performance
 //! using industry-standard sysbench-compatible workloads. It compares:
 //! - VibeSQL (native Rust API)
