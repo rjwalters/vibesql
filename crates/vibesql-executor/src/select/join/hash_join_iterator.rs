@@ -2,12 +2,25 @@
 //!
 //! This module implements an iterator-based hash join that provides O(N+M)
 //! performance while maintaining lazy evaluation for the left (probe) side.
+//!
+//! # Bloom Filter Optimization
+//!
+//! This implementation uses a Bloom filter to quickly reject probe-side rows
+//! that cannot possibly match any build-side rows. This optimization is
+//! inspired by SQLite's `WHERE_BLOOMFILTER` optimization.
+//!
+//! Benefits:
+//! - Bloom filter check is O(1) with excellent cache behavior
+//! - For selective joins, eliminates most hash table lookups
+//! - Memory overhead is small (~10 bits per build-side element)
 
 #![allow(clippy::manual_is_multiple_of)]
 
-use ahash::AHashMap;
+use std::hash::{Hash, Hasher};
 
-use super::{combine_rows, FromResult};
+use ahash::{AHashMap, AHasher};
+
+use super::{combine_rows, BloomFilter, FromResult};
 use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
@@ -15,24 +28,47 @@ use crate::{
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
 
+/// Minimum number of build-side rows to enable Bloom filter optimization.
+/// For small tables, the overhead of maintaining the Bloom filter may exceed benefits.
+const BLOOM_FILTER_MIN_ROWS: usize = 100;
+
+/// Target false positive rate for Bloom filter (1%).
+/// Lower rates require more memory but provide better filtering.
+const BLOOM_FILTER_FPR: f64 = 0.01;
+
+/// Hash a SqlValue for use in Bloom filter.
+/// Uses AHash for fast, high-quality hashing.
+#[inline]
+fn hash_sql_value(value: &vibesql_types::SqlValue) -> u64 {
+    let mut hasher = AHasher::default();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Hash join iterator that lazily produces joined rows
 ///
 /// This implementation uses a hash join algorithm with:
 /// - Lazy left (probe) side: rows consumed on-demand from iterator
 /// - Materialized right (build) side: all rows hashed into HashMap
+/// - Bloom filter for quick rejection of non-matching probe rows
 ///
 /// Algorithm:
-/// 1. Build phase: Materialize right side into hash table (one-time cost)
-/// 2. Probe phase: Stream left rows, hash lookup for matches (O(1) per row)
+/// 1. Build phase: Materialize right side into hash table AND Bloom filter (one-time cost)
+/// 2. Probe phase: For each left row:
+///    a. Check Bloom filter - if negative, skip immediately (no hash lookup)
+///    b. If Bloom filter positive, do actual hash table lookup
 ///
 /// Performance: O(N + M) where N=left rows, M=right rows
+/// For selective joins, Bloom filter reduces constant factor significantly.
 ///
-/// Memory: O(M) for right side hash table + O(K) for current matches
+/// Memory: O(M) for right side hash table + O(M * 10 bits) for Bloom filter
 pub struct HashJoinIterator<L: RowIterator> {
     /// Lazy probe side (left)
     left: L,
     /// Materialized build side (right) - hash table mapping join key to rows
     right_hash_table: AHashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>>,
+    /// Bloom filter for quick rejection of non-matching keys (None if disabled)
+    bloom_filter: Option<BloomFilter>,
     /// Combined schema for output rows
     schema: CombinedSchema,
     /// Column index in left table for join key
@@ -53,6 +89,9 @@ pub struct HashJoinIterator<L: RowIterator> {
     timeout_ctx: TimeoutContext,
     /// Iteration counter for periodic timeout checks
     iteration_count: usize,
+    /// Count of rows rejected by Bloom filter (for debugging/profiling)
+    #[allow(dead_code)]
+    bloom_rejections: usize,
 }
 
 impl<L: RowIterator> HashJoinIterator<L> {
@@ -102,11 +141,24 @@ impl<L: RowIterator> HashJoinIterator<L> {
 
         // Build phase: Create hash table from right side
         // This is the one-time materialization cost
+        let right_rows = right.into_rows();
+        let num_build_rows = right_rows.len();
+
         let mut hash_table: AHashMap<vibesql_types::SqlValue, Vec<vibesql_storage::Row>> =
             AHashMap::new();
+
+        // Create Bloom filter if we have enough rows to benefit
+        // Check environment variable for disabling (useful for A/B testing)
+        let bloom_disabled = std::env::var("VIBESQL_DISABLE_BLOOM_FILTER").is_ok();
+        let mut bloom_filter = if !bloom_disabled && num_build_rows >= BLOOM_FILTER_MIN_ROWS {
+            Some(BloomFilter::new(num_build_rows, BLOOM_FILTER_FPR))
+        } else {
+            None
+        };
+
         let mut build_iterations = 0;
 
-        for row in right.into_rows() {
+        for row in right_rows {
             // Check timeout periodically during build phase
             build_iterations += 1;
             if build_iterations % CHECK_INTERVAL == 0 {
@@ -117,6 +169,13 @@ impl<L: RowIterator> HashJoinIterator<L> {
 
             // Skip NULL values - they never match in equi-joins
             if key != vibesql_types::SqlValue::Null {
+                // Insert into Bloom filter before hash table
+                if let Some(ref mut bf) = bloom_filter {
+                    // Hash the SqlValue and insert into Bloom filter
+                    let hash = hash_sql_value(&key);
+                    bf.insert_hash(hash);
+                }
+
                 hash_table.entry(key).or_default().push(row);
             }
         }
@@ -124,6 +183,7 @@ impl<L: RowIterator> HashJoinIterator<L> {
         Ok(Self {
             left,
             right_hash_table: hash_table,
+            bloom_filter,
             schema: combined_schema,
             left_col_idx,
             right_col_idx,
@@ -133,6 +193,7 @@ impl<L: RowIterator> HashJoinIterator<L> {
             right_col_count,
             timeout_ctx,
             iteration_count: 0,
+            bloom_rejections: 0,
         })
     }
 
@@ -178,6 +239,19 @@ impl<L: RowIterator> Iterator for HashJoinIterator<L> {
                         continue;
                     }
 
+                    // BLOOM FILTER OPTIMIZATION:
+                    // Quick check to see if this key MIGHT be in the build side.
+                    // If the Bloom filter says "definitely not present", skip the
+                    // expensive hash table lookup entirely.
+                    if let Some(ref bf) = self.bloom_filter {
+                        let hash = hash_sql_value(key);
+                        if !bf.might_contain_hash(hash) {
+                            // Bloom filter says definitely no match - skip this row
+                            self.bloom_rejections += 1;
+                            continue;
+                        }
+                    }
+
                     // Lookup matches in hash table
                     if let Some(matches) = self.right_hash_table.get(key) {
                         // Found matches - set up for iteration
@@ -188,6 +262,7 @@ impl<L: RowIterator> Iterator for HashJoinIterator<L> {
                     } else {
                         // No matches for this left row
                         // For INNER JOIN, skip this row
+                        // (This can happen due to Bloom filter false positives)
                         continue;
                     }
                 }
