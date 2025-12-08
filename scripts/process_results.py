@@ -693,6 +693,17 @@ class TPCDSParser(BenchmarkParser):
 class SysbenchParser(BenchmarkParser):
     """Parser for Sysbench OLTP benchmark results."""
 
+    # Map display names to database field names
+    WORKLOAD_NAME_MAP = {
+        'point select': 'point_select',
+        'insert': 'insert',
+        'update index': 'update_index',
+        'update non-index': 'update_non_index',
+        'delete': 'delete',
+        'range queries': 'range_queries',
+        'range': 'range_queries',
+    }
+
     @property
     def benchmark_suite(self) -> str:
         return 'sysbench'
@@ -700,12 +711,116 @@ class SysbenchParser(BenchmarkParser):
     @classmethod
     def can_parse(cls, content: str) -> bool:
         """Check for Sysbench specific markers."""
+        # New custom harness format (post-Criterion migration)
+        if '--- VibeSQL Results ---' in content and 'Workload' in content:
+            return True
+        # Legacy Criterion format (for backwards compatibility)
         return ('sysbench_' in content or
                 'point_select' in content or
                 'oltp_read' in content)
 
-    def parse(self, content: str) -> Tuple[List[Dict], Dict]:
-        """Parse Sysbench benchmark output from stdout."""
+    def _latency_to_ns(self, value: float, unit: str) -> float:
+        """Convert latency value to nanoseconds."""
+        unit = unit.lower()
+        if unit in ('µs', 'μs', 'us'):
+            return value * 1000
+        elif unit == 'ms':
+            return value * 1_000_000
+        elif unit == 's':
+            return value * 1_000_000_000
+        elif unit == 'ns':
+            return value
+        # Default to microseconds (most common in sysbench output)
+        return value * 1000
+
+    def _parse_custom_harness(self, content: str) -> Tuple[List[Dict], Dict]:
+        """Parse new custom harness output format (post-Criterion migration).
+
+        Expected format:
+            --- VibeSQL Results ---
+            Workload               Client   Operations     Avg Latency      Ops/sec
+            -------------------- -------- ------------ --------------- ------------
+            Point Select              all       500000         2.00 us       500000
+            Insert                    all       100000        10.00 us       100000
+            ...
+
+            --- SQLite Results ---
+            ...
+        """
+        results = []
+        current_engine = None
+
+        # Extract table size from configuration section
+        table_size = 10000  # Default
+        config_match = re.search(r'Table size:\s+(\d+)\s+rows', content)
+        if config_match:
+            table_size = int(config_match.group(1))
+
+        # Engine section header pattern: "--- VibeSQL Results ---" or "--- SQLite Results (4 clients) ---"
+        engine_pattern = re.compile(r'^---\s+(\w+)\s+Results.*---', re.MULTILINE)
+
+        # Result row pattern - matches lines like:
+        # "Point Select              all       500000         2.00 us       500000"
+        # "Update Non-Index          all       234567         6.78 us       147500"
+        # Note: Workload names can have spaces and hyphens
+        result_pattern = re.compile(
+            r'^([\w\s-]+?)\s{2,}'        # Workload name (greedy until 2+ spaces)
+            r'(?:all|\d+|TOTAL)\s+'      # Client column (all, number, or TOTAL)
+            r'(\d+)\s+'                  # Operations
+            r'([\d.]+)\s+(us|ms|ns)\s+'  # Avg Latency + unit
+            r'([\d.]+)',                 # Ops/sec
+            re.MULTILINE
+        )
+
+        for line in content.split('\n'):
+            # Check for engine section header
+            engine_match = engine_pattern.match(line)
+            if engine_match:
+                current_engine = engine_match.group(1).lower()
+                continue
+
+            # Skip lines without an active engine context
+            if not current_engine:
+                continue
+
+            # Skip header and separator lines
+            if 'Workload' in line or line.startswith('---') or line.startswith('==='):
+                continue
+
+            # Try to match result row
+            result_match = result_pattern.match(line)
+            if result_match:
+                workload_display = result_match.group(1).strip().lower()
+                operations = int(result_match.group(2))
+                latency_val = float(result_match.group(3))
+                latency_unit = result_match.group(4)
+                # ops_per_sec = float(result_match.group(5))  # Not stored in DB
+
+                # Map display name to database field name
+                test_name = self.WORKLOAD_NAME_MAP.get(workload_display, workload_display.replace(' ', '_'))
+
+                # Convert latency to nanoseconds
+                mean_time_ns = self._latency_to_ns(latency_val, latency_unit)
+
+                results.append({
+                    'database_engine': current_engine,
+                    'test_name': test_name,
+                    'table_size': table_size,
+                    'mean_time_ns': mean_time_ns,
+                    'std_dev_ns': None,  # Not available in new format
+                    'median_time_ns': mean_time_ns,  # Use mean as approximation
+                    'iterations': operations
+                })
+
+        summary = {
+            'total_results': len(results),
+            'engines': list(set(r.get('database_engine', 'unknown') for r in results))
+        }
+
+        return results, summary
+
+    def _parse_criterion_stdout(self, content: str) -> Tuple[List[Dict], Dict]:
+        """Parse legacy Criterion benchmark output from stdout."""
         results = []
 
         # Build iterations map
@@ -737,17 +852,6 @@ class SysbenchParser(BenchmarkParser):
             re.MULTILINE
         )
 
-        def unit_to_ns(val: float, unit: str) -> float:
-            unit = unit.lower()
-            if unit in ('µs', 'μs', 'us'):
-                return val * 1000
-            elif unit == 'ms':
-                return val * 1_000_000
-            elif unit == 's':
-                return val * 1_000_000_000
-            else:  # ns
-                return val
-
         for match in pattern.finditer(content):
             test_name = match.group(1).replace("sysbench_", "")
             engine = match.group(2).lower()
@@ -760,9 +864,9 @@ class SysbenchParser(BenchmarkParser):
             high_val = float(match.group(8))
             high_unit = match.group(9)
 
-            low_ns = unit_to_ns(low_val, low_unit)
-            mean_ns = unit_to_ns(mean_val, mean_unit)
-            high_ns = unit_to_ns(high_val, high_unit)
+            low_ns = self._latency_to_ns(low_val, low_unit)
+            mean_ns = self._latency_to_ns(mean_val, mean_unit)
+            high_ns = self._latency_to_ns(high_val, high_unit)
 
             std_dev_ns = (high_ns - low_ns) / 4.0
 
@@ -785,6 +889,20 @@ class SysbenchParser(BenchmarkParser):
         }
 
         return results, summary
+
+    def parse(self, content: str) -> Tuple[List[Dict], Dict]:
+        """Parse Sysbench benchmark output from stdout.
+
+        Supports both:
+        1. New custom harness format (post-Criterion migration)
+        2. Legacy Criterion format (for backwards compatibility)
+        """
+        # Check for new custom harness format first
+        if '--- VibeSQL Results ---' in content and 'Workload' in content:
+            return self._parse_custom_harness(content)
+
+        # Fall back to legacy Criterion format
+        return self._parse_criterion_stdout(content)
 
     def parse_criterion_directory(self, criterion_dir: Path) -> List[Dict]:
         """Parse Criterion benchmark results from directory.
