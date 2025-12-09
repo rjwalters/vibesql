@@ -81,21 +81,40 @@ impl ColumnarBatch {
     }
 
     /// Convert columnar batch back to row-oriented storage
+    ///
+    /// This implementation uses column-outer, row-inner iteration for better
+    /// cache locality. Instead of calling `get_value()` for each cell (O(n*m)
+    /// enum matches), we match on each column once and iterate through all
+    /// its values sequentially.
+    ///
+    /// # Performance
+    ///
+    /// For a 60,000 row × 15 column batch:
+    /// - Old approach: 900,000 `get_value()` calls with enum matching per cell
+    /// - New approach: 15 enum matches total, sequential memory access per column
+    ///
+    /// Expected 2-3x speedup due to:
+    /// - Single enum match per column (not per cell)
+    /// - Sequential memory access within each column array
+    /// - Better CPU cache utilization
     pub fn to_rows(&self) -> Result<Vec<Row>, ExecutorError> {
-        let mut rows = Vec::with_capacity(self.row_count);
-
-        for row_idx in 0..self.row_count {
-            let mut values = Vec::with_capacity(self.columns.len());
-
-            for column in &self.columns {
-                let value = column.get_value(row_idx)?;
-                values.push(value);
-            }
-
-            rows.push(Row::new(values));
+        if self.row_count == 0 {
+            return Ok(Vec::new());
         }
 
-        Ok(rows)
+        // Pre-allocate all row value vectors
+        let num_cols = self.columns.len();
+        let mut row_values: Vec<Vec<SqlValue>> = (0..self.row_count)
+            .map(|_| Vec::with_capacity(num_cols))
+            .collect();
+
+        // Process column-by-column (cache-friendly)
+        for column in &self.columns {
+            column.append_values_to_rows(&mut row_values)?;
+        }
+
+        // Convert to Row objects
+        Ok(row_values.into_iter().map(Row::new).collect())
     }
 
     /// Deduplicate rows in the batch, returning a new batch with unique rows only
@@ -397,6 +416,181 @@ impl ColumnArray {
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index })
             }
         }
+    }
+
+    /// Append all values from this column to the corresponding row vectors.
+    ///
+    /// This is used by `ColumnarBatch::to_rows()` for cache-friendly column-major
+    /// iteration. Instead of calling `get_value()` for each cell, we match on
+    /// the column type once and iterate through all values sequentially.
+    ///
+    /// # Arguments
+    ///
+    /// * `row_values` - Mutable slice of row value vectors to append to
+    ///
+    /// # Performance
+    ///
+    /// This approach is significantly faster than per-cell `get_value()` because:
+    /// - Single enum match per column (not per cell)
+    /// - Sequential memory access within the column array
+    /// - NULL bitmap checked with simple indexing, not Option unwrapping per cell
+    pub(crate) fn append_values_to_rows(
+        &self,
+        row_values: &mut [Vec<SqlValue>],
+    ) -> Result<(), ExecutorError> {
+        match self {
+            Self::Int64(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Integer(v)
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Integer(v));
+                    }
+                }
+            }
+
+            Self::Int32(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Integer(v as i64)
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Integer(v as i64));
+                    }
+                }
+            }
+
+            Self::Float64(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Double(v)
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Double(v));
+                    }
+                }
+            }
+
+            Self::Float32(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Real(v)
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Real(v));
+                    }
+                }
+            }
+
+            Self::String(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Varchar(arcstr::ArcStr::from(v.as_ref()))
+                        });
+                    }
+                } else {
+                    for (i, v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Varchar(arcstr::ArcStr::from(v.as_ref())));
+                    }
+                }
+            }
+
+            Self::FixedString(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Character(arcstr::ArcStr::from(v.as_ref()))
+                        });
+                    }
+                } else {
+                    for (i, v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Character(arcstr::ArcStr::from(v.as_ref())));
+                    }
+                }
+            }
+
+            Self::Date(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Date(days_since_epoch_to_date(v))
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Date(days_since_epoch_to_date(v)));
+                    }
+                }
+            }
+
+            Self::Timestamp(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Timestamp(microseconds_to_timestamp(v))
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Timestamp(microseconds_to_timestamp(v)));
+                    }
+                }
+            }
+
+            Self::Boolean(values, nulls) => {
+                if let Some(null_mask) = nulls {
+                    for (i, (&v, &is_null)) in values.iter().zip(null_mask.iter()).enumerate() {
+                        row_values[i].push(if is_null {
+                            SqlValue::Null
+                        } else {
+                            SqlValue::Boolean(v != 0)
+                        });
+                    }
+                } else {
+                    for (i, &v) in values.iter().enumerate() {
+                        row_values[i].push(SqlValue::Boolean(v != 0));
+                    }
+                }
+            }
+
+            Self::Mixed(values) => {
+                for (i, v) in values.iter().enumerate() {
+                    row_values[i].push(v.clone());
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Get the data type of this column
