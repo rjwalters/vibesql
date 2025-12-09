@@ -80,6 +80,129 @@ pub enum ColumnPredicate {
     },
 }
 
+impl ColumnPredicate {
+    /// Get all column indices referenced by this predicate
+    ///
+    /// Returns a vec (typically 1-2 elements) containing the column indices
+    /// that need to be extracted for evaluating this predicate.
+    pub fn referenced_columns(&self) -> Vec<usize> {
+        match self {
+            ColumnPredicate::LessThan { column_idx, .. }
+            | ColumnPredicate::GreaterThan { column_idx, .. }
+            | ColumnPredicate::GreaterThanOrEqual { column_idx, .. }
+            | ColumnPredicate::LessThanOrEqual { column_idx, .. }
+            | ColumnPredicate::Equal { column_idx, .. }
+            | ColumnPredicate::NotEqual { column_idx, .. }
+            | ColumnPredicate::Between { column_idx, .. }
+            | ColumnPredicate::Like { column_idx, .. }
+            | ColumnPredicate::InList { column_idx, .. } => vec![*column_idx],
+            ColumnPredicate::ColumnCompare { left_column_idx, right_column_idx, .. } => {
+                vec![*left_column_idx, *right_column_idx]
+            }
+        }
+    }
+}
+
+/// Collect all unique column indices referenced by a slice of predicates
+///
+/// Returns a sorted, deduplicated list of column indices that need to be
+/// extracted for evaluating the predicates. This enables selective column
+/// extraction optimization - only extracting needed columns instead of all.
+pub fn collect_referenced_columns(predicates: &[ColumnPredicate]) -> Vec<usize> {
+    let mut columns: Vec<usize> = predicates
+        .iter()
+        .flat_map(|p| p.referenced_columns())
+        .collect();
+    columns.sort_unstable();
+    columns.dedup();
+    columns
+}
+
+/// Remap predicates to use new column indices
+///
+/// Given predicates that reference columns in the original table and a mapping
+/// from original column indices to new (sparse batch) positions, returns new
+/// predicates with remapped column indices.
+///
+/// # Arguments
+///
+/// * `predicates` - Original predicates with original column indices
+/// * `column_mapping` - Sorted array where `column_mapping[new_idx] = old_idx`
+///
+/// # Returns
+///
+/// New predicates where each `column_idx` has been replaced with its position
+/// in `column_mapping`. Panics if any column_idx is not found in the mapping.
+///
+/// # Example
+///
+/// ```text
+/// Original predicates: [Equal { column_idx: 14, value: 'R' }]
+/// Column mapping: [14]  (only column 14 was extracted)
+/// Remapped predicates: [Equal { column_idx: 0, value: 'R' }]
+/// ```
+pub fn remap_predicates(predicates: &[ColumnPredicate], column_mapping: &[usize]) -> Vec<ColumnPredicate> {
+    predicates.iter().map(|p| remap_predicate(p, column_mapping)).collect()
+}
+
+fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> ColumnPredicate {
+    // Find new index for a column - binary search since mapping is sorted
+    let find_new_idx = |old_idx: usize| -> usize {
+        column_mapping
+            .binary_search(&old_idx)
+            .expect("Column index not found in mapping - this is a bug")
+    };
+
+    match predicate {
+        ColumnPredicate::LessThan { column_idx, value } => {
+            ColumnPredicate::LessThan { column_idx: find_new_idx(*column_idx), value: value.clone() }
+        }
+        ColumnPredicate::GreaterThan { column_idx, value } => {
+            ColumnPredicate::GreaterThan { column_idx: find_new_idx(*column_idx), value: value.clone() }
+        }
+        ColumnPredicate::GreaterThanOrEqual { column_idx, value } => {
+            ColumnPredicate::GreaterThanOrEqual { column_idx: find_new_idx(*column_idx), value: value.clone() }
+        }
+        ColumnPredicate::LessThanOrEqual { column_idx, value } => {
+            ColumnPredicate::LessThanOrEqual { column_idx: find_new_idx(*column_idx), value: value.clone() }
+        }
+        ColumnPredicate::Equal { column_idx, value } => {
+            ColumnPredicate::Equal { column_idx: find_new_idx(*column_idx), value: value.clone() }
+        }
+        ColumnPredicate::NotEqual { column_idx, value } => {
+            ColumnPredicate::NotEqual { column_idx: find_new_idx(*column_idx), value: value.clone() }
+        }
+        ColumnPredicate::Between { column_idx, low, high } => {
+            ColumnPredicate::Between {
+                column_idx: find_new_idx(*column_idx),
+                low: low.clone(),
+                high: high.clone(),
+            }
+        }
+        ColumnPredicate::Like { column_idx, pattern, negated } => {
+            ColumnPredicate::Like {
+                column_idx: find_new_idx(*column_idx),
+                pattern: pattern.clone(),
+                negated: *negated,
+            }
+        }
+        ColumnPredicate::InList { column_idx, values, negated } => {
+            ColumnPredicate::InList {
+                column_idx: find_new_idx(*column_idx),
+                values: values.clone(),
+                negated: *negated,
+            }
+        }
+        ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } => {
+            ColumnPredicate::ColumnCompare {
+                left_column_idx: find_new_idx(*left_column_idx),
+                op: *op,
+                right_column_idx: find_new_idx(*right_column_idx),
+            }
+        }
+    }
+}
+
 /// Extract column predicates as a tree from a WHERE clause expression
 ///
 /// This converts AST expressions into a predicate tree that can be evaluated

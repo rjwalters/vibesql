@@ -81,6 +81,60 @@ impl ColumnarBatch {
         Ok(Self { row_count, columns, column_names: None })
     }
 
+    /// Convert selected columns from row-oriented storage to columnar batch
+    ///
+    /// This is an optimized version of `from_rows` that only extracts the
+    /// specified columns. This is critical for predicate evaluation on wide
+    /// tables where only a few columns are referenced by the WHERE clause.
+    ///
+    /// # Arguments
+    ///
+    /// * `rows` - The rows to convert
+    /// * `column_indices` - Which column indices to extract (must be sorted)
+    ///
+    /// # Returns
+    ///
+    /// A sparse columnar batch where `column(i)` returns the data for
+    /// `column_indices[i]`. The caller must map original column indices
+    /// to batch positions using the `column_indices` array.
+    ///
+    /// # Performance
+    ///
+    /// For a table with 16 columns where only 1 column is needed:
+    /// - `from_rows`: extracts all 16 columns (100% work)
+    /// - `from_rows_selective`: extracts only 1 column (6% work)
+    pub fn from_rows_selective(
+        rows: &[Row],
+        column_indices: &[usize],
+    ) -> Result<Self, ExecutorError> {
+        if rows.is_empty() || column_indices.is_empty() {
+            return Ok(Self::new(0));
+        }
+
+        let row_count = rows.len();
+
+        // Infer column types from first row for only the selected columns
+        let column_types: Vec<ColumnType> = column_indices
+            .iter()
+            .map(|&col_idx| {
+                rows[0]
+                    .get(col_idx)
+                    .map(Self::infer_type_from_value)
+                    .unwrap_or(ColumnType::Mixed)
+            })
+            .collect();
+
+        // Create column arrays for only the selected columns
+        let mut columns = Vec::with_capacity(column_indices.len());
+
+        for (batch_idx, &col_idx) in column_indices.iter().enumerate() {
+            let column = Self::extract_column(rows, col_idx, &column_types[batch_idx])?;
+            columns.push(column);
+        }
+
+        Ok(Self { row_count, columns, column_names: None })
+    }
+
     /// Extract a single column from rows into a typed array
     pub(crate) fn extract_column(
         rows: &[Row],
@@ -255,18 +309,26 @@ impl ColumnarBatch {
         let mut types = Vec::with_capacity(first_row.len());
 
         for i in 0..first_row.len() {
-            let col_type = match first_row.get(i) {
-                Some(SqlValue::Integer(_)) => ColumnType::Int64,
-                Some(SqlValue::Double(_)) => ColumnType::Float64,
-                Some(SqlValue::Varchar(_)) => ColumnType::String,
-                Some(SqlValue::Date(_)) => ColumnType::Date,
-                Some(SqlValue::Boolean(_)) => ColumnType::Boolean,
-                _ => ColumnType::Mixed,
-            };
+            let col_type = first_row
+                .get(i)
+                .map(Self::infer_type_from_value)
+                .unwrap_or(ColumnType::Mixed);
             types.push(col_type);
         }
 
         types
+    }
+
+    /// Infer column type from a single SqlValue
+    fn infer_type_from_value(value: &SqlValue) -> ColumnType {
+        match value {
+            SqlValue::Integer(_) => ColumnType::Int64,
+            SqlValue::Double(_) => ColumnType::Float64,
+            SqlValue::Varchar(_) => ColumnType::String,
+            SqlValue::Date(_) => ColumnType::Date,
+            SqlValue::Boolean(_) => ColumnType::Boolean,
+            _ => ColumnType::Mixed,
+        }
     }
 }
 

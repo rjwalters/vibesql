@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use super::predicates::{apply_table_local_predicates, apply_table_local_predicates_ref};
+use super::predicates::apply_table_local_predicates;
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
@@ -321,10 +321,6 @@ pub(crate) fn execute_table_scan(
     let table_schema = apply_column_aliases(table.schema.clone(), column_aliases)?;
     let schema = CombinedSchema::from_table(effective_name.clone(), table_schema);
 
-    // Get live rows from table (excludes deleted rows from deletion bitmap)
-    // Issue #3790: Must use scan_live_vec() instead of scan() to filter deleted rows
-    let live_rows = table.scan_live_vec();
-
     // Check if we need to apply table-local predicates (Phase 1 optimization)
     // NOTE: Skip predicate pushdown for correlated subqueries (when outer_row/outer_schema exist)
     // because the predicates may reference outer columns that aren't available during table scan.
@@ -335,6 +331,8 @@ pub(crate) fn execute_table_scan(
         if is_correlated {
             // Return unfiltered rows for correlated subqueries
             // Filtering will happen later with full outer row context
+            // Issue #3790: Must use scan_live_vec() to filter deleted rows
+            let live_rows = table.scan_live_vec();
             use crate::select::from_iterator::FromIterator;
             return Ok(super::FromResult::from_iterator(
                 schema,
@@ -370,17 +368,28 @@ pub(crate) fn execute_table_scan(
             if let Some(column_predicates) =
                 crate::select::columnar::extract_column_predicates(where_expr, &schema)
             {
+                // OPTIMIZATION: Avoid double-cloning rows
+                // Before: scan_live_vec() clones ALL rows, then filter clones passing rows again
+                // After: scan() returns &[Row] references, filter returns indices,
+                //        then we clone ONLY the rows that pass (and aren't deleted)
+                //
+                // For lineitem (60K rows, 20K pass filter):
+                // - Before: 60K clones + 20K clones = 80K clones
+                // - After: 20K clones only = 75% reduction in cloning
+                let all_rows = table.scan();
+
                 if crate::profiling::is_scan_debug_enabled() {
                     eprintln!(
                         "[SCAN_PATH] {} table: extracted {} columnar predicates for {} rows",
                         table_name,
                         column_predicates.len(),
-                        live_rows.len()
+                        all_rows.len()
                     );
                 }
+
                 // For native columnar tables, use SIMD filtering on typed columns
                 // This avoids SqlValue overhead by working directly on i64/f64/String arrays
-                if table.is_native_columnar() && live_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                if table.is_native_columnar() && all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(filtered_rows) = filter_with_simd_columnar(table, &column_predicates)
                     {
                         return Ok(super::FromResult::from_rows(schema, filtered_rows));
@@ -390,11 +399,11 @@ pub(crate) fn execute_table_scan(
 
                 // For row-oriented tables, use cached columnar filter with late materialization
                 // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing rows
-                if live_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                if all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(filtered_rows) = filter_with_cached_columnar(
                         database,
                         table_name,
-                        &live_rows,
+                        all_rows,
                         &column_predicates,
                     ) {
                         return Ok(super::FromResult::from_rows(schema, filtered_rows));
@@ -404,9 +413,15 @@ pub(crate) fn execute_table_scan(
 
                 // For smaller tables or if cached columnar fails, use direct row filtering
                 let indices =
-                    crate::select::columnar::apply_columnar_filter(&live_rows, &column_predicates)?;
-                let filtered_rows: Vec<_> =
-                    indices.into_iter().filter_map(|idx| live_rows.get(idx).cloned()).collect();
+                    crate::select::columnar::apply_columnar_filter(all_rows, &column_predicates)?;
+
+                // Clone only the rows that pass the filter AND aren't deleted
+                // This is the key optimization: we skip cloning rows that don't pass
+                let filtered_rows: Vec<_> = indices
+                    .into_iter()
+                    .filter(|&idx| !table.is_row_deleted(idx))
+                    .filter_map(|idx| all_rows.get(idx).cloned())
+                    .collect();
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
             }
 
@@ -416,10 +431,12 @@ pub(crate) fn execute_table_scan(
                     table_name);
             }
             // Fall back to generic predicate evaluation for complex expressions
+            // Must use scan_live_vec() here since apply_table_local_predicates expects owned rows
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
             // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
-            let filtered_rows = apply_table_local_predicates_ref(
-                &live_rows,
+            let live_rows = table.scan_live_vec();
+            let filtered_rows = apply_table_local_predicates(
+                live_rows,
                 schema.clone(),
                 &predicate_plan,
                 &effective_name,
@@ -433,7 +450,9 @@ pub(crate) fn execute_table_scan(
     }
 
     // No table-local predicates or no WHERE clause: return live rows
-    // Issue #3790: live_rows already filters deleted rows via scan_live_vec()
+    // Issue #3790: Must filter deleted rows via scan_live_vec()
+    let live_rows = table.scan_live_vec();
+
     #[cfg(feature = "parallel")]
     let rows = parallel_scan_materialize(&live_rows);
 
