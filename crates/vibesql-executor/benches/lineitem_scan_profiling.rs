@@ -173,7 +173,7 @@ fn main() {
 
     #[cfg(not(feature = "duckdb-comparison"))]
     {
-        print_summary_table("VibeSQL", &vibesql_results);
+        harness::print_summary_table("VibeSQL", &vibesql_results);
     }
 
     eprintln!("\n=== Benchmark Complete ===\n");
