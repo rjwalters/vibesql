@@ -506,8 +506,20 @@ fn main() {
                         eprintln!("  Run {}: {:.2}ms ({} rows)", i + 1, times.last().unwrap(), rows);
                     }
                     Err(e) => {
-                        error = Some(e.to_string());
-                        eprintln!("  Run {}: ERROR - {}", i + 1, e);
+                        // Get detailed error info including server message
+                        let db_err = e.as_db_error();
+                        let error_msg = if let Some(db) = db_err {
+                            format!("DB Error - severity: {:?}, code: {:?}, message: {}, detail: {:?}, hint: {:?}",
+                                db.severity(),
+                                db.code(),
+                                db.message(),
+                                db.detail(),
+                                db.hint())
+                        } else {
+                            format!("{:?}", e)
+                        };
+                        error = Some(error_msg.clone());
+                        eprintln!("  Run {}: ERROR - {}", i + 1, error_msg);
                         break;
                     }
                 }

@@ -270,6 +270,15 @@ where
             .get(&table_name.to_lowercase())
             .and_then(|preds| utils::combine_predicates_with_qualification(preds, &table_ref.name));
 
+        if std::env::var("SCAN_PUSHDOWN_DEBUG").is_ok() {
+            eprintln!(
+                "[SCAN_PUSHDOWN] Table {} has {} local predicates, filter: {:?}",
+                table_name,
+                table_local_predicates.get(&table_name.to_lowercase()).map(|p| p.len()).unwrap_or(0),
+                table_filter.as_ref().map(|f| format!("{:?}", f).chars().take(200).collect::<String>())
+            );
+        }
+
         let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {
             if let Some(subquery) = &table_ref.subquery {
@@ -485,16 +494,25 @@ where
             })
             .collect();
 
+        // Build per-table scan breakdown string
+        let scan_breakdown: String = scan_times
+            .iter()
+            .map(|(name, time)| format!("  {}: {:?}", name, time))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         // Emit structured profiling summary
         DebugEvent::new(Category::Execution, "join_profile_summary", "JOIN_PROFILE")
             .text(format!(
                 "=== Multi-way JOIN Timing Breakdown ===\n\
                  Table scans ({} tables): {:?}\n\
+                 {}\n\
                  Total join time: {:?}\n\
                  Column reorder: {:?} ({} rows)\n\
                  Grand total: {:?}",
                 scan_times.len(),
                 total_scan,
+                scan_breakdown,
                 total_join,
                 reorder_time,
                 reordered_rows.len(),

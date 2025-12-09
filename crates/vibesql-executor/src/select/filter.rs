@@ -245,6 +245,9 @@ pub(super) fn apply_where_filter_basic<'a>(
 
 /// Parallel version of apply_where_filter_combined
 /// Uses rayon to evaluate WHERE predicates across multiple threads
+///
+/// Performance optimization: Attempts to compile predicates before parallel execution.
+/// Compiled predicates avoid expression tree overhead and are thread-safe.
 #[cfg(feature = "parallel")]
 #[allow(dead_code)]
 pub(super) fn apply_where_filter_combined_parallel<'a>(
@@ -253,6 +256,8 @@ pub(super) fn apply_where_filter_combined_parallel<'a>(
     evaluator: &CombinedExpressionEvaluator,
     _executor: &crate::SelectExecutor<'a>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+    use super::vectorized::compiled_predicate::{CompiledOrClause, CompiledWhereClause};
+
     if where_expr.is_none() {
         return Ok(rows);
     }
@@ -265,6 +270,57 @@ pub(super) fn apply_where_filter_combined_parallel<'a>(
 
     let where_expr = where_expr.unwrap();
 
+    // Try to compile the predicate for fast parallel evaluation
+    // Compiled predicates are thread-safe and avoid expression tree overhead
+    let compiled_and = CompiledWhereClause::try_compile(where_expr, evaluator.schema());
+    let compiled_or = if compiled_and.is_none() {
+        CompiledOrClause::try_compile(where_expr, evaluator.schema())
+    } else {
+        None
+    };
+
+    // Debug: Log which path is being taken
+    if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+        eprintln!(
+            "[PARALLEL_COMPILE] AND compiled: {}, OR compiled: {}",
+            compiled_and.is_some(),
+            compiled_or.is_some()
+        );
+    }
+
+    // Fast path 1: Use compiled AND predicates in parallel
+    if let Some(compiled) = compiled_and {
+        let compiled_arc = Arc::new(compiled);
+        let result: Result<Vec<_>, ExecutorError> = rows
+            .into_par_iter()
+            .map(|row| {
+                if compiled_arc.evaluate(&row)? {
+                    Ok(Some(row))
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect();
+        return result.map(|v| v.into_iter().flatten().collect());
+    }
+
+    // Fast path 2: Use compiled OR predicates in parallel
+    if let Some(compiled) = compiled_or {
+        let compiled_arc = Arc::new(compiled);
+        let result: Result<Vec<_>, ExecutorError> = rows
+            .into_par_iter()
+            .map(|row| {
+                if compiled_arc.evaluate(&row)? {
+                    Ok(Some(row))
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect();
+        return result.map(|v| v.into_iter().flatten().collect());
+    }
+
+    // Slow path: Fall back to expression tree evaluation
     // Clone the expression for thread-safe sharing
     let where_expr_arc = Arc::new(where_expr.clone());
 
@@ -323,6 +379,9 @@ pub(crate) fn apply_where_filter_combined_auto<'a>(
     evaluator: &CombinedExpressionEvaluator,
     executor: &crate::SelectExecutor<'a>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+    if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+        eprintln!("[FILTER_AUTO_ENTRY] Called with {} rows, where_expr: {}", rows.len(), where_expr.is_some());
+    }
     if where_expr.is_none() {
         return Ok(rows);
     }
@@ -333,6 +392,9 @@ pub(crate) fn apply_where_filter_combined_auto<'a>(
         let row_count = rows.len();
         let config = ParallelConfig::global();
         if config.should_parallelize_scan(row_count) {
+            if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                eprintln!("[FILTER_AUTO] Using PARALLEL path for {} rows", row_count);
+            }
             return apply_where_filter_combined_parallel(rows, where_expr, evaluator, executor);
         }
     }
@@ -340,5 +402,8 @@ pub(crate) fn apply_where_filter_combined_auto<'a>(
     // For medium datasets, use vectorized (chunk-based) execution
     // This provides better cache locality than row-by-row without
     // the overhead of parallelization
+    if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+        eprintln!("[FILTER_AUTO] Calling vectorized filter on {} rows", rows.len());
+    }
     super::vectorized::apply_where_filter_vectorized(rows, where_expr, evaluator, executor)
 }
