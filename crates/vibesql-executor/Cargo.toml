@@ -243,3 +243,7 @@ harness = false
 [[bench]]
 name = "tpch_server"
 harness = false
+
+[[bench]]
+name = "tpcc_server"
+harness = false
