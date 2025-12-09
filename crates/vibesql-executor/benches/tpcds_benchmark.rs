@@ -43,7 +43,7 @@ use std::env;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tpcds::memory::hint_memory_release;
-use tpcds::queries::{sqlite_should_skip, TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
+use tpcds::queries::{TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
 use tpcds::schema::*;
 use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
