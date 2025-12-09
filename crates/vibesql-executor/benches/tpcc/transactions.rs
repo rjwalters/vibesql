@@ -1075,24 +1075,28 @@ impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
 }
 
 /// TPC-C transaction executor for MySQL
+///
+/// Uses `RefCell` for interior mutability to allow the `TPCCExecutor` trait
+/// (which requires `&self`) to call MySQL methods that need `&mut self`.
 #[cfg(feature = "mysql-comparison")]
 pub struct MysqlTransactionExecutor<'a> {
-    pub conn: &'a mut mysql::PooledConn,
+    pub conn: std::cell::RefCell<&'a mut mysql::PooledConn>,
 }
 
 #[cfg(feature = "mysql-comparison")]
 impl<'a> MysqlTransactionExecutor<'a> {
     pub fn new(conn: &'a mut mysql::PooledConn) -> Self {
-        Self { conn }
+        Self { conn: std::cell::RefCell::new(conn) }
     }
 
-    pub fn new_order(&mut self, input: &NewOrderInput) -> TransactionResult {
+    pub fn new_order_impl(&self, input: &NewOrderInput) -> TransactionResult {
         use mysql::prelude::*;
         let start = Instant::now();
+        let mut conn = self.conn.borrow_mut();
 
         // Get warehouse tax rate
         if let Err(e) =
-            self.conn.exec_drop("SELECT w_tax FROM warehouse WHERE w_id = ?", (input.w_id,))
+            conn.exec_drop("SELECT w_tax FROM warehouse WHERE w_id = ?", (input.w_id,))
         {
             return TransactionResult {
                 success: false,
@@ -1102,7 +1106,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
 
         // Get district info
-        if let Err(e) = self.conn.exec_drop(
+        if let Err(e) = conn.exec_drop(
             "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
         ) {
@@ -1114,7 +1118,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
 
         // Get customer info
-        if let Err(e) = self.conn.exec_drop(
+        if let Err(e) = conn.exec_drop(
             "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
             (input.w_id, input.d_id, input.c_id),
         ) {
@@ -1128,7 +1132,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         // Process each order line - query item and stock info
         for item in &input.items {
             // Get item info
-            if let Err(e) = self.conn.exec_drop(
+            if let Err(e) = conn.exec_drop(
                 "SELECT i_price, i_name, i_data FROM item WHERE i_id = ?",
                 (item.ol_i_id,),
             ) {
@@ -1140,7 +1144,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
             }
 
             // Get stock info
-            if let Err(e) = self.conn.exec_drop(
+            if let Err(e) = conn.exec_drop(
                 "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = ? AND s_w_id = ?",
                 (item.ol_i_id, item.ol_supply_w_id),
             ) {
@@ -1159,12 +1163,13 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
     }
 
-    pub fn payment(&mut self, input: &PaymentInput) -> TransactionResult {
+    pub fn payment_impl(&self, input: &PaymentInput) -> TransactionResult {
         use mysql::prelude::*;
         let start = Instant::now();
+        let mut conn = self.conn.borrow_mut();
 
         // Get warehouse info
-        if let Err(e) = self.conn.exec_drop(
+        if let Err(e) = conn.exec_drop(
             "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = ?",
             (input.w_id,),
         ) {
@@ -1176,7 +1181,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
 
         // Get district info
-        if let Err(e) = self.conn.exec_drop(
+        if let Err(e) = conn.exec_drop(
             "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
         ) {
@@ -1189,7 +1194,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
 
         // Get customer (by ID or last name)
         if let Some(c_id) = input.c_id {
-            if let Err(e) = self.conn.exec_drop(
+            if let Err(e) = conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
                 (input.c_w_id, input.c_d_id, c_id),
             ) {
@@ -1199,7 +1204,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
                     error: Some(format!("Customer query failed: {}", e)),
                 };
             }
-        } else if let Err(e) = self.conn.exec_drop(
+        } else if let Err(e) = conn.exec_drop(
             "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
             (input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()),
         ) {
@@ -1217,13 +1222,14 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
     }
 
-    pub fn order_status(&mut self, input: &OrderStatusInput) -> TransactionResult {
+    pub fn order_status_impl(&self, input: &OrderStatusInput) -> TransactionResult {
         use mysql::prelude::*;
         let start = Instant::now();
+        let mut conn = self.conn.borrow_mut();
 
         // Get customer (by ID or last name)
         let c_id = if let Some(c_id) = input.c_id {
-            if let Err(e) = self.conn.exec_drop(
+            if let Err(e) = conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
                 (input.w_id, input.d_id, c_id),
             ) {
@@ -1235,7 +1241,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
             }
             c_id
         } else {
-            if let Err(e) = self.conn.exec_drop(
+            if let Err(e) = conn.exec_drop(
                 "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
                 (input.w_id, input.d_id, input.c_last.as_ref().unwrap()),
             ) {
@@ -1249,7 +1255,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         };
 
         // Get last order for customer
-        if let Err(e) = self.conn.exec_drop(
+        if let Err(e) = conn.exec_drop(
             "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = ? AND o_d_id = ? AND o_c_id = ? ORDER BY o_id DESC LIMIT 1",
             (input.w_id, input.d_id, c_id),
         ) {
@@ -1267,13 +1273,14 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
     }
 
-    pub fn delivery(&mut self, input: &DeliveryInput) -> TransactionResult {
+    pub fn delivery_impl(&self, input: &DeliveryInput) -> TransactionResult {
         use mysql::prelude::*;
         let start = Instant::now();
+        let mut conn = self.conn.borrow_mut();
 
         // Process each district - query for new orders
         for d_id in 1..=10 {
-            if let Err(e) = self.conn.exec_drop(
+            if let Err(e) = conn.exec_drop(
                 "SELECT no_o_id FROM new_order WHERE no_w_id = ? AND no_d_id = ? ORDER BY no_o_id LIMIT 1",
                 (input.w_id, d_id),
             ) {
@@ -1292,12 +1299,13 @@ impl<'a> MysqlTransactionExecutor<'a> {
         }
     }
 
-    pub fn stock_level(&mut self, input: &StockLevelInput) -> TransactionResult {
+    pub fn stock_level_impl(&self, input: &StockLevelInput) -> TransactionResult {
         use mysql::prelude::*;
         let start = Instant::now();
+        let mut conn = self.conn.borrow_mut();
 
         // Get district next order ID
-        let d_next_o_id: i32 = match self.conn.exec_first(
+        let d_next_o_id: i32 = match conn.exec_first(
             "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
             (input.w_id, input.d_id),
         ) {
@@ -1321,7 +1329,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
         // Use subquery approach for better optimization
         let ol_o_id_min = d_next_o_id - 20;
-        if let Err(e) = self.conn.exec_drop(
+        if let Err(e) = conn.exec_drop(
             "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
              WHERE ol_w_id = ? AND ol_d_id = ? \
              AND ol_o_id >= ? AND ol_o_id < ? \
@@ -1345,46 +1353,24 @@ impl<'a> MysqlTransactionExecutor<'a> {
 
 #[cfg(feature = "mysql-comparison")]
 impl<'a> TPCCExecutor for MysqlTransactionExecutor<'a> {
-    fn new_order(&self, _input: &NewOrderInput) -> TransactionResult {
-        // This trait requires &self but MySQL needs &mut self for queries
-        // We implement the trait for benchmarking compatibility but use the &mut self methods directly
-        TransactionResult {
-            success: false,
-            duration_us: 0,
-            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
-        }
+    fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
+        self.new_order_impl(input)
     }
 
-    fn payment(&self, _input: &PaymentInput) -> TransactionResult {
-        TransactionResult {
-            success: false,
-            duration_us: 0,
-            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
-        }
+    fn payment(&self, input: &PaymentInput) -> TransactionResult {
+        self.payment_impl(input)
     }
 
-    fn order_status(&self, _input: &OrderStatusInput) -> TransactionResult {
-        TransactionResult {
-            success: false,
-            duration_us: 0,
-            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
-        }
+    fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
+        self.order_status_impl(input)
     }
 
-    fn delivery(&self, _input: &DeliveryInput) -> TransactionResult {
-        TransactionResult {
-            success: false,
-            duration_us: 0,
-            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
-        }
+    fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
+        self.delivery_impl(input)
     }
 
-    fn stock_level(&self, _input: &StockLevelInput) -> TransactionResult {
-        TransactionResult {
-            success: false,
-            duration_us: 0,
-            error: Some("Use MysqlTransactionExecutor methods directly".to_string()),
-        }
+    fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
+        self.stock_level_impl(input)
     }
 }
 
