@@ -11,7 +11,10 @@ use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 
-use super::{compiled_predicate::CompiledWhereClause, VECTORIZE_THRESHOLD};
+use super::{
+    compiled_predicate::{CompiledOrClause, CompiledWhereClause},
+    VECTORIZE_THRESHOLD,
+};
 
 /// Apply WHERE clause filter using chunk-based evaluation
 ///
@@ -51,15 +54,34 @@ pub fn apply_where_filter_vectorized<'a>(
 
     // Try to compile the WHERE clause for fast-path evaluation
     // This avoids expression tree overhead for simple predicates
-    let compiled = CompiledWhereClause::try_compile(where_expr, evaluator.schema());
+    //
+    // Compilation priority:
+    // 1. CompiledWhereClause - for AND chains (e.g., TPC-H Q6)
+    // 2. CompiledOrClause - for OR of AND chains (e.g., TPC-H Q19)
+    // 3. Expression tree fallback - for complex expressions
+    let compiled_and = CompiledWhereClause::try_compile(where_expr, evaluator.schema());
+    let compiled_or = if compiled_and.is_none() {
+        CompiledOrClause::try_compile(where_expr, evaluator.schema())
+    } else {
+        None
+    };
 
     // Use pooled buffer for result
     let mut filtered_rows = executor.query_buffer_pool().get_row_buffer(row_count);
     let mut rows_processed = 0;
     const CHECK_INTERVAL: usize = 1000;
 
-    // Fast path: Use compiled predicates if available
-    if let Some(compiled_pred) = compiled {
+    // Debug: Log which path is being taken
+    if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+        eprintln!(
+            "[OR_COMPILE] AND compiled: {}, OR compiled: {}",
+            compiled_and.is_some(),
+            compiled_or.is_some()
+        );
+    }
+
+    // Fast path 1: Use compiled AND predicates if available
+    if let Some(compiled_pred) = compiled_and {
         for row in rows.into_iter() {
             // Check timeout periodically
             rows_processed += 1;
@@ -69,6 +91,21 @@ pub fn apply_where_filter_vectorized<'a>(
 
             // Evaluate compiled predicate (much faster than expression tree)
             if compiled_pred.evaluate(&row)? {
+                filtered_rows.push(row);
+            }
+        }
+    } else if let Some(compiled_or_pred) = compiled_or {
+        // Fast path 2: Use compiled OR predicates
+        // This handles OR of AND chains like TPC-H Q19
+        for row in rows.into_iter() {
+            // Check timeout periodically
+            rows_processed += 1;
+            if rows_processed % CHECK_INTERVAL == 0 {
+                executor.check_timeout()?;
+            }
+
+            // Evaluate compiled OR predicate
+            if compiled_or_pred.evaluate(&row)? {
                 filtered_rows.push(row);
             }
         }

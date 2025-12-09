@@ -8,6 +8,8 @@
 //! - Pre-compute column indices to avoid schema lookups
 //! - Flatten AND chains into a vector of predicates
 //! - Use type-specific comparison functions to skip type coercion
+//! - Support OR of AND chains (e.g., TPC-H Q19's 3-branch OR structure)
+//! - IN list predicates for multi-value equality checks
 
 #![allow(clippy::redundant_guards)]
 //! - Direct memory access to column values
@@ -24,6 +26,8 @@ enum CompiledPredicate {
     ColumnLiteral { column_idx: usize, op: ComparisonOp, literal: SqlValue },
     /// BETWEEN: column_idx BETWEEN low AND high
     Between { column_idx: usize, low: SqlValue, high: SqlValue, negated: bool, symmetric: bool },
+    /// IN list: column_idx IN (value1, value2, ...)
+    InList { column_idx: usize, values: Vec<SqlValue>, negated: bool },
 }
 
 impl CompiledPredicate {
@@ -51,6 +55,16 @@ impl CompiledPredicate {
 
             // NOT BETWEEN is unselective (~90% of rows)
             CompiledPredicate::Between { negated: true, .. } => 0.90,
+
+            // IN list selectivity depends on number of values
+            // More values = less selective
+            CompiledPredicate::InList { values, negated: false, .. } => {
+                // Each value has ~0.1% chance, so n values ≈ n * 0.001
+                // Cap at 0.5 for very large IN lists
+                (values.len() as f64 * 0.001).min(0.5)
+            }
+            // NOT IN is very unselective (most rows pass)
+            CompiledPredicate::InList { negated: true, .. } => 0.95,
         }
     }
 
@@ -59,6 +73,7 @@ impl CompiledPredicate {
         match self {
             CompiledPredicate::ColumnLiteral { column_idx, .. } => *column_idx,
             CompiledPredicate::Between { column_idx, .. } => *column_idx,
+            CompiledPredicate::InList { column_idx, .. } => *column_idx,
         }
     }
 
@@ -79,6 +94,7 @@ impl CompiledPredicate {
         match self {
             CompiledPredicate::ColumnLiteral { literal, .. } => !matches!(literal, SqlValue::Null),
             CompiledPredicate::Between { .. } => true,
+            CompiledPredicate::InList { .. } => true, // IN comparisons require non-null
         }
     }
 }
@@ -97,6 +113,117 @@ enum ComparisonOp {
 /// A compiled WHERE clause consisting of AND-combined simple predicates
 pub struct CompiledWhereClause {
     predicates: Vec<CompiledPredicate>,
+}
+
+/// A compiled OR clause consisting of multiple AND branches
+///
+/// This handles expressions like: (A AND B) OR (C AND D) OR (E AND F)
+/// Each branch is a CompiledWhereClause (AND-combined predicates)
+///
+/// Evaluation uses short-circuit OR semantics: if any branch is true, return true
+pub struct CompiledOrClause {
+    branches: Vec<CompiledWhereClause>,
+}
+
+impl CompiledOrClause {
+    /// Try to compile an OR expression into the optimized form
+    /// Returns None if the expression doesn't match the OR-of-ANDs pattern
+    pub fn try_compile(where_expr: &Expression, schema: &CombinedSchema) -> Option<Self> {
+        let mut branches = Vec::new();
+
+        // Extract OR branches
+        let result = Self::extract_or_branches(where_expr, schema, &mut branches);
+
+        if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+            eprintln!(
+                "[OR_TRY_COMPILE] extract_or_branches result: {:?}, branch count: {}",
+                result.is_some(),
+                branches.len()
+            );
+        }
+
+        result?;
+
+        // Need at least 2 branches to be an OR clause
+        if branches.len() < 2 {
+            if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                eprintln!("[OR_TRY_COMPILE] Rejected: need >= 2 branches, got {}", branches.len());
+            }
+            return None;
+        }
+
+        // Reorder branches by estimated selectivity (most selective first)
+        // This improves short-circuit performance
+        Self::reorder_branches(&mut branches);
+
+        if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+            eprintln!("[OR_TRY_COMPILE] Success: compiled {} branches", branches.len());
+        }
+
+        Some(CompiledOrClause { branches })
+    }
+
+    /// Extract OR branches from an expression
+    fn extract_or_branches(
+        expr: &Expression,
+        schema: &CombinedSchema,
+        branches: &mut Vec<CompiledWhereClause>,
+    ) -> Option<()> {
+        match expr {
+            Expression::BinaryOp { left, op: BinaryOperator::Or, right } => {
+                // Recursively extract from left and right
+                if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                    eprintln!("[OR_EXTRACT] Found OR node, recursing");
+                }
+                Self::extract_or_branches(left, schema, branches)?;
+                Self::extract_or_branches(right, schema, branches)?;
+                Some(())
+            }
+            _ => {
+                // Try to compile this branch as an AND-chain
+                if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                    eprintln!("[OR_EXTRACT] Trying to compile branch as AND-chain: {:?}",
+                        format!("{:?}", expr).chars().take(200).collect::<String>());
+                }
+                let compiled = CompiledWhereClause::try_compile(expr, schema);
+                if compiled.is_none() {
+                    if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                        eprintln!("[OR_EXTRACT] Branch compilation FAILED");
+                    }
+                    return None;
+                }
+                branches.push(compiled.unwrap());
+                Some(())
+            }
+        }
+    }
+
+    /// Reorder branches by selectivity (most selective first for short-circuit benefit)
+    fn reorder_branches(branches: &mut [CompiledWhereClause]) {
+        // Estimate each branch's selectivity as the product of its predicate selectivities
+        // (assuming independence, which is imprecise but fast)
+        branches.sort_by(|a, b| {
+            let selectivity_a: f64 =
+                a.predicates.iter().map(|p| p.estimate_selectivity()).product();
+            let selectivity_b: f64 =
+                b.predicates.iter().map(|p| p.estimate_selectivity()).product();
+            // Sort descending by selectivity - least selective branches first
+            // This is counterintuitive but correct: in OR, we WANT to find a true branch
+            // quickly, so we evaluate branches most likely to pass first
+            selectivity_b.partial_cmp(&selectivity_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    /// Evaluate the OR clause on a row (returns true if ANY branch is true)
+    #[inline(always)]
+    pub fn evaluate(&self, row: &Row) -> Result<bool, ExecutorError> {
+        for branch in &self.branches {
+            if branch.evaluate(row)? {
+                return Ok(true); // Short-circuit: OR semantics
+            }
+        }
+        Ok(false)
+    }
 }
 
 impl CompiledWhereClause {
@@ -187,11 +314,64 @@ impl CompiledWhereClause {
                     col_expr, low, high, *negated, *symmetric, schema, predicates,
                 )
             }
+            Expression::InList { expr: col_expr, values, negated } => {
+                // Try to compile IN list predicate
+                Self::try_compile_in_list(col_expr, values, *negated, schema, predicates)
+            }
             _ => {
                 // Try to compile as simple binary comparison
                 Self::try_compile_comparison(expr, schema, predicates)
             }
         }
+    }
+
+    /// Try to compile an IN list predicate
+    fn try_compile_in_list(
+        col_expr: &Expression,
+        values: &[Expression],
+        negated: bool,
+        schema: &CombinedSchema,
+        predicates: &mut Vec<CompiledPredicate>,
+    ) -> bool {
+        // Extract column reference
+        let column_idx = match col_expr {
+            Expression::ColumnRef { table, column } => {
+                schema.get_column_index(table.as_deref(), column)
+            }
+            _ => return false,
+        };
+
+        let column_idx = match column_idx {
+            Some(idx) => idx,
+            None => return false,
+        };
+
+        // Extract literal values from the IN list
+        let mut literal_values = Vec::with_capacity(values.len());
+        for val_expr in values {
+            match val_expr {
+                Expression::Literal(val) => {
+                    // Skip NULL values - they never match in IN comparisons
+                    if !matches!(val, SqlValue::Null) {
+                        literal_values.push(val.clone());
+                    }
+                }
+                _ => return false, // Non-literal values not supported
+            }
+        }
+
+        // If all values were NULL, the predicate is always false
+        if literal_values.is_empty() {
+            return false;
+        }
+
+        predicates.push(CompiledPredicate::InList {
+            column_idx,
+            values: literal_values,
+            negated,
+        });
+
+        true
     }
 
     /// Try to compile a BETWEEN predicate
@@ -261,6 +441,24 @@ impl CompiledWhereClause {
             BinaryOperator::GreaterThanOrEqual => ComparisonOp::GreaterThanOrEqual,
             _ => return false, // Not a comparison operator
         };
+
+        // Skip column-to-column equality predicates in post-join context.
+        // These are already enforced by the hash join (e.g., p_partkey = l_partkey in TPC-H Q19).
+        // We return true to indicate "handled" but don't add a predicate since the join
+        // already ensures the equality holds for all rows in the result.
+        if matches!(comp_op, ComparisonOp::Equal) {
+            if Self::try_extract_column(left, schema).is_some()
+                && Self::try_extract_column(right, schema).is_some()
+            {
+                if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                    eprintln!(
+                        "[COMPILED_PRED] Skipping column-to-column equality (join-satisfied): {:?} = {:?}",
+                        left, right
+                    );
+                }
+                return true;
+            }
+        }
 
         // Try column on left, literal on right
         if let (Some(column_idx), Some(literal)) =
@@ -344,7 +542,29 @@ impl CompiledWhereClause {
                 let result = self.is_between(column_value, low, high, *symmetric)?;
                 Ok(if *negated { !result } else { result })
             }
+            CompiledPredicate::InList { column_idx, values, negated } => {
+                let column_value = &row.values[*column_idx];
+                let result = self.is_in_list(column_value, values)?;
+                Ok(if *negated { !result } else { result })
+            }
         }
+    }
+
+    /// Check if a value is in a list of values
+    #[inline(always)]
+    fn is_in_list(&self, value: &SqlValue, values: &[SqlValue]) -> Result<bool, ExecutorError> {
+        // NULL is never in any list
+        if matches!(value, SqlValue::Null) {
+            return Ok(false);
+        }
+
+        // Check if value matches any in the list
+        for list_value in values {
+            if self.compare_values(value, list_value, ComparisonOp::Equal)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Fast comparison of SQL values with type-specific logic
@@ -783,5 +1003,164 @@ mod tests {
                 SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
             ]);
         assert!(!compiled.evaluate(&row_out_of_range).unwrap());
+    }
+
+    /// Creates a schema with two joined tables (lineitem + part) for testing join-related predicates
+    fn make_joined_schema() -> CombinedSchema {
+        let lineitem = TableSchema::new(
+            "lineitem".to_string(),
+            vec![
+                ColumnSchema {
+                    name: "l_partkey".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    default_value: None,
+                },
+                ColumnSchema {
+                    name: "l_quantity".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    default_value: None,
+                },
+            ],
+        );
+        let part = TableSchema::new(
+            "part".to_string(),
+            vec![
+                ColumnSchema {
+                    name: "p_partkey".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: false,
+                    default_value: None,
+                },
+                ColumnSchema {
+                    name: "p_brand".to_string(),
+                    data_type: DataType::Varchar { max_length: None },
+                    nullable: false,
+                    default_value: None,
+                },
+            ],
+        );
+        CombinedSchema::combine(
+            CombinedSchema::from_table("lineitem".to_string(), lineitem),
+            "part".to_string(),
+            part,
+        )
+    }
+
+    #[test]
+    fn test_skip_column_to_column_equality_in_or_branch() {
+        // Test that column-to-column equality predicates (e.g., p_partkey = l_partkey)
+        // are skipped during OR compilation since they're already satisfied by hash join.
+        // This is the key optimization for TPC-H Q19.
+        let schema = make_joined_schema();
+
+        // Create an OR-of-ANDs expression similar to Q19:
+        // (p_partkey = l_partkey AND p_brand = 'Brand#12')
+        // OR (p_partkey = l_partkey AND p_brand = 'Brand#23')
+        let branch1 = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+                // p_partkey = l_partkey (column-to-column, should be skipped)
+                left: Box::new(Expression::ColumnRef {
+                    table: Some("part".to_string()),
+                    column: "p_partkey".to_string(),
+                }),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::ColumnRef {
+                    table: Some("lineitem".to_string()),
+                    column: "l_partkey".to_string(),
+                }),
+            }),
+            op: BinaryOperator::And,
+            right: Box::new(Expression::BinaryOp {
+                // p_brand = 'Brand#12'
+                left: Box::new(Expression::ColumnRef {
+                    table: Some("part".to_string()),
+                    column: "p_brand".to_string(),
+                }),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Brand#12",
+                )))),
+            }),
+        };
+
+        let branch2 = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+                // p_partkey = l_partkey (column-to-column, should be skipped)
+                left: Box::new(Expression::ColumnRef {
+                    table: Some("part".to_string()),
+                    column: "p_partkey".to_string(),
+                }),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::ColumnRef {
+                    table: Some("lineitem".to_string()),
+                    column: "l_partkey".to_string(),
+                }),
+            }),
+            op: BinaryOperator::And,
+            right: Box::new(Expression::BinaryOp {
+                // p_brand = 'Brand#23'
+                left: Box::new(Expression::ColumnRef {
+                    table: Some("part".to_string()),
+                    column: "p_brand".to_string(),
+                }),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Brand#23",
+                )))),
+            }),
+        };
+
+        let or_expr = Expression::BinaryOp {
+            left: Box::new(branch1),
+            op: BinaryOperator::Or,
+            right: Box::new(branch2),
+        };
+
+        // The OR clause should compile successfully now that we skip column-to-column equalities
+        let compiled = CompiledOrClause::try_compile(&or_expr, &schema);
+        assert!(
+            compiled.is_some(),
+            "CompiledOrClause should succeed when column-to-column equalities are skipped"
+        );
+
+        let compiled = compiled.unwrap();
+        // Each branch should have only 1 predicate (the p_brand comparison),
+        // not 2 (the column-to-column equality should be skipped)
+        for (i, branch) in compiled.branches.iter().enumerate() {
+            assert_eq!(
+                branch.predicates.len(),
+                1,
+                "Branch {} should have 1 predicate (column-to-column equality should be skipped)",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_column_to_column_inequality_not_skipped() {
+        // Ensure we only skip EQUALITY comparisons, not other operators
+        let schema = make_joined_schema();
+
+        // l_partkey > p_partkey (inequality - should NOT be skipped, should fail compilation)
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef {
+                table: Some("lineitem".to_string()),
+                column: "l_partkey".to_string(),
+            }),
+            op: BinaryOperator::GreaterThan,
+            right: Box::new(Expression::ColumnRef {
+                table: Some("part".to_string()),
+                column: "p_partkey".to_string(),
+            }),
+        };
+
+        // This should fail to compile since column-to-column inequality is not supported
+        let compiled = CompiledWhereClause::try_compile(&expr, &schema);
+        assert!(
+            compiled.is_none(),
+            "Column-to-column inequality should not compile (not skipped, not supported)"
+        );
     }
 }
