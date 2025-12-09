@@ -195,7 +195,10 @@ impl JoinOrderAnalyzer {
                 // Extract edges from each branch
                 let mut branch_edges: Vec<Vec<JoinEdge>> = Vec::new();
                 for branch in &branches {
-                    let mut branch_analyzer = JoinOrderAnalyzer::new();
+                    // IMPORTANT: Pass the column_to_table map to branch analyzers
+                    // so they can resolve column names to tables
+                    let mut branch_analyzer =
+                        JoinOrderAnalyzer::with_column_map(self.column_to_table.clone());
                     let table_vec: Vec<String> = tables.iter().cloned().collect();
                     branch_analyzer.register_tables(table_vec);
                     branch_analyzer.analyze_predicate(branch, tables);
