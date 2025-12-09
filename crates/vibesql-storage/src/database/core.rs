@@ -234,9 +234,18 @@ impl Database {
         }
 
         // Try uppercase normalization (for unquoted identifiers from the parser)
-        let normalized_name = name.to_uppercase();
-        if normalized_name != name {
-            if let Some(table) = self.tables.get(&normalized_name) {
+        let uppercase_name = name.to_uppercase();
+        if uppercase_name != name {
+            if let Some(table) = self.tables.get(&uppercase_name) {
+                return Some(table);
+            }
+        }
+
+        // Try lowercase normalization (for case-insensitive matching when table
+        // was created with lowercase but query uses uppercase identifiers)
+        let lowercase_name = name.to_lowercase();
+        if lowercase_name != name && lowercase_name != uppercase_name {
+            if let Some(table) = self.tables.get(&lowercase_name) {
                 return Some(table);
             }
         }
@@ -252,9 +261,19 @@ impl Database {
             }
 
             // Try uppercase with schema prefix
-            let qualified_name_normalized = format!("{}.{}", current_schema, normalized_name);
-            if qualified_name_normalized != qualified_name_original {
-                return self.tables.get(&qualified_name_normalized);
+            let qualified_name_uppercase = format!("{}.{}", current_schema, uppercase_name);
+            if qualified_name_uppercase != qualified_name_original {
+                if let Some(table) = self.tables.get(&qualified_name_uppercase) {
+                    return Some(table);
+                }
+            }
+
+            // Try lowercase with schema prefix
+            let qualified_name_lowercase = format!("{}.{}", current_schema, lowercase_name);
+            if qualified_name_lowercase != qualified_name_original
+                && qualified_name_lowercase != qualified_name_uppercase
+            {
+                return self.tables.get(&qualified_name_lowercase);
             }
         }
 
@@ -269,9 +288,19 @@ impl Database {
         }
 
         // Try uppercase normalization (for unquoted identifiers from the parser)
-        let normalized_name = name.to_uppercase();
-        if normalized_name != name && self.tables.contains_key(&normalized_name) {
-            return self.tables.get_mut(&normalized_name);
+        let uppercase_name = name.to_uppercase();
+        if uppercase_name != name && self.tables.contains_key(&uppercase_name) {
+            return self.tables.get_mut(&uppercase_name);
+        }
+
+        // Try lowercase normalization (for case-insensitive matching when table
+        // was created with lowercase but query uses uppercase identifiers)
+        let lowercase_name = name.to_lowercase();
+        if lowercase_name != name
+            && lowercase_name != uppercase_name
+            && self.tables.contains_key(&lowercase_name)
+        {
+            return self.tables.get_mut(&lowercase_name);
         }
 
         // Try with schema qualification
@@ -285,9 +314,20 @@ impl Database {
             }
 
             // Try uppercase with schema prefix
-            let qualified_name_normalized = format!("{}.{}", current_schema, normalized_name);
-            if qualified_name_normalized != qualified_name_original {
-                return self.tables.get_mut(&qualified_name_normalized);
+            let qualified_name_uppercase = format!("{}.{}", current_schema, uppercase_name);
+            if qualified_name_uppercase != qualified_name_original
+                && self.tables.contains_key(&qualified_name_uppercase)
+            {
+                return self.tables.get_mut(&qualified_name_uppercase);
+            }
+
+            // Try lowercase with schema prefix
+            let qualified_name_lowercase = format!("{}.{}", current_schema, lowercase_name);
+            if qualified_name_lowercase != qualified_name_original
+                && qualified_name_lowercase != qualified_name_uppercase
+                && self.tables.contains_key(&qualified_name_lowercase)
+            {
+                return self.tables.get_mut(&qualified_name_lowercase);
             }
         }
 
