@@ -33,8 +33,8 @@ jobs:
           # Linux aarch64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-          # macOS x86_64
-          - os: macos-13
+          # macOS x86_64 (using macos-15 as macos-13 is deprecated)
+          - os: macos-15
             target: x86_64-apple-darwin
           # macOS Apple Silicon
           - os: macos-14
