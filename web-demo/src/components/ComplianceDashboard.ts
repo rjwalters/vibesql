@@ -1,3 +1,4 @@
+import { t } from '../i18n'
 import { OverallGaugeComponent } from './OverallGaugeComponent'
 import { CategoryBreakdownComponent } from './CategoryBreakdownComponent'
 import { FeatureMatrixComponent } from './FeatureMatrixComponent'
@@ -149,7 +150,7 @@ export class ComplianceDashboard {
         <div class="flex items-center justify-center p-12">
           <div class="text-center">
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-            <p class="text-gray-600 dark:text-gray-400">Loading compliance data...</p>
+            <p class="text-gray-600 dark:text-gray-400">${t('loading-compliance-data')}</p>
           </div>
         </div>
       `

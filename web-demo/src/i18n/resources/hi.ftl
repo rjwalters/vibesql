@@ -56,6 +56,16 @@ msg-rows-affected = { $count } पंक्तियाँ प्रभावि
 # Errors
 error-generic = एक त्रुटि हुई
 error-query-failed = क्वेरी विफल
+error-no-databases = कोई डेटाबेस उपलब्ध नहीं
+
+# Loading states
+loading-initializing-theme = थीम प्रारंभ हो रही है
+loading-preparing-editor = संपादक तैयार हो रहा है
+loading-database-engine = डेटाबेस इंजन लोड हो रहा है
+loading-setting-up-ui = यूज़र इंटरफ़ेस सेटअप हो रहा है
+loading-editor = संपादक लोड हो रहा है...
+loading-compliance-data = अनुपालन डेटा लोड हो रहा है...
+loading-conformance-report = अनुरूपता रिपोर्ट लोड हो रही है...
 
 # Editor
 editor-placeholder = यहां SQL क्वेरी दर्ज करें... (निष्पादित करने के लिए Ctrl+Enter या Cmd+Enter)

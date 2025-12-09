@@ -68,6 +68,16 @@ msg-rows-affected = { $count } { $count ->
 # Errors
 error-generic = Сталася помилка
 error-query-failed = Помилка виконання запиту
+error-no-databases = Немає доступних баз даних
+
+# Loading states
+loading-initializing-theme = Ініціалізація теми
+loading-preparing-editor = Підготовка редактора
+loading-database-engine = Завантаження рушія бази даних
+loading-setting-up-ui = Налаштування інтерфейсу користувача
+loading-editor = Завантаження редактора...
+loading-compliance-data = Завантаження даних відповідності...
+loading-conformance-report = Завантаження звіту про відповідність...
 
 # Editor
 editor-placeholder = Введіть SQL-запит тут... (Ctrl+Enter або Cmd+Enter для виконання)

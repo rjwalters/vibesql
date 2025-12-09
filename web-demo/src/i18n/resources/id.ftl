@@ -56,6 +56,16 @@ msg-rows-affected = { $count } baris terpengaruh
 # Errors
 error-generic = Terjadi kesalahan
 error-query-failed = Query gagal
+error-no-databases = Tidak ada database tersedia
+
+# Loading states
+loading-initializing-theme = Menginisialisasi tema
+loading-preparing-editor = Menyiapkan editor
+loading-database-engine = Memuat mesin database
+loading-setting-up-ui = Menyiapkan antarmuka pengguna
+loading-editor = Memuat editor...
+loading-compliance-data = Memuat data kepatuhan...
+loading-conformance-report = Memuat laporan kesesuaian...
 
 # Editor
 editor-placeholder = Masukkan query SQL di sini... (Ctrl+Enter atau Cmd+Enter untuk menjalankan)

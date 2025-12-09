@@ -1,4 +1,5 @@
 import { Component } from './base'
+import { t, onI18nChange } from '../i18n'
 
 export interface DatabaseOption {
   id: string
@@ -22,6 +23,9 @@ export class DatabaseSelectorComponent extends Component<DatabaseSelectorState> 
       databases,
       selected: selectedId,
     })
+
+    // Re-render on locale change to update translations
+    onI18nChange(() => this.render())
   }
 
   /**
@@ -54,7 +58,7 @@ export class DatabaseSelectorComponent extends Component<DatabaseSelectorState> 
     const { databases, selected } = this.state
 
     if (databases.length === 0) {
-      this.element.innerHTML = '<p class="text-gray-500 dark:text-gray-400">No databases available</p>'
+      this.element.innerHTML = `<p class="text-gray-500 dark:text-gray-400">${this.escapeHtml(t('error-no-databases'))}</p>`
       return
     }
 

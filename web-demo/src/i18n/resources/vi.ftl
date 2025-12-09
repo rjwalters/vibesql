@@ -56,6 +56,16 @@ msg-rows-affected = { $count } hàng bị ảnh hưởng
 # Errors
 error-generic = Đã xảy ra lỗi
 error-query-failed = Truy vấn thất bại
+error-no-databases = Không có cơ sở dữ liệu nào khả dụng
+
+# Loading states
+loading-initializing-theme = Đang khởi tạo giao diện
+loading-preparing-editor = Đang chuẩn bị trình soạn thảo
+loading-database-engine = Đang tải công cụ cơ sở dữ liệu
+loading-setting-up-ui = Đang thiết lập giao diện người dùng
+loading-editor = Đang tải trình soạn thảo...
+loading-compliance-data = Đang tải dữ liệu tuân thủ...
+loading-conformance-report = Đang tải báo cáo phù hợp...
 
 # Editor
 editor-placeholder = Nhập truy vấn SQL tại đây... (Ctrl+Enter hoặc Cmd+Enter để chạy)

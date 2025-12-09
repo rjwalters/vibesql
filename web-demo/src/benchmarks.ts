@@ -1715,7 +1715,7 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
   // Update header labels for server mode (SQLite card shows MySQL comparison)
   if (isServer) {
     const sqliteHeader = document.querySelector('#avg-speedup-sqlite')?.parentElement?.querySelector('h3');
-    if (sqliteHeader) sqliteHeader.textContent = 'vs MySQL';
+    if (sqliteHeader) sqliteHeader.textContent = t('bench-vs-mysql');
   }
 
   const opsTestedEl = document.getElementById('ops-tested');

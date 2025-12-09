@@ -56,6 +56,16 @@ msg-rows-affected = { $count }行が影響を受けました
 # Errors
 error-generic = エラーが発生しました
 error-query-failed = クエリが失敗しました
+error-no-databases = 利用可能なデータベースがありません
+
+# Loading states
+loading-initializing-theme = テーマを初期化中
+loading-preparing-editor = エディターを準備中
+loading-database-engine = データベースエンジンを読み込み中
+loading-setting-up-ui = ユーザーインターフェースを設定中
+loading-editor = エディターを読み込み中...
+loading-compliance-data = コンプライアンスデータを読み込み中...
+loading-conformance-report = 適合性レポートを読み込み中...
 
 # Editor
 editor-placeholder = SQLクエリを入力してください... (Ctrl+EnterまたはCmd+Enterで実行)

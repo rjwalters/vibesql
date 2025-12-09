@@ -4,6 +4,7 @@
  * Simple textarea-based editor shown before Monaco loads.
  * Provides immediate interactivity while Monaco is being lazy-loaded.
  */
+import { t } from '../i18n'
 
 export interface FallbackEditor {
   getValue(): string
@@ -72,7 +73,7 @@ export function createFallbackEditor(
     transition: opacity 0.2s;
     z-index: 10;
   `
-  loadingOverlay.textContent = 'Loading editor...'
+  loadingOverlay.textContent = t('loading-editor')
 
   // Make container relative for absolute positioning of overlay
   container.style.position = 'relative'

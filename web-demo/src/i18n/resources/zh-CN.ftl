@@ -56,6 +56,16 @@ msg-rows-affected = { $count } 行受影响
 # Errors
 error-generic = 发生错误
 error-query-failed = 查询失败
+error-no-databases = 没有可用的数据库
+
+# Loading states
+loading-initializing-theme = 正在初始化主题
+loading-preparing-editor = 正在准备编辑器
+loading-database-engine = 正在加载数据库引擎
+loading-setting-up-ui = 正在设置用户界面
+loading-editor = 正在加载编辑器...
+loading-compliance-data = 正在加载合规数据...
+loading-conformance-report = 正在加载符合性报告...
 
 # Editor
 editor-placeholder = 在此输入SQL查询... (Ctrl+Enter 或 Cmd+Enter 执行)

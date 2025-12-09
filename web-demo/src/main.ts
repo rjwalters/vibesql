@@ -14,12 +14,16 @@ import { initLocale, SUPPORTED_LOCALES } from './locale'
 import { initI18n, setI18nLocale, updateDOM, t } from './i18n'
 
 async function bootstrap(): Promise<void> {
-  // Initialize loading progress indicator
+  // Initialize locale and i18n early so loading messages can be translated
+  const locale = initLocale()
+  initI18n(locale.current)
+
+  // Initialize loading progress indicator with translated messages
   const progress = new LoadingProgressComponent()
-  progress.addStep('theme', 'Initializing theme')
-  progress.addStep('editor', 'Preparing editor')
-  progress.addStep('wasm', 'Loading database engine')
-  progress.addStep('ui', 'Setting up user interface')
+  progress.addStep('theme', t('loading-initializing-theme'))
+  progress.addStep('editor', t('loading-preparing-editor'))
+  progress.addStep('wasm', t('loading-database-engine'))
+  progress.addStep('ui', t('loading-setting-up-ui'))
 
   // Hide loading indicator when complete
   progress.onComplete(() => {
@@ -30,11 +34,7 @@ async function bootstrap(): Promise<void> {
     // Initialize core application components
     const app = await initializeApp(progress)
 
-    // Initialize locale system
-    const locale = initLocale()
-
-    // Initialize i18n with current locale
-    initI18n(locale.current)
+    // Now that DOM is ready, update translated elements
     updateDOM()
     updateDocumentTitle()
 

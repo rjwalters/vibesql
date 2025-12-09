@@ -56,6 +56,16 @@ msg-rows-affected = { $count } satır etkilendi
 # Errors
 error-generic = Bir hata oluştu
 error-query-failed = Sorgu başarısız oldu
+error-no-databases = Kullanılabilir veritabanı yok
+
+# Loading states
+loading-initializing-theme = Tema başlatılıyor
+loading-preparing-editor = Düzenleyici hazırlanıyor
+loading-database-engine = Veritabanı motoru yükleniyor
+loading-setting-up-ui = Kullanıcı arayüzü ayarlanıyor
+loading-editor = Düzenleyici yükleniyor...
+loading-compliance-data = Uyumluluk verileri yükleniyor...
+loading-conformance-report = Uygunluk raporu yükleniyor...
 
 # Editor
 editor-placeholder = SQL sorgusunu buraya girin... (Çalıştırmak için Ctrl+Enter veya Cmd+Enter)

@@ -56,6 +56,16 @@ msg-rows-affected = { $count } แถวได้รับผลกระทบ
 # Errors
 error-generic = เกิดข้อผิดพลาด
 error-query-failed = คิวรีล้มเหลว
+error-no-databases = ไม่มีฐานข้อมูลที่ใช้ได้
+
+# Loading states
+loading-initializing-theme = กำลังเริ่มต้นธีม
+loading-preparing-editor = กำลังเตรียมตัวแก้ไข
+loading-database-engine = กำลังโหลดเอ็นจิ้นฐานข้อมูล
+loading-setting-up-ui = กำลังตั้งค่าอินเทอร์เฟซผู้ใช้
+loading-editor = กำลังโหลดตัวแก้ไข...
+loading-compliance-data = กำลังโหลดข้อมูลการปฏิบัติตามกฎ...
+loading-conformance-report = กำลังโหลดรายงานความสอดคล้อง...
 
 # Editor
 editor-placeholder = ป้อนคิวรี SQL ที่นี่... (Ctrl+Enter หรือ Cmd+Enter เพื่อรัน)

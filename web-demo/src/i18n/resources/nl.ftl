@@ -65,6 +65,16 @@ msg-rows-affected = { $count } { $count ->
 # Errors
 error-generic = Er is een fout opgetreden
 error-query-failed = Query mislukt
+error-no-databases = Geen databases beschikbaar
+
+# Loading states
+loading-initializing-theme = Thema wordt geïnitialiseerd
+loading-preparing-editor = Editor wordt voorbereid
+loading-database-engine = Database-engine wordt geladen
+loading-setting-up-ui = Gebruikersinterface wordt ingesteld
+loading-editor = Editor wordt geladen...
+loading-compliance-data = Nalevingsgegevens worden geladen...
+loading-conformance-report = Conformiteitsrapport wordt geladen...
 
 # Editor
 editor-placeholder = Voer SQL-query hier in... (Ctrl+Enter of Cmd+Enter om uit te voeren)

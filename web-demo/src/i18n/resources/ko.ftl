@@ -56,6 +56,16 @@ msg-rows-affected = { $count }개 행이 영향을 받았습니다
 # Errors
 error-generic = 오류가 발생했습니다
 error-query-failed = 쿼리 실패
+error-no-databases = 사용 가능한 데이터베이스가 없습니다
+
+# Loading states
+loading-initializing-theme = 테마 초기화 중
+loading-preparing-editor = 편집기 준비 중
+loading-database-engine = 데이터베이스 엔진 로드 중
+loading-setting-up-ui = 사용자 인터페이스 설정 중
+loading-editor = 편집기 로드 중...
+loading-compliance-data = 규정 준수 데이터 로드 중...
+loading-conformance-report = 적합성 보고서 로드 중...
 
 # Editor
 editor-placeholder = SQL 쿼리를 입력하세요... (Ctrl+Enter 또는 Cmd+Enter로 실행)

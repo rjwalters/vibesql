@@ -65,6 +65,16 @@ msg-rows-affected = { $count } { $count ->
 # Errors
 error-generic = Ett fel uppstod
 error-query-failed = Frågan misslyckades
+error-no-databases = Inga databaser tillgängliga
+
+# Loading states
+loading-initializing-theme = Initierar tema
+loading-preparing-editor = Förbereder editor
+loading-database-engine = Laddar databasmotor
+loading-setting-up-ui = Konfigurerar användargränssnitt
+loading-editor = Laddar editor...
+loading-compliance-data = Laddar efterlevnadsdata...
+loading-conformance-report = Laddar efterlevnadsrapport...
 
 # Editor
 editor-placeholder = Skriv SQL-fråga här... (Ctrl+Enter eller Cmd+Enter för att köra)

@@ -65,6 +65,16 @@ msg-rows-affected = { $count } { $count ->
 # Errors
 error-generic = Ocurrió un error
 error-query-failed = La consulta falló
+error-no-databases = No hay bases de datos disponibles
+
+# Loading states
+loading-initializing-theme = Inicializando tema
+loading-preparing-editor = Preparando editor
+loading-database-engine = Cargando motor de base de datos
+loading-setting-up-ui = Configurando interfaz de usuario
+loading-editor = Cargando editor...
+loading-compliance-data = Cargando datos de cumplimiento...
+loading-conformance-report = Cargando informe de conformidad...
 
 # Editor
 editor-placeholder = Ingresa tu consulta SQL aquí... (Ctrl+Enter o Cmd+Enter para ejecutar)

@@ -56,6 +56,16 @@ msg-rows-affected = تأثر { $count } صف
 # Errors
 error-generic = حدث خطأ
 error-query-failed = فشل الاستعلام
+error-no-databases = لا توجد قواعد بيانات متاحة
+
+# Loading states
+loading-initializing-theme = جارٍ تهيئة السمة
+loading-preparing-editor = جارٍ تحضير المحرر
+loading-database-engine = جارٍ تحميل محرك قاعدة البيانات
+loading-setting-up-ui = جارٍ إعداد واجهة المستخدم
+loading-editor = جارٍ تحميل المحرر...
+loading-compliance-data = جارٍ تحميل بيانات التوافق...
+loading-conformance-report = جارٍ تحميل تقرير المطابقة...
 
 # Editor
 editor-placeholder = أدخل استعلام SQL هنا... (Ctrl+Enter أو Cmd+Enter للتنفيذ)
