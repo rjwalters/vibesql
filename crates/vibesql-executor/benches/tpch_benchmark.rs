@@ -374,7 +374,6 @@ fn main() {
         }
         all_results.push(("SQLite", sqlite_results));
     } else {
-        #[cfg(feature = "benchmark-comparison")]
         eprintln!("\nSkipping SQLite (filtered out by ENGINE_FILTER)");
     }
 
@@ -398,7 +397,6 @@ fn main() {
         }
         all_results.push(("DuckDB", duckdb_results));
     } else {
-        #[cfg(feature = "duckdb-comparison")]
         eprintln!("\nSkipping DuckDB (filtered out by ENGINE_FILTER)");
     }
 
@@ -421,7 +419,6 @@ fn main() {
             eprintln!("\nSkipping MySQL (MYSQL_URL not set)");
         }
     } else {
-        #[cfg(feature = "mysql-comparison")]
         eprintln!("\nSkipping MySQL (filtered out by ENGINE_FILTER)");
     }
 
