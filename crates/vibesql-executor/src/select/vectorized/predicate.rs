@@ -1,8 +1,8 @@
 //! Chunk-based WHERE clause predicate evaluation
 //!
-//! Processes rows in chunks of 256 for better instruction cache locality.
+//! Processes rows in chunks for better instruction cache locality.
 //! Single-pass evaluation avoids the overhead of bitmap allocation and double iteration.
-//! Falls back to row-by-row evaluation for small row counts (< 100).
+//! Falls back to row-by-row evaluation for small row counts (< VECTORIZE_THRESHOLD).
 //!
 //! Performance optimization: Uses compiled predicates for simple WHERE clauses
 //! (e.g., AND-combined column comparisons) to avoid expression tree overhead.
@@ -18,7 +18,7 @@ use super::{
 
 /// Apply WHERE clause filter using chunk-based evaluation
 ///
-/// Processes rows in chunks of DEFAULT_CHUNK_SIZE (256 rows) for improved:
+/// Processes rows in chunks for improved:
 /// - Instruction cache locality: Keeps predicate evaluation function hot
 /// - Code locality: Tight inner loop enables better CPU pipeline efficiency
 /// - Reduced overhead: Single-pass evaluation and filtering
