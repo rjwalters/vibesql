@@ -443,6 +443,11 @@ def run_tpch_comparison(config: BenchConfig) -> int:
         env["BENCHMARK_TIMEOUT_SECS"] = str(config.timeout)
         print(f"  Timeout: {config.timeout}s")
 
+    # Set ENGINE_FILTER for runtime engine selection
+    # This allows running only specific engines even when all are compiled
+    env["ENGINE_FILTER"] = ",".join(config.engines)
+    print(f"  Engine filter: {env['ENGINE_FILTER']}")
+
     # Find and run the benchmark binary
     print(f"\nRunning TPC-H benchmarks (features: {features_str})...")
     import glob

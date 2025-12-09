@@ -8,8 +8,11 @@
 //! - Reports min/max/avg/median statistics
 //! - Supports warmup phases
 //! - Produces consistent output for parsing by scripts/bench
+//! - Runtime engine selection via ENGINE_FILTER
 //!
 //! Environment Variables:
+//!   ENGINE_FILTER - Comma-separated list of engines to run (default: all)
+//!                   Valid values: vibesql, sqlite, duckdb, mysql, all
 //!   WARMUP_ITERATIONS - Number of warmup runs (default: 3)
 //!   BENCHMARK_ITERATIONS - Number of timed runs (default: 10)
 //!   BENCHMARK_TIMEOUT_SECS - Timeout per query (default: 30)
@@ -357,6 +360,131 @@ pub fn format_duration(d: Duration) -> String {
         format!("{:.2}ms", d.as_secs_f64() * 1000.0)
     } else {
         format!("{:.2}us", d.as_secs_f64() * 1_000_000.0)
+    }
+}
+
+/// Engine filter for runtime selection of which engines to benchmark.
+///
+/// This allows running only specific engines without recompiling the benchmark binary.
+/// The filter is parsed from the `ENGINE_FILTER` environment variable.
+///
+/// # Usage
+///
+/// ```bash
+/// # Run only VibeSQL
+/// ENGINE_FILTER=vibesql ./target/release/deps/tpch_benchmark-*
+///
+/// # Run VibeSQL and SQLite
+/// ENGINE_FILTER=vibesql,sqlite ./target/release/deps/tpch_benchmark-*
+///
+/// # Run all engines (default when ENGINE_FILTER is not set)
+/// ./target/release/deps/tpch_benchmark-*
+/// ```
+#[derive(Debug, Clone)]
+pub struct EngineFilter {
+    pub vibesql: bool,
+    pub sqlite: bool,
+    pub duckdb: bool,
+    pub mysql: bool,
+}
+
+impl EngineFilter {
+    /// Parse ENGINE_FILTER environment variable.
+    /// If not set, all compiled engines are enabled.
+    pub fn from_env() -> Self {
+        match env::var("ENGINE_FILTER") {
+            Ok(filter) => {
+                let engines: Vec<String> = filter
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                // If filter is empty or "all", enable all
+                if engines.is_empty() || engines.iter().any(|e| e == "all") {
+                    return Self::all();
+                }
+
+                Self {
+                    vibesql: engines.iter().any(|e| e == "vibesql"),
+                    sqlite: engines.iter().any(|e| e == "sqlite"),
+                    duckdb: engines.iter().any(|e| e == "duckdb"),
+                    mysql: engines.iter().any(|e| e == "mysql"),
+                }
+            }
+            Err(_) => Self::all(),
+        }
+    }
+
+    /// Enable all engines (default when no filter is set)
+    pub fn all() -> Self {
+        Self {
+            vibesql: true,
+            sqlite: true,
+            duckdb: true,
+            mysql: true,
+        }
+    }
+
+    /// Enable only VibeSQL
+    pub fn vibesql_only() -> Self {
+        Self {
+            vibesql: true,
+            sqlite: false,
+            duckdb: false,
+            mysql: false,
+        }
+    }
+
+    /// Returns a comma-separated list of enabled engines for display
+    pub fn enabled_list(&self) -> String {
+        let mut engines = Vec::new();
+        if self.vibesql {
+            engines.push("vibesql");
+        }
+        if self.sqlite {
+            engines.push("sqlite");
+        }
+        if self.duckdb {
+            engines.push("duckdb");
+        }
+        if self.mysql {
+            engines.push("mysql");
+        }
+        if engines.is_empty() {
+            "none".to_string()
+        } else {
+            engines.join(", ")
+        }
+    }
+
+    /// Returns true if any engine is enabled
+    pub fn any_enabled(&self) -> bool {
+        self.vibesql || self.sqlite || self.duckdb || self.mysql
+    }
+
+    /// Returns the number of enabled engines
+    pub fn count(&self) -> usize {
+        let mut count = 0;
+        if self.vibesql {
+            count += 1;
+        }
+        if self.sqlite {
+            count += 1;
+        }
+        if self.duckdb {
+            count += 1;
+        }
+        if self.mysql {
+            count += 1;
+        }
+        count
+    }
+}
+
+impl Default for EngineFilter {
+    fn default() -> Self {
+        Self::from_env()
     }
 }
 

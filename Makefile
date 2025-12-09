@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpcc benchmark-tpcds benchmark-tpcds-all benchmark-sysbench benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-servers clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -99,6 +99,12 @@ help:
 	@echo "  make benchmark-tpcds     - Run TPC-DS benchmark suite (isolated, memory-safe)"
 	@echo "  make benchmark-tpcds-all - Run TPC-DS with all engines simultaneously (may OOM)"
 	@echo "  make benchmark-sysbench  - Run Sysbench OLTP benchmarks"
+	@echo ""
+	@echo "Per-engine benchmark targets (eliminate redundant testing):"
+	@echo "  make benchmark-vibesql   - Run all benchmarks for VibeSQL only (~1 hour)"
+	@echo "  make benchmark-sqlite    - Run all benchmarks for SQLite only (~1.5 hours)"
+	@echo "  make benchmark-duckdb    - Run all benchmarks for DuckDB only (~2 hours)"
+	@echo "  make benchmark-servers   - Run server benchmarks (VibeSQL-server + MySQL)"
 	@echo ""
 	@echo "Profiling targets (uses samply, no sudo required):"
 	@echo "  make profile-tpch       - Profile TPC-H queries (opens Firefox Profiler)"
@@ -326,6 +332,33 @@ benchmark-tpcds-all:
 # Run Sysbench OLTP benchmark
 benchmark-sysbench:
 	@./scripts/bench --test=sysbench
+
+#
+# Per-Engine Benchmark Targets
+# Run all benchmark types for a single engine (eliminates redundant testing)
+#
+
+# Run all benchmarks for VibeSQL only (~1 hour)
+benchmark-vibesql:
+	@echo "Running all benchmarks for VibeSQL only..."
+	@./scripts/bench --test=all --engine=vibesql
+
+# Run all benchmarks for SQLite only (~1.5 hours)
+benchmark-sqlite:
+	@echo "Running all benchmarks for SQLite only..."
+	@./scripts/bench --test=all --engine=sqlite
+
+# Run all benchmarks for DuckDB only (~2 hours)
+benchmark-duckdb:
+	@echo "Running all benchmarks for DuckDB only..."
+	@./scripts/bench --test=all --engine=duckdb
+
+# Run all server benchmarks (VibeSQL-server + MySQL)
+# MySQL is only tested in server mode, not embedded mode
+benchmark-servers:
+	@echo "Running server benchmarks (VibeSQL-server + MySQL)..."
+	@./scripts/bench --test=tpch-server --engine=vibesql,mysql
+	@./scripts/bench --test=sysbench --engine=mysql
 
 #
 # Analysis Targets
