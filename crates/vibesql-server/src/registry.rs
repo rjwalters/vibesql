@@ -76,6 +76,17 @@ impl DatabaseRegistry {
         let databases = self.databases.read().await;
         databases.len()
     }
+
+    /// Register a pre-built database instance.
+    ///
+    /// This is useful for benchmarks where the database is pre-loaded with data
+    /// before starting the server.
+    pub fn register_database(&self, name: &str, db: Database) {
+        // Use blocking write since this is typically called at startup
+        let databases = self.databases.blocking_write();
+        let mut databases = databases;
+        databases.insert(name.to_string(), Arc::new(RwLock::new(db)));
+    }
 }
 
 impl Default for DatabaseRegistry {

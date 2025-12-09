@@ -18,7 +18,7 @@ declare const Chart: any;
 /**
  * Benchmark suite types
  */
-type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbench-server' | 'footprint-embedded' | 'footprint-server';
+type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbench-server' | 'tpch-server' | 'footprint-embedded' | 'footprint-server';
 
 // ============================================================================
 // HTML Template Helpers
@@ -577,6 +577,65 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
           { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-sysbench-srv-disc-pooling' },
           { labelKey: 'bench-bullet-stmt-caching', descKey: 'bench-sysbench-srv-disc-caching' },
           { labelKey: 'bench-bullet-extended-protocol', descKey: 'bench-sysbench-srv-disc-extended' },
+        ]),
+      },
+    ]),
+  },
+  'tpch-server': {
+    id: 'tpch-server',
+    name: 'TPC-H (Server)',
+    nameKey: 'bench-tpch-server-name',
+    dataFile: 'tpch_server_results.json',
+    opsLabel: 'TPC-H queries',
+    opsLabelKey: 'bench-tpch-server-ops-label',
+    descriptions: {
+      'q1': 'Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY',
+      'q3': 'Shipping Priority - 3-table JOIN with aggregation',
+      'q4': 'Order Priority Checking - Correlated EXISTS subquery',
+      'q5': 'Local Supplier Volume - 6-table JOIN with complex filtering',
+      'q6': 'Forecasting Revenue Change - WHERE filters with BETWEEN and SUM',
+      'q7': 'Volume Shipping - 6-table JOIN with SUBSTR and date filtering',
+      'q9': 'Product Type Profit Measure - 4-table JOIN with aggregation',
+      'q10': 'Returned Item Reporting - 4-table JOIN with TOP-N LIMIT',
+      'q11': 'Important Stock Identification - Subquery in HAVING clause',
+      'q12': 'Shipping Modes Priority - CASE aggregation with date logic',
+      'q14': 'Promotion Effect - Conditional aggregation with CASE',
+      'q19': 'Discounted Revenue - Complex OR conditions',
+    },
+    descriptionKeys: {
+      'q1': 'bench-tpch-q1', 'q3': 'bench-tpch-q3', 'q4': 'bench-tpch-q4',
+      'q5': 'bench-tpch-q5', 'q6': 'bench-tpch-q6', 'q7': 'bench-tpch-q7',
+      'q9': 'bench-tpch-q9', 'q10': 'bench-tpch-q10', 'q11': 'bench-tpch-q11',
+      'q12': 'bench-tpch-q12', 'q14': 'bench-tpch-q14', 'q19': 'bench-tpch-q19',
+    },
+    getMethodology: () => methodology(
+      t('bench-tpch-server-title'),
+      t('bench-tpch-server-description'),
+      [
+        li(t('bench-benchmark-framework'), 'Custom timing harness (Rust native)'),
+        li(t('bench-scale-factor'), 'SF 0.01 (~60,000 rows across 8 tables)'),
+        li(t('bench-data'), 'Deterministic TPC-H compliant dataset'),
+        li(t('bench-databases-tested'), 'VibeSQL Server (PostgreSQL protocol), MySQL'),
+        li(t('bench-execution-mode'), 'Client-server mode with network overhead'),
+        li(t('bench-protocol'), 'VibeSQL: PostgreSQL wire protocol, MySQL: native'),
+      ],
+      [t('bench-tpch-server-note-intro'), t('bench-tpch-server-note-queries')]
+    ),
+    getDiscussion: () => discussion([
+      {
+        title: t('bench-tpch-srv-disc-protocol-title'),
+        content: pI18n('bench-tpch-srv-disc-protocol'),
+      },
+      {
+        title: t('bench-tpch-srv-disc-comparison-title'),
+        content: pI18n('bench-tpch-srv-disc-comparison'),
+      },
+      {
+        title: t('bench-tpch-srv-disc-roadmap-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-prepared-stmts', descKey: 'bench-tpch-srv-disc-prepared' },
+          { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-tpch-srv-disc-pooling' },
+          { labelKey: 'bench-bullet-larger-scale', descKey: 'bench-tpch-srv-disc-scale' },
         ]),
       },
     ]),

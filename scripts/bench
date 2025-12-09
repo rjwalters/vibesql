@@ -143,7 +143,7 @@ Transaction Filter (--txn):
     # Test selection
     parser.add_argument(
         "--test",
-        choices=["tpch", "tpcc", "tpcds", "sysbench", "all"],
+        choices=["tpch", "tpcc", "tpcds", "sysbench", "tpch-server", "all"],
         default="tpch",
         help="Benchmark to run (default: tpch)"
     )
@@ -867,6 +867,128 @@ def _process_sysbench_server_results(results_file: str) -> None:
     print(f"  Added {len(benchmarks)} server benchmark results to {json_path.name}")
 
 
+def run_tpch_server(config: BenchConfig) -> int:
+    """Run TPC-H server benchmark (VibeSQL server vs MySQL)."""
+    print("\n" + "=" * 60)
+    print("TPC-H Server Benchmark (PostgreSQL Wire Protocol)")
+    print("=" * 60)
+
+    # Build features based on selected engines
+    features = []
+    if "mysql" in config.engines:
+        features.append("mysql-comparison")
+    features_str = ",".join(features) if features else ""
+
+    # Build benchmark
+    build_cmd = ["cargo", "bench", "--package", "vibesql-executor", "--bench", "tpch_server", "--no-run"]
+    if features_str:
+        build_cmd.extend(["--features", features_str])
+
+    print("Building TPC-H server benchmark...")
+    result = subprocess.run(build_cmd, cwd=Path(__file__).parent.parent)
+
+    if result.returncode != 0:
+        print("❌ Build failed")
+        return 1
+
+    strip_quarantine()
+
+    # Set up environment
+    env = os.environ.copy()
+    scale_factor = config.scale or 0.01
+    warmup_iterations = 1
+    benchmark_iterations = 3 if not config.quick else 1
+
+    env["SCALE_FACTOR"] = str(scale_factor)
+    env["WARMUP_ITERATIONS"] = str(warmup_iterations)
+    env["BENCHMARK_ITERATIONS"] = str(benchmark_iterations)
+
+    # Query filter
+    if config.queries:
+        env["QUERY_FILTER"] = ",".join(config.queries)
+
+    # Try to start MySQL if needed
+    if "mysql" in config.engines:
+        print("\nStarting MySQL Docker container...")
+        result = subprocess.run(
+            ["./scripts/ensure-mysql-docker.sh"],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            env["MYSQL_URL"] = result.stdout.strip()
+            print(f"✓ MySQL ready: {env['MYSQL_URL']}")
+        else:
+            print("⚠ MySQL unavailable (Docker not available)")
+
+    # Find benchmark binary - use the most recently modified one
+    import glob
+    benchmarks = glob.glob("./target/release/deps/tpch_server-*")
+    benchmarks = [b for b in benchmarks if not b.endswith((".d", ".o"))]
+
+    if not benchmarks:
+        print("❌ Benchmark binary not found")
+        return 1
+
+    bench_bin = max(benchmarks, key=lambda b: Path(b).stat().st_mtime)
+
+    print(f"\nRunning TPC-H server (SF={scale_factor})...")
+    result = subprocess.run(
+        [bench_bin],
+        cwd=Path(__file__).parent.parent,
+        env=env,
+        capture_output=True,
+        text=True
+    )
+
+    # Print stderr (progress/debug) to console
+    if result.stderr:
+        print(result.stderr)
+
+    if result.returncode != 0:
+        print("⚠ TPC-H server benchmark completed with warnings")
+    else:
+        print("✓ TPC-H server benchmark completed")
+
+    # Parse JSON output from stdout and write to results file
+    _process_tpch_server_results(result.stdout)
+
+    return 0
+
+
+def _process_tpch_server_results(json_output: str) -> None:
+    """Parse TPC-H server results and write to tpch_server_results.json."""
+    import re
+
+    # Find the JSON blob in the output (starts with { and ends with })
+    json_match = re.search(r'\{[\s\S]*\}', json_output)
+    if not json_match:
+        print("  No JSON results found in output")
+        return
+
+    try:
+        data = json.loads(json_match.group())
+    except json.JSONDecodeError as e:
+        print(f"  Failed to parse JSON: {e}")
+        return
+
+    # Add git info
+    git_info = get_git_info()
+    if "metadata" not in data:
+        data["metadata"] = {}
+    data["metadata"]["git_commit"] = git_info.get("commit", "unknown")
+    data["metadata"]["timestamp"] = datetime.now().isoformat()
+
+    # Write to results file
+    json_path = Path(__file__).parent.parent / "web-demo" / "public" / "benchmarks" / "tpch_server_results.json"
+    with open(json_path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    benchmark_count = len(data.get("benchmarks", []))
+    print(f"  Wrote {benchmark_count} results to {json_path.name}")
+
+
 def run_footprint(config: BenchConfig) -> int:
     """Run footprint benchmark (binary size, startup time, memory)."""
     print("\n" + "=" * 60)
@@ -987,11 +1109,11 @@ def run_all(config: BenchConfig) -> int:
     # In smoke test mode, include server benchmarks for fair MySQL comparison
     # TPC-DS now supports QUERY_FILTER, so we include it for full pipeline validation
     if config.test_mode:
-        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server"]
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "tpch-server"]
         print("Note: Skipping footprint in smoke test mode")
     else:
-        # Full benchmark suite includes server sysbench and footprint
-        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "footprint"]
+        # Full benchmark suite includes server benchmarks and footprint
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "tpch-server", "footprint"]
 
     for test in benchmarks:
         config.test = test
@@ -1008,6 +1130,8 @@ def run_all(config: BenchConfig) -> int:
             ret = run_sysbench(config)
         elif test == "sysbench-server":
             ret = run_sysbench_server(config)
+        elif test == "tpch-server":
+            ret = run_tpch_server(config)
         elif test == "footprint":
             ret = run_footprint(config)
         else:
@@ -1163,6 +1287,8 @@ def main():
         return run_tpcds(config)
     elif config.test == "sysbench":
         return run_sysbench(config)
+    elif config.test == "tpch-server":
+        return run_tpch_server(config)
     else:
         print(f"❌ Unknown test: {config.test}")
         return 1

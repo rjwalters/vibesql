@@ -1,0 +1,21 @@
+{
+  "benchmarks": [
+    {
+      "name": "tpch_server_q1_vibesql_server",
+      "stats": {
+        "mean": 0,
+        "stddev": 0,
+        "min": 0,
+        "max": 0,
+        "rounds": 0
+      }
+    }
+  ],
+  "metadata": {
+    "suite": "tpch-server",
+    "scale_factor": 0.01,
+    "timestamp": "2025-12-08T00:00:00Z",
+    "git_commit": "placeholder",
+    "note": "Placeholder - run ./scripts/bench --test=tpch-server to populate with real data"
+  }
+}
