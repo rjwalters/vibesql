@@ -294,22 +294,22 @@ bench-wasm-brotli = WASM (brotli)
 # TPC-H specific
 bench-tpch-name = TPC-H
 bench-tpch-title = TPC-H Decision Support Benchmark
-bench-tpch-description = These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>, which simulates real-world decision support workloads with complex analytical queries involving aggregations, joins, subqueries, and sorting.
+bench-tpch-description = تستخدم هذه المقاييس المعيارية <strong>مجموعة اختبارات TPC-H</strong> القياسية الصناعية، والتي تحاكي أعباء عمل دعم القرار الواقعية مع استعلامات تحليلية معقدة تتضمن التجميعات والربط والاستعلامات الفرعية والفرز.
 bench-tpch-ops-label = TPC-H queries
-bench-tpch-note-intro = All benchmarks measure end-to-end query execution time including parsing, planning, execution, and result materialization. This represents <strong>real-world SQL engine performance</strong> for analytical workloads.
-bench-tpch-note-queries = <strong>Note:</strong> TPC-H queries test different aspects of SQL performance: simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15), and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+bench-tpch-note-intro = تقيس جميع المقاييس المعيارية وقت تنفيذ الاستعلام من البداية إلى النهاية بما في ذلك التحليل والتخطيط والتنفيذ وتجسيد النتائج. يمثل هذا <strong>أداء محرك SQL الواقعي</strong> لأعباء العمل التحليلية.
+bench-tpch-note-queries = <strong>ملاحظة:</strong> تختبر استعلامات TPC-H جوانب مختلفة من أداء SQL: التجميعات البسيطة (Q1، Q6)، الربط المعقد (Q2-Q5، Q7-Q10)، الاستعلامات الفرعية (Q11-Q15)، والتحليلات المتقدمة (Q16-Q22). مرر المؤشر فوق أسماء الاستعلامات في الجدول أعلاه للحصول على الأوصاف.
 
 # TPC-H Discussion
-bench-tpch-disc-excels-title = Where VibeSQL Excels
-bench-tpch-disc-excels = VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20) where our columnar execution engine and SIMD-accelerated aggregations shine. These queries involve filtering large tables and computing aggregates without complex join patterns.
-bench-tpch-disc-targets-title = Current Optimization Targets
-bench-tpch-disc-targets = Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's decades-refined B-tree joins. Specific areas under active development:
-bench-tpch-disc-join-ordering = Improved cardinality estimation for better join order selection
-bench-tpch-disc-hash-sizing = Adaptive hash table growth and spill-to-disk for large joins
-bench-tpch-disc-vectorized = Batch processing in the join inner loop to improve cache utilization
-bench-tpch-disc-inl-joins = Leveraging B-tree indexes when beneficial
-bench-tpch-disc-path-title = Path to Leadership
-bench-tpch-disc-path = VibeSQL's architecture is designed for modern hardware with features like columnar storage, vectorized execution, and lock-free concurrency. As these optimizations mature, we expect VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.
+bench-tpch-disc-excels-title = أين يتفوق VibeSQL
+bench-tpch-disc-excels = يُظهر VibeSQL أداءً قوياً في <strong>استعلامات التجميع كثيفة المسح</strong> (Q1، Q6، Q14، Q15، Q20) حيث يتألق محرك التنفيذ العمودي والتجميعات المسرّعة بـ SIMD. تتضمن هذه الاستعلامات تصفية الجداول الكبيرة وحساب التجميعات بدون أنماط ربط معقدة.
+bench-tpch-disc-targets-title = أهداف التحسين الحالية
+bench-tpch-disc-targets = تُظهر استعلامات الربط المتعددة (Q3، Q5، Q7-Q10، Q18، Q19، Q21) حالياً تفوق SQLite. العائق الرئيسي هو تنفيذ ربط التجزئة لدينا، الذي لم يستخدم بعد نفس مستوى التحسين مثل عمليات ربط B-tree المُحسّنة على مدى عقود في SQLite. المجالات قيد التطوير النشط:
+bench-tpch-disc-join-ordering = تحسين تقدير الأصل لاختيار ترتيب ربط أفضل
+bench-tpch-disc-hash-sizing = نمو جدول التجزئة التكيفي والتجاوز إلى القرص للربط الكبير
+bench-tpch-disc-vectorized = معالجة الدفعات في حلقة الربط الداخلية لتحسين استخدام ذاكرة التخزين المؤقت
+bench-tpch-disc-inl-joins = الاستفادة من فهارس B-tree عند الفائدة
+bench-tpch-disc-path-title = المسار نحو الريادة
+bench-tpch-disc-path = تم تصميم بنية VibeSQL للأجهزة الحديثة مع ميزات مثل التخزين العمودي والتنفيذ المتجه والتزامن بدون قفل. مع نضج هذه التحسينات، نتوقع أن يحقق VibeSQL ريادة مستمرة عبر جميع استعلامات TPC-H. يدعم التصميم الأساسي التوازي و SIMD الذي لا تستطيع قواعد البيانات التقليدية ذات التخزين الصفي إضافته بسهولة.
 
 # TPC-H Query Descriptions
 bench-tpch-q1 = Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY
@@ -338,29 +338,31 @@ bench-tpch-q22 = Global Sales Opportunity - SUBSTR with NOT EXISTS subquery
 # TPC-DS specific
 bench-tpcds-name = TPC-DS
 bench-tpcds-title = TPC-DS Decision Support Benchmark
-bench-tpcds-description = <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model a modern decision support system with significantly more complex query patterns including multiple fact tables, snow-flake schema, and advanced SQL features.
+bench-tpcds-description = <strong>TPC-DS</strong> هو خليفة TPC-H، ويتميز بـ 99 استعلاماً تنمذج نظام دعم قرار حديث مع أنماط استعلام أكثر تعقيداً بما في ذلك جداول حقائق متعددة ومخطط ندفة الثلج وميزات SQL المتقدمة.
 bench-tpcds-ops-label = TPC-DS queries
-bench-tpcds-note-intro = TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features like window functions, common table expressions (WITH clause), and complex join patterns across multiple fact and dimension tables.
-bench-tpcds-note-remaining = <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or specific date arithmetic functions not yet implemented.
+bench-tpcds-note-intro = استعلامات TPC-DS أكثر تعقيداً بشكل كبير من TPC-H، وتختبر ميزات SQL المتقدمة مثل دوال النافذة وتعبيرات الجداول المشتركة (جملة WITH) وأنماط الربط المعقدة عبر جداول الحقائق والأبعاد المتعددة.
+bench-tpcds-note-remaining = <strong>ملاحظة:</strong> تنجح جميع استعلامات TPC-DS البالغ عددها 99، مما يدل على دعم شامل لميزات SQL:1999 بما في ذلك INTERSECT و EXCEPT ودوال النافذة و CTEs والاستعلامات الفرعية المعقدة.
 
 # TPC-DS Discussion
-bench-tpcds-disc-coverage-title = SQL:1999 Feature Coverage
-bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>, demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
-bench-tpcds-disc-optimization-title = Complex Query Optimization
-bench-tpcds-disc-optimization = TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
-bench-tpcds-disc-cte = Intelligent decision between materialized and inline CTEs
-bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when beneficial
-bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
-bench-tpcds-disc-toward-title = Toward 99/99
-bench-tpcds-disc-toward = INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set operations fit naturally into our existing query algebra and will be implemented as hash-based operators similar to our DISTINCT processing.
+bench-tpcds-disc-coverage-title = تغطية ميزات SQL:1999
+bench-tpcds-disc-coverage = يختبر TPC-DS أكثر ميزات SQL تطلباً. ينجح VibeSQL في <strong>جميع الاستعلامات الـ 99</strong>، مما يدل على تغطية كاملة لـ SQL:1999 بما في ذلك ROLLUP و CUBE و GROUPING() ودوال النافذة مع التأطير المعقد و CTEs العودية وعمليات المجموعات INTERSECT/EXCEPT.
+bench-tpcds-disc-optimization-title = تحسين الاستعلامات المعقدة
+bench-tpcds-disc-optimization = غالباً ما تربط استعلامات TPC-DS أكثر من 10 جداول مع استعلامات فرعية مترابطة. مجالات التركيز الحالية:
+bench-tpcds-disc-cte = القرار الذكي بين CTEs المُجسّدة والمضمّنة
+bench-tpcds-disc-decorrelation = تحويل الاستعلامات الفرعية المترابطة إلى عمليات ربط عند الفائدة
+bench-tpcds-disc-star = ترتيب ربط الحقائق والأبعاد للأنماط التحليلية
+bench-tpcds-disc-toward-title = تغطية TPC-DS الكاملة
+bench-tpcds-disc-toward = مع نجاح جميع الاستعلامات الـ 99، يُظهر VibeSQL امتثالاً جاهزاً للإنتاج لـ SQL:1999 لأعباء العمل التحليلية المعقدة. أكملت الإضافات الأخيرة لعمليات المجموعات INTERSECT و EXCEPT تغطية TPC-DS الكاملة، مُنفّذة كعوامل قائمة على التجزئة فعّالة.
+bench-tpcds-disc-sqlite-title = ملاحظة مقارنة SQLite
+bench-tpcds-disc-sqlite = لا يستطيع SQLite تنفيذ 12 من استعلامات TPC-DS الـ 99 (Q2، Q5، Q14، Q17، Q18، Q22، Q36، Q67، Q70، Q77، Q80، Q86) بسبب غياب ميزات OLAP في SQL:1999: مجموعات التجميع <strong>ROLLUP/CUBE</strong>، ودالة <strong>GROUPING()</strong>، و <strong>STDDEV_SAMP()</strong>. يتم تخطي هذه الاستعلامات في مقاييس SQLite. يدعم VibeSQL و DuckDB جميع الاستعلامات الـ 99.
 
 # TPC-C specific
 bench-tpcc-name = TPC-C
 bench-tpcc-title = TPC-C Online Transaction Processing Benchmark
-bench-tpcc-description = The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment with a mix of complex transactions including order entry, payment processing, order status queries, delivery processing, and stock level monitoring.
+bench-tpcc-description = يحاكي <strong>مقياس TPC-C</strong> بيئة إدخال طلبات كاملة مع مزيج من المعاملات المعقدة بما في ذلك إدخال الطلبات ومعالجة المدفوعات واستعلامات حالة الطلب ومعالجة التسليم ومراقبة مستوى المخزون.
 bench-tpcc-ops-label = TPC-C transactions
-bench-tpcc-note-intro = TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle concurrent transactions with complex business logic. This benchmark is critical for evaluating <strong>transactional workload performance</strong>.
-bench-tpcc-note-results = <strong>Note:</strong> Results show average transaction latency. Lower is better. TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
+bench-tpcc-note-intro = يقيس TPC-C المعاملات في الدقيقة (tpmC) ويختبر قدرة قاعدة البيانات على التعامل مع المعاملات المتزامنة مع منطق أعمال معقد. هذا المقياس حاسم لتقييم <strong>أداء أعباء العمل المعاملاتية</strong>.
+bench-tpcc-note-results = <strong>ملاحظة:</strong> تُظهر النتائج متوسط زمن استجابة المعاملة. الأقل أفضل. TPC-C متطلب بشكل خاص لأعباء العمل كثيفة الكتابة مع متطلبات اتساق صارمة.
 
 # TPC-C Transaction Descriptions
 bench-tpcc-new-order = New Order - Complex transaction with inventory checks and order creation
@@ -370,22 +372,24 @@ bench-tpcc-delivery = Delivery - Batch processing of pending orders
 bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
 
 # TPC-C Discussion
-bench-tpcc-disc-faster-title = 42x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS, a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
-bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
-bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
-bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution
-bench-tpcc-disc-btree = Purpose-built index structure optimized for in-memory workloads
-bench-tpcc-disc-prepared = Query plans are compiled once and reused
-bench-tpcc-disc-scaling-title = Scaling Further
-bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect near-linear scaling as we add parallel execution support. Our goal is to achieve 500K+ TPS on modern multi-core hardware.
+bench-tpcc-disc-faster-title = أسرع بـ 5 مرات من SQLite
+bench-tpcc-disc-faster = يحقق VibeSQL <strong>حوالي 23,000 معاملة في الثانية</strong> مقارنة بـ 4,500 معاملة في الثانية لـ SQLite، تحسن بمقدار 5 مرات. يأتي هذا التسريع من بنية MVCC بدون قفل التي تتجنب القفل الخشن في SQLite على كل عملية كتابة.
+bench-tpcc-disc-dominates-title = لماذا يهيمن VibeSQL على OLTP
+bench-tpcc-disc-lockfree = يسمح MVCC للقراء والكتاب بالتقدم بشكل متزامن بدون حظر
+bench-tpcc-disc-optimistic = تتعارض المعاملات فقط في وقت الالتزام، وليس أثناء التنفيذ
+bench-tpcc-disc-btree = هيكل فهرس مُصمم خصيصاً ومُحسّن لأعباء العمل في الذاكرة
+bench-tpcc-disc-prepared = يتم تجميع خطط الاستعلام مرة واحدة وإعادة استخدامها
+bench-tpcc-disc-scaling-title = التوسع أكثر
+bench-tpcc-disc-scaling = النتائج الحالية أحادية الخيط. تدعم بنية VibeSQL معالجة المعاملات متعددة الخيوط، ونتوقع توسعاً محسناً مع إضافة دعم التنفيذ المتوازي.
+bench-tpcc-disc-duckdb-title = لماذا يتأخر DuckDB في OLTP
+bench-tpcc-disc-duckdb = يحقق DuckDB فقط حوالي 385 معاملة في الثانية على TPC-C (أبطأ بـ 60 مرة من VibeSQL، أبطأ بـ 12 مرة من SQLite). هذا متوقع: DuckDB هي <strong>قاعدة بيانات تحليلية (OLAP)</strong> مُحسّنة للعمليات الدفعية الكبيرة، وليس المعاملات أحادية الصف. يتفوق تنسيق التخزين العمودي في مسح ملايين الصفوف لكنه يضيف عبئاً للبحث النقطي والتحديثات الصغيرة التي تهيمن على أعباء عمل OLTP مثل TPC-C.
 
 # Sysbench Embedded specific
 bench-sysbench-embedded-name = Sysbench (Embedded)
 bench-sysbench-embedded-title = Sysbench Micro-Benchmarks (Embedded)
-bench-sysbench-embedded-description = <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific database operations. These tests measure raw performance for fundamental operations without the complexity of full transaction workloads.
+bench-sysbench-embedded-description = يوفر <strong>Sysbench</strong> مقاييس مركزة دقيقة تعزل عمليات قاعدة البيانات المحددة. تقيس هذه الاختبارات الأداء الخام للعمليات الأساسية بدون تعقيد أعباء العمل المعاملاتية الكاملة.
 bench-sysbench-embedded-ops-label = Sysbench operations
-bench-sysbench-embedded-note = Embedded mode runs the database in-process with zero network overhead, ideal for single-process applications where minimal latency is critical.
+bench-sysbench-embedded-note = يُشغّل الوضع المضمن قاعدة البيانات داخل العملية بدون عبء شبكة، مثالي للتطبيقات أحادية العملية حيث الحد الأدنى من زمن الاستجابة أمر بالغ الأهمية.
 
 # Sysbench Operation Descriptions
 bench-sysbench-point-select = Point Select - Single row lookup by primary key
@@ -396,42 +400,42 @@ bench-sysbench-delete = Delete - Remove rows by primary key
 bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
 
 # Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = Point Lookups: VibeSQL Leads
-bench-sysbench-emb-disc-point = VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
-bench-sysbench-emb-disc-index-title = Index Updates: 2x Faster
-bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design allows in-place index updates without write-ahead logging overhead for each operation.
-bench-sysbench-emb-disc-improve-title = Areas for Improvement
-bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
-bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need predicate pushdown optimization
-bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
+bench-sysbench-emb-disc-point-title = البحث النقطي: على قدم المساواة
+bench-sysbench-emb-disc-point = تعمل عمليات الاختيار النقطي في VibeSQL بسرعة <strong>حوالي 0.37 ميكروثانية</strong>، مطابقة لـ SQLite بـ 0.36 ميكروثانية. تم تحسين تنفيذ B-tree لدينا للبحث عن صف واحد مع الحد الأدنى من تتبع المؤشرات وتخطيطات العقد الصديقة للتخزين المؤقت.
+bench-sysbench-emb-disc-index-title = تحديثات الفهرس: مجال للتحسين
+bench-sysbench-emb-disc-index = تعمل تحديثات الفهرس في VibeSQL بسرعة <strong>حوالي 4.3 ميكروثانية مقابل 1.7 ميكروثانية لـ SQLite</strong>. هذا مجال للتحسين حيث يضيف تصميم MVCC لدينا عبئاً لصيانة الفهرس نعمل على تقليله.
+bench-sysbench-emb-disc-improve-title = مجالات التحسين
+bench-sysbench-emb-disc-bulk = مسار الإدراج الدفعي في SQLite مُحسّن للغاية؛ نضيف عمليات B-tree دفعية
+bench-sysbench-emb-disc-nonindex = تُظهر التحديثات غير المفهرسة VibeSQL بـ 1.9 ميكروثانية مقابل 1.4 ميكروثانية لـ SQLite - قريبة من التكافؤ
+bench-sysbench-emb-disc-deletes = تحسنت عمليات الحذف بشكل كبير: الآن حوالي 5.5 ميكروثانية مقابل 3.8 ميكروثانية لـ SQLite (كانت 1183 ميكروثانية سابقاً)
 bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
 bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
-bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
-bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
+bench-sysbench-emb-disc-architecture-title = المقايضات المعمارية
+bench-sysbench-emb-disc-architecture = تستهدف البنية الهجينة لـ VibeSQL أعباء عمل OLTP و OLAP. يوفر تخزين B-tree لدينا أداء بحث نقطي منافساً لـ SQLite، بينما يتعامل التنفيذ العمودي مع الاستعلامات التحليلية بكفاءة. يختلف هذا عن قواعد بيانات OLAP الصرفة مثل DuckDB التي تُحسّن حصرياً للعمليات الدفعية على حساب زمن استجابة الصف الواحد.
 
 # Sysbench Server specific
 bench-sysbench-server-name = Sysbench (Server)
 bench-sysbench-server-title = Sysbench Micro-Benchmarks (Server)
-bench-sysbench-server-description = <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol) against MySQL, measuring performance for multi-client database deployments.
+bench-sysbench-server-description = تقارن مقاييس <strong>Sysbench</strong> للخادم خادم VibeSQL (بروتوكول PostgreSQL السلكي) مع MySQL، لقياس الأداء لعمليات نشر قواعد البيانات متعددة العملاء.
 bench-sysbench-server-ops-label = Sysbench operations
-bench-sysbench-server-note = Server mode uses the PostgreSQL wire protocol, enabling multi-client access and compatibility with existing PostgreSQL tooling and drivers.
+bench-sysbench-server-note = يستخدم وضع الخادم بروتوكول PostgreSQL السلكي، مما يتيح الوصول متعدد العملاء والتوافق مع أدوات ومحركات PostgreSQL الحالية.
 
 # Sysbench Server Discussion
-bench-sysbench-srv-disc-protocol-title = PostgreSQL Wire Protocol
-bench-sysbench-srv-disc-protocol = VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query compared to embedded mode, but enables multi-client deployments.
-bench-sysbench-srv-disc-mysql-title = MySQL Comparison
-bench-sysbench-srv-disc-mysql = Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement for traditional client-server databases. Results vary by operation type, with VibeSQL showing advantages in read-heavy workloads.
-bench-sysbench-srv-disc-roadmap-title = Server Roadmap
-bench-sysbench-srv-disc-pooling = Reduce connection establishment overhead for high-throughput scenarios
-bench-sysbench-srv-disc-caching = Server-side caching of query plans across connections
-bench-sysbench-srv-disc-extended = Full PostgreSQL extended query protocol support for batch operations
+bench-sysbench-srv-disc-protocol-title = بروتوكول PostgreSQL السلكي
+bench-sysbench-srv-disc-protocol = يُنفّذ خادم VibeSQL بروتوكول PostgreSQL السلكي، مما يتيح التوافق مع محركات وأدوات PostgreSQL الحالية. يضيف هذا حوالي 10-50 ميكروثانية من عبء البروتوكول لكل استعلام مقارنة بالوضع المضمن، لكنه يُمكّن عمليات النشر متعددة العملاء.
+bench-sysbench-srv-disc-mysql-title = مقارنة MySQL
+bench-sysbench-srv-disc-mysql = تقارن مقاييس الخادم مع MySQL لتقييم VibeSQL كبديل مباشر لقواعد البيانات التقليدية العميل-الخادم. تختلف النتائج حسب نوع العملية، مع إظهار VibeSQL مزايا في أعباء العمل كثيفة القراءة.
+bench-sysbench-srv-disc-roadmap-title = خارطة طريق الخادم
+bench-sysbench-srv-disc-pooling = تقليل عبء إنشاء الاتصال لسيناريوهات الإنتاجية العالية
+bench-sysbench-srv-disc-caching = التخزين المؤقت لخطط الاستعلام على جانب الخادم عبر الاتصالات
+bench-sysbench-srv-disc-extended = دعم بروتوكول الاستعلام الموسع الكامل لـ PostgreSQL للعمليات الدفعية
 
 # Footprint Embedded specific
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
-bench-footprint-embedded-description = <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries, comparing binary size, cold startup time, and peak memory usage.
+bench-footprint-embedded-description = تقيس <strong>مقاييس البصمة المضمنة</strong> كفاءة موارد ملفات قاعدة البيانات الأصلية، مقارنة حجم الملف الثنائي ووقت البدء البارد واستخدام الذاكرة القصوى.
 bench-footprint-embedded-ops-label = databases compared
-bench-footprint-embedded-note = Native binary footprint is critical for <strong>embedded and edge deployments</strong> where binary size, startup latency, and memory consumption directly impact deployment feasibility.
+bench-footprint-embedded-note = البصمة الثنائية الأصلية حاسمة لـ <strong>عمليات النشر المضمنة والحافة</strong> حيث يؤثر حجم الملف الثنائي وزمن استجابة البدء واستهلاك الذاكرة مباشرة على جدوى النشر.
 
 # Footprint Embedded Descriptions
 bench-footprint-binary-size = Binary Size - Size of the compiled database binary on disk
@@ -439,44 +443,44 @@ bench-footprint-startup-time = Startup Time - Time to cold-start and execute fir
 bench-footprint-peak-memory = Peak Memory - Maximum resident set size during initialization
 
 # Footprint Embedded Discussion
-bench-footprint-emb-disc-size-title = Binary Size: Middle Ground
-bench-footprint-emb-disc-size = VibeSQL at <strong>~17MB</strong> sits between SQLite (~5MB) and DuckDB (~45MB). This reflects our choice to include advanced features (window functions, CTEs, columnar execution) while keeping the binary manageable for embedded deployments.
-bench-footprint-emb-disc-startup-title = Startup: Fastest Cold Start
-bench-footprint-emb-disc-startup = VibeSQL achieves <strong>~7.7ms cold startup</strong>, slightly faster than SQLite (~8.2ms) and significantly faster than DuckDB (~14.6ms). Our minimal initialization path loads only essential metadata structures on startup.
-bench-footprint-emb-disc-memory-title = Memory Efficiency
-bench-footprint-emb-disc-memory = Peak memory during startup is ~7MB for VibeSQL vs ~3MB for SQLite and ~11MB for DuckDB. The difference from SQLite reflects our more sophisticated query optimizer and columnar execution infrastructure that's allocated upfront.
-bench-footprint-emb-disc-roadmap-title = Size Reduction Roadmap
-bench-footprint-emb-disc-flags = Compile-time feature selection to exclude unused functionality
-bench-footprint-emb-disc-lto = Whole-program link-time optimization for dead code elimination
-bench-footprint-emb-disc-modular = Separate core engine from optional features (e.g., window functions)
+bench-footprint-emb-disc-size-title = حجم الملف الثنائي: حل وسط
+bench-footprint-emb-disc-size = يقع VibeSQL بـ <strong>حوالي 17 ميجابايت</strong> بين SQLite (حوالي 5 ميجابايت) و DuckDB (حوالي 45 ميجابايت). يعكس هذا اختيارنا لتضمين ميزات متقدمة (دوال النافذة، CTEs، التنفيذ العمودي) مع الحفاظ على الملف الثنائي قابلاً للإدارة لعمليات النشر المضمنة.
+bench-footprint-emb-disc-startup-title = البدء: أسرع بدء بارد
+bench-footprint-emb-disc-startup = يحقق VibeSQL <strong>بدءاً بارداً بحوالي 6 مللي ثانية</strong>، أسرع من SQLite (حوالي 6.5 مللي ثانية) وأسرع بكثير من DuckDB (حوالي 13 مللي ثانية). يُحمّل مسار التهيئة الأدنى لدينا فقط هياكل البيانات الوصفية الأساسية عند البدء.
+bench-footprint-emb-disc-memory-title = كفاءة الذاكرة
+bench-footprint-emb-disc-memory = ذروة الذاكرة أثناء البدء هي حوالي 7 ميجابايت لـ VibeSQL مقابل حوالي 3 ميجابايت لـ SQLite و حوالي 11 ميجابايت لـ DuckDB. يعكس الفرق عن SQLite مُحسّن الاستعلامات الأكثر تطوراً والبنية التحتية للتنفيذ العمودي المخصصة مسبقاً.
+bench-footprint-emb-disc-roadmap-title = خارطة طريق تقليل الحجم
+bench-footprint-emb-disc-flags = اختيار الميزات في وقت الترجمة لاستبعاد الوظائف غير المستخدمة
+bench-footprint-emb-disc-lto = تحسين وقت الربط للبرنامج الكامل لإزالة الكود الميت
+bench-footprint-emb-disc-modular = فصل المحرك الأساسي عن الميزات الاختيارية (مثل دوال النافذة)
 
 # Footprint Server/WASM specific
 bench-footprint-server-name = Footprint (Server/WASM)
 bench-footprint-server-title = WASM Footprint
-bench-footprint-server-description = <strong>WASM footprint benchmarks</strong> measure the WebAssembly module size for browser deployment, critical for web applications where download size impacts user experience.
+bench-footprint-server-description = تقيس <strong>مقاييس بصمة WASM</strong> حجم وحدة WebAssembly لنشر المتصفح، وهو أمر حاسم لتطبيقات الويب حيث يؤثر حجم التنزيل على تجربة المستخدم.
 bench-footprint-server-ops-label = deployment targets
-bench-footprint-server-note = WASM sizes are critical for <strong>web deployments</strong> where download time directly impacts time-to-interactive. Gzip sizes are most relevant as browsers automatically decompress gzip content.
-bench-footprint-server-note2 = <strong>Note:</strong> VibeSQL WASM is designed for minimal download size while maintaining full SQL:1999 compliance in the browser.
+bench-footprint-server-note = أحجام WASM حاسمة لـ <strong>عمليات نشر الويب</strong> حيث يؤثر وقت التنزيل مباشرة على الوقت حتى التفاعل. أحجام Gzip هي الأكثر صلة حيث تقوم المتصفحات تلقائياً بفك ضغط محتوى gzip.
+bench-footprint-server-note2 = <strong>ملاحظة:</strong> تم تصميم WASM لـ VibeSQL لأدنى حجم تنزيل مع الحفاظ على الامتثال الكامل لـ SQL:1999 في المتصفح.
 
 # Footprint Server Descriptions
 bench-footprint-wasm-size = WASM Size - Size of the WebAssembly module for browser deployment
 bench-footprint-wasm-gzip = WASM (gzip) - Compressed size for web delivery
 
 # Footprint Server Discussion
-bench-footprint-srv-disc-wasm-title = WASM: 2.2MB Compressed
-bench-footprint-srv-disc-wasm = VibeSQL's WebAssembly module compresses to <strong>~2.2MB gzipped</strong>, enabling fast initial page loads. This is a full SQL:1999 database with window functions, CTEs, and ACID transactions running entirely in the browser.
-bench-footprint-srv-disc-included-title = What's Included
-bench-footprint-srv-disc-parser = Complete SQL parser and query optimizer
-bench-footprint-srv-disc-btree = B-tree storage engine with MVCC
-bench-footprint-srv-disc-window = Window functions and advanced aggregations
-bench-footprint-srv-disc-cte = Common table expressions (WITH clause)
-bench-footprint-srv-disc-acid = Full ACID transaction support
-bench-footprint-srv-disc-benefits-title = Browser Deployment Benefits
-bench-footprint-srv-disc-benefits = Running SQL in the browser eliminates round-trip latency to servers, enables offline-first applications, and keeps sensitive data on the user's device. VibeSQL's WASM build is designed for this use case with minimal dependencies and efficient memory usage.
-bench-footprint-srv-disc-roadmap-title = WASM Roadmap
-bench-footprint-srv-disc-streaming = Start executing while the module downloads
-bench-footprint-srv-disc-indexeddb = Durable storage across browser sessions
-bench-footprint-srv-disc-worker = Run queries off the main thread for responsive UIs
+bench-footprint-srv-disc-wasm-title = WASM: 1.5 ميجابايت مضغوط
+bench-footprint-srv-disc-wasm = تُضغط وحدة WebAssembly لـ VibeSQL إلى <strong>حوالي 1.5 ميجابايت بتنسيق gzip</strong>، مما يُمكّن تحميلات الصفحة الأولية السريعة. هذه قاعدة بيانات SQL:1999 كاملة مع دوال النافذة و CTEs ومعاملات ACID تعمل بالكامل في المتصفح.
+bench-footprint-srv-disc-included-title = ما هو مضمن
+bench-footprint-srv-disc-parser = محلل SQL كامل ومُحسّن استعلامات
+bench-footprint-srv-disc-btree = محرك تخزين B-tree مع MVCC
+bench-footprint-srv-disc-window = دوال النافذة والتجميعات المتقدمة
+bench-footprint-srv-disc-cte = تعبيرات الجداول المشتركة (جملة WITH)
+bench-footprint-srv-disc-acid = دعم معاملات ACID الكامل
+bench-footprint-srv-disc-benefits-title = فوائد النشر في المتصفح
+bench-footprint-srv-disc-benefits = يُلغي تشغيل SQL في المتصفح زمن الرحلة ذهاباً وإياباً إلى الخوادم، ويُمكّن التطبيقات التي تعمل بدون اتصال أولاً، ويحتفظ بالبيانات الحساسة على جهاز المستخدم. تم تصميم بناء WASM لـ VibeSQL لحالة الاستخدام هذه مع الحد الأدنى من التبعيات والاستخدام الفعال للذاكرة.
+bench-footprint-srv-disc-roadmap-title = خارطة طريق WASM
+bench-footprint-srv-disc-streaming = البدء بالتنفيذ أثناء تنزيل الوحدة
+bench-footprint-srv-disc-indexeddb = تخزين دائم عبر جلسات المتصفح
+bench-footprint-srv-disc-worker = تشغيل الاستعلامات خارج الخيط الرئيسي للواجهات المستجيبة
 
 # Bullet point labels (used with descriptions)
 bench-bullet-join-ordering = Join ordering
