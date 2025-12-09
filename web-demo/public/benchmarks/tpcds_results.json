@@ -3,8 +3,8 @@
     {
       "name": "tpcds_q1_vibesql",
       "stats": {
-        "mean": 0.004692499995231628,
-        "total": 0.004692499995231628,
+        "mean": 0.004537500023841858,
+        "total": 0.004537500023841858,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -13,8 +13,8 @@
     {
       "name": "tpcds_q10_vibesql",
       "stats": {
-        "mean": 0.016549999952316284,
-        "total": 0.016549999952316284,
+        "mean": 0.015480000019073487,
+        "total": 0.015480000019073487,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -23,8 +23,8 @@
     {
       "name": "tpcds_q11_vibesql",
       "stats": {
-        "mean": 0.36938249969482423,
-        "total": 0.36938249969482423,
+        "mean": 0.37114500427246094,
+        "total": 0.37114500427246094,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -33,8 +33,8 @@
     {
       "name": "tpcds_q12_vibesql",
       "stats": {
-        "mean": 0.0037024999856948852,
-        "total": 0.0037024999856948852,
+        "mean": 0.0036424999833106994,
+        "total": 0.0036424999833106994,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -43,8 +43,8 @@
     {
       "name": "tpcds_q13_vibesql",
       "stats": {
-        "mean": 0.006110000014305114,
-        "total": 0.006110000014305114,
+        "mean": 0.006037500023841858,
+        "total": 0.006037500023841858,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -53,8 +53,8 @@
     {
       "name": "tpcds_q14_vibesql",
       "stats": {
-        "mean": 0.2884300079345703,
-        "total": 0.2884300079345703,
+        "mean": 0.29075498962402346,
+        "total": 0.29075498962402346,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -63,8 +63,8 @@
     {
       "name": "tpcds_q15_vibesql",
       "stats": {
-        "mean": 0.010932499885559083,
-        "total": 0.010932499885559083,
+        "mean": 0.011152500152587891,
+        "total": 0.011152500152587891,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -73,8 +73,8 @@
     {
       "name": "tpcds_q16_vibesql",
       "stats": {
-        "mean": 0.005032500028610229,
-        "total": 0.005032500028610229,
+        "mean": 0.004997500061988831,
+        "total": 0.004997500061988831,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -83,8 +83,8 @@
     {
       "name": "tpcds_q17_vibesql",
       "stats": {
-        "mean": 0.02153500032424927,
-        "total": 0.02153500032424927,
+        "mean": 0.02124000024795532,
+        "total": 0.02124000024795532,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -93,8 +93,8 @@
     {
       "name": "tpcds_q18_vibesql",
       "stats": {
-        "mean": 0.010157500267028809,
-        "total": 0.010157500267028809,
+        "mean": 0.010175000190734864,
+        "total": 0.010175000190734864,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -103,8 +103,8 @@
     {
       "name": "tpcds_q19_vibesql",
       "stats": {
-        "mean": 0.010542500019073486,
-        "total": 0.010542500019073486,
+        "mean": 0.010537500143051147,
+        "total": 0.010537500143051147,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -113,8 +113,8 @@
     {
       "name": "tpcds_q2_vibesql",
       "stats": {
-        "mean": 0.08423499870300293,
-        "total": 0.08423499870300293,
+        "mean": 0.08197750091552734,
+        "total": 0.08197750091552734,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -123,8 +123,8 @@
     {
       "name": "tpcds_q20_vibesql",
       "stats": {
-        "mean": 0.007819999933242798,
-        "total": 0.007819999933242798,
+        "mean": 0.007892499923706055,
+        "total": 0.007892499923706055,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -133,8 +133,8 @@
     {
       "name": "tpcds_q21_vibesql",
       "stats": {
-        "mean": 0.008867499828338623,
-        "total": 0.008867499828338623,
+        "mean": 0.00897000002861023,
+        "total": 0.00897000002861023,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -143,8 +143,8 @@
     {
       "name": "tpcds_q22_vibesql",
       "stats": {
-        "mean": 0.006740000009536743,
-        "total": 0.006740000009536743,
+        "mean": 0.006692500114440918,
+        "total": 0.006692500114440918,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -153,8 +153,8 @@
     {
       "name": "tpcds_q23_vibesql",
       "stats": {
-        "mean": 0.07596249961853027,
-        "total": 0.07596249961853027,
+        "mean": 0.0778499984741211,
+        "total": 0.0778499984741211,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -163,8 +163,8 @@
     {
       "name": "tpcds_q24_vibesql",
       "stats": {
-        "mean": 0.02644000005722046,
-        "total": 0.02644000005722046,
+        "mean": 0.027509999752044677,
+        "total": 0.027509999752044677,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -173,8 +173,8 @@
     {
       "name": "tpcds_q25_vibesql",
       "stats": {
-        "mean": 0.01746500015258789,
-        "total": 0.01746500015258789,
+        "mean": 0.017447499752044678,
+        "total": 0.017447499752044678,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -183,8 +183,8 @@
     {
       "name": "tpcds_q26_vibesql",
       "stats": {
-        "mean": 0.011504999876022338,
-        "total": 0.011504999876022338,
+        "mean": 0.01171749997138977,
+        "total": 0.01171749997138977,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -193,8 +193,8 @@
     {
       "name": "tpcds_q27_vibesql",
       "stats": {
-        "mean": 0.009899999856948852,
-        "total": 0.009899999856948852,
+        "mean": 0.010074999809265137,
+        "total": 0.010074999809265137,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -203,8 +203,8 @@
     {
       "name": "tpcds_q28_vibesql",
       "stats": {
-        "mean": 0.010829999923706054,
-        "total": 0.010829999923706054,
+        "mean": 0.012399999618530274,
+        "total": 0.012399999618530274,
         "rows": 0,
         "status": "passed",
         "iterations": 1
@@ -213,8 +213,8 @@
     {
       "name": "tpcds_q29_vibesql",
       "stats": {
-        "mean": 0.020132499694824217,
-        "total": 0.020132499694824217,
+        "mean": 0.020309999465942384,
+        "total": 0.020309999465942384,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -223,8 +223,8 @@
     {
       "name": "tpcds_q3_vibesql",
       "stats": {
-        "mean": 0.005582499980926514,
-        "total": 0.005582499980926514,
+        "mean": 0.005444999933242798,
+        "total": 0.005444999933242798,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -233,8 +233,8 @@
     {
       "name": "tpcds_q30_vibesql",
       "stats": {
-        "mean": 0.0038174999952316283,
-        "total": 0.0038174999952316283,
+        "mean": 0.003967500030994415,
+        "total": 0.003967500030994415,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -243,8 +243,8 @@
     {
       "name": "tpcds_q31_vibesql",
       "stats": {
-        "mean": 0.053285000801086425,
-        "total": 0.053285000801086425,
+        "mean": 0.05467499923706055,
+        "total": 0.05467499923706055,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -253,8 +253,8 @@
     {
       "name": "tpcds_q32_vibesql",
       "stats": {
-        "mean": 0.004860000014305115,
-        "total": 0.004860000014305115,
+        "mean": 0.0048825000524520875,
+        "total": 0.0048825000524520875,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -263,8 +263,8 @@
     {
       "name": "tpcds_q33_vibesql",
       "stats": {
-        "mean": 0.024950000286102295,
-        "total": 0.024950000286102295,
+        "mean": 0.025232500076293945,
+        "total": 0.025232500076293945,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -273,8 +273,8 @@
     {
       "name": "tpcds_q34_vibesql",
       "stats": {
-        "mean": 0.007792499899864197,
-        "total": 0.007792499899864197,
+        "mean": 0.007807499885559082,
+        "total": 0.007807499885559082,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -283,8 +283,8 @@
     {
       "name": "tpcds_q35_vibesql",
       "stats": {
-        "mean": 0.006230000019073486,
-        "total": 0.006230000019073486,
+        "mean": 0.006225000023841858,
+        "total": 0.006225000023841858,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -293,8 +293,8 @@
     {
       "name": "tpcds_q36_vibesql",
       "stats": {
-        "mean": 0.007702500104904175,
-        "total": 0.007702500104904175,
+        "mean": 0.007684999942779541,
+        "total": 0.007684999942779541,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -303,8 +303,8 @@
     {
       "name": "tpcds_q37_vibesql",
       "stats": {
-        "mean": 0.008692499876022339,
-        "total": 0.008692499876022339,
+        "mean": 0.008850000143051148,
+        "total": 0.008850000143051148,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -313,8 +313,8 @@
     {
       "name": "tpcds_q38_vibesql",
       "stats": {
-        "mean": 0.029702499866485595,
-        "total": 0.029702499866485595,
+        "mean": 0.02941499996185303,
+        "total": 0.02941499996185303,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -323,8 +323,8 @@
     {
       "name": "tpcds_q39_vibesql",
       "stats": {
-        "mean": 0.02338249969482422,
-        "total": 0.02338249969482422,
+        "mean": 0.023662499904632567,
+        "total": 0.023662499904632567,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -333,8 +333,8 @@
     {
       "name": "tpcds_q4_vibesql",
       "stats": {
-        "mean": 0.5894974975585937,
-        "total": 0.5894974975585937,
+        "mean": 0.5956875,
+        "total": 0.5956875,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -343,8 +343,8 @@
     {
       "name": "tpcds_q40_vibesql",
       "stats": {
-        "mean": 0.018945000171661376,
-        "total": 0.018945000171661376,
+        "mean": 0.018932499885559083,
+        "total": 0.018932499885559083,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -353,8 +353,8 @@
     {
       "name": "tpcds_q41_vibesql",
       "stats": {
-        "mean": 0.0025825000405311585,
-        "total": 0.0025825000405311585,
+        "mean": 0.0026025000214576722,
+        "total": 0.0026025000214576722,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -363,8 +363,8 @@
     {
       "name": "tpcds_q42_vibesql",
       "stats": {
-        "mean": 0.0056875,
-        "total": 0.0056875,
+        "mean": 0.005734999895095825,
+        "total": 0.005734999895095825,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -373,8 +373,8 @@
     {
       "name": "tpcds_q43_vibesql",
       "stats": {
-        "mean": 0.038660000801086426,
-        "total": 0.038660000801086426,
+        "mean": 0.03938499927520752,
+        "total": 0.03938499927520752,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -383,8 +383,8 @@
     {
       "name": "tpcds_q44_vibesql",
       "stats": {
-        "mean": 0.09010749816894531,
-        "total": 0.09010749816894531,
+        "mean": 0.09299250030517578,
+        "total": 0.09299250030517578,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -393,8 +393,8 @@
     {
       "name": "tpcds_q45_vibesql",
       "stats": {
-        "mean": 0.007722499966621399,
-        "total": 0.007722499966621399,
+        "mean": 0.00771999990940094,
+        "total": 0.00771999990940094,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -403,8 +403,8 @@
     {
       "name": "tpcds_q46_vibesql",
       "stats": {
-        "mean": 0.013147500038146973,
-        "total": 0.013147500038146973,
+        "mean": 0.013397499799728393,
+        "total": 0.013397499799728393,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -413,8 +413,8 @@
     {
       "name": "tpcds_q47_vibesql",
       "stats": {
-        "mean": 0.05285749912261963,
-        "total": 0.05285749912261963,
+        "mean": 0.05434000015258789,
+        "total": 0.05434000015258789,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -423,8 +423,8 @@
     {
       "name": "tpcds_q48_vibesql",
       "stats": {
-        "mean": 0.02247499990463257,
-        "total": 0.02247499990463257,
+        "mean": 0.02241249990463257,
+        "total": 0.02241249990463257,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -433,8 +433,8 @@
     {
       "name": "tpcds_q49_vibesql",
       "stats": {
-        "mean": 0.024612500190734864,
-        "total": 0.024612500190734864,
+        "mean": 0.024704999923706054,
+        "total": 0.024704999923706054,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -443,8 +443,8 @@
     {
       "name": "tpcds_q5_vibesql",
       "stats": {
-        "mean": 0.07210250091552735,
-        "total": 0.07210250091552735,
+        "mean": 0.07459000015258789,
+        "total": 0.07459000015258789,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -453,8 +453,8 @@
     {
       "name": "tpcds_q50_vibesql",
       "stats": {
-        "mean": 0.005077499985694885,
-        "total": 0.005077499985694885,
+        "mean": 0.005202499985694885,
+        "total": 0.005202499985694885,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -463,8 +463,8 @@
     {
       "name": "tpcds_q51_vibesql",
       "stats": {
-        "mean": 0.008597500085830689,
-        "total": 0.008597500085830689,
+        "mean": 0.008702500104904174,
+        "total": 0.008702500104904174,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -473,8 +473,8 @@
     {
       "name": "tpcds_q52_vibesql",
       "stats": {
-        "mean": 0.005674999952316284,
-        "total": 0.005674999952316284,
+        "mean": 0.005767499804496765,
+        "total": 0.005767499804496765,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -483,8 +483,8 @@
     {
       "name": "tpcds_q53_vibesql",
       "stats": {
-        "mean": 0.00650249993801117,
-        "total": 0.00650249993801117,
+        "mean": 0.006527500033378601,
+        "total": 0.006527500033378601,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -493,8 +493,8 @@
     {
       "name": "tpcds_q54_vibesql",
       "stats": {
-        "mean": 0.01878000020980835,
-        "total": 0.01878000020980835,
+        "mean": 0.018954999923706056,
+        "total": 0.018954999923706056,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -503,8 +503,8 @@
     {
       "name": "tpcds_q55_vibesql",
       "stats": {
-        "mean": 0.005860000133514404,
-        "total": 0.005860000133514404,
+        "mean": 0.005794999837875367,
+        "total": 0.005794999837875367,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -513,8 +513,8 @@
     {
       "name": "tpcds_q56_vibesql",
       "stats": {
-        "mean": 0.009580000162124633,
-        "total": 0.009580000162124633,
+        "mean": 0.009570000171661376,
+        "total": 0.009570000171661376,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -523,8 +523,8 @@
     {
       "name": "tpcds_q57_vibesql",
       "stats": {
-        "mean": 0.09198250198364258,
-        "total": 0.09198250198364258,
+        "mean": 0.09554500007629395,
+        "total": 0.09554500007629395,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -533,8 +533,8 @@
     {
       "name": "tpcds_q58_vibesql",
       "stats": {
-        "mean": 0.02203999996185303,
-        "total": 0.02203999996185303,
+        "mean": 0.022082500457763672,
+        "total": 0.022082500457763672,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -543,8 +543,8 @@
     {
       "name": "tpcds_q59_vibesql",
       "stats": {
-        "mean": 0.1716500015258789,
-        "total": 0.1716500015258789,
+        "mean": 0.16941749954223634,
+        "total": 0.16941749954223634,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -553,8 +553,8 @@
     {
       "name": "tpcds_q6_vibesql",
       "stats": {
-        "mean": 0.2266500015258789,
-        "total": 0.2266500015258789,
+        "mean": 0.2270449981689453,
+        "total": 0.2270449981689453,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -563,8 +563,8 @@
     {
       "name": "tpcds_q60_vibesql",
       "stats": {
-        "mean": 0.004590000033378601,
-        "total": 0.004590000033378601,
+        "mean": 0.0046974999904632565,
+        "total": 0.0046974999904632565,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -573,8 +573,8 @@
     {
       "name": "tpcds_q61_vibesql",
       "stats": {
-        "mean": 0.014637500047683716,
-        "total": 0.014637500047683716,
+        "mean": 0.015757500171661377,
+        "total": 0.015757500171661377,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -583,8 +583,8 @@
     {
       "name": "tpcds_q62_vibesql",
       "stats": {
-        "mean": 0.008339999914169312,
-        "total": 0.008339999914169312,
+        "mean": 0.008297500133514404,
+        "total": 0.008297500133514404,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -593,8 +593,8 @@
     {
       "name": "tpcds_q63_vibesql",
       "stats": {
-        "mean": 0.006485000014305115,
-        "total": 0.006485000014305115,
+        "mean": 0.006572499990463256,
+        "total": 0.006572499990463256,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -603,8 +603,8 @@
     {
       "name": "tpcds_q64_vibesql",
       "stats": {
-        "mean": 0.007597499966621399,
-        "total": 0.007597499966621399,
+        "mean": 0.007792500019073487,
+        "total": 0.007792500019073487,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -613,8 +613,8 @@
     {
       "name": "tpcds_q65_vibesql",
       "stats": {
-        "mean": 0.0074500000476837155,
-        "total": 0.0074500000476837155,
+        "mean": 0.007629999995231628,
+        "total": 0.007629999995231628,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -623,8 +623,8 @@
     {
       "name": "tpcds_q66_vibesql",
       "stats": {
-        "mean": 0.008104999780654907,
-        "total": 0.008104999780654907,
+        "mean": 0.008210000038146972,
+        "total": 0.008210000038146972,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -633,8 +633,8 @@
     {
       "name": "tpcds_q67_vibesql",
       "stats": {
-        "mean": 0.007639999985694885,
-        "total": 0.007639999985694885,
+        "mean": 0.007664999961853027,
+        "total": 0.007664999961853027,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -643,8 +643,8 @@
     {
       "name": "tpcds_q68_vibesql",
       "stats": {
-        "mean": 0.02518000030517578,
-        "total": 0.02518000030517578,
+        "mean": 0.02544250011444092,
+        "total": 0.02544250011444092,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -653,8 +653,8 @@
     {
       "name": "tpcds_q69_vibesql",
       "stats": {
-        "mean": 0.027192500114440916,
-        "total": 0.027192500114440916,
+        "mean": 0.027144999980926513,
+        "total": 0.027144999980926513,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -663,8 +663,8 @@
     {
       "name": "tpcds_q7_vibesql",
       "stats": {
-        "mean": 0.009015000104904174,
-        "total": 0.009015000104904174,
+        "mean": 0.008980000019073486,
+        "total": 0.008980000019073486,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -673,8 +673,8 @@
     {
       "name": "tpcds_q70_vibesql",
       "stats": {
-        "mean": 0.006160000085830689,
-        "total": 0.006160000085830689,
+        "mean": 0.006262500047683716,
+        "total": 0.006262500047683716,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -683,8 +683,8 @@
     {
       "name": "tpcds_q71_vibesql",
       "stats": {
-        "mean": 0.017052499771118165,
-        "total": 0.017052499771118165,
+        "mean": 0.01718499994277954,
+        "total": 0.01718499994277954,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -693,8 +693,8 @@
     {
       "name": "tpcds_q72_vibesql",
       "stats": {
-        "mean": 0.02275000047683716,
-        "total": 0.02275000047683716,
+        "mean": 0.023160000324249266,
+        "total": 0.023160000324249266,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -703,8 +703,8 @@
     {
       "name": "tpcds_q73_vibesql",
       "stats": {
-        "mean": 0.018357500076293946,
-        "total": 0.018357500076293946,
+        "mean": 0.018419999599456786,
+        "total": 0.018419999599456786,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -713,8 +713,8 @@
     {
       "name": "tpcds_q74_vibesql",
       "stats": {
-        "mean": 0.06628999996185303,
-        "total": 0.06628999996185303,
+        "mean": 0.06799249839782714,
+        "total": 0.06799249839782714,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -723,8 +723,8 @@
     {
       "name": "tpcds_q75_vibesql",
       "stats": {
-        "mean": 0.06470249938964844,
-        "total": 0.06470249938964844,
+        "mean": 0.06707999992370606,
+        "total": 0.06707999992370606,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -733,8 +733,8 @@
     {
       "name": "tpcds_q76_vibesql",
       "stats": {
-        "mean": 0.0047299998998641965,
-        "total": 0.0047299998998641965,
+        "mean": 0.004774999976158142,
+        "total": 0.004774999976158142,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -743,8 +743,8 @@
     {
       "name": "tpcds_q77_vibesql",
       "stats": {
-        "mean": 0.01749000024795532,
-        "total": 0.01749000024795532,
+        "mean": 0.017730000495910645,
+        "total": 0.017730000495910645,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -753,8 +753,8 @@
     {
       "name": "tpcds_q78_vibesql",
       "stats": {
-        "mean": 0.3418725051879883,
-        "total": 0.3418725051879883,
+        "mean": 0.3517550048828125,
+        "total": 0.3517550048828125,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -763,8 +763,8 @@
     {
       "name": "tpcds_q79_vibesql",
       "stats": {
-        "mean": 0.018074999809265135,
-        "total": 0.018074999809265135,
+        "mean": 0.018367500305175782,
+        "total": 0.018367500305175782,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -773,8 +773,8 @@
     {
       "name": "tpcds_q8_vibesql",
       "stats": {
-        "mean": 0.06134999942779541,
-        "total": 0.06134999942779541,
+        "mean": 0.061054999351501466,
+        "total": 0.061054999351501466,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -783,8 +783,8 @@
     {
       "name": "tpcds_q80_vibesql",
       "stats": {
-        "mean": 0.008912499904632568,
-        "total": 0.008912499904632568,
+        "mean": 0.009157500267028808,
+        "total": 0.009157500267028808,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -793,8 +793,8 @@
     {
       "name": "tpcds_q81_vibesql",
       "stats": {
-        "mean": 0.006592499971389771,
-        "total": 0.006592499971389771,
+        "mean": 0.006782500028610229,
+        "total": 0.006782500028610229,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -803,8 +803,8 @@
     {
       "name": "tpcds_q83_vibesql",
       "stats": {
-        "mean": 0.005507499933242798,
-        "total": 0.005507499933242798,
+        "mean": 0.00565750002861023,
+        "total": 0.00565750002861023,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -813,8 +813,8 @@
     {
       "name": "tpcds_q84_vibesql",
       "stats": {
-        "mean": 0.0018149999976158143,
-        "total": 0.0018149999976158143,
+        "mean": 0.0018700000047683716,
+        "total": 0.0018700000047683716,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -823,8 +823,8 @@
     {
       "name": "tpcds_q85_vibesql",
       "stats": {
-        "mean": 0.0044825000762939455,
-        "total": 0.0044825000762939455,
+        "mean": 0.004722499966621399,
+        "total": 0.004722499966621399,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -833,8 +833,8 @@
     {
       "name": "tpcds_q86_vibesql",
       "stats": {
-        "mean": 0.004102500081062317,
-        "total": 0.004102500081062317,
+        "mean": 0.004214999914169312,
+        "total": 0.004214999914169312,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -843,8 +843,8 @@
     {
       "name": "tpcds_q87_vibesql",
       "stats": {
-        "mean": 0.07243749809265136,
-        "total": 0.07243749809265136,
+        "mean": 0.07364500045776368,
+        "total": 0.07364500045776368,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -853,8 +853,8 @@
     {
       "name": "tpcds_q88_vibesql",
       "stats": {
-        "mean": 0.052550000190734865,
-        "total": 0.052550000190734865,
+        "mean": 0.05382499980926514,
+        "total": 0.05382499980926514,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -863,8 +863,8 @@
     {
       "name": "tpcds_q89_vibesql",
       "stats": {
-        "mean": 0.019932499885559084,
-        "total": 0.019932499885559084,
+        "mean": 0.02009999942779541,
+        "total": 0.02009999942779541,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -873,8 +873,8 @@
     {
       "name": "tpcds_q9_vibesql",
       "stats": {
-        "mean": 0.13207000732421875,
-        "total": 0.13207000732421875,
+        "mean": 0.0932699966430664,
+        "total": 0.0932699966430664,
         "rows": 0,
         "status": "passed",
         "iterations": 1
@@ -883,8 +883,8 @@
     {
       "name": "tpcds_q90_vibesql",
       "stats": {
-        "mean": 0.012829999923706054,
-        "total": 0.012829999923706054,
+        "mean": 0.013242500066757203,
+        "total": 0.013242500066757203,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -893,8 +893,8 @@
     {
       "name": "tpcds_q91_vibesql",
       "stats": {
-        "mean": 0.002455000042915344,
-        "total": 0.002455000042915344,
+        "mean": 0.0024524999856948854,
+        "total": 0.0024524999856948854,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -903,8 +903,8 @@
     {
       "name": "tpcds_q92_vibesql",
       "stats": {
-        "mean": 0.0035899999737739564,
-        "total": 0.0035899999737739564,
+        "mean": 0.0034950000047683717,
+        "total": 0.0034950000047683717,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -913,8 +913,8 @@
     {
       "name": "tpcds_q93_vibesql",
       "stats": {
-        "mean": 0.008689999818801879,
-        "total": 0.008689999818801879,
+        "mean": 0.008742500066757202,
+        "total": 0.008742500066757202,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -923,8 +923,8 @@
     {
       "name": "tpcds_q94_vibesql",
       "stats": {
-        "mean": 0.003762499988079071,
-        "total": 0.003762499988079071,
+        "mean": 0.00379749995470047,
+        "total": 0.00379749995470047,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -933,8 +933,8 @@
     {
       "name": "tpcds_q95_vibesql",
       "stats": {
-        "mean": 0.03622249984741211,
-        "total": 0.03622249984741211,
+        "mean": 0.037852500915527346,
+        "total": 0.037852500915527346,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -943,8 +943,8 @@
     {
       "name": "tpcds_q96_vibesql",
       "stats": {
-        "mean": 0.012204999923706055,
-        "total": 0.012204999923706055,
+        "mean": 0.012137500047683715,
+        "total": 0.012137500047683715,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -953,8 +953,8 @@
     {
       "name": "tpcds_q97_vibesql",
       "stats": {
-        "mean": 0.010897500038146973,
-        "total": 0.010897500038146973,
+        "mean": 0.011107500076293946,
+        "total": 0.011107500076293946,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -963,8 +963,8 @@
     {
       "name": "tpcds_q98_vibesql",
       "stats": {
-        "mean": 0.00809500002861023,
-        "total": 0.00809500002861023,
+        "mean": 0.008087500095367432,
+        "total": 0.008087500095367432,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -973,8 +973,8 @@
     {
       "name": "tpcds_q99_vibesql",
       "stats": {
-        "mean": 0.024375,
-        "total": 0.024375,
+        "mean": 0.0249375,
+        "total": 0.0249375,
         "rows": 0,
         "status": "passed",
         "iterations": 4
@@ -983,8 +983,8 @@
   ],
   "metadata": {
     "suite": "tpcds",
-    "timestamp": "2025-12-09T11:09:04.426114",
-    "git_commit": "3fb33d43",
+    "timestamp": "2025-12-09T12:22:11.669415",
+    "git_commit": "991b6ccb",
     "scale_factor": "0.001",
     "total_queries": 98,
     "passed_queries": 98,

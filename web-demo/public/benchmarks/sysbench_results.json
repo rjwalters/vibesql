@@ -3,31 +3,31 @@
     {
       "name": "sysbench_point_select_vibesql",
       "stats": {
-        "mean": 0,
+        "mean": 9e-08,
         "stddev": 0,
-        "min": 0.0,
-        "max": 0.0,
-        "rounds": 42570278
+        "min": 8.1e-08,
+        "max": 9.900000000000001e-08,
+        "rounds": 36648747
       }
     },
     {
       "name": "sysbench_insert_vibesql",
       "stats": {
-        "mean": 4.59e-06,
+        "mean": 4.94e-06,
         "stddev": 0,
-        "min": 4.131e-06,
-        "max": 5.049e-06,
-        "rounds": 5183046
+        "min": 4.446e-06,
+        "max": 5.434000000000001e-06,
+        "rounds": 4984568
       }
     },
     {
       "name": "sysbench_update_index_vibesql",
       "stats": {
-        "mean": 3.34e-06,
+        "mean": 4.08e-06,
         "stddev": 0,
-        "min": 3.006e-06,
-        "max": 3.6740000000000007e-06,
-        "rounds": 7498119
+        "min": 3.672e-06,
+        "max": 4.488e-06,
+        "rounds": 6507468
       }
     },
     {
@@ -37,27 +37,27 @@
         "stddev": 0,
         "min": 9.090000000000001e-07,
         "max": 1.1110000000000002e-06,
-        "rounds": 16267397
+        "rounds": 16208722
       }
     },
     {
       "name": "sysbench_delete_vibesql",
       "stats": {
-        "mean": 2.34e-06,
+        "mean": 1.79e-06,
         "stddev": 0,
-        "min": 2.1060000000000002e-06,
-        "max": 2.5740000000000003e-06,
+        "min": 1.6110000000000001e-06,
+        "max": 1.969e-06,
         "rounds": 9900
       }
     },
     {
       "name": "sysbench_range_queries_vibesql",
       "stats": {
-        "mean": 1.962e-05,
+        "mean": 2.027e-05,
         "stddev": 0,
-        "min": 1.7658e-05,
-        "max": 2.1582e-05,
-        "rounds": 1518780
+        "min": 1.8243e-05,
+        "max": 2.2297000000000004e-05,
+        "rounds": 1470540
       }
     },
     {
@@ -67,37 +67,37 @@
         "stddev": 0,
         "min": 0.0,
         "max": 0.0,
-        "rounds": 77615387
+        "rounds": 78561425
       }
     },
     {
       "name": "sysbench_insert_sqlite",
       "stats": {
-        "mean": 8.36e-06,
+        "mean": 9.4e-06,
         "stddev": 0,
-        "min": 7.5239999999999995e-06,
-        "max": 9.196e-06,
-        "rounds": 3126043
+        "min": 8.46e-06,
+        "max": 1.0340000000000001e-05,
+        "rounds": 2854151
       }
     },
     {
       "name": "sysbench_update_index_sqlite",
       "stats": {
-        "mean": 1.02e-06,
+        "mean": 1.01e-06,
         "stddev": 0,
-        "min": 9.18e-07,
-        "max": 1.122e-06,
-        "rounds": 19822709
+        "min": 9.090000000000001e-07,
+        "max": 1.1110000000000002e-06,
+        "rounds": 19972920
       }
     },
     {
       "name": "sysbench_update_non_index_sqlite",
       "stats": {
-        "mean": 1e-08,
+        "mean": 5e-08,
         "stddev": 0,
-        "min": 9.000000000000001e-09,
-        "max": 1.1000000000000001e-08,
-        "rounds": 23597759
+        "min": 4.5e-08,
+        "max": 5.5e-08,
+        "rounds": 23955504
       }
     },
     {
@@ -113,198 +113,198 @@
     {
       "name": "sysbench_range_queries_sqlite",
       "stats": {
-        "mean": 7.99e-06,
+        "mean": 8.2e-06,
         "stddev": 0,
-        "min": 7.191e-06,
-        "max": 8.789e-06,
-        "rounds": 3695012
+        "min": 7.38e-06,
+        "max": 9.02e-06,
+        "rounds": 3599984
       }
     },
     {
       "name": "sysbench_point_select_vibesql_server",
       "stats": {
-        "mean": 4.412e-05,
-        "stddev": 2.206e-06,
-        "min": 4.1914e-05,
-        "max": 4.6325999999999997e-05,
-        "rounds": 671588
+        "mean": 4.455e-05,
+        "stddev": 2.2275e-06,
+        "min": 4.23225e-05,
+        "max": 4.67775e-05,
+        "rounds": 665264
       }
     },
     {
       "name": "sysbench_insert_vibesql_server",
       "stats": {
-        "mean": 5.224e-05,
-        "stddev": 2.612e-06,
-        "min": 4.9628e-05,
-        "max": 5.4852e-05,
-        "rounds": 559659
+        "mean": 5.827e-05,
+        "stddev": 2.9135e-06,
+        "min": 5.53565e-05,
+        "max": 6.118350000000001e-05,
+        "rounds": 502671
       }
     },
     {
       "name": "sysbench_update_index_vibesql_server",
       "stats": {
-        "mean": 5.359e-05,
-        "stddev": 2.6795000000000003e-06,
-        "min": 5.09105e-05,
-        "max": 5.62695e-05,
-        "rounds": 554095
+        "mean": 6.587e-05,
+        "stddev": 3.2935000000000003e-06,
+        "min": 6.25765e-05,
+        "max": 6.916350000000001e-05,
+        "rounds": 451560
       }
     },
     {
       "name": "sysbench_range_queries_vibesql_server",
       "stats": {
-        "mean": 0.00012428,
-        "stddev": 6.214e-06,
-        "min": 0.00011806599999999999,
-        "max": 0.00013049400000000001,
-        "rounds": 241132
+        "mean": 0.00014193000000000002,
+        "stddev": 7.0965000000000014e-06,
+        "min": 0.0001348335,
+        "max": 0.00014902650000000003,
+        "rounds": 211152
       }
     },
     {
       "name": "sysbench_point_select_vibesql_server",
       "stats": {
-        "mean": 0.00015319999999999998,
-        "stddev": 7.66e-06,
-        "min": 0.00014553999999999997,
-        "max": 0.00016086,
-        "rounds": 195122
+        "mean": 0.00013851,
+        "stddev": 6.9255e-06,
+        "min": 0.0001315845,
+        "max": 0.0001454355,
+        "rounds": 215748
       }
     },
     {
       "name": "sysbench_insert_vibesql_server",
       "stats": {
-        "mean": 0.0005444600000000001,
-        "stddev": 2.7223000000000007e-05,
-        "min": 0.000517237,
-        "max": 0.0005716830000000001,
-        "rounds": 54958
+        "mean": 0.00045825,
+        "stddev": 2.29125e-05,
+        "min": 0.0004353375,
+        "max": 0.0004811625,
+        "rounds": 65287
       }
     },
     {
       "name": "sysbench_update_index_vibesql_server",
       "stats": {
-        "mean": 0.00050234,
-        "stddev": 2.5117e-05,
-        "min": 0.000477223,
-        "max": 0.0005274570000000001,
-        "rounds": 59655
+        "mean": 0.00048236000000000004,
+        "stddev": 2.4118000000000002e-05,
+        "min": 0.00045824200000000004,
+        "max": 0.0005064780000000001,
+        "rounds": 62124
       }
     },
     {
       "name": "sysbench_range_queries_vibesql_server",
       "stats": {
-        "mean": 0.00029529000000000003,
-        "stddev": 1.4764500000000002e-05,
-        "min": 0.0002805255,
-        "max": 0.00031005450000000004,
-        "rounds": 101548
+        "mean": 0.00027873000000000004,
+        "stddev": 1.3936500000000003e-05,
+        "min": 0.00026479350000000005,
+        "max": 0.00029266650000000003,
+        "rounds": 107580
       }
     },
     {
       "name": "sysbench_vibesql_server_vibesql_server",
       "stats": {
-        "mean": 4.412e-05,
-        "stddev": 2.206e-06,
-        "min": 4.1914e-05,
-        "max": 4.6325999999999997e-05,
-        "rounds": 671588
+        "mean": 4.455e-05,
+        "stddev": 2.2275e-06,
+        "min": 4.23225e-05,
+        "max": 4.67775e-05,
+        "rounds": 665264
       }
     },
     {
       "name": "sysbench_mysql_vibesql_server",
       "stats": {
-        "mean": 0.00015319999999999998,
-        "stddev": 7.66e-06,
-        "min": 0.00014553999999999997,
-        "max": 0.00016086,
-        "rounds": 195122
+        "mean": 0.00013851,
+        "stddev": 6.9255e-06,
+        "min": 0.0001315845,
+        "max": 0.0001454355,
+        "rounds": 215748
       }
     },
     {
       "name": "sysbench_vibesql_server_vibesql_server",
       "stats": {
-        "mean": 5.224e-05,
-        "stddev": 2.612e-06,
-        "min": 4.9628e-05,
-        "max": 5.4852e-05,
-        "rounds": 559659
+        "mean": 5.827e-05,
+        "stddev": 2.9135e-06,
+        "min": 5.53565e-05,
+        "max": 6.118350000000001e-05,
+        "rounds": 502671
       }
     },
     {
       "name": "sysbench_mysql_vibesql_server",
       "stats": {
-        "mean": 0.0005444600000000001,
-        "stddev": 2.7223000000000007e-05,
-        "min": 0.000517237,
-        "max": 0.0005716830000000001,
-        "rounds": 54958
+        "mean": 0.00045825,
+        "stddev": 2.29125e-05,
+        "min": 0.0004353375,
+        "max": 0.0004811625,
+        "rounds": 65287
       }
     },
     {
       "name": "sysbench_vibesql_server_vibesql_server",
       "stats": {
-        "mean": 5.359e-05,
-        "stddev": 2.6795000000000003e-06,
-        "min": 5.09105e-05,
-        "max": 5.62695e-05,
-        "rounds": 554095
+        "mean": 6.587e-05,
+        "stddev": 3.2935000000000003e-06,
+        "min": 6.25765e-05,
+        "max": 6.916350000000001e-05,
+        "rounds": 451560
       }
     },
     {
       "name": "sysbench_mysql_vibesql_server",
       "stats": {
-        "mean": 0.00050234,
-        "stddev": 2.5117e-05,
-        "min": 0.000477223,
-        "max": 0.0005274570000000001,
-        "rounds": 59655
+        "mean": 0.00048236000000000004,
+        "stddev": 2.4118000000000002e-05,
+        "min": 0.00045824200000000004,
+        "max": 0.0005064780000000001,
+        "rounds": 62124
       }
     },
     {
       "name": "sysbench_vibesql_server_vibesql_server",
       "stats": {
-        "mean": 4.697e-05,
-        "stddev": 2.3485e-06,
-        "min": 4.46215e-05,
-        "max": 4.93185e-05,
-        "rounds": 623905
+        "mean": 8.553e-05,
+        "stddev": 4.2765000000000005e-06,
+        "min": 8.12535e-05,
+        "max": 8.980650000000001e-05,
+        "rounds": 345527
       }
     },
     {
       "name": "sysbench_mysql_vibesql_server",
       "stats": {
-        "mean": 0.00051167,
-        "stddev": 2.55835e-05,
-        "min": 0.00048608649999999995,
-        "max": 0.0005372535,
-        "rounds": 58510
+        "mean": 0.0004936399999999999,
+        "stddev": 2.4682e-05,
+        "min": 0.0004689579999999999,
+        "max": 0.000518322,
+        "rounds": 60645
       }
     },
     {
       "name": "sysbench_vibesql_server_vibesql_server",
       "stats": {
-        "mean": 0.00012428,
-        "stddev": 6.214e-06,
-        "min": 0.00011806599999999999,
-        "max": 0.00013049400000000001,
-        "rounds": 241132
+        "mean": 0.00014193000000000002,
+        "stddev": 7.0965000000000014e-06,
+        "min": 0.0001348335,
+        "max": 0.00014902650000000003,
+        "rounds": 211152
       }
     },
     {
       "name": "sysbench_mysql_vibesql_server",
       "stats": {
-        "mean": 0.00029529000000000003,
-        "stddev": 1.4764500000000002e-05,
-        "min": 0.0002805255,
-        "max": 0.00031005450000000004,
-        "rounds": 101548
+        "mean": 0.00027873000000000004,
+        "stddev": 1.3936500000000003e-05,
+        "min": 0.00026479350000000005,
+        "max": 0.00029266650000000003,
+        "rounds": 107580
       }
     }
   ],
   "metadata": {
     "suite": "sysbench",
-    "timestamp": "2025-12-09T11:29:01.862215",
-    "git_commit": "3fb33d43",
+    "timestamp": "2025-12-09T12:42:18.499899",
+    "git_commit": "7f5c1956",
     "table_size": "10000"
   }
 }
