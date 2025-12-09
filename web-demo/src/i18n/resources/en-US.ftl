@@ -353,6 +353,8 @@ bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when 
 bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
 bench-tpcds-disc-toward-title = Complete TPC-DS Coverage
 bench-tpcds-disc-toward = With all 99 queries passing, VibeSQL demonstrates production-ready SQL:1999 compliance for complex analytical workloads. Recent additions of INTERSECT and EXCEPT set operations completed full TPC-DS coverage, implemented as efficient hash-based operators.
+bench-tpcds-disc-sqlite-title = SQLite Comparison Note
+bench-tpcds-disc-sqlite = SQLite cannot execute 12 of the 99 TPC-DS queries (Q2, Q5, Q14, Q17, Q18, Q22, Q36, Q67, Q70, Q77, Q80, Q86) due to missing SQL:1999 OLAP features: <strong>ROLLUP/CUBE</strong> grouping sets, the <strong>GROUPING()</strong> function, and <strong>STDDEV_SAMP()</strong>. These queries are skipped in SQLite benchmarks. VibeSQL and DuckDB support all 99 queries.
 
 # TPC-C specific
 bench-tpcc-name = TPC-C

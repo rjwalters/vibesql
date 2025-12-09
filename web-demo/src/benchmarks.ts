@@ -409,6 +409,10 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         title: t('bench-tpcds-disc-toward-title'),
         content: pI18n('bench-tpcds-disc-toward'),
       },
+      {
+        title: t('bench-tpcds-disc-sqlite-title'),
+        content: pI18n('bench-tpcds-disc-sqlite'),
+      },
     ]),
   },
   tpcc: {
