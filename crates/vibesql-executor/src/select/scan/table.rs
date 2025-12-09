@@ -22,7 +22,7 @@ use crate::{
     optimizer::PredicatePlan,
     privilege_checker::PrivilegeChecker,
     schema::CombinedSchema,
-    select::columnar::{simd_filter_batch, ColumnPredicate, ColumnarBatch},
+    select::columnar::{simd_filter_batch, simd_filter_to_indices, ColumnPredicate, ColumnarBatch},
     select::cte::CteResult,
 };
 
@@ -388,7 +388,21 @@ pub(crate) fn execute_table_scan(
                     // Fall through to row-based path if SIMD fails
                 }
 
-                // For row-oriented tables, use bitmap-based filtering
+                // For row-oriented tables, use cached columnar filter with late materialization
+                // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing rows
+                if live_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                    if let Ok(filtered_rows) = filter_with_cached_columnar(
+                        database,
+                        table_name,
+                        &live_rows,
+                        &column_predicates,
+                    ) {
+                        return Ok(super::FromResult::from_rows(schema, filtered_rows));
+                    }
+                    // Fall through to row-based path if cached columnar fails
+                }
+
+                // For smaller tables or if cached columnar fails, use direct row filtering
                 let indices =
                     crate::select::columnar::apply_columnar_filter(&live_rows, &column_predicates)?;
                 let filtered_rows: Vec<_> =
@@ -467,6 +481,96 @@ fn filter_with_simd_columnar(
     // Step 4: Convert filtered batch back to rows
     // Only the rows that passed all predicates are materialized
     let filtered_rows = filtered_batch.to_rows()?;
+
+    Ok(filtered_rows)
+}
+
+/// Filter row-oriented tables using database columnar cache with late materialization
+///
+/// This function implements the lazy columnar cache optimization from Issue #4136:
+/// 1. Get cached columnar data from database.get_columnar() (LRU cache, Arc-shared)
+/// 2. Convert to ColumnarBatch for SIMD operations (zero-copy via Arc)
+/// 3. Filter using SIMD to get INDICES of passing rows (no row reconstruction)
+/// 4. Clone only the rows that passed all predicates from live_rows
+///
+/// # Late Materialization Pattern
+///
+/// The key optimization is "late materialization" - we defer cloning row data
+/// until after we know which rows pass all predicates. This avoids:
+/// - Cloning all rows upfront (which we were doing via scan_live_vec())
+/// - Reconstructing rows from columnar format after filtering
+///
+/// # Performance
+///
+/// For TPC-H Q10 with 600K lineitem rows where 150K pass:
+/// - Old: Clone 600K rows, filter, keep 150K = 750K row operations
+/// - New: Filter on columnar (cached), clone only 150K passing = 150K clones
+/// - Expected: 5x reduction in memory allocation overhead
+///
+/// # Arguments
+/// * `database` - Database containing the columnar cache
+/// * `table_name` - Name of the table (for cache lookup)
+/// * `live_rows` - Reference to live rows (already collected but not yet cloned into result)
+/// * `predicates` - Column predicates for SIMD filtering
+fn filter_with_cached_columnar(
+    database: &vibesql_storage::Database,
+    table_name: &str,
+    live_rows: &[vibesql_storage::Row],
+    predicates: &[ColumnPredicate],
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+    // Step 1: Get cached columnar data from database
+    // This uses the LRU columnar cache - if cached, this is O(1) Arc clone
+    // If not cached, it converts and caches for future queries
+    let columnar_table = database
+        .get_columnar(table_name)
+        .map_err(|e| ExecutorError::StorageError(e.to_string()))?
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    // Step 2: Convert to ColumnarBatch for SIMD operations
+    // Zero-copy: just bumps Arc reference count
+    let batch = ColumnarBatch::from_storage_columnar(&columnar_table)?;
+
+    // Verify row count matches - columnar cache should be in sync with live_rows
+    // (Cache invalidation on INSERT/UPDATE/DELETE ensures this)
+    if batch.row_count() != live_rows.len() {
+        // Cache is stale - invalidate and fall back to row-based filtering
+        // This can happen in rare race conditions between cache population and mutations
+        if crate::profiling::is_scan_debug_enabled() {
+            eprintln!(
+                "[SCAN_PATH] {} table: columnar cache stale (batch {} vs live {}), falling back",
+                table_name,
+                batch.row_count(),
+                live_rows.len()
+            );
+        }
+        return Err(ExecutorError::Other(format!(
+            "Columnar cache stale for {} (expected {} rows, got {})",
+            table_name,
+            live_rows.len(),
+            batch.row_count()
+        )));
+    }
+
+    // Step 3: Apply SIMD-accelerated filtering to get INDICES only (not rows)
+    // This is the key optimization - we don't reconstruct rows from columnar
+    let passing_indices = simd_filter_to_indices(&batch, predicates)?;
+
+    if crate::profiling::is_scan_debug_enabled() {
+        eprintln!(
+            "[SCAN_PATH] {} table: cached columnar filter {} -> {} rows ({}% selectivity)",
+            table_name,
+            live_rows.len(),
+            passing_indices.len(),
+            if live_rows.is_empty() { 0 } else { passing_indices.len() * 100 / live_rows.len() }
+        );
+    }
+
+    // Step 4: Clone only the rows that passed all predicates (late materialization)
+    // This is the payoff - we only clone passing_indices.len() rows instead of all rows
+    let filtered_rows: Vec<vibesql_storage::Row> = passing_indices
+        .into_iter()
+        .filter_map(|idx| live_rows.get(idx).cloned())
+        .collect();
 
     Ok(filtered_rows)
 }
