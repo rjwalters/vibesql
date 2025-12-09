@@ -353,11 +353,17 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 /// Returns None if MYSQL_URL is not set or connection fails
 #[cfg(feature = "mysql-comparison")]
 pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
+    use mysql::prelude::Queryable;
     use std::io::Write;
 
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
     let mut conn = pool.get_conn().ok()?;
+
+    // Disable HeatWave secondary engine to avoid errors on CUBE/ROLLUP queries
+    // Error 3889: "No secondary engine defined for at least one of the query tables"
+    let _ = conn.query_drop("SET SESSION use_secondary_engine=OFF");
+
     let mut data = TPCDSData::new(scale_factor);
 
     // Create schema (drops and recreates tables)

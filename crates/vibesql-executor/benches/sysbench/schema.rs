@@ -104,6 +104,10 @@ pub fn load_mysql(table_size: usize) -> Option<PooledConn> {
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
     let mut conn = pool.get_conn().ok()?;
+
+    // Disable HeatWave secondary engine to avoid errors on complex queries
+    let _ = conn.query_drop("SET SESSION use_secondary_engine=OFF");
+
     let mut data = SysbenchData::new(table_size);
 
     // Create schema (drops and recreates table)

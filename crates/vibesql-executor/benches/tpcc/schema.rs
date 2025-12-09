@@ -136,8 +136,16 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 /// Note: This assumes the database has already been loaded by `load_mysql`.
 #[cfg(feature = "mysql-comparison")]
 pub fn get_mysql_pool() -> Option<Pool> {
+    use mysql::{Opts, OptsBuilder};
+
     let url = std::env::var("MYSQL_URL").ok()?;
-    Pool::new(url.as_str()).ok()
+    let base_opts = Opts::from_url(&url).ok()?;
+
+    // Build options with init statement to disable HeatWave secondary engine
+    let opts = OptsBuilder::from_opts(base_opts)
+        .init(vec!["SET SESSION use_secondary_engine=OFF"]);
+
+    Pool::new(opts).ok()
 }
 
 /// Load MySQL TPC-C database
@@ -148,6 +156,10 @@ pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
     let mut conn = pool.get_conn().ok()?;
+
+    // Disable HeatWave secondary engine to avoid errors on complex queries
+    let _ = conn.query_drop("SET SESSION use_secondary_engine=OFF");
+
     let mut data = TPCCData::new(scale_factor);
 
     // Create schema (drops and recreates tables)
