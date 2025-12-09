@@ -55,7 +55,8 @@ tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.3", path = "../vibesql-parser" }
-vibesql-server = { version = "0.1.3", path = "../vibesql-server" }
+# NOTE: vibesql-server dev-dependency removed to break circular dependency.
+# Server benchmarks (sysbench_server, tpcc_server, tpch_server) are now in vibesql-server crate.
 criterion = { version = "0.8", features = ["html_reports"] }
 rand = "0.9"
 rand_chacha = "0.9"
@@ -65,7 +66,6 @@ env_logger = "0.11"
 libc = "0.2"
 sysinfo = "0.37"
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
-tokio-postgres = "0.7"
 bytes = "1.0"
 
 [features]
@@ -232,18 +232,8 @@ harness = false
 name = "arena_prepared_statement_benchmark"
 harness = false
 
-[[bench]]
-name = "sysbench_server"
-harness = false
+# NOTE: sysbench_server, tpch_server, tpcc_server benchmarks moved to vibesql-server crate
 
 [[bench]]
 name = "delete_profiling"
-harness = false
-
-[[bench]]
-name = "tpch_server"
-harness = false
-
-[[bench]]
-name = "tpcc_server"
 harness = false

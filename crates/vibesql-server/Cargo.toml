@@ -17,6 +17,10 @@ storage-memory = ["vibesql-storage/storage-memory"]
 # storage-all enables all storage backends and also enables the local feature flags
 # so that #[cfg(feature = "...")] checks work correctly in tests
 storage-all = ["vibesql-storage/storage-all", "opendal", "storage-memory"]
+# Benchmark comparison features (for server benchmarks)
+mysql-comparison = ["mysql"]
+duckdb-comparison = ["duckdb"]
+sqlite-comparison = []
 
 [lib]
 name = "vibesql_server"
@@ -90,6 +94,10 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 dashmap = "6"
 arcstr = "1.2"
 
+# Optional benchmark comparison dependencies (must be in [dependencies] for optional to work)
+duckdb = { version = "1.1", features = ["bundled"], optional = true }
+mysql = { version = "26.0", optional = true }
+
 [dev-dependencies]
 bytes = "1.0"
 criterion = { version = "0.8", features = ["async_tokio"] }
@@ -99,6 +107,9 @@ tokio-test = "0.4"
 tokio-postgres = "0.7"
 tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", features = ["stream"] }
+# Additional dependencies for server benchmarks (moved from vibesql-executor)
+rand_chacha = "0.9"
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [[bench]]
 name = "subscription_fanout"
@@ -106,4 +117,16 @@ harness = false
 
 [[bench]]
 name = "selective_bandwidth_benchmark"
+harness = false
+
+[[bench]]
+name = "sysbench_server"
+harness = false
+
+[[bench]]
+name = "tpcc_server"
+harness = false
+
+[[bench]]
+name = "tpch_server"
 harness = false
