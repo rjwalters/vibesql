@@ -446,18 +446,17 @@ impl CompiledWhereClause {
         // These are already enforced by the hash join (e.g., p_partkey = l_partkey in TPC-H Q19).
         // We return true to indicate "handled" but don't add a predicate since the join
         // already ensures the equality holds for all rows in the result.
-        if matches!(comp_op, ComparisonOp::Equal) {
-            if Self::try_extract_column(left, schema).is_some()
-                && Self::try_extract_column(right, schema).is_some()
-            {
-                if std::env::var("OR_COMPILE_DEBUG").is_ok() {
-                    eprintln!(
-                        "[COMPILED_PRED] Skipping column-to-column equality (join-satisfied): {:?} = {:?}",
-                        left, right
-                    );
-                }
-                return true;
+        if matches!(comp_op, ComparisonOp::Equal)
+            && Self::try_extract_column(left, schema).is_some()
+            && Self::try_extract_column(right, schema).is_some()
+        {
+            if std::env::var("OR_COMPILE_DEBUG").is_ok() {
+                eprintln!(
+                    "[COMPILED_PRED] Skipping column-to-column equality (join-satisfied): {:?} = {:?}",
+                    left, right
+                );
             }
+            return true;
         }
 
         // Try column on left, literal on right
