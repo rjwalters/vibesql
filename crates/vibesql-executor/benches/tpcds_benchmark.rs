@@ -61,6 +61,18 @@ use rusqlite::Connection as SqliteConn;
 /// Default scale factor for TPC-DS benchmarks
 const DEFAULT_SCALE_FACTOR: f64 = 0.001;
 
+/// Queries that use SQL features SQLite doesn't support (ROLLUP, CUBE, STDDEV_SAMP)
+#[cfg(feature = "sqlite-comparison")]
+fn sqlite_should_skip(query_name: &str) -> bool {
+    matches!(
+        query_name,
+        // ROLLUP/CUBE queries
+        "Q5" | "Q14" | "Q18" | "Q22" | "Q36" | "Q67" | "Q70" | "Q77" | "Q80" | "Q86" |
+        // STDDEV_SAMP queries
+        "Q17"
+    )
+}
+
 /// Global memory monitor
 static MEMORY_MONITOR: std::sync::OnceLock<Mutex<MemoryMonitor>> = std::sync::OnceLock::new();
 
