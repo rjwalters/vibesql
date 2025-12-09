@@ -37,6 +37,12 @@ pub struct CombinedExpressionEvaluator<'a> {
     pub(super) cse_cache: Rc<RefCell<LruCache<u64, vibesql_types::SqlValue>>>,
     /// Whether CSE is enabled (can be disabled for debugging)
     pub(super) enable_cse: bool,
+    /// Cache for subquery correlation analysis (key = subquery pointer address, value = is_correlated)
+    /// Avoids expensive AST traversal for every row evaluation (issue #4142)
+    pub(super) correlation_cache: Rc<RefCell<HashMap<usize, bool>>>,
+    /// Cache for subquery hash values (key = subquery pointer address, value = hash)
+    /// Avoids expensive Debug format + hash computation for every row evaluation (issue #4142)
+    pub(super) subquery_hash_cache: Rc<RefCell<HashMap<usize, u64>>>,
 }
 
 impl<'a> CombinedExpressionEvaluator<'a> {
@@ -57,6 +63,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -78,6 +86,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -102,6 +112,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -124,6 +136,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -147,6 +161,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -169,6 +185,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -191,6 +209,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -215,6 +235,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -238,6 +260,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -300,6 +324,9 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: self.depth + 1,
             cse_cache: self.cse_cache.clone(),
             enable_cse: self.enable_cse,
+            // Share correlation and hash caches - they're keyed by AST pointer address
+            correlation_cache: self.correlation_cache.clone(),
+            subquery_hash_cache: self.subquery_hash_cache.clone(),
         };
         f(&evaluator)
     }
@@ -309,6 +336,7 @@ impl<'a> CombinedExpressionEvaluator<'a> {
     /// Shares the subquery cache (safe because non-correlated subqueries produce
     /// the same results regardless of the current row) but creates a fresh CSE cache
     /// (necessary because CSE results depend on row values).
+    /// Also shares correlation and hash caches (keyed by AST pointer, not row-dependent).
     pub fn clone_for_new_expression(&self) -> Self {
         CombinedExpressionEvaluator {
             schema: self.schema,
@@ -323,6 +351,9 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             depth: self.depth,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: self.enable_cse,
+            // Share correlation and hash caches - they're keyed by AST pointer address
+            correlation_cache: self.correlation_cache.clone(),
+            subquery_hash_cache: self.subquery_hash_cache.clone(),
         }
     }
 
@@ -334,6 +365,47 @@ impl<'a> CombinedExpressionEvaluator<'a> {
     /// Get the database reference (if available)
     pub(crate) fn database(&self) -> Option<&'a vibesql_storage::Database> {
         self.database
+    }
+
+    /// Check if a subquery is correlated, with caching by AST pointer address.
+    ///
+    /// This avoids expensive AST traversal for every row evaluation.
+    /// The correlation status of a subquery is determined by its AST structure,
+    /// which doesn't change during query execution.
+    #[inline]
+    pub(crate) fn is_correlated_cached(&self, subquery: &vibesql_ast::SelectStmt) -> bool {
+        let ptr = subquery as *const _ as usize;
+
+        // Check cache first
+        if let Some(&is_correlated) = self.correlation_cache.borrow().get(&ptr) {
+            return is_correlated;
+        }
+
+        // Cache miss: compute and store
+        let is_correlated =
+            crate::optimizer::subquery_rewrite::correlation::is_correlated(subquery);
+        self.correlation_cache.borrow_mut().insert(ptr, is_correlated);
+        is_correlated
+    }
+
+    /// Compute subquery hash with caching by AST pointer address.
+    ///
+    /// This avoids expensive Debug format + hash computation for every row evaluation.
+    /// The hash of a subquery is determined by its AST structure,
+    /// which doesn't change during query execution.
+    #[inline]
+    pub(crate) fn compute_subquery_hash_cached(&self, subquery: &vibesql_ast::SelectStmt) -> u64 {
+        let ptr = subquery as *const _ as usize;
+
+        // Check cache first
+        if let Some(&hash) = self.subquery_hash_cache.borrow().get(&ptr) {
+            return hash;
+        }
+
+        // Cache miss: compute and store
+        let hash = super::caching::compute_subquery_hash(subquery);
+        self.subquery_hash_cache.borrow_mut().insert(ptr, hash);
+        hash
     }
 
     /// Get evaluator components for parallel execution
@@ -383,6 +455,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
             depth: 0,
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
+            correlation_cache: Rc::new(RefCell::new(HashMap::new())),
+            subquery_hash_cache: Rc::new(RefCell::new(HashMap::new())),
             enable_cse,
         }
     }

@@ -3,12 +3,21 @@
 //! This module handles evaluation of scalar subqueries that must return
 //! exactly one row and one column. Includes caching for both uncorrelated
 //! and correlated subqueries.
+//!
+//! ## Performance Optimization (Issue #4142)
+//!
+//! This module uses cached lookups for correlation analysis and subquery hashing:
+//! - `is_correlated_cached()`: Caches correlation check result per subquery AST pointer
+//! - `compute_subquery_hash_cached()`: Caches hash computation per subquery AST pointer
+//!
+//! These optimizations avoid O(n) AST traversal and Debug-format string allocation
+//! for every row when evaluating correlated scalar subqueries.
 
 use super::super::super::core::CombinedExpressionEvaluator;
 use super::correlation::extract_correlation_values;
 use super::schema_utils::{build_merged_outer_row, build_merged_outer_schema};
 use crate::errors::ExecutorError;
-use crate::evaluator::caching::{compute_correlated_cache_key, compute_subquery_hash};
+use crate::evaluator::caching::compute_correlated_cache_key;
 
 impl CombinedExpressionEvaluator<'_> {
     /// Evaluate scalar subquery - must return exactly one row and one column
@@ -61,20 +70,20 @@ impl CombinedExpressionEvaluator<'_> {
             "Subquery execution requires database reference".to_string(),
         ))?;
 
-        // Determine if subquery is correlated
-        let is_uncorrelated =
-            !crate::optimizer::subquery_rewrite::correlation::is_correlated(subquery);
+        // Determine if subquery is correlated (cached by AST pointer - issue #4142)
+        let is_uncorrelated = !self.is_correlated_cached(subquery);
 
         // Compute cache key (different strategies for correlated vs uncorrelated)
         let cache_key = if is_uncorrelated {
-            // Uncorrelated: cache key is just the subquery hash
-            compute_subquery_hash(subquery)
+            // Uncorrelated: cache key is just the subquery hash (cached by AST pointer - issue #4142)
+            self.compute_subquery_hash_cached(subquery)
         } else if !self.schema.table_schemas.is_empty() {
             // Correlated: cache key includes correlation column values
             // Only attempt if we have an outer schema to reference
             if let Some(correlation_values) = extract_correlation_values(subquery, row, self.schema)
             {
-                let subquery_hash = compute_subquery_hash(subquery);
+                // Hash is cached by AST pointer (issue #4142)
+                let subquery_hash = self.compute_subquery_hash_cached(subquery);
                 compute_correlated_cache_key(subquery_hash, &correlation_values)
             } else {
                 // Failed to extract correlation values - skip caching
