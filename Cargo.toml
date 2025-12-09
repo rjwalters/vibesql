@@ -9,11 +9,12 @@ description = "SQL database engine with SQL:1999 compliance"
 keywords = ["sql", "database", "query", "engine"]
 categories = ["database"]
 include = [
-    "src/**/*",
-    "Cargo.toml",
-    "README.md",
-    "CHANGELOG.md",
-    "LICENSE-*",
+    "/src/**/*",
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
 ]
 
 [features]
