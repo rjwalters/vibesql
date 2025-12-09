@@ -343,6 +343,43 @@ pub(super) fn extract_where_equijoins_with_schema(
                 extract_recursive(left, tables, column_to_table, equijoins);
                 extract_recursive(right, tables, column_to_table, equijoins);
             }
+            // Flattened AND (Conjunction): recurse into all children
+            Expression::Conjunction(children) => {
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[JOIN_REORDER] Processing Conjunction with {} children", children.len());
+                }
+                for child in children {
+                    extract_recursive(child, tables, column_to_table, equijoins);
+                }
+            }
+            // Flattened OR (Disjunction): extract common equijoins from all branches
+            Expression::Disjunction(children) => {
+                if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                    eprintln!("[JOIN_REORDER] Processing Disjunction with {} branches", children.len());
+                }
+
+                // Extract equijoins from each branch
+                let mut branch_equijoins: Vec<Vec<Expression>> = Vec::new();
+                for branch in children {
+                    let mut branch_eqs = Vec::new();
+                    extract_recursive(branch, tables, column_to_table, &mut branch_eqs);
+                    branch_equijoins.push(branch_eqs);
+                }
+
+                // Find equijoins that appear in ALL branches
+                if !branch_equijoins.is_empty() {
+                    let common_eqs = find_common_equijoins(&branch_equijoins);
+
+                    if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
+                        eprintln!(
+                            "[JOIN_REORDER] Found {} common equijoins across all Disjunction branches",
+                            common_eqs.len()
+                        );
+                    }
+
+                    equijoins.extend(common_eqs);
+                }
+            }
             // Binary OR: extract common equijoins from all branches
             Expression::BinaryOp { op: BinaryOperator::Or, .. } => {
                 if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
