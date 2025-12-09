@@ -35,7 +35,7 @@ fn make_value(i: usize) -> SqlValue {
         0 => SqlValue::Integer(i as i64 * 1000),
         1 => SqlValue::Double(i as f64 * 2.5),
         2 => SqlValue::Varchar(arcstr::ArcStr::from(format!("value_{}", i))),
-        3 => SqlValue::Boolean(i % 2 == 0),
+        3 => SqlValue::Boolean(i.is_multiple_of(2)),
         4 => SqlValue::Null,
         _ => unreachable!(),
     }

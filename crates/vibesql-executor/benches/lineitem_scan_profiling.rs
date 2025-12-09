@@ -21,7 +21,7 @@
 mod harness;
 mod tpch;
 
-use harness::{print_group_header, print_summary_table, BenchResult, Harness};
+use harness::{print_group_header, BenchResult, Harness};
 use std::hint::black_box;
 use std::time::Instant;
 use vibesql_executor::SelectExecutor;
