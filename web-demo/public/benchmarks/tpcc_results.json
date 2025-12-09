@@ -3,60 +3,60 @@
     {
       "name": "tpcc_mixed_vibesql",
       "stats": {
-        "mean": 4.3e-05,
+        "mean": 4.7e-05,
         "stddev": 0,
-        "min": 3.8e-05,
-        "max": 4.7e-05,
-        "rounds": 1403851,
-        "tps": 23397.52,
-        "transactions": 1403851,
+        "min": 4.3e-05,
+        "max": 5.2e-05,
+        "rounds": 1265449,
+        "tps": 21090.82,
+        "transactions": 1265449,
         "duration_ms": 60000
       }
     },
     {
       "name": "tpcc_mixed_sqlite",
       "stats": {
-        "mean": 0.00022,
+        "mean": 0.000342,
         "stddev": 0,
-        "min": 0.000198,
-        "max": 0.000242,
-        "rounds": 272412,
-        "tps": 4540.2,
-        "transactions": 272412,
-        "duration_ms": 60000
+        "min": 0.000308,
+        "max": 0.000376,
+        "rounds": 175477,
+        "tps": 2924.52,
+        "transactions": 175477,
+        "duration_ms": 60002
       }
     },
     {
       "name": "tpcc_mixed_duckdb",
       "stats": {
-        "mean": 0.002599,
+        "mean": 0.00341,
         "stddev": 0,
-        "min": 0.002339,
-        "max": 0.002859,
-        "rounds": 23086,
-        "tps": 384.76,
-        "transactions": 23086,
-        "duration_ms": 60001
+        "min": 0.003069,
+        "max": 0.003751,
+        "rounds": 17598,
+        "tps": 293.29,
+        "transactions": 17598,
+        "duration_ms": 60002
       }
     },
     {
       "name": "tpcc_mixed_mysql",
       "stats": {
-        "mean": 0.0,
+        "mean": 0.001812,
         "stddev": 0,
-        "min": 0.0,
-        "max": 0.0,
-        "rounds": 939667166,
-        "tps": 15661119.0,
-        "transactions": 939667166,
-        "duration_ms": 60000
+        "min": 0.001631,
+        "max": 0.001993,
+        "rounds": 33116,
+        "tps": 551.91,
+        "transactions": 33116,
+        "duration_ms": 60003
       }
     }
   ],
-  "datetime": "2025-12-08T03:27:54.332255",
+  "datetime": "2025-12-08T21:11:12.602208",
   "machine_info": {
     "suite": "tpcc",
-    "git_commit": "151801ee",
+    "git_commit": "96566d91",
     "scale_factor": "1.0"
   }
 }
