@@ -289,9 +289,11 @@ where
             // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'`
             // to the table scan, significantly reducing rows before joins
             // Note: LIMIT pushdown is None here because this is for join intermediate results
+            // Note: column_aliases is None - join reordering doesn't preserve column aliases
             execute_table_scan(
                 &table_ref.name,
                 table_ref.alias.as_ref(),
+                None, // column_aliases not supported in join reordering
                 cte_results,
                 database,
                 table_filter.as_ref(),
@@ -915,6 +917,7 @@ where
     let target_result = execute_table_scan(
         &target_ref.name,
         target_ref.alias.as_ref(),
+        None, // column_aliases not supported in join reordering
         cte_results,
         database,
         None, // Don't push WHERE predicates yet - we'll handle them in join reordering
@@ -1018,6 +1021,7 @@ where
         let table_result = execute_table_scan(
             &table_ref.name,
             table_ref.alias.as_ref(),
+            None, // column_aliases not supported in join reordering
             cte_results,
             database,
             None,

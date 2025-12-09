@@ -33,11 +33,49 @@ use crate::select::parallel::parallel_scan_materialize;
 /// Below this threshold, row-by-row filtering is faster due to conversion overhead
 const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 
+/// Apply SQL:1999 E051-09 column aliases to a table schema
+///
+/// When `column_aliases` is Some, renames the columns in the schema to match
+/// the provided aliases. Returns an error if the alias count doesn't match
+/// the column count.
+///
+/// Example: `FROM t AS mytemp (x, y)` renames columns A, B to X, Y
+fn apply_column_aliases(
+    schema: vibesql_catalog::TableSchema,
+    column_aliases: Option<&Vec<String>>,
+) -> Result<vibesql_catalog::TableSchema, ExecutorError> {
+    if let Some(aliases) = column_aliases {
+        if aliases.len() != schema.columns.len() {
+            return Err(ExecutorError::ColumnCountMismatch {
+                expected: schema.columns.len(),
+                provided: aliases.len(),
+            });
+        }
+        // Create new columns with renamed names
+        // We must create a new TableSchema to rebuild the column_index_cache
+        let renamed_columns: Vec<vibesql_catalog::ColumnSchema> = schema
+            .columns
+            .iter()
+            .zip(aliases.iter())
+            .map(|(col, alias)| vibesql_catalog::ColumnSchema {
+                name: alias.clone(),
+                data_type: col.data_type.clone(),
+                nullable: col.nullable,
+                default_value: col.default_value.clone(),
+            })
+            .collect();
+        // TableSchema::new() rebuilds the column_index_cache
+        return Ok(vibesql_catalog::TableSchema::new(schema.name.clone(), renamed_columns));
+    }
+    Ok(schema)
+}
+
 /// Execute a table scan (handles CTEs, views, and regular tables)
 ///
 /// # Arguments
 /// * `table_name` - Name of the table to scan
 /// * `alias` - Optional table alias
+/// * `column_aliases` - SQL:1999 E051-09: Optional column renaming (e.g., `FROM t AS a (x, y)`)
 /// * `cte_results` - CTE context for the query
 /// * `database` - Database reference
 /// * `where_clause` - Optional WHERE clause for filtering
@@ -48,6 +86,7 @@ const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 pub(crate) fn execute_table_scan(
     table_name: &str,
     alias: Option<&String>,
+    column_aliases: Option<&Vec<String>>,
     cte_results: &HashMap<String, CteResult>,
     database: &vibesql_storage::Database,
     where_clause: Option<&vibesql_ast::Expression>,
@@ -68,7 +107,9 @@ pub(crate) fn execute_table_scan(
     if let Some((cte_schema, cte_rows)) = cte_result {
         // Use CTE result
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-        let schema = CombinedSchema::from_table(effective_name.clone(), cte_schema.clone());
+        // SQL:1999 E051-09: Apply column aliases if provided
+        let cte_table_schema = apply_column_aliases(cte_schema.clone(), column_aliases)?;
+        let schema = CombinedSchema::from_table(effective_name.clone(), cte_table_schema);
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
         // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
@@ -110,6 +151,8 @@ pub(crate) fn execute_table_scan(
             .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        // SQL:1999 E051-09: Apply column aliases if provided
+        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
         let schema = CombinedSchema::from_table(effective_name, table_schema);
 
         return Ok(super::FromResult::from_rows(schema, result.rows));
@@ -169,6 +212,8 @@ pub(crate) fn execute_table_scan(
 
         let view_schema = vibesql_catalog::TableSchema::new(table_name.to_string(), columns);
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        // SQL:1999 E051-09: Apply column aliases if provided
+        let view_schema = apply_column_aliases(view_schema, column_aliases)?;
         let schema = CombinedSchema::from_table(effective_name.clone(), view_schema);
         let mut rows = select_result.rows;
 
@@ -204,7 +249,7 @@ pub(crate) fn execute_table_scan(
     // This handles queries like: SELECT ... FROM stock WHERE s_w_id = 1 AND s_i_id = 123
     // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
     if let Some(result) =
-        try_primary_key_lookup(table_name, alias, where_clause, database, cte_results)?
+        try_primary_key_lookup(table_name, alias, column_aliases, where_clause, database, cte_results)?
     {
         return Ok(result);
     }
@@ -272,7 +317,9 @@ pub(crate) fn execute_table_scan(
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-    let schema = CombinedSchema::from_table(effective_name.clone(), table.schema.clone());
+    // SQL:1999 E051-09: Apply column aliases if provided (e.g., FROM t AS a (x, y))
+    let table_schema = apply_column_aliases(table.schema.clone(), column_aliases)?;
+    let schema = CombinedSchema::from_table(effective_name.clone(), table_schema);
 
     // Get live rows from table (excludes deleted rows from deletion bitmap)
     // Issue #3790: Must use scan_live_vec() instead of scan() to filter deleted rows
@@ -439,10 +486,12 @@ fn filter_with_simd_columnar(
 /// - `Err(...)` - An error occurred
 ///
 /// # Arguments
+/// * `column_aliases` - SQL:1999 E051-09: Optional column renaming (e.g., `FROM t AS a (x, y)`)
 /// * `cte_results` - CTE context for IN subqueries that may reference CTEs (Issue #3562)
 fn try_primary_key_lookup(
     table_name: &str,
     alias: Option<&String>,
+    column_aliases: Option<&Vec<String>>,
     where_clause: Option<&vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
     cte_results: &HashMap<String, CteResult>,
@@ -483,7 +532,9 @@ fn try_primary_key_lookup(
 
     // Build schema for result
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
-    let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+    // SQL:1999 E051-09: Apply column aliases if provided
+    let table_schema = apply_column_aliases(table.schema.clone(), column_aliases)?;
+    let schema = CombinedSchema::from_table(effective_name, table_schema);
 
     // Perform O(1) lookup in primary key index
     let rows = match pk_index.get(&pk_values) {

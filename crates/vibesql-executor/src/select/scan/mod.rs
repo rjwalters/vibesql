@@ -127,9 +127,10 @@ where
 
     // Fall back to standard execution (recursive left-deep joins)
     match from {
-        vibesql_ast::FromClause::Table { name, alias, .. } => table::execute_table_scan(
+        vibesql_ast::FromClause::Table { name, alias, column_aliases } => table::execute_table_scan(
             name,
             alias.as_ref(),
+            column_aliases.as_ref(),
             cte_results,
             database,
             where_clause,
