@@ -1281,6 +1281,14 @@ fn print_parallel_results(
 }
 
 fn print_comparison_summary(all_results: &[(&str, Vec<WorkloadResults>)], client_count: usize) {
+    // Check if comparison summary should be suppressed (for batch runs)
+    if std::env::var("SUPPRESS_COMPARISON_SUMMARY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+
     if client_count > 1 {
         eprintln!("\n\n=== Comparison Summary ({} clients) ===", client_count);
     } else {

@@ -849,6 +849,14 @@ fn print_results(results: &TPCCServerResults, db_name: &str, transaction_type: T
 }
 
 fn print_comparison(vibesql_results: &TPCCServerResults, mysql_results: &TPCCServerResults) {
+    // Check if comparison summary should be suppressed (for batch runs)
+    if std::env::var("SUPPRESS_COMPARISON_SUMMARY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+
     eprintln!("\n=== Comparison Summary ===");
     eprintln!(
         "{:<15} {:>15} {:>15} {:>12}",

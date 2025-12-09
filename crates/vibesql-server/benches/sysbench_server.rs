@@ -1199,6 +1199,14 @@ fn print_results(results: &[WorkloadResults], db_name: &str) {
 }
 
 fn print_comparison_summary(all_results: &[(&str, Vec<WorkloadResults>)]) {
+    // Check if comparison summary should be suppressed (for batch runs)
+    if std::env::var("SUPPRESS_COMPARISON_SUMMARY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+
     eprintln!("\n\n=== Comparison Summary ===");
 
     // Get all workload names

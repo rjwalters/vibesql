@@ -1153,6 +1153,10 @@ def run_all(config: BenchConfig) -> int:
     print("Running ALL BENCHMARKS")
     print("=" * 60)
 
+    # Suppress intermediate comparison summaries when running all benchmarks
+    # The final summary and export will provide complete comparison data
+    os.environ["SUPPRESS_COMPARISON_SUMMARY"] = "1"
+
     results: Dict[str, BenchmarkResult] = {}
     start_time = datetime.now()
 

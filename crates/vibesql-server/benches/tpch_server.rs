@@ -296,6 +296,14 @@ fn print_results(results: &[QueryResult], db_name: &str) {
 }
 
 fn print_comparison(vibesql_results: &[QueryResult], mysql_results: &[QueryResult]) {
+    // Check if comparison summary should be suppressed (for batch runs)
+    if std::env::var("SUPPRESS_COMPARISON_SUMMARY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+
     eprintln!("\n=== Comparison Summary ===");
     eprintln!(
         "{:<8} {:>15} {:>15} {:>12}",

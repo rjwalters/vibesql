@@ -1588,8 +1588,12 @@ fn main() {
     #[cfg(not(feature = "mysql-comparison"))]
     let mysql_results: Option<TPCCBenchmarkResults> = None;
 
-    // Summary comparison
-    {
+    // Summary comparison (skip if suppressed for batch runs)
+    let suppress_summary = std::env::var("SUPPRESS_COMPARISON_SUMMARY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if !suppress_summary {
         eprintln!("\n\n=== Comparison Summary ===");
         eprintln!("Transaction type: {}", transaction_type.name());
         eprintln!("{:<12} {:>12} {:>12} {:>10}", "Database", "TPS", "Avg (us)", "Clients");

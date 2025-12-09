@@ -16,6 +16,7 @@
 //!   WARMUP_ITERATIONS - Number of warmup runs (default: 3)
 //!   BENCHMARK_ITERATIONS - Number of timed runs (default: 10)
 //!   BENCHMARK_TIMEOUT_SECS - Timeout per query (default: 30)
+//!   SUPPRESS_COMPARISON_SUMMARY - Set to "1" or "true" to suppress comparison summary output
 
 // Allow unused functions - this is a shared utility module and not all
 // benchmarks use every function. These will be used as more benchmarks
@@ -320,9 +321,17 @@ pub fn print_summary_table(engine_name: &str, results: &[BenchStats]) {
     }
 }
 
+/// Check if comparison summary output should be suppressed.
+/// Returns true if SUPPRESS_COMPARISON_SUMMARY is set to "1" or "true".
+pub fn suppress_comparison_summary() -> bool {
+    env::var("SUPPRESS_COMPARISON_SUMMARY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 /// Print a comparison table across multiple engines
 pub fn print_comparison_table(results: &[(&str, Vec<BenchStats>)]) {
-    if results.is_empty() {
+    if results.is_empty() || suppress_comparison_summary() {
         return;
     }
 
