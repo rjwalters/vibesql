@@ -3,19 +3,248 @@
     {
       "name": "tpch_server_q1_vibesql_server",
       "stats": {
-        "mean": 0,
-        "stddev": 0,
-        "min": 0,
-        "max": 0,
-        "rounds": 0
+        "mean": 0.11287723599999999,
+        "stddev": 0.0013839738528637928,
+        "min": 0.111120166,
+        "max": 0.1145025,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q3_vibesql_server",
+      "stats": {
+        "mean": 0.35634740300000006,
+        "stddev": 0.007063693654667124,
+        "min": 0.346373375,
+        "max": 0.361816834,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q4_vibesql_server",
+      "stats": {
+        "mean": 6.338513139,
+        "stddev": 0.03856691100911074,
+        "min": 6.288883833,
+        "max": 6.382918834,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q5_vibesql_server",
+      "stats": {
+        "mean": 0.07822523633333334,
+        "stddev": 0.0015109332576392026,
+        "min": 0.07650825,
+        "max": 0.08018525,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q6_vibesql_server",
+      "stats": {
+        "mean": 0.048155472000000005,
+        "stddev": 0.00010864918610831896,
+        "min": 0.048078458,
+        "max": 0.048309125,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q7_vibesql_server",
+      "stats": {
+        "mean": 0.043681028,
+        "stddev": 0.0006482875641395572,
+        "min": 0.043205334,
+        "max": 0.044597625,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q9_vibesql_server",
+      "stats": {
+        "mean": 0.04835243066666666,
+        "stddev": 0.0005773136422687049,
+        "min": 0.047536458,
+        "max": 0.048784459,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q10_vibesql_server",
+      "stats": {
+        "mean": 0.33841736099999997,
+        "stddev": 0.003933399903740277,
+        "min": 0.333643625,
+        "max": 0.343277291,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q11_vibesql_server",
+      "stats": {
+        "mean": 0.08631108366666666,
+        "stddev": 0.0006843208504911237,
+        "min": 0.085537083,
+        "max": 0.087201209,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q12_vibesql_server",
+      "stats": {
+        "mean": 0.31346838899999996,
+        "stddev": 0.0018160632853743207,
+        "min": 0.311740083,
+        "max": 0.315977792,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q14_vibesql_server",
+      "stats": {
+        "mean": 0.30912763900000007,
+        "stddev": 0.0021034293234244955,
+        "min": 0.30755375,
+        "max": 0.312100625,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q19_vibesql_server",
+      "stats": {
+        "mean": 0.31026261099999997,
+        "stddev": 0.0010581534973688922,
+        "min": 0.309006625,
+        "max": 0.311595166,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q1_mysql",
+      "stats": {
+        "mean": 0.052293111,
+        "stddev": 0.0007538434210661175,
+        "min": 0.051586333,
+        "max": 0.053337708,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q3_mysql",
+      "stats": {
+        "mean": 0.019710889000000002,
+        "stddev": 0.00019820130924054808,
+        "min": 0.019434042,
+        "max": 0.019887292,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q4_mysql",
+      "stats": {
+        "mean": 0.012196832666666666,
+        "stddev": 0.00012731593467520916,
+        "min": 0.012087666,
+        "max": 0.012375416,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q5_mysql",
+      "stats": {
+        "mean": 0.05160041666666666,
+        "stddev": 4.1870998979669613e-05,
+        "min": 0.0515445,
+        "max": 0.05164525,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q6_mysql",
+      "stats": {
+        "mean": 0.008487347333333332,
+        "stddev": 4.7433039970983254e-05,
+        "min": 0.008431,
+        "max": 0.008547042,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q7_mysql",
+      "stats": {
+        "mean": 0.024266444666666668,
+        "stddev": 0.0001221682871024872,
+        "min": 0.024142,
+        "max": 0.024432459,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q9_mysql",
+      "stats": {
+        "mean": 0.08449058333333333,
+        "stddev": 0.00016214557965057557,
+        "min": 0.084262167,
+        "max": 0.084622292,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q10_mysql",
+      "stats": {
+        "mean": 0.01720666666666667,
+        "stddev": 1.2843383519236943e-05,
+        "min": 0.017193208,
+        "max": 0.017223959,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q11_mysql",
+      "stats": {
+        "mean": 0.009261597333333333,
+        "stddev": 0.00018895212766612554,
+        "min": 0.009050375,
+        "max": 0.009508959,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q12_mysql",
+      "stats": {
+        "mean": 0.012150750000000002,
+        "stddev": 9.744880113509126e-05,
+        "min": 0.01207975,
+        "max": 0.012288542,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q14_mysql",
+      "stats": {
+        "mean": 0.008697528,
+        "stddev": 0.00013406002688596836,
+        "min": 0.008574292,
+        "max": 0.008883917,
+        "rounds": 3
+      }
+    },
+    {
+      "name": "tpch_server_q19_mysql",
+      "stats": {
+        "mean": 0.025199514000000003,
+        "stddev": 0.0001277317670667729,
+        "min": 0.025097958,
+        "max": 0.025379667,
+        "rounds": 3
       }
     }
   ],
   "metadata": {
     "suite": "tpch-server",
     "scale_factor": 0.01,
-    "timestamp": "2025-12-08T00:00:00Z",
-    "git_commit": "placeholder",
-    "note": "Placeholder - run ./scripts/bench --test=tpch-server to populate with real data"
+    "timestamp": "2025-12-09T11:22:02.600081",
+    "git_commit": "3fb33d43"
   }
 }
