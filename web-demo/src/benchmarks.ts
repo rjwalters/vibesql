@@ -18,7 +18,7 @@ declare const Chart: any;
 /**
  * Benchmark suite types
  */
-type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbench-server' | 'tpch-server' | 'footprint-embedded' | 'footprint-server';
+type BenchmarkSuite = 'tpch' | 'tpcds' | 'tpcc' | 'sysbench-embedded' | 'sysbench-server' | 'tpch-server' | 'tpcc-server' | 'footprint-embedded' | 'footprint-server';
 
 // ============================================================================
 // HTML Template Helpers
@@ -640,6 +640,61 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
           { labelKey: 'bench-bullet-prepared-stmts', descKey: 'bench-tpch-srv-disc-prepared' },
           { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-tpch-srv-disc-pooling' },
           { labelKey: 'bench-bullet-larger-scale', descKey: 'bench-tpch-srv-disc-scale' },
+        ]),
+      },
+    ]),
+  },
+  'tpcc-server': {
+    id: 'tpcc-server',
+    name: 'TPC-C (Server)',
+    nameKey: 'bench-tpcc-server-name',
+    dataFile: 'tpcc_server_results.json',
+    opsLabel: 'TPC-C transactions',
+    opsLabelKey: 'bench-tpcc-server-ops-label',
+    descriptions: {
+      'mixed': 'Mixed Workload - Standard TPC-C transaction mix (45% New-Order, 43% Payment, 4% Order-Status, 4% Delivery, 4% Stock-Level)',
+      'new_order': 'New Order - Complex transaction with inventory checks and order creation',
+      'payment': 'Payment - Update customer balance and warehouse/district totals',
+      'order_status': 'Order Status - Read-only query for customer order history',
+      'delivery': 'Delivery - Batch processing of pending orders',
+      'stock_level': 'Stock Level - Count items below threshold in recent orders',
+    },
+    descriptionKeys: {
+      'mixed': 'bench-tpcc-mixed',
+      'new_order': 'bench-tpcc-new-order',
+      'payment': 'bench-tpcc-payment',
+      'order_status': 'bench-tpcc-order-status',
+      'delivery': 'bench-tpcc-delivery',
+      'stock_level': 'bench-tpcc-stock-level',
+    },
+    getMethodology: () => methodology(
+      t('bench-tpcc-server-title'),
+      t('bench-tpcc-server-description'),
+      [
+        li(t('bench-workload'), 'OLTP (Online Transaction Processing)'),
+        li(t('bench-transaction-mix'), '45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level'),
+        li(t('bench-warehouses'), '1 warehouse (scaled for client-server testing)'),
+        li(t('bench-databases-tested'), 'VibeSQL Server (PostgreSQL protocol), MySQL'),
+        li(t('bench-execution-mode'), 'Client-server mode with network overhead'),
+        li(t('bench-protocol'), 'VibeSQL: PostgreSQL wire protocol, MySQL: native'),
+      ],
+      [t('bench-tpcc-server-note-intro'), t('bench-tpcc-server-note-results')]
+    ),
+    getDiscussion: () => discussion([
+      {
+        title: t('bench-tpcc-srv-disc-protocol-title'),
+        content: pI18n('bench-tpcc-srv-disc-protocol'),
+      },
+      {
+        title: t('bench-tpcc-srv-disc-comparison-title'),
+        content: pI18n('bench-tpcc-srv-disc-comparison'),
+      },
+      {
+        title: t('bench-tpcc-srv-disc-roadmap-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-bullet-prepared-stmts', descKey: 'bench-tpcc-srv-disc-prepared' },
+          { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-tpcc-srv-disc-pooling' },
+          { labelKey: 'bench-bullet-parallel-clients', descKey: 'bench-tpcc-srv-disc-parallel' },
         ]),
       },
     ]),
