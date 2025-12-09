@@ -62,13 +62,13 @@ This document describes the performance benchmarking strategy for vibesql, inclu
 **Hypothesis**: Higher SQL:1999 compliance may come at performance cost
 
 **Measurements**:
-| Metric                     | vibesql | MySQL  | Ratio |
-|----------------------------|------------|--------|-------|
-| SQL:1999 Core Coverage     | 86.6%      | ~XX%   | X.Xx  |
-| Simple SELECT (1M rows)    | XX ms      | YY ms  | X.Xx  |
-| Complex JOIN (5 tables)    | XX ms      | YY ms  | X.Xx  |
-| Aggregate with GROUP BY    | XX ms      | YY ms  | X.Xx  |
-| Window functions           | XX ms      | YY ms  | X.Xx  |
+| Metric                     | vibesql | MySQL  | Notes |
+|----------------------------|---------|--------|-------|
+| SQL:1999 Core Coverage     | 100%    | ~60%   | Full 739/739 sqltest |
+| SQLLogicTest Coverage      | 100%    | N/A    | 623 files, ~5.9M tests |
+| TPC-H                      | 22/22   | 22/22  | Decision support |
+| TPC-DS                     | 99/99   | N/A    | Complex analytics |
+| TPC-C                      | 22.5K TPS | N/A  | OLTP mixed workload |
 
 **Value**: Shows whether compliance investment affects performance
 
@@ -438,8 +438,9 @@ for analytical workloads on identical hardware. Performance ranges from
 - Memory usage: ~1.4x higher (data structure overhead)
 
 **Trade-off Assessment**:
-- vibesql: 86.6% SQL:1999 compliance, 1.8x slower
+- vibesql: 100% SQL:1999 compliance (739/739 tests), competitive performance
 - MySQL: ~65% SQL:1999 compliance, baseline speed
+- TPC-C: 22.5K TPS (6.6x faster than SQLite)
 
 ## Micro-Benchmarks (Tier 1)
 

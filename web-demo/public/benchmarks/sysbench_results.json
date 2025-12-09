@@ -3,31 +3,31 @@
     {
       "name": "sysbench_point_select_vibesql",
       "stats": {
-        "mean": 0,
+        "mean": 4e-08,
         "stddev": 0,
-        "min": 0.0,
-        "max": 0.0,
-        "rounds": 39634516
+        "min": 3.6000000000000005e-08,
+        "max": 4.4000000000000004e-08,
+        "rounds": 37056218
       }
     },
     {
       "name": "sysbench_insert_vibesql",
       "stats": {
-        "mean": 5.22e-06,
+        "mean": 5.2e-06,
         "stddev": 0,
-        "min": 4.698e-06,
-        "max": 5.742e-06,
-        "rounds": 4740412
+        "min": 4.68e-06,
+        "max": 5.72e-06,
+        "rounds": 4734022
       }
     },
     {
       "name": "sysbench_update_index_vibesql",
       "stats": {
-        "mean": 4.09e-06,
+        "mean": 3.99e-06,
         "stddev": 0,
-        "min": 3.681e-06,
-        "max": 4.4990000000000005e-06,
-        "rounds": 6521748
+        "min": 3.591e-06,
+        "max": 4.389000000000001e-06,
+        "rounds": 6833152
       }
     },
     {
@@ -37,134 +37,134 @@
         "stddev": 0,
         "min": 9.090000000000001e-07,
         "max": 1.1110000000000002e-06,
-        "rounds": 15462674
+        "rounds": 15861353
       }
     },
     {
       "name": "sysbench_delete_vibesql",
       "stats": {
-        "mean": 2.44e-06,
+        "mean": 2.47e-06,
         "stddev": 0,
-        "min": 2.196e-06,
-        "max": 2.684e-06,
+        "min": 2.223e-06,
+        "max": 2.7170000000000004e-06,
         "rounds": 9900
       }
     },
     {
       "name": "sysbench_range_queries_vibesql",
       "stats": {
-        "mean": 2.201e-05,
+        "mean": 2.213e-05,
         "stddev": 0,
-        "min": 1.9809000000000003e-05,
-        "max": 2.4211000000000002e-05,
-        "rounds": 1354652
+        "min": 1.9917e-05,
+        "max": 2.4343e-05,
+        "rounds": 1347848
       }
     },
     {
       "name": "sysbench_point_select_sqlite",
       "stats": {
-        "mean": 0,
+        "mean": 1e-08,
         "stddev": 0,
-        "min": 0.0,
-        "max": 0.0,
-        "rounds": 73783091
+        "min": 9.000000000000001e-09,
+        "max": 1.1000000000000001e-08,
+        "rounds": 67304656
       }
     },
     {
       "name": "sysbench_insert_sqlite",
       "stats": {
-        "mean": 9.96e-06,
+        "mean": 1.729e-05,
         "stddev": 0,
-        "min": 8.964e-06,
-        "max": 1.0956e-05,
-        "rounds": 2679634
+        "min": 1.5561e-05,
+        "max": 1.9019e-05,
+        "rounds": 1627590
       }
     },
     {
       "name": "sysbench_update_index_sqlite",
       "stats": {
-        "mean": 1.01e-06,
+        "mean": 1.05e-06,
         "stddev": 0,
-        "min": 9.090000000000001e-07,
-        "max": 1.1110000000000002e-06,
-        "rounds": 17833663
+        "min": 9.45e-07,
+        "max": 1.155e-06,
+        "rounds": 17716607
       }
     },
     {
       "name": "sysbench_update_non_index_sqlite",
       "stats": {
-        "mean": 2.9e-07,
+        "mean": 2.4e-07,
         "stddev": 0,
-        "min": 2.6099999999999997e-07,
-        "max": 3.19e-07,
-        "rounds": 21144537
+        "min": 2.1599999999999998e-07,
+        "max": 2.64e-07,
+        "rounds": 21699395
       }
     },
     {
       "name": "sysbench_delete_sqlite",
       "stats": {
-        "mean": 1.12e-06,
+        "mean": 1.13e-06,
         "stddev": 0,
-        "min": 1.0080000000000001e-06,
-        "max": 1.2320000000000002e-06,
+        "min": 1.017e-06,
+        "max": 1.243e-06,
         "rounds": 9900
       }
     },
     {
       "name": "sysbench_range_queries_sqlite",
       "stats": {
-        "mean": 8.84e-06,
+        "mean": 8.81e-06,
         "stddev": 0,
-        "min": 7.956e-06,
-        "max": 9.724e-06,
-        "rounds": 3343940
+        "min": 7.929e-06,
+        "max": 9.691000000000001e-06,
+        "rounds": 3352940
       }
     },
     {
       "name": "sysbench_point_select_vibesql_server",
       "stats": {
-        "mean": 4.465e-05,
-        "stddev": 2.2325000000000002e-06,
-        "min": 4.24175e-05,
-        "max": 4.6882500000000004e-05,
-        "rounds": 663791
+        "mean": 4.725e-05,
+        "stddev": 2.3625000000000003e-06,
+        "min": 4.48875e-05,
+        "max": 4.9612500000000007e-05,
+        "rounds": 627628
       }
     },
     {
       "name": "sysbench_insert_vibesql_server",
       "stats": {
-        "mean": 5.3880000000000006e-05,
-        "stddev": 2.6940000000000004e-06,
-        "min": 5.1186e-05,
-        "max": 5.657400000000001e-05,
-        "rounds": 542279
+        "mean": 5.475e-05,
+        "stddev": 2.7375000000000005e-06,
+        "min": 5.20125e-05,
+        "max": 5.748750000000001e-05,
+        "rounds": 534327
       }
     },
     {
       "name": "sysbench_update_index_vibesql_server",
       "stats": {
-        "mean": 5.31e-05,
-        "stddev": 2.6550000000000004e-06,
-        "min": 5.0445e-05,
-        "max": 5.5755000000000004e-05,
-        "rounds": 559182
+        "mean": 5.449e-05,
+        "stddev": 2.7245000000000003e-06,
+        "min": 5.17655e-05,
+        "max": 5.7214500000000006e-05,
+        "rounds": 545070
       }
     },
     {
       "name": "sysbench_range_queries_vibesql_server",
       "stats": {
-        "mean": 0.00012335,
-        "stddev": 6.1675e-06,
-        "min": 0.00011718249999999998,
-        "max": 0.0001295175,
-        "rounds": 242948
+        "mean": 0.00012634,
+        "stddev": 6.317000000000001e-06,
+        "min": 0.00012002300000000001,
+        "max": 0.00013265700000000003,
+        "rounds": 237184
       }
     }
   ],
   "metadata": {
     "suite": "sysbench",
-    "timestamp": "2025-12-08T22:25:35.852536",
-    "git_commit": "ad04e0e4",
+    "timestamp": "2025-12-08T22:56:20.354308",
+    "git_commit": "d07e3502",
     "table_size": "10000"
   }
 }

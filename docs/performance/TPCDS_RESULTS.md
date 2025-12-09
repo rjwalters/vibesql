@@ -19,13 +19,13 @@ This document captures the TPC-DS benchmark execution results for VibeSQL.
 
 | Date | Passing | Rate | Notes |
 |------|---------|------|-------|
-| 2024-11-27 | 73 | 73.7% | Initial baseline |
-| 2024-12-02 | 88 | 88.9% | +15 queries, parser improvements |
-| 2024-12-05 | 99 | 100% | Full TPC-DS support achieved |
+| 2025-11-27 | 73 | 73.7% | Initial baseline |
+| 2025-12-02 | 88 | 88.9% | +15 queries, parser improvements |
+| 2025-12-05 | 99 | 100% | Full TPC-DS support achieved |
 
 ## Execution Environment
 
-- Date: 2024-12-05
+- Date: 2025-12-05
 - Platform: macOS (Darwin)
 - Rust: stable
 

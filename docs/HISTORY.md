@@ -51,3 +51,20 @@ A timeline of major milestones in the development of VibeSQL.
 - Lazy columnar cache with automatic invalidation on mutations
 - Cost-based join reordering for multi-way joins
 - Subquery-to-join transformation for correlated subqueries
+
+### December 2025: TPC-DS Full Coverage & Server Enhancements
+
+- Achieved 100% TPC-DS coverage (99/99 queries)
+- Fixed GROUPING() function for ROLLUP/CUBE queries
+- Resolved complex CTE and column resolution issues
+- PostgreSQL wire protocol server with environment variable configuration
+- Real-time subscription efficiency metrics and selective updates
+- Observability improvements with comprehensive metrics documentation
+- TPC-C server benchmark implementation
+
+### December 2025: Developer Experience
+
+- CPU profiling decision tree documentation (samply integration)
+- Debug instrumentation consolidation with VIBESQL_DEBUG umbrella flag
+- Structured JSON debug output for performance analysis
+- Cloudflare CDN deployment documentation for web demo

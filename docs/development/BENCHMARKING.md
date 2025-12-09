@@ -860,7 +860,7 @@ sysbench --version
 6. **Include timestamp** (performance changes over time)
 
 **Example claim**:
-> VibeSQL processes TPC-H Q1 in 2.45 ± 0.12 seconds on a 1GB dataset, compared to SQLite's 3.21 seconds, on an M1 MacBook Pro, December 2024.
+> VibeSQL processes TPC-H Q1 in 9.0 ± 0.1 ms on SF 0.01, compared to SQLite's 32.6 ms (3.6x faster), on an M1 MacBook Pro, December 2025.
 
 ### For Development Iteration
 

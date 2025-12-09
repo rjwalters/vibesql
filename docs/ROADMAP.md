@@ -8,10 +8,10 @@ VibeSQL has achieved **100% SQL:1999 compliance** and **100% SQLLogicTest confor
 |--------|--------|
 | SQL:1999 Core (sqltest) | 739/739 (100%) |
 | SQLLogicTest | 623/623 files (100%) |
-| Unit tests | 4,800+ |
-| TPC-H | 22/22 queries |
+| Unit tests | 5,500+ |
+| TPC-H | 22/22 queries (100%) |
 | TPC-C | All transactions |
-| TPC-DS | 97/99 queries |
+| TPC-DS | 99/99 queries (100%) |
 
 See [HISTORY.md](HISTORY.md) for development timeline.
 
@@ -71,8 +71,11 @@ Pre-computed aggregations with incremental refresh. Useful for repeated complex 
 
 ## Known Gaps
 
-### TPC-DS (2 remaining queries)
-- Q14, Q95: CTE table resolution issues
+All major test suites are at 100% coverage. Current focus areas:
+
+- TPC-C OLTP throughput optimization
+- Query performance for complex analytical queries
+- Memory efficiency for large-scale workloads
 
 ## Contributing
 
