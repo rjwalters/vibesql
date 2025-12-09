@@ -5641,7 +5641,9 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
         let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
-        let day = (day_of_year % 30) + 1;
+        let raw_day = (day_of_year % 30) + 1;
+        // Clamp day to valid range for this month/year (handles Feb 29 in non-leap years)
+        let day = raw_day.min(days_in_month(year, month));
         let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
         let d_date_id = format!("AAAAAA{:010}", d_date_sk);
         let d_dow = (days_since_base % 7) as i32;
@@ -8915,7 +8917,9 @@ fn load_date_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
         let year = start_year + (days_since_base / 365) as i32;
         let day_of_year = (days_since_base % 365) as i32;
         let month = (day_of_year / 30).min(11) + 1;
-        let day = (day_of_year % 30) + 1;
+        let raw_day = (day_of_year % 30) + 1;
+        // Clamp day to valid range for this month/year (handles Feb 29 in non-leap years)
+        let day = raw_day.min(days_in_month(year, month));
         let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
         let d_date_id = format!("AAAAAA{:010}", d_date_sk);
         let d_dow = (days_since_base % 7) as i32;
