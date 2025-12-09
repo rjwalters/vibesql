@@ -62,7 +62,7 @@ use tpch::schema::load_mysql;
 #[cfg(feature = "benchmark-comparison")]
 use tpch::schema::load_sqlite;
 
-/// All available TPC-H queries
+/// All available TPC-H queries (standard SQL with EXTRACT)
 const ALL_QUERIES: &[(&str, &str)] = &[
     ("Q1", TPCH_Q1),
     ("Q3", TPCH_Q3),
@@ -71,6 +71,23 @@ const ALL_QUERIES: &[(&str, &str)] = &[
     ("Q6", TPCH_Q6),
     ("Q7", TPCH_Q7),
     ("Q9", TPCH_Q9),
+    ("Q10", TPCH_Q10),
+    ("Q11", TPCH_Q11),
+    ("Q12", TPCH_Q12),
+    ("Q14", TPCH_Q14),
+    ("Q19", TPCH_Q19),
+];
+
+/// SQLite-specific TPC-H queries (uses strftime instead of EXTRACT)
+#[cfg(feature = "benchmark-comparison")]
+const ALL_QUERIES_SQLITE: &[(&str, &str)] = &[
+    ("Q1", TPCH_Q1),
+    ("Q3", TPCH_Q3),
+    ("Q4", TPCH_Q4),
+    ("Q5", TPCH_Q5),
+    ("Q6", TPCH_Q6),
+    ("Q7", TPCH_Q7_SQLITE),
+    ("Q9", TPCH_Q9_SQLITE),
     ("Q10", TPCH_Q10),
     ("Q11", TPCH_Q11),
     ("Q12", TPCH_Q12),
@@ -110,6 +127,19 @@ fn get_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'stat
             .copied()
             .collect(),
         None => ALL_QUERIES.to_vec(),
+    }
+}
+
+/// Get SQLite-specific queries to run based on filter
+#[cfg(feature = "benchmark-comparison")]
+fn get_sqlite_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'static str)> {
+    match filter {
+        Some(queries) => ALL_QUERIES_SQLITE
+            .iter()
+            .filter(|(name, _)| queries.iter().any(|q| q == *name))
+            .copied()
+            .collect(),
+        None => ALL_QUERIES_SQLITE.to_vec(),
     }
 }
 
@@ -282,10 +312,12 @@ fn main() {
         let sqlite_conn = load_sqlite(scale_factor);
         eprintln!("SQLite loaded in {:?}", load_start.elapsed());
 
+        // Use SQLite-specific queries (strftime instead of EXTRACT)
+        let sqlite_queries = get_sqlite_queries_to_run(&query_filter);
         let mut sqlite_results = Vec::new();
         eprintln!("\n--- SQLite ---");
 
-        for (name, sql) in &queries {
+        for (name, sql) in &sqlite_queries {
             let stats = harness.run(name, || run_sqlite_query(&sqlite_conn, sql));
             stats.print_compact();
             sqlite_results.push(stats);

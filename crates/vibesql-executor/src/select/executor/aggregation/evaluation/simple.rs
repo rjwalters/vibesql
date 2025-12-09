@@ -327,6 +327,25 @@ pub(super) fn evaluate(
             }
         }
 
+        // EXTRACT: evaluate the expression and delegate to evaluator
+        vibesql_ast::Expression::Extract { field, expr: inner_expr } => {
+            let inner_value =
+                executor.evaluate_with_aggregates(inner_expr, group_rows, group_key, evaluator)?;
+
+            // Create an Extract expression with the evaluated value as a literal
+            let evaluated_expr = vibesql_ast::Expression::Extract {
+                field: field.clone(),
+                expr: Box::new(vibesql_ast::Expression::Literal(inner_value)),
+            };
+
+            // Use the standard evaluator to process the extract
+            if let Some(first_row) = group_rows.first() {
+                evaluator.eval(&evaluated_expr, first_row)
+            } else {
+                Ok(vibesql_types::SqlValue::Null)
+            }
+        }
+
         // Conjunction (AND) - evaluate all children with short-circuit
         vibesql_ast::Expression::Conjunction(children) => {
             let mut result = vibesql_types::SqlValue::Boolean(true);

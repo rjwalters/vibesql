@@ -134,7 +134,7 @@ pub const TPCH_Q7: &str = r#"
 SELECT
     n1.n_name as supp_nation,
     n2.n_name as cust_nation,
-    SUBSTR(CAST(l_shipdate AS VARCHAR), 1, 4) as l_year,
+    EXTRACT(YEAR FROM l_shipdate) as l_year,
     SUM(l_extendedprice * (1 - l_discount)) as revenue
 FROM supplier, lineitem, orders, customer, nation n1, nation n2
 WHERE s_suppkey = l_suppkey
@@ -146,14 +146,14 @@ WHERE s_suppkey = l_suppkey
          OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE'))
     AND l_shipdate >= '1995-01-01'
     AND l_shipdate <= '1996-12-31'
-GROUP BY supp_nation, cust_nation, l_year
+GROUP BY n1.n_name, n2.n_name, EXTRACT(YEAR FROM l_shipdate)
 ORDER BY supp_nation, cust_nation, l_year
 "#;
 
 // TPC-H Q8: National Market Share (8-way join)
 pub const TPCH_Q8: &str = r#"
 SELECT
-    SUBSTR(CAST(o_orderdate AS VARCHAR), 1, 4) as o_year,
+    EXTRACT(YEAR FROM o_orderdate) as o_year,
     SUM(CASE WHEN n2.n_name = 'BRAZIL'
         THEN l_extendedprice * (1 - l_discount)
         ELSE 0 END) / SUM(l_extendedprice * (1 - l_discount)) as mkt_share
@@ -169,7 +169,7 @@ WHERE p_partkey = l_partkey
     AND o_orderdate >= '1995-01-01'
     AND o_orderdate <= '1996-12-31'
     AND p_type = 'ECONOMY ANODIZED STEEL'
-GROUP BY o_year
+GROUP BY EXTRACT(YEAR FROM o_orderdate)
 ORDER BY o_year
 "#;
 
@@ -178,7 +178,7 @@ ORDER BY o_year
 pub const TPCH_Q9: &str = r#"
 SELECT
     n_name as nation,
-    SUBSTR(CAST(o_orderdate AS VARCHAR), 1, 4) as o_year,
+    EXTRACT(YEAR FROM o_orderdate) as o_year,
     SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity) as sum_profit
 FROM part, supplier, lineitem, partsupp, orders, nation
 WHERE s_suppkey = l_suppkey
@@ -188,7 +188,7 @@ WHERE s_suppkey = l_suppkey
     AND o_orderkey = l_orderkey
     AND s_nationkey = n_nationkey
     AND p_name LIKE '%green%'
-GROUP BY nation, o_year
+GROUP BY n_name, EXTRACT(YEAR FROM o_orderdate)
 ORDER BY nation, o_year DESC
 "#;
 
@@ -484,4 +484,74 @@ WHERE SUBSTR(c_phone, 1, 2) IN ('13', '31', '23', '29', '30', '18', '17')
     )
 GROUP BY cntrycode
 ORDER BY cntrycode
+"#;
+
+// =============================================================================
+// SQLite-specific query variants
+// =============================================================================
+// SQLite does not support EXTRACT(YEAR FROM date), use strftime instead
+
+/// SQLite-specific Q7: Volume Shipping
+/// Uses strftime('%Y', date) instead of EXTRACT(YEAR FROM date)
+pub const TPCH_Q7_SQLITE: &str = r#"
+SELECT
+    n1.n_name as supp_nation,
+    n2.n_name as cust_nation,
+    strftime('%Y', l_shipdate) as l_year,
+    SUM(l_extendedprice * (1 - l_discount)) as revenue
+FROM supplier, lineitem, orders, customer, nation n1, nation n2
+WHERE s_suppkey = l_suppkey
+    AND o_orderkey = l_orderkey
+    AND c_custkey = o_custkey
+    AND s_nationkey = n1.n_nationkey
+    AND c_nationkey = n2.n_nationkey
+    AND ((n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY')
+         OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE'))
+    AND l_shipdate >= '1995-01-01'
+    AND l_shipdate <= '1996-12-31'
+GROUP BY n1.n_name, n2.n_name, strftime('%Y', l_shipdate)
+ORDER BY supp_nation, cust_nation, l_year
+"#;
+
+/// SQLite-specific Q8: National Market Share
+/// Uses strftime('%Y', date) instead of EXTRACT(YEAR FROM date)
+pub const TPCH_Q8_SQLITE: &str = r#"
+SELECT
+    strftime('%Y', o_orderdate) as o_year,
+    SUM(CASE WHEN n2.n_name = 'BRAZIL'
+        THEN l_extendedprice * (1 - l_discount)
+        ELSE 0 END) / SUM(l_extendedprice * (1 - l_discount)) as mkt_share
+FROM part, supplier, lineitem, orders, customer, nation n1, nation n2, region
+WHERE p_partkey = l_partkey
+    AND s_suppkey = l_suppkey
+    AND l_orderkey = o_orderkey
+    AND o_custkey = c_custkey
+    AND c_nationkey = n1.n_nationkey
+    AND n1.n_regionkey = r_regionkey
+    AND r_name = 'AMERICA'
+    AND s_nationkey = n2.n_nationkey
+    AND o_orderdate >= '1995-01-01'
+    AND o_orderdate <= '1996-12-31'
+    AND p_type = 'ECONOMY ANODIZED STEEL'
+GROUP BY strftime('%Y', o_orderdate)
+ORDER BY o_year
+"#;
+
+/// SQLite-specific Q9: Product Type Profit Measure
+/// Uses strftime('%Y', date) instead of EXTRACT(YEAR FROM date)
+pub const TPCH_Q9_SQLITE: &str = r#"
+SELECT
+    n_name as nation,
+    strftime('%Y', o_orderdate) as o_year,
+    SUM(l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity) as sum_profit
+FROM part, supplier, lineitem, partsupp, orders, nation
+WHERE s_suppkey = l_suppkey
+    AND ps_suppkey = l_suppkey
+    AND ps_partkey = l_partkey
+    AND p_partkey = l_partkey
+    AND o_orderkey = l_orderkey
+    AND s_nationkey = n_nationkey
+    AND p_name LIKE '%green%'
+GROUP BY n_name, strftime('%Y', o_orderdate)
+ORDER BY nation, o_year DESC
 "#;
