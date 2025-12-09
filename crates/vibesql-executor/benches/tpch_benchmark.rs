@@ -25,7 +25,8 @@
 //! ## Environment Variables
 //!
 //! - `ENGINE_FILTER` - Comma-separated list of engines to run (e.g., "vibesql,sqlite")
-//!   Valid values: vibesql, sqlite, duckdb, mysql (default: all compiled engines)
+//!   Valid values: vibesql, sqlite, duckdb, mysql (default: vibesql,sqlite,duckdb)
+//!   Note: MySQL is excluded by default (client-server database). Use ENGINE_FILTER=all to include.
 //! - `WARMUP_ITERATIONS` - Number of warmup runs per query (default: 3)
 //! - `BENCHMARK_ITERATIONS` - Number of timed runs per query (default: 10)
 //! - `BENCHMARK_TIMEOUT_SECS` - Timeout per query (default: 30)
@@ -305,7 +306,8 @@ fn main() {
     let harness = Harness::with_config(config.clone());
 
     // Parse engine filter for runtime selection
-    let engine_filter = EngineFilter::from_env();
+    // Embedded benchmarks default to embedded databases only (no MySQL)
+    let engine_filter = EngineFilter::from_env_embedded();
 
     eprintln!("Configuration:");
     eprintln!("  Scale factor: {}", scale_factor);

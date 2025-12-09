@@ -141,19 +141,23 @@ Transaction Filter (--txn):
         """)
 
     # Test selection
+    # Embedded tests: tpch, tpcc, tpcds, sysbench
+    # Server tests: tpch-server, tpcc-server, sysbench-server
     parser.add_argument(
         "--test",
-        choices=["tpch", "tpcc", "tpcds", "sysbench", "tpch-server", "all"],
+        choices=["tpch", "tpcc", "tpcds", "sysbench", "tpch-server", "tpcc-server", "sysbench-server", "all"],
         default="tpch",
-        help="Benchmark to run (default: tpch)"
+        help="Benchmark to run (default: tpch). Server tests use client-server protocol."
     )
 
     # Engine selection
+    # Embedded engines: vibesql, sqlite, duckdb
+    # Server engines: vibesql-server, mysql
     parser.add_argument(
         "--engine",
         type=str,
         default="vibesql",
-        help="Engines to compare (comma-separated): vibesql,sqlite,duckdb,mysql (default: vibesql)"
+        help="Engines to compare (comma-separated). Embedded: vibesql,sqlite,duckdb. Server: vibesql-server,mysql"
     )
 
     # Query/transaction filtering
@@ -245,25 +249,46 @@ Transaction Filter (--txn):
 
 
 def parse_engines(engine_str: str) -> List[str]:
-    """Parse engine string and validate."""
-    valid_engines = {"vibesql", "sqlite", "duckdb", "mysql"}
-    
+    """Parse engine string and validate.
+
+    Embedded engines (in-process): vibesql, sqlite, duckdb
+    Server engines (client-server): vibesql-server, mysql
+    """
+    embedded_engines = {"vibesql", "sqlite", "duckdb"}
+    server_engines = {"vibesql-server", "mysql"}
+    valid_engines = embedded_engines | server_engines
+
     engines = [e.strip() for e in engine_str.split(",")]
     engines = [e for e in engines if e]  # Remove empty strings
-    
+
     if not engines:
         engines = ["vibesql"]
-    
-    # Expand 'all'
+
+    # Expand 'all' to all embedded engines (for backward compatibility)
+    # Use 'all-embedded' or 'all-server' for explicit selection
     if "all" in engines:
-        engines = list(valid_engines)
-    
+        engines = list(embedded_engines)
+    elif "all-embedded" in engines:
+        engines = list(embedded_engines)
+    elif "all-server" in engines:
+        engines = list(server_engines)
+
     # Validate
     for engine in engines:
         if engine not in valid_engines:
-            raise ValueError(f"Invalid engine: {engine}. Valid: {', '.join(valid_engines)}")
-    
+            raise ValueError(f"Invalid engine: {engine}. Valid embedded: {', '.join(sorted(embedded_engines))}. Valid server: {', '.join(sorted(server_engines))}")
+
     return list(set(engines))  # Remove duplicates
+
+
+def is_server_engine(engine: str) -> bool:
+    """Check if engine is a server (client-server) engine."""
+    return engine in {"vibesql-server", "mysql"}
+
+
+def is_embedded_engine(engine: str) -> bool:
+    """Check if engine is an embedded (in-process) engine."""
+    return engine in {"vibesql", "sqlite", "duckdb"}
 
 
 def parse_list(list_str: Optional[str]) -> Optional[List[str]]:
@@ -289,10 +314,10 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
     # Purpose: Validate data collection, storage, and analysis pipeline
     # Run just 1 query per benchmark type × all engines to verify the full matrix
     if args.smoke:
-        # For smoke tests, run ALL engines to validate the full pipeline
+        # For smoke tests, run all embedded engines to validate the pipeline
         # unless user explicitly specified a subset with --engine
         if args.engine == "vibesql":  # default value means not explicitly set
-            engines = ["vibesql", "sqlite", "duckdb", "mysql"]
+            engines = ["vibesql", "sqlite", "duckdb"]
         # else: keep the engines parsed from --engine flag
         args.timeout = args.timeout or 5      # 5s timeout per query
         args.duration = args.duration or 2    # 2s duration for TPC-C/Sysbench (minimal)
@@ -994,6 +1019,27 @@ def _process_tpch_server_results(json_output: str) -> None:
     print(f"  Wrote {benchmark_count} results to {json_path.name}")
 
 
+def run_tpcc_server(config: BenchConfig) -> int:
+    """Run TPC-C server benchmark (VibeSQL server vs MySQL).
+
+    Note: TPC-C server benchmark is not yet implemented.
+    This placeholder allows the benchmark-server-all target to run without errors.
+    """
+    print("\n" + "=" * 60)
+    print("TPC-C Server Benchmark (PostgreSQL Wire Protocol)")
+    print("=" * 60)
+    print("")
+    print("⚠ TPC-C server benchmark not yet implemented")
+    print("")
+    print("To implement this benchmark, create:")
+    print("  crates/vibesql-executor/benches/tpcc_server.rs")
+    print("")
+    print("The benchmark should test TPC-C transactions over the PostgreSQL")
+    print("wire protocol, comparing VibeSQL-server against MySQL.")
+    print("")
+    return 0  # Return success so benchmark-server-all can continue
+
+
 def run_footprint(config: BenchConfig) -> int:
     """Run footprint benchmark (binary size, startup time, memory)."""
     print("\n" + "=" * 60)
@@ -1294,6 +1340,10 @@ def main():
         return run_sysbench(config)
     elif config.test == "tpch-server":
         return run_tpch_server(config)
+    elif config.test == "tpcc-server":
+        return run_tpcc_server(config)
+    elif config.test == "sysbench-server":
+        return run_sysbench_server(config)
     else:
         print(f"❌ Unknown test: {config.test}")
         return 1

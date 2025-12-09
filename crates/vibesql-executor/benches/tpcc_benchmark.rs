@@ -9,6 +9,8 @@
 //!   TPCC_WARMUP_SECS   - Warmup duration in seconds (default: 10)
 //!   TPCC_CLIENTS       - Number of parallel clients (default: 1)
 //!                        Set to 0 or "auto" for memory-aware auto-scaling
+//!   ENGINE_FILTER      - Comma-separated list of engines to run (default: vibesql,sqlite,duckdb)
+//!                        Note: MySQL excluded by default (use server benchmarks for MySQL)
 //!
 //! Run specific transaction type:
 //!   ./target/release/deps/tpcc_benchmark-* new-order
@@ -23,9 +25,16 @@
 //! Multi-client parallel execution:
 //!   TPCC_CLIENTS=4 ./target/release/deps/tpcc_benchmark-*
 //!   TPCC_CLIENTS=auto ./target/release/deps/tpcc_benchmark-*
+//!
+//! Engine selection (embedded databases only by default):
+//!   ENGINE_FILTER=vibesql ./target/release/deps/tpcc_benchmark-*
+//!   ENGINE_FILTER=vibesql,sqlite ./target/release/deps/tpcc_benchmark-*
+//!   ENGINE_FILTER=vibesql,sqlite,duckdb,mysql ./target/release/deps/tpcc_benchmark-*  # Include MySQL
 
+mod harness;
 mod tpcc;
 
+use harness::EngineFilter;
 use rayon::prelude::*;
 use std::env;
 use std::time::{Duration, Instant};
@@ -1299,12 +1308,16 @@ fn main() {
         eprintln!("  TPCC_WARMUP_SECS     Warmup duration in seconds (default: 10)");
         eprintln!("  TPCC_CLIENTS         Number of parallel clients (default: 1)");
         eprintln!("                       Set to 0 or \"auto\" for memory-aware auto-scaling");
+        eprintln!("  ENGINE_FILTER        Engines to run (default: vibesql,sqlite,duckdb)");
+        eprintln!("                       Note: MySQL excluded by default (client-server)");
         eprintln!("\nExamples:");
         eprintln!("  {}                           # Run mixed workload", args[0]);
         eprintln!("  {} new-order                 # Run only New-Order", args[0]);
         eprintln!("  TPCC_SCALE_FACTOR=2 {}       # Run with 2 warehouses", args[0]);
         eprintln!("  TPCC_CLIENTS=4 {}            # Run with 4 parallel clients", args[0]);
         eprintln!("  TPCC_CLIENTS=auto {}         # Auto-scale clients based on resources", args[0]);
+        eprintln!("  ENGINE_FILTER=vibesql {}     # VibeSQL only", args[0]);
+        eprintln!("  ENGINE_FILTER=all {}         # Include MySQL (all engines)", args[0]);
         std::process::exit(0);
     }
 
@@ -1360,6 +1373,9 @@ fn main() {
         None => 1,                                      // Default: single client
     };
 
+    // Parse engine filter (defaults to embedded databases only - no MySQL)
+    let engine_filter = EngineFilter::from_env_embedded();
+
     eprintln!("Configuration:");
     eprintln!("  Scale factor: {}", scale_factor);
     eprintln!("  Warehouses: {}", num_warehouses);
@@ -1369,61 +1385,62 @@ fn main() {
     eprintln!("  Duration: {} seconds", duration_secs);
     eprintln!("  Warmup: {} seconds", warmup_secs);
     eprintln!("  Transaction type: {}", transaction_type.name());
+    eprintln!("  Engines: {}", engine_filter.enabled_list());
     if num_clients > 1 {
         eprintln!("  Clients: {} (parallel mode)", num_clients);
     } else {
         eprintln!("  Clients: 1 (single-threaded)");
     }
 
-    // Load VibeSQL database
-    eprintln!("\nLoading VibeSQL TPC-C database (SF {})...", scale_factor);
-    let load_start = Instant::now();
-    let vibesql_db = load_vibesql(scale_factor);
-    eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
+    // Track results for comparison summary
+    let mut vibesql_results: Option<TPCCBenchmarkResults> = None;
 
-    // Run VibeSQL benchmark using SQL execution (fair comparison with other databases)
-    eprintln!("\n--- VibeSQL Benchmark ---");
-    tpcc::transactions::reset_profile_counters();
-    let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
+    // Load and run VibeSQL benchmark
+    if engine_filter.vibesql {
+        eprintln!("\nLoading VibeSQL TPC-C database (SF {})...", scale_factor);
+        let load_start = Instant::now();
+        let vibesql_db = load_vibesql(scale_factor);
+        eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
 
-    let vibesql_results = if num_clients > 1 {
-        // Parallel multi-client execution
-        let (client_results, aggregate) = run_parallel_benchmark(
-            &vibesql_executor,
-            transaction_type,
-            num_warehouses,
-            num_clients,
-            duration,
-            warmup,
-            true,
-        );
-        print_parallel_results(&client_results, &aggregate, transaction_type);
-        aggregate
+        // Run VibeSQL benchmark using SQL execution (fair comparison with other databases)
+        eprintln!("\n--- VibeSQL Benchmark ---");
+        tpcc::transactions::reset_profile_counters();
+        let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
+
+        vibesql_results = Some(if num_clients > 1 {
+            // Parallel multi-client execution
+            let (client_results, aggregate) = run_parallel_benchmark(
+                &vibesql_executor,
+                transaction_type,
+                num_warehouses,
+                num_clients,
+                duration,
+                warmup,
+                true,
+            );
+            print_parallel_results(&client_results, &aggregate, transaction_type);
+            aggregate
+        } else {
+            // Single-client execution (original behavior)
+            let results =
+                run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
+            print_results(&results, transaction_type);
+            results
+        });
+
+        tpcc::transactions::print_profile_summary();
     } else {
-        // Single-client execution (original behavior)
-        let results =
-            run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
-        print_results(&results, transaction_type);
-        results
-    };
-
-    tpcc::transactions::print_profile_summary();
-
-    // Store for comparison summary (if needed)
-    let _ = &vibesql_results;
+        eprintln!("\nSkipping VibeSQL (filtered out by ENGINE_FILTER)");
+    }
 
     // Comparison benchmarks (if feature enabled)
     #[cfg(feature = "benchmark-comparison")]
-    {
+    let sqlite_results: Option<TPCCBenchmarkResults> = if engine_filter.sqlite {
         use tpcc::schema::load_sqlite;
-        #[cfg(feature = "duckdb-comparison")]
-        use tpcc::schema::load_duckdb;
-        #[cfg(feature = "mysql-comparison")]
-        use tpcc::schema::load_mysql;
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
-        let sqlite_results = if num_clients > 1 {
+        Some(if num_clients > 1 {
             // Parallel multi-client execution (each client gets its own DB)
             let (client_results, aggregate) = run_sqlite_parallel_benchmark(
                 scale_factor,
@@ -1454,56 +1471,70 @@ fn main() {
             );
             print_results(&results, transaction_type);
             results
-        };
+        })
+    } else {
+        eprintln!("\n\nSkipping SQLite (filtered out by ENGINE_FILTER)");
+        None
+    };
+    #[cfg(not(feature = "benchmark-comparison"))]
+    let sqlite_results: Option<TPCCBenchmarkResults> = None;
 
-        // DuckDB benchmark (requires duckdb-comparison feature)
-        #[cfg(feature = "duckdb-comparison")]
-        let duckdb_results = {
-            eprintln!("\n\n--- DuckDB Benchmark ---");
-            let duckdb_results = if num_clients > 1 {
-                // Parallel multi-client execution (each client gets its own DB)
-                let (client_results, aggregate) = run_duckdb_parallel_benchmark(
-                    scale_factor,
-                    transaction_type,
-                    num_warehouses,
-                    num_clients,
-                    duration,
-                    warmup,
-                    true,
-                );
-                print_parallel_results(&client_results, &aggregate, transaction_type);
-                aggregate
-            } else {
-                // Single-client execution
-                eprintln!("Loading DuckDB database...");
-                let duckdb_load_start = Instant::now();
-                let duckdb_conn = load_duckdb(scale_factor);
-                eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
+    // DuckDB benchmark (requires duckdb-comparison feature)
+    #[cfg(feature = "duckdb-comparison")]
+    let duckdb_results: Option<TPCCBenchmarkResults> = if engine_filter.duckdb {
+        use tpcc::schema::load_duckdb;
 
-                let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
-                let results = run_benchmark(
-                    &duckdb_executor,
-                    transaction_type,
-                    num_warehouses,
-                    duration,
-                    warmup,
-                    true,
-                );
-                print_results(&results, transaction_type);
-                results
-            };
-            Some(duckdb_results)
-        };
-        #[cfg(not(feature = "duckdb-comparison"))]
-        let duckdb_results: Option<TPCCBenchmarkResults> = None;
+        eprintln!("\n\n--- DuckDB Benchmark ---");
+        Some(if num_clients > 1 {
+            // Parallel multi-client execution (each client gets its own DB)
+            let (client_results, aggregate) = run_duckdb_parallel_benchmark(
+                scale_factor,
+                transaction_type,
+                num_warehouses,
+                num_clients,
+                duration,
+                warmup,
+                true,
+            );
+            print_parallel_results(&client_results, &aggregate, transaction_type);
+            aggregate
+        } else {
+            // Single-client execution
+            eprintln!("Loading DuckDB database...");
+            let duckdb_load_start = Instant::now();
+            let duckdb_conn = load_duckdb(scale_factor);
+            eprintln!("DuckDB loaded in {:?}", duckdb_load_start.elapsed());
 
-        // MySQL benchmark (requires mysql-comparison feature and MYSQL_URL env var)
-        #[cfg(feature = "mysql-comparison")]
-        let mysql_results = if let Some(mut mysql_conn) = load_mysql(scale_factor) {
+            let duckdb_executor = DuckdbTransactionExecutor::new(&duckdb_conn);
+            let results = run_benchmark(
+                &duckdb_executor,
+                transaction_type,
+                num_warehouses,
+                duration,
+                warmup,
+                true,
+            );
+            print_results(&results, transaction_type);
+            results
+        })
+    } else {
+        eprintln!("\n\nSkipping DuckDB (filtered out by ENGINE_FILTER)");
+        None
+    };
+    #[cfg(not(feature = "duckdb-comparison"))]
+    let duckdb_results: Option<TPCCBenchmarkResults> = None;
+
+    // MySQL benchmark (requires mysql-comparison feature and MYSQL_URL env var)
+    // Note: MySQL is excluded by default (use ENGINE_FILTER=all or ENGINE_FILTER=...,mysql to include)
+    #[cfg(feature = "mysql-comparison")]
+    let mysql_results: Option<TPCCBenchmarkResults> = if engine_filter.mysql {
+        use tpcc::schema::load_mysql;
+
+        if let Some(mut mysql_conn) = load_mysql(scale_factor) {
             eprintln!("\n\n--- MySQL Benchmark ---");
             eprintln!("MySQL connected and loaded");
 
-            let mysql_results = if num_clients > 1 {
+            Some(if num_clients > 1 {
                 // Parallel multi-client execution with connection pool
                 use tpcc::schema::get_mysql_pool;
                 if let Some(pool) = get_mysql_pool() {
@@ -1544,17 +1575,21 @@ fn main() {
                 );
                 print_results(&results, transaction_type);
                 results
-            };
-            Some(mysql_results)
+            })
         } else {
             eprintln!("\n\n--- MySQL Benchmark ---");
             eprintln!("Skipping MySQL (set MYSQL_URL env var to enable)");
             None
-        };
-        #[cfg(not(feature = "mysql-comparison"))]
-        let mysql_results: Option<TPCCBenchmarkResults> = None;
+        }
+    } else {
+        eprintln!("\n\nSkipping MySQL (filtered out by ENGINE_FILTER)");
+        None
+    };
+    #[cfg(not(feature = "mysql-comparison"))]
+    let mysql_results: Option<TPCCBenchmarkResults> = None;
 
-        // Summary comparison
+    // Summary comparison
+    {
         eprintln!("\n\n=== Comparison Summary ===");
         eprintln!("Transaction type: {}", transaction_type.name());
         eprintln!("{:<12} {:>12} {:>12} {:>10}", "Database", "TPS", "Avg (us)", "Clients");
@@ -1573,20 +1608,24 @@ fn main() {
             }
         }
 
-        eprintln!(
-            "{:<12} {:>12.2} {:>12.2} {:>10}",
-            "VibeSQL",
-            vibesql_results.transactions_per_second,
-            compute_avg(&vibesql_results),
-            num_clients
-        );
-        eprintln!(
-            "{:<12} {:>12.2} {:>12.2} {:>10}",
-            "SQLite",
-            sqlite_results.transactions_per_second,
-            compute_avg(&sqlite_results),
-            num_clients
-        );
+        if let Some(ref vibesql_res) = vibesql_results {
+            eprintln!(
+                "{:<12} {:>12.2} {:>12.2} {:>10}",
+                "VibeSQL",
+                vibesql_res.transactions_per_second,
+                compute_avg(vibesql_res),
+                num_clients
+            );
+        }
+        if let Some(ref sqlite_res) = sqlite_results {
+            eprintln!(
+                "{:<12} {:>12.2} {:>12.2} {:>10}",
+                "SQLite",
+                sqlite_res.transactions_per_second,
+                compute_avg(sqlite_res),
+                num_clients
+            );
+        }
         if let Some(ref duckdb_res) = duckdb_results {
             eprintln!(
                 "{:<12} {:>12.2} {:>12.2} {:>10}",
@@ -1605,34 +1644,6 @@ fn main() {
                 num_clients
             );
         }
-    }
-
-    #[cfg(not(feature = "benchmark-comparison"))]
-    {
-        // Without comparison feature, just show VibeSQL summary
-        fn compute_avg(results: &TPCCBenchmarkResults) -> f64 {
-            if results.total_transactions > 0 {
-                let total_time = results.new_order_avg_us * results.new_order_count as f64
-                    + results.payment_avg_us * results.payment_count as f64
-                    + results.order_status_avg_us * results.order_status_count as f64
-                    + results.delivery_avg_us * results.delivery_count as f64
-                    + results.stock_level_avg_us * results.stock_level_count as f64;
-                total_time / results.total_transactions as f64
-            } else {
-                0.0
-            }
-        }
-        eprintln!("\n=== Summary ===");
-        eprintln!("Transaction type: {}", transaction_type.name());
-        eprintln!("{:<12} {:>12} {:>12} {:>10}", "Database", "TPS", "Avg (us)", "Clients");
-        eprintln!("{:-<12} {:->12} {:->12} {:->10}", "", "", "", "");
-        eprintln!(
-            "{:<12} {:>12.2} {:>12.2} {:>10}",
-            "VibeSQL",
-            vibesql_results.transactions_per_second,
-            compute_avg(&vibesql_results),
-            num_clients
-        );
     }
 
     eprintln!("\n=== Done ===");

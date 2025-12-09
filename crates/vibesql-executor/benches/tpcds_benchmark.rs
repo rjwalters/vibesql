@@ -30,13 +30,14 @@
 //! - `QUERY_FILTER` - Comma-separated list of queries to run (e.g., "Q1,Q6,Q9")
 //! - `VIBESQL_MEMORY_THRESHOLD` - Memory pressure threshold (default: 80%)
 //! - `MYSQL_URL` - MySQL connection string (optional)
-//! - `TPCDS_ENGINE` - Engine to test: sqlite, duckdb, mysql, all (default: all)
+//! - `ENGINE_FILTER` - Engines to run (default: vibesql,sqlite,duckdb; MySQL excluded)
+//!   Use ENGINE_FILTER=all to include MySQL
 
 mod harness;
 mod memory_monitor;
 mod tpcds;
 
-use harness::{BenchConfig, BenchResult, BenchStats, Harness};
+use harness::{BenchConfig, BenchResult, BenchStats, EngineFilter, Harness};
 use memory_monitor::{format_bytes, MemoryMonitor, MemoryPressure};
 use std::env;
 use std::sync::Mutex;
@@ -116,35 +117,9 @@ fn get_query_filter() -> Option<Vec<String>> {
     })
 }
 
-/// Check which engines to run
-#[cfg(any(feature = "sqlite-comparison", feature = "duckdb-comparison", feature = "mysql-comparison"))]
-fn get_comparison_engine() -> Option<String> {
-    env::var("TPCDS_ENGINE").ok()
-}
-
-#[cfg(feature = "sqlite-comparison")]
-fn sqlite_enabled() -> bool {
-    match get_comparison_engine() {
-        None => true,
-        Some(ref e) if e == "all" => true,
-        Some(ref e) if e == "sqlite" => true,
-        _ => false,
-    }
-}
-
-#[cfg(feature = "duckdb-comparison")]
-fn duckdb_enabled() -> bool {
-    match get_comparison_engine() {
-        None => true,
-        Some(ref e) if e == "all" => true,
-        Some(ref e) if e == "duckdb" => true,
-        _ => false,
-    }
-}
-
-#[cfg(feature = "mysql-comparison")]
-fn mysql_enabled() -> bool {
-    matches!(get_comparison_engine(), Some(ref e) if e == "mysql")
+/// Get the engine filter for this benchmark
+fn get_engine_filter() -> EngineFilter {
+    EngineFilter::from_env_embedded()
 }
 
 /// Run a query on VibeSQL
@@ -276,12 +251,14 @@ fn main() {
 
     let config = BenchConfig::default();
     let harness = Harness::with_config(config.clone());
+    let engine_filter = get_engine_filter();
 
     eprintln!("Configuration:");
     eprintln!("  Scale factor: {}", scale_factor);
     eprintln!("  Warmup iterations: {}", config.warmup_iterations);
     eprintln!("  Benchmark iterations: {}", config.benchmark_iterations);
     eprintln!("  Timeout: {}s", config.timeout.as_secs());
+    eprintln!("  Engines: {}", engine_filter.enabled_list());
 
     // Initialize memory monitor
     let _ = get_memory_monitor();
@@ -311,51 +288,55 @@ fn main() {
     // ========================================
     // VibeSQL Benchmark
     // ========================================
-    eprintln!("\nLoading VibeSQL database (SF {})...", scale_factor);
-    let load_start = Instant::now();
-    let vibesql_db = load_vibesql(scale_factor);
-    eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
+    if engine_filter.vibesql {
+        eprintln!("\nLoading VibeSQL database (SF {})...", scale_factor);
+        let load_start = Instant::now();
+        let vibesql_db = load_vibesql(scale_factor);
+        eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
 
-    let mut vibesql_results = Vec::new();
-    let mut passed = 0;
-    let mut skipped = 0;
+        let mut vibesql_results = Vec::new();
+        let mut passed = 0;
+        let mut skipped = 0;
 
-    eprintln!("\n--- VibeSQL ---");
+        eprintln!("\n--- VibeSQL ---");
 
-    for (name, sql) in &queries {
-        // Check memory pressure
-        if !check_memory_before_query(name) {
-            skipped += 1;
-            continue;
+        for (name, sql) in &queries {
+            // Check memory pressure
+            if !check_memory_before_query(name) {
+                skipped += 1;
+                continue;
+            }
+
+            let timeout = harness.timeout();
+            let stats = harness.run(name, || run_vibesql_query(&vibesql_db, sql, timeout));
+
+            if stats.iterations > 0 {
+                stats.print_compact();
+                vibesql_results.push(stats);
+                passed += 1;
+            } else {
+                eprintln!("  {} SKIPPED (0 successful iterations)", name);
+                skipped += 1;
+            }
+
+            // Clear caches periodically to prevent OOM
+            clear_in_subquery_cache();
         }
 
-        let timeout = harness.timeout();
-        let stats = harness.run(name, || run_vibesql_query(&vibesql_db, sql, timeout));
+        eprintln!("\nVibeSQL: {} passed, {} skipped", passed, skipped);
+        all_results.push(("VibeSQL", vibesql_results));
 
-        if stats.iterations > 0 {
-            stats.print_compact();
-            vibesql_results.push(stats);
-            passed += 1;
-        } else {
-            eprintln!("  {} SKIPPED (0 successful iterations)", name);
-            skipped += 1;
-        }
-
-        // Clear caches periodically to prevent OOM
-        clear_in_subquery_cache();
+        // Release memory before loading next engine
+        hint_memory_release();
+    } else {
+        eprintln!("\nSkipping VibeSQL (filtered out by ENGINE_FILTER)");
     }
-
-    eprintln!("\nVibeSQL: {} passed, {} skipped", passed, skipped);
-    all_results.push(("VibeSQL", vibesql_results));
-
-    // Release memory before loading next engine
-    hint_memory_release();
 
     // ========================================
     // SQLite Benchmark (if feature enabled)
     // ========================================
     #[cfg(feature = "sqlite-comparison")]
-    if sqlite_enabled() {
+    if engine_filter.sqlite {
         eprintln!("\nLoading SQLite database...");
         let load_start = Instant::now();
         let sqlite_conn = load_sqlite(scale_factor);
@@ -392,13 +373,16 @@ fn main() {
         }
         all_results.push(("SQLite", sqlite_results));
         hint_memory_release();
+    } else {
+        #[cfg(feature = "sqlite-comparison")]
+        eprintln!("\nSkipping SQLite (filtered out by ENGINE_FILTER)");
     }
 
     // ========================================
     // DuckDB Benchmark (if feature enabled)
     // ========================================
     #[cfg(feature = "duckdb-comparison")]
-    if duckdb_enabled() {
+    if engine_filter.duckdb {
         eprintln!("\nLoading DuckDB database...");
         let load_start = Instant::now();
         let duckdb_conn = load_duckdb(scale_factor);
@@ -420,13 +404,17 @@ fn main() {
         }
         all_results.push(("DuckDB", duckdb_results));
         hint_memory_release();
+    } else {
+        #[cfg(feature = "duckdb-comparison")]
+        eprintln!("\nSkipping DuckDB (filtered out by ENGINE_FILTER)");
     }
 
     // ========================================
     // MySQL Benchmark (if feature enabled)
+    // Note: MySQL is excluded by default (use ENGINE_FILTER=all or ENGINE_FILTER=...,mysql)
     // ========================================
     #[cfg(feature = "mysql-comparison")]
-    if mysql_enabled() {
+    if engine_filter.mysql {
         if let Some(mut conn) = load_mysql(scale_factor) {
             let mut mysql_results = Vec::new();
             eprintln!("\n--- MySQL ---");
@@ -446,6 +434,9 @@ fn main() {
         } else {
             eprintln!("\nSkipping MySQL (MYSQL_URL not set)");
         }
+    } else {
+        #[cfg(feature = "mysql-comparison")]
+        eprintln!("\nSkipping MySQL (filtered out by ENGINE_FILTER)");
     }
 
     // Print comparison summary

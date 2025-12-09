@@ -436,6 +436,51 @@ impl EngineFilter {
         }
     }
 
+    /// Enable only embedded databases (excludes MySQL which is client-server)
+    /// Use this as the default for embedded benchmark binaries like tpcc_benchmark.
+    pub fn embedded_only() -> Self {
+        Self {
+            vibesql: true,
+            sqlite: true,
+            duckdb: true,
+            mysql: false,
+        }
+    }
+
+    /// Parse ENGINE_FILTER environment variable for embedded benchmarks.
+    /// Unlike `from_env()`, this defaults to embedded databases only (no MySQL).
+    /// MySQL can still be enabled explicitly via ENGINE_FILTER=vibesql,sqlite,duckdb,mysql
+    pub fn from_env_embedded() -> Self {
+        match env::var("ENGINE_FILTER") {
+            Ok(filter) => {
+                let engines: Vec<String> = filter
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                // If filter is empty, use embedded defaults (no MySQL)
+                if engines.is_empty() {
+                    return Self::embedded_only();
+                }
+
+                // "all" means all including MySQL (explicit opt-in)
+                if engines.iter().any(|e| e == "all") {
+                    return Self::all();
+                }
+
+                Self {
+                    vibesql: engines.iter().any(|e| e == "vibesql"),
+                    sqlite: engines.iter().any(|e| e == "sqlite"),
+                    duckdb: engines.iter().any(|e| e == "duckdb"),
+                    mysql: engines.iter().any(|e| e == "mysql"),
+                }
+            }
+            // No filter set: use embedded defaults (no MySQL)
+            Err(_) => Self::embedded_only(),
+        }
+    }
+
     /// Returns a comma-separated list of enabled engines for display
     pub fn enabled_list(&self) -> String {
         let mut engines = Vec::new();
