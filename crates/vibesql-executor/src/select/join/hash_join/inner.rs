@@ -5,6 +5,12 @@ use super::columnar::{hash_join_indices_columnar, hash_join_indices_columnar_mul
 use super::{batch_combine_rows, FromResult};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 // Note: Memory limit checking removed from hash join.
 // Hash join uses O(smaller_table) memory for the hash table, not O(result_size).
 // The actual join output size depends on data distribution and selectivity,
@@ -86,6 +92,39 @@ pub(in crate::select::join) fn hash_join_inner(
 
         // Probe phase: Collect (build_idx, probe_idx) pairs without materializing rows
         // This defers the expensive row cloning until after we know all matches
+        // Uses parallel probing when row count exceeds threshold (read-only hash table is thread-safe)
+        #[cfg(feature = "parallel")]
+        {
+            let config = ParallelConfig::global();
+            if config.should_parallelize_join(probe_rows.len()) {
+                // Parallel probe - read-only hash table access is thread-safe
+                let pairs: Vec<(usize, usize)> = probe_rows
+                    .par_iter()
+                    .enumerate()
+                    .flat_map(|(probe_idx, probe_row)| {
+                        let key = &probe_row.values[probe_col_idx];
+                        if key == &vibesql_types::SqlValue::Null {
+                            return Vec::new();
+                        }
+                        hash_table
+                            .get(key)
+                            .map(|build_indices| {
+                                build_indices
+                                    .iter()
+                                    .map(|&build_idx| (build_idx, probe_idx))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                return Ok(FromResult::from_rows(
+                    combined_schema,
+                    batch_combine_rows(build_rows, probe_rows, &pairs, left_is_build),
+                ));
+            }
+        }
+
+        // Sequential fallback for small datasets or non-parallel builds
         let estimated_capacity = probe_rows.len().saturating_mul(2).min(100_000);
         let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
 
@@ -179,6 +218,39 @@ pub(in crate::select::join) fn hash_join_inner_multi(
         let hash_table = build_hash_table_composite_parallel(build_rows, build_col_indices);
 
         // Probe phase: Collect (build_idx, probe_idx) pairs
+        // Uses parallel probing when row count exceeds threshold (read-only hash table is thread-safe)
+        #[cfg(feature = "parallel")]
+        {
+            let config = ParallelConfig::global();
+            if config.should_parallelize_join(probe_rows.len()) {
+                // Parallel probe with composite keys
+                let pairs: Vec<(usize, usize)> = probe_rows
+                    .par_iter()
+                    .enumerate()
+                    .flat_map(|(probe_idx, probe_row)| {
+                        let probe_key = CompositeKey::from_row(probe_row, probe_col_indices);
+                        if probe_key.has_null() {
+                            return Vec::new();
+                        }
+                        hash_table
+                            .get(&probe_key)
+                            .map(|build_indices| {
+                                build_indices
+                                    .iter()
+                                    .map(|&build_idx| (build_idx, probe_idx))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                return Ok(FromResult::from_rows(
+                    combined_schema,
+                    batch_combine_rows(build_rows, probe_rows, &pairs, left_is_build),
+                ));
+            }
+        }
+
+        // Sequential fallback for small datasets or non-parallel builds
         let estimated_capacity = probe_rows.len().saturating_mul(2).min(100_000);
         let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
 
@@ -269,6 +341,42 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     }
 
     // Probe phase: For each left row, lookup by left_col value
+    // Uses parallel probing when row count exceeds threshold (read-only hash table is thread-safe)
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        if config.should_parallelize_join(left_slice.len()) {
+            // Parallel probe for arithmetic join
+            let pairs: Vec<(usize, usize)> = left_slice
+                .par_iter()
+                .enumerate()
+                .flat_map(|(left_idx, left_row)| {
+                    let value = &left_row.values[left_col_idx];
+                    if let SqlValue::Integer(n) = value {
+                        hash_table
+                            .get(n)
+                            .map(|right_indices| {
+                                right_indices
+                                    .iter()
+                                    .map(|&right_idx| (left_idx, right_idx))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect();
+
+            // Swap pairs for batch_combine_rows (see comment below)
+            let swapped_pairs: Vec<(usize, usize)> =
+                pairs.into_iter().map(|(left, right)| (right, left)).collect();
+            let result_rows = batch_combine_rows(right_slice, left_slice, &swapped_pairs, false);
+            return Ok(FromResult::from_rows(combined_schema, result_rows));
+        }
+    }
+
+    // Sequential fallback for small datasets or non-parallel builds
     let estimated_capacity = left_slice.len().saturating_mul(2).min(100_000);
     let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(estimated_capacity);
 
