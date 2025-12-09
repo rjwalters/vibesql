@@ -81,10 +81,8 @@ impl DatabaseRegistry {
     ///
     /// This is useful for benchmarks where the database is pre-loaded with data
     /// before starting the server.
-    pub fn register_database(&self, name: &str, db: Database) {
-        // Use blocking write since this is typically called at startup
-        let databases = self.databases.blocking_write();
-        let mut databases = databases;
+    pub async fn register_database(&self, name: &str, db: Database) {
+        let mut databases = self.databases.write().await;
         databases.insert(name.to_string(), Arc::new(RwLock::new(db)));
     }
 }

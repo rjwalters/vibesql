@@ -169,7 +169,7 @@ async fn start_vibesql_server_with_db(
 
     // Create database registry with pre-loaded TPC-C database
     let database_registry = DatabaseRegistry::new();
-    database_registry.register_database("tpcc", db);
+    database_registry.register_database("tpcc", db).await;
 
     let observability = Arc::new(
         ObservabilityProvider::init(&Default::default())
