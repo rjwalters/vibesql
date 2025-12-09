@@ -83,6 +83,7 @@ editor-placeholder = Enter SQL query here... (Ctrl+Enter or Cmd+Enter to execute
 nav-terminal = SQL Terminal Demo
 nav-compliance = SQL Test Compliance Report
 nav-benchmarks = Performance Benchmarks
+nav-trends = Performance Trends
 nav-github = GitHub Repository
 nav-home = Home
 

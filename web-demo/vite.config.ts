@@ -99,6 +99,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         conformance: resolve(__dirname, 'conformance.html'),
         benchmarks: resolve(__dirname, 'benchmarks.html'),
+        trends: resolve(__dirname, 'trends.html'),
       },
     },
     // Increase chunk size warning limit for Monaco
