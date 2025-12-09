@@ -82,6 +82,34 @@ pub fn simd_filter_batch(
     apply_filter_mask(batch, &filter_mask)
 }
 
+/// Create a filter mask and return the indices of passing rows
+///
+/// This is the preferred function for late materialization optimization.
+/// Instead of returning a filtered batch (which requires row reconstruction),
+/// this returns only the indices of rows that pass all predicates.
+///
+/// # Performance
+///
+/// This function enables the "late materialization" pattern:
+/// 1. Filter on columnar data (SIMD-accelerated)
+/// 2. Return only indices of passing rows
+/// 3. Clone only the rows that passed (not all rows)
+///
+/// For TPC-H Q10 with 60K lineitem rows where 20K pass:
+/// - Old: Clone 60K rows, filter, clone 20K passing rows = 80K clones
+/// - New: Filter, clone only 20K passing rows = 20K clones (75% reduction)
+pub fn simd_filter_to_indices(
+    batch: &ColumnarBatch,
+    predicates: &[ColumnPredicate],
+) -> Result<Vec<usize>, ExecutorError> {
+    let mask = simd_create_filter_mask(batch, predicates)?;
+    Ok(mask
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, passes)| if passes { Some(idx) } else { None })
+        .collect())
+}
+
 /// Create a filter mask using SIMD operations where possible
 ///
 /// Returns a Vec<bool> where true means the row passes all predicates.
