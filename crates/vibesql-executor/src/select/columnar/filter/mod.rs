@@ -15,7 +15,8 @@ use crate::errors::ExecutorError;
 pub(super) use comparison::parse_date_string;
 pub use evaluation::{evaluate_column_compare, evaluate_predicate, evaluate_predicate_tree};
 pub use predicates::{
-    extract_column_predicates, extract_predicate_tree, ColumnPredicate, CompareOp, PredicateTree,
+    collect_referenced_columns, extract_column_predicates, extract_predicate_tree,
+    remap_predicates, ColumnPredicate, CompareOp, PredicateTree,
 };
 
 /// Apply a filter to row indices based on a predicate tree
@@ -203,9 +204,19 @@ pub fn apply_columnar_filter_simd_streaming(
         return Ok(vec![]);
     }
 
+    // OPTIMIZATION: Selective column extraction (#4XXX)
+    // Instead of extracting all columns (expensive for wide tables),
+    // only extract the columns referenced by predicates.
+    //
+    // For lineitem (16 columns) with filter on L_RETURNFLAG:
+    // - Old: Extract 16 columns × N rows = 16N values
+    // - New: Extract 1 column × N rows = 1N values (16x reduction)
+    let referenced_columns = collect_referenced_columns(predicates);
+    let remapped_predicates = remap_predicates(predicates, &referenced_columns);
+
     // Batch size tuned for L2 cache efficiency (~256KB)
-    // With ~16 columns of 8 bytes each = 128 bytes/row
-    // 1024 rows = ~128KB per batch, leaving room for predicates
+    // With selective extraction, we use fewer columns so batches are smaller.
+    // We can potentially use larger batches, but 1024 is still reasonable.
     const BATCH_SIZE: usize = 1024;
 
     let mut matching_indices = Vec::with_capacity(rows.len() / 4); // Estimate 25% selectivity
@@ -215,11 +226,12 @@ pub fn apply_columnar_filter_simd_streaming(
         let batch_end = (batch_start + BATCH_SIZE).min(rows.len());
         let batch_slice = &rows[batch_start..batch_end];
 
-        // Convert batch to columnar format for SIMD processing
-        let batch = ColumnarBatch::from_rows(batch_slice)?;
+        // Convert only the referenced columns to columnar format
+        // This is the key optimization - extracting 1-2 columns instead of 16
+        let batch = ColumnarBatch::from_rows_selective(batch_slice, &referenced_columns)?;
 
-        // Create filter mask using SIMD operations
-        let filter_mask = create_filter_mask_simd(&batch, predicates)?;
+        // Create filter mask using SIMD operations with remapped predicates
+        let filter_mask = create_filter_mask_simd(&batch, &remapped_predicates)?;
 
         // Collect matching indices
         for (local_idx, &passes) in filter_mask.iter().enumerate() {
