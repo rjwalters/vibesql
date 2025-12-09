@@ -32,6 +32,35 @@ DuckDB (Rust)  = SQL Engine only (via duckdb-rs)
 
 This gives you **true SQL engine performance** without language binding artifacts.
 
+## Engine Selection
+
+### Runtime Engine Filtering
+
+Use the `ENGINE_FILTER` environment variable to run only specific engines without recompiling:
+
+```bash
+# Run VibeSQL only (fastest iteration)
+ENGINE_FILTER=vibesql ./target/release/deps/tpch_benchmark-*
+
+# Run VibeSQL and SQLite only
+ENGINE_FILTER=vibesql,sqlite ./target/release/deps/tpch_benchmark-*
+
+# Run all embedded engines
+ENGINE_FILTER=vibesql,sqlite,duckdb ./target/release/deps/tpch_benchmark-*
+```
+
+This eliminates redundant data loading and significantly reduces benchmark runtime.
+
+### MySQL Note
+
+MySQL is a client-server database and is tested separately via the server benchmark:
+```bash
+# Use server benchmark for MySQL comparison
+make benchmark-servers
+```
+
+For embedded engine comparisons (VibeSQL, SQLite, DuckDB), use the standard benchmark targets.
+
 ## Quick Start
 
 ### Run All TPC-H Benchmarks
