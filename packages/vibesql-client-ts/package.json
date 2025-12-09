@@ -1,6 +1,6 @@
 {
   "name": "@vibesql/client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "TypeScript client for VibeSql with real-time subscription support",
   "type": "module",
   "main": "dist/index.js",
