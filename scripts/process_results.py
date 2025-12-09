@@ -475,7 +475,8 @@ class TPCDSParser(BenchmarkParser):
         """Check for TPC-DS specific markers."""
         return ('=== CSV Output ===' in content or
                 'tpcds_queries' in content or
-                'TPC-DS' in content)
+                'TPC-DS' in content or
+                '--- VibeSQL ---' in content)  # Custom harness format
 
     def parse(self, content: str) -> Tuple[List[Dict], Dict]:
         """Parse TPC-DS benchmark output."""
@@ -495,7 +496,10 @@ class TPCDSParser(BenchmarkParser):
         # Try CSV format first (from tpcds_runner)
         if '=== CSV Output ===' in content:
             results = self._parse_csv_output(content)
-        # Try Criterion stdout format
+        # Try custom harness format (post-Criterion migration)
+        elif '--- VibeSQL ---' in content or '--- SQLite ---' in content:
+            results = self._parse_custom_harness_output(content)
+        # Try Criterion stdout format (legacy)
         elif 'tpcds_queries' in content and 'time:' in content:
             results = self._parse_criterion_output(content)
         else:
@@ -581,8 +585,89 @@ class TPCDSParser(BenchmarkParser):
 
         return results
 
+    def _parse_custom_harness_output(self, content: str) -> List[Dict]:
+        """Parse custom benchmark harness output (post-Criterion migration).
+
+        Format:
+            --- VibeSQL ---
+              Q1                       6.57ms avg (    6.05ms -     7.01ms)
+              Q2                      87.47ms avg (   86.49ms -    89.29ms)
+            --- SQLite ---
+              Q1                      12.34ms avg (   11.00ms -    13.50ms)
+        """
+        results = []
+        current_engine = None
+
+        # Pattern for engine section headers: "--- VibeSQL ---"
+        engine_pattern = re.compile(r'^---\s+(\w+)\s+---$')
+
+        # Pattern for query results: "  Q1                       6.57ms avg (    6.05ms -     7.01ms)"
+        # Also handles seconds: "  Q6                        3.63s avg (     3.59s -      3.65s)"
+        # And timeout/error lines: "  Q13                    TIMEOUT (30s)"
+        query_pattern = re.compile(
+            r'^\s+(Q\d+|sanity_\w+)\s+'
+            r'([\d.]+)(ms|s)\s+avg\s+\(\s*([\d.]+)(ms|s)\s+-\s+([\d.]+)(ms|s)\s*\)'
+        )
+        error_pattern = re.compile(
+            r'^\s+(Q\d+|sanity_\w+)\s+(TIMEOUT|ERROR|SKIP|FAILED).*'
+        )
+
+        for line in content.split('\n'):
+            # Check for engine header
+            engine_match = engine_pattern.match(line)
+            if engine_match:
+                current_engine = engine_match.group(1).lower()
+                continue
+
+            if not current_engine:
+                continue
+
+            # Check for successful query result
+            query_match = query_pattern.match(line)
+            if query_match:
+                query_name = query_match.group(1)
+                mean_val = float(query_match.group(2))
+                mean_unit = query_match.group(3)
+
+                # Convert to milliseconds
+                mean_ms = mean_val * 1000 if mean_unit == 's' else mean_val
+
+                results.append({
+                    'database_engine': current_engine,
+                    'query_name': query_name,
+                    'group_name': 'tpcds_queries',
+                    'mean_time_ms': mean_ms,
+                    'std_dev_ms': None,
+                    'median_time_ms': None,
+                    'iterations': 10,  # Default for custom harness
+                    'status': 'passed'
+                })
+                continue
+
+            # Check for error/timeout results
+            error_match = error_pattern.match(line)
+            if error_match:
+                query_name = error_match.group(1)
+                error_type = error_match.group(2).lower()
+
+                status = 'timeout' if error_type == 'timeout' else 'failed'
+
+                results.append({
+                    'database_engine': current_engine,
+                    'query_name': query_name,
+                    'group_name': 'tpcds_queries',
+                    'mean_time_ms': None,
+                    'std_dev_ms': None,
+                    'median_time_ms': None,
+                    'iterations': 0,
+                    'status': status,
+                    'error_message': line.strip()
+                })
+
+        return results
+
     def _parse_criterion_output(self, content: str) -> List[Dict]:
-        """Parse Criterion benchmark output from stdout."""
+        """Parse Criterion benchmark output from stdout (legacy)."""
         results = []
 
         pattern = re.compile(
