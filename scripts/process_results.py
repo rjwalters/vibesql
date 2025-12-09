@@ -161,8 +161,14 @@ class TPCHParser(BenchmarkParser):
         """Parse TPC-H benchmark output."""
         results = []
         current_query = None
+        scale_factor = None
 
         for line in content.split('\n'):
+            # Scale factor: Loading TPC-H database (SF 0.01)...
+            sf_match = re.match(r'.*Loading TPC-H database \(SF ([\d.]+)\)', line)
+            if sf_match:
+                scale_factor = float(sf_match.group(1))
+                continue
             # Query header: === Q1 ===
             query_match = re.match(r'^=== (Q\d+) ===$', line)
             if query_match:
@@ -241,7 +247,8 @@ class TPCHParser(BenchmarkParser):
             'total_queries': len(results),
             'passed_queries': sum(1 for r in results if r['status'] == 'passed'),
             'failed_queries': sum(1 for r in results if r['status'] == 'error'),
-            'timeout_queries': sum(1 for r in results if r['status'] == 'timeout')
+            'timeout_queries': sum(1 for r in results if r['status'] == 'timeout'),
+            'scale_factor': scale_factor
         }
 
         return results, summary
@@ -255,13 +262,14 @@ class TPCHParser(BenchmarkParser):
 
         execute_insert(cursor, "benchmark_runs", [
             "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
-            "timeout_secs", "total_queries", "passed_queries",
+            "scale_factor", "timeout_secs", "total_queries", "passed_queries",
             "failed_queries", "timeout_queries", "notes"
         ], [
             datetime.now().isoformat(),
             git_commit,
             git_branch,
             'tpch',
+            summary.get('scale_factor'),
             timeout_secs,
             summary['total_queries'],
             summary['passed_queries'],
@@ -317,6 +325,7 @@ class TPCCParser(BenchmarkParser):
         results = []
         current_engine = None
         current_result = None
+        scale_factor = None
 
         def save_current_result():
             nonlocal current_result
@@ -328,6 +337,15 @@ class TPCCParser(BenchmarkParser):
                 current_result = None
 
         for line in content.split('\n'):
+            # Scale factor: "Scale factor: 1" or "Loading VibeSQL TPC-C database (SF 1)..."
+            sf_match = re.match(r'^\s*Scale factor:\s*([\d.]+)', line)
+            if sf_match:
+                scale_factor = float(sf_match.group(1))
+                continue
+            sf_match2 = re.match(r'.*Loading.*TPC-C.*\(SF ([\d.]+)\)', line)
+            if sf_match2:
+                scale_factor = float(sf_match2.group(1))
+                continue
             # Detect engine section
             if '--- VibeSQL Benchmark ---' in line:
                 save_current_result()
@@ -389,7 +407,8 @@ class TPCCParser(BenchmarkParser):
 
         summary = {
             'total_engines': len(results),
-            'total_transactions': sum(r.get('transaction_count', 0) for r in results)
+            'total_transactions': sum(r.get('transaction_count', 0) for r in results),
+            'scale_factor': scale_factor
         }
 
         return results, summary
@@ -398,7 +417,8 @@ class TPCCParser(BenchmarkParser):
                        config: Dict) -> int:
         """Insert TPC-C results into the database."""
         git_commit, git_branch = get_git_info()
-        scale_factor = config.get('scale_factor', 1)
+        # Prefer parsed scale_factor from output, fall back to config
+        scale_factor = summary.get('scale_factor') or config.get('scale_factor', 1)
         duration_secs = config.get('duration', 60)
         notes = config.get('notes')
 
@@ -459,6 +479,19 @@ class TPCDSParser(BenchmarkParser):
 
     def parse(self, content: str) -> Tuple[List[Dict], Dict]:
         """Parse TPC-DS benchmark output."""
+        # Extract scale factor from output
+        # Format: "Scale factor: 0.001" or "Loading VibeSQL database (SF 0.001)..."
+        scale_factor = None
+        for line in content.split('\n'):
+            sf_match = re.match(r'^\s*Scale factor:\s*([\d.]+)', line)
+            if sf_match:
+                scale_factor = float(sf_match.group(1))
+                break
+            sf_match2 = re.match(r'.*Loading.*database.*\(SF ([\d.]+)\)', line)
+            if sf_match2:
+                scale_factor = float(sf_match2.group(1))
+                break
+
         # Try CSV format first (from tpcds_runner)
         if '=== CSV Output ===' in content:
             results = self._parse_csv_output(content)
@@ -475,7 +508,8 @@ class TPCDSParser(BenchmarkParser):
             'failed_queries': sum(1 for r in results if r.get('status') == 'failed'),
             'timeout_queries': sum(1 for r in results if r.get('status') == 'timeout'),
             'error_queries': sum(1 for r in results if r.get('status') == 'error'),
-            'incomplete_queries': sum(1 for r in results if r.get('status') == 'incomplete')
+            'incomplete_queries': sum(1 for r in results if r.get('status') == 'incomplete'),
+            'scale_factor': scale_factor
         }
 
         return results, summary
@@ -641,7 +675,8 @@ class TPCDSParser(BenchmarkParser):
                        config: Dict) -> int:
         """Insert TPC-DS results into the database."""
         git_commit, git_branch = get_git_info()
-        scale_factor = config.get('scale_factor', 0.01)
+        # Prefer parsed scale_factor from output, fall back to config
+        scale_factor = summary.get('scale_factor') or config.get('scale_factor', 0.01)
         notes = config.get('notes')
 
         # Filter to vibesql results for main tracking
