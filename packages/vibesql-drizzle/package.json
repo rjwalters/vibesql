@@ -1,6 +1,6 @@
 {
   "name": "@vibesql/drizzle",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Drizzle ORM adapter for VibeSQL using sqlite-proxy driver",
   "type": "module",
   "main": "dist/index.js",
