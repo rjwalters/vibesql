@@ -177,6 +177,35 @@ Potential areas for further optimization:
 - **Q14**: Cross-channel intersect could benefit from hash join optimization
 - **Q38/Q74**: Customer year comparisons could use materialized views
 
+## SQLite Comparison Limitations
+
+When running the TPC-DS benchmark comparison (`make benchmark-all`), SQLite cannot execute
+all 99 queries due to missing SQL features. The following queries are skipped for SQLite:
+
+| Query | Reason | Missing Feature |
+|-------|--------|-----------------|
+| Q2 | Syntax | Parenthesized UNION subqueries |
+| Q5 | OLAP | GROUP BY ROLLUP |
+| Q14 | OLAP | GROUP BY ROLLUP |
+| Q17 | Function | STDDEV_SAMP() |
+| Q18 | OLAP | GROUP BY ROLLUP |
+| Q22 | OLAP | GROUP BY ROLLUP |
+| Q36 | OLAP | GROUPING() + CUBE |
+| Q67 | OLAP | GROUP BY ROLLUP |
+| Q70 | OLAP | GROUPING() + ROLLUP |
+| Q77 | OLAP | GROUP BY ROLLUP |
+| Q80 | OLAP | GROUP BY ROLLUP |
+| Q86 | OLAP | GROUPING() + ROLLUP |
+
+**Total**: 12 queries skipped for SQLite (88 of 99 queries run successfully)
+
+These are SQL:1999/2003 OLAP features that SQLite does not implement:
+- **ROLLUP/CUBE**: Hierarchical grouping sets (would require multiple UNION ALLs to emulate)
+- **GROUPING()**: Identifies super-aggregate rows in ROLLUP/CUBE results
+- **STDDEV_SAMP()**: Sample standard deviation (could be computed manually)
+
+DuckDB and VibeSQL support all 99 queries.
+
 ## Running the Benchmark
 
 ```bash

@@ -42,7 +42,7 @@ use std::env;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tpcds::memory::hint_memory_release;
-use tpcds::queries::{TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
+use tpcds::queries::{sqlite_should_skip, TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
 use tpcds::schema::*;
 use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
@@ -362,9 +362,17 @@ fn main() {
         eprintln!("SQLite loaded in {:?}", load_start.elapsed());
 
         let mut sqlite_results = Vec::new();
+        let mut sqlite_skipped = 0;
         eprintln!("\n--- SQLite ---");
 
         for (name, sql) in &queries {
+            // Skip queries that use SQL features SQLite doesn't support
+            if sqlite_should_skip(name) {
+                eprintln!("  {:20} SKIPPED (unsupported SQL feature)", name);
+                sqlite_skipped += 1;
+                continue;
+            }
+
             if !check_memory_before_query(name) {
                 continue;
             }
@@ -374,6 +382,13 @@ fn main() {
                 stats.print_compact();
                 sqlite_results.push(stats);
             }
+        }
+
+        if sqlite_skipped > 0 {
+            eprintln!(
+                "\nSQLite: {} queries skipped (ROLLUP/CUBE/STDDEV_SAMP not supported)",
+                sqlite_skipped
+            );
         }
         all_results.push(("SQLite", sqlite_results));
         hint_memory_release();
