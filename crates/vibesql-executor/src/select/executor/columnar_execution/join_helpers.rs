@@ -253,3 +253,19 @@ pub(super) fn extract_single_table_name(from_clause: &FromClause) -> Option<Stri
         FromClause::Subquery { .. } => None, // Subqueries not supported
     }
 }
+
+/// Extract table name and optional alias from a FROM clause if it's a simple table reference
+///
+/// Returns (table_name, alias) where alias is the alias if specified, otherwise None.
+/// Returns None if the FROM clause contains JOINs, subqueries, or other complex constructs.
+///
+/// # Issue #4111
+/// The alias (if present) must be used as the schema key, since queries reference
+/// columns using the alias (e.g., `J.I_CURRENT_PRICE` in `FROM item J`).
+pub(super) fn extract_table_name_and_alias(from_clause: &FromClause) -> Option<(String, Option<String>)> {
+    match from_clause {
+        FromClause::Table { name, alias, .. } => Some((name.clone(), alias.clone())),
+        FromClause::Join { .. } => None, // JOINs not supported in native columnar path
+        FromClause::Subquery { .. } => None, // Subqueries not supported
+    }
+}

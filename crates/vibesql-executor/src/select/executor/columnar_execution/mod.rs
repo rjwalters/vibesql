@@ -232,15 +232,27 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
+        // Skip native columnar for correlated subqueries (#4111)
+        // Correlated subqueries have outer_schema set and may have WHERE clauses
+        // that reference outer columns (e.g., `J.I_CATEGORY = I.I_CATEGORY`).
+        // The columnar predicate extraction doesn't handle outer column references,
+        // so these predicates are silently dropped, causing incorrect results.
+        if self.outer_schema.is_some() {
+            log::debug!("Native columnar: skipping - correlated subquery with outer schema");
+            return Ok(None);
+        }
+
         // Must have a FROM clause with a single table
         let from_clause = match &stmt.from {
             Some(from) => from,
             None => return Ok(None),
         };
 
-        // Extract table name if this is a simple single-table scan
-        let table_name = match join_helpers::extract_single_table_name(from_clause) {
-            Some(name) => name,
+        // Extract table name and alias if this is a simple single-table scan
+        // Issue #4111: We need both the table name (for database lookup) and the alias
+        // (for schema key, since queries reference columns using the alias)
+        let (table_name, table_alias) = match join_helpers::extract_table_name_and_alias(from_clause) {
+            Some((name, alias)) => (name, alias),
             None => {
                 log::debug!("Native columnar: skipping - not a simple single-table query");
                 return Ok(None);
@@ -263,7 +275,11 @@ impl SelectExecutor<'_> {
         };
 
         // Build schema for this table
-        let schema = CombinedSchema::from_table(table_name.clone(), table.schema.clone());
+        // Issue #4111: Use the alias as the schema key if one is provided, otherwise use table name.
+        // This ensures queries like `SELECT J.I_CURRENT_PRICE FROM item J` can resolve J.I_CURRENT_PRICE
+        // against the schema key "J" (not "item").
+        let schema_key = table_alias.unwrap_or_else(|| table_name.clone());
+        let schema = CombinedSchema::from_table(schema_key, table.schema.clone());
 
         // Validate column references BEFORE processing (issue #2654)
         // This ensures column errors are caught even when tables are empty
