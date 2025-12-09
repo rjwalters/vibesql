@@ -761,7 +761,7 @@ def run_sysbench_server(config: BenchConfig) -> int:
     features_str = ",".join(features) if features else ""
 
     # Build benchmark
-    build_cmd = ["cargo", "bench", "--package", "vibesql-executor", "--bench", "sysbench_server", "--no-run"]
+    build_cmd = ["cargo", "bench", "--package", "vibesql-server", "--bench", "sysbench_server", "--no-run"]
     if features_str:
         build_cmd.extend(["--features", features_str])
 
@@ -910,7 +910,7 @@ def run_tpch_server(config: BenchConfig) -> int:
     features_str = ",".join(features) if features else ""
 
     # Build benchmark
-    build_cmd = ["cargo", "bench", "--package", "vibesql-executor", "--bench", "tpch_server", "--no-run"]
+    build_cmd = ["cargo", "bench", "--package", "vibesql-server", "--bench", "tpch_server", "--no-run"]
     if features_str:
         build_cmd.extend(["--features", features_str])
 
@@ -1032,7 +1032,7 @@ def run_tpcc_server(config: BenchConfig) -> int:
     print("⚠ TPC-C server benchmark not yet implemented")
     print("")
     print("To implement this benchmark, create:")
-    print("  crates/vibesql-executor/benches/tpcc_server.rs")
+    print("  crates/vibesql-server/benches/tpcc_server.rs")
     print("")
     print("The benchmark should test TPC-C transactions over the PostgreSQL")
     print("wire protocol, comparing VibeSQL-server against MySQL.")
