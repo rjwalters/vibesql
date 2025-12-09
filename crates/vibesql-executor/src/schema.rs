@@ -459,6 +459,45 @@ mod tests {
         assert!(schema.get_column_index(Some("users"), "USERNAME").is_some());
     }
 
+    /// Test case for issue #4111: TPC-DS Q6 scenario
+    /// Schema created with lowercase column names (from data loader)
+    /// Query uses uppercase identifiers (from parser normalization)
+    #[test]
+    fn test_tpcds_q6_case_insensitive_column_lookup_issue_4111() {
+        // Simulate TPC-DS item table with lowercase columns (as created by data loader)
+        let schema = CombinedSchema::from_table(
+            "J".to_string(), // Uppercase alias from parser
+            table_schema_with_columns(
+                "item",
+                vec![
+                    ("i_item_sk", DataType::Integer),
+                    ("i_current_price", DataType::DoublePrecision), // lowercase!
+                    ("i_category", DataType::Varchar { max_length: None }),
+                ],
+            ),
+        );
+
+        // Query uses uppercase column names (from parser normalization)
+        // This is the exact pattern that fails in TPC-DS Q6:
+        // SELECT AVG(j.i_current_price) FROM item j WHERE j.i_category = i.i_category
+        assert!(
+            schema.get_column_index(Some("J"), "I_CURRENT_PRICE").is_some(),
+            "J.I_CURRENT_PRICE should find i_current_price via case-insensitive lookup"
+        );
+        assert!(
+            schema.get_column_index(Some("J"), "I_CATEGORY").is_some(),
+            "J.I_CATEGORY should find i_category via case-insensitive lookup"
+        );
+        assert!(
+            schema.get_column_index(Some("j"), "I_CURRENT_PRICE").is_some(),
+            "j.I_CURRENT_PRICE should find i_current_price"
+        );
+        assert!(
+            schema.get_column_index(Some("J"), "i_current_price").is_some(),
+            "J.i_current_price should find via exact match"
+        );
+    }
+
     #[test]
     fn test_column_distinct_cases_exact_match() {
         // When there are multiple columns with different cases (via delimited identifiers),
