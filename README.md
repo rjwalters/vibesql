@@ -13,8 +13,8 @@
 ## Highlights
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
-- **100% SQLLogicTest conformance** - 623 files (~5.9M tests)
-- **9,000+ unit tests** - comprehensive test coverage
+- **100% SQLLogicTest conformance** - 622 files (~7.4M tests)
+- **5,500+ unit tests** - comprehensive test coverage
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **HTTP REST & GraphQL API** - Full CRUD and query endpoints
 - **Vector search** - AI/ML embeddings with similarity search
@@ -23,7 +23,7 @@
 - **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **372,000+ lines** of Rust across 12 crates
+- **400,000+ lines** of Rust across 12 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
@@ -154,15 +154,15 @@ function ChatRoom({ channelId }) {
 
 ## Benchmarks
 
-VibeSQL achieves **75,404 TPS** on TPC-C (38x faster than SQLite) and passes 100% of TPC-H and TPC-DS queries.
+VibeSQL achieves **23,398 TPS** on TPC-C mixed workload (5x faster than SQLite) and passes 100% of TPC-H and TPC-DS queries.
 
 ### Test Coverage
 
 | Suite | Coverage | Tests |
 |-------|----------|-------|
 | SQL:1999 Core | 100% | 739/739 sqltest |
-| SQLLogicTest | 100% | 623 files (~5.9M tests) |
-| Unit Tests | - | 9,000+ tests |
+| SQLLogicTest | 100% | 622 files (~7.4M tests) |
+| Unit Tests | - | 5,500+ tests |
 | TPC-DS | 100% | 99/99 queries |
 | TPC-H | 100% | 22/22 queries |
 | TPC-C | 100% | All transactions |
@@ -171,17 +171,17 @@ VibeSQL achieves **75,404 TPS** on TPC-C (38x faster than SQLite) and passes 100
 
 | Database | TPS | vs SQLite |
 |----------|-----|-----------|
-| **VibeSQL** | **75,404** | **38x faster** |
-| SQLite | 1,984 | baseline |
-| DuckDB | 347 | 6x slower |
+| **VibeSQL** | **23,398** | **5x faster** |
+| SQLite | 4,540 | baseline |
+| DuckDB | 385 | 12x slower |
 
-*Scale Factor 1, 10-second duration. Stock-Level transaction latency: 173µs (36x under 1ms target).*
+*Scale Factor 1, 60-second duration, mixed workload (New Order, Payment, Order Status, Delivery, Stock Level).*
 
 ### TPC-DS (Complex Analytics)
 
 **99/99 queries passing (100%)** at SF 0.001. All queries complete within timeout.
 
-*Peak memory: ~141 MB. See [full results](docs/benchmarks/TPCDS_RESULTS.md).*
+*Peak memory: ~141 MB. See [full results](docs/performance/TPCDS_RESULTS.md).*
 
 ### TPC-H (Decision Support)
 

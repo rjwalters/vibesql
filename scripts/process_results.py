@@ -269,7 +269,7 @@ class TPCHParser(BenchmarkParser):
             git_commit,
             git_branch,
             'tpch',
-            summary.get('scale_factor'),
+            str(summary.get('scale_factor')) if summary.get('scale_factor') is not None else None,
             timeout_secs,
             summary['total_queries'],
             summary['passed_queries'],
