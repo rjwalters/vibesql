@@ -3,6 +3,8 @@ use ahash::AHashMap;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+use crate::timeout::TimeoutContext;
+
 /// Grouped rows: (group key values, rows in group)
 pub type GroupedRows = Vec<(Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>)>;
 
@@ -30,8 +32,9 @@ pub fn group_rows<'a>(
         if config.should_parallelize_aggregate(rows.len()) {
             // Get components needed for thread-local evaluators
             let components = evaluator.get_parallel_components();
+            let timeout_ctx = TimeoutContext::from_executor(executor);
 
-            return group_rows_parallel(rows, group_by_exprs, components);
+            return group_rows_parallel(rows, group_by_exprs, components, &timeout_ctx);
         }
     }
 
@@ -90,16 +93,22 @@ fn group_rows_sequential<'a>(
 ///
 /// Thread safety is achieved by creating fresh evaluators per thread,
 /// avoiding the `Send` constraint on `RefCell`/`Rc` in `CombinedExpressionEvaluator`.
+///
+/// Timeout is checked before and after parallel processing (Issue #4151).
 #[cfg(feature = "parallel")]
 fn group_rows_parallel<'a>(
     rows: &[vibesql_storage::Row],
     group_by_exprs: &[vibesql_ast::Expression],
     components: crate::evaluator::parallel::ParallelComponents<'a>,
+    timeout_ctx: &TimeoutContext,
 ) -> Result<GroupedRows, crate::errors::ExecutorError> {
     use crate::evaluator::CombinedExpressionEvaluator;
 
     let (schema, database, outer_row, outer_schema, window_mapping, cte_context, enable_cse) =
         components;
+
+    // Check timeout before parallel execution (can't check mid-parallel easily)
+    timeout_ctx.check()?;
 
     // Get number of threads for chunking
     let num_threads = rayon::current_num_threads();
@@ -145,6 +154,9 @@ fn group_rows_parallel<'a>(
             Ok(local_groups)
         })
         .collect();
+
+    // Check timeout after parallel phase
+    timeout_ctx.check()?;
 
     // Check for errors from any thread
     let mut validated_results: Vec<AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>>> =

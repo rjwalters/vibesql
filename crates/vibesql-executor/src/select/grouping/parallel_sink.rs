@@ -37,6 +37,8 @@ use crate::errors::ExecutorError;
 use crate::evaluator::CombinedExpressionEvaluator;
 #[cfg(feature = "parallel")]
 use crate::schema::CombinedSchema;
+#[cfg(feature = "parallel")]
+use crate::timeout::TimeoutContext;
 
 /// Thread-local state for parallel aggregation
 ///
@@ -61,6 +63,8 @@ impl ThreadLocalAggregationState {
 /// 1. **Sink**: Each thread processes a chunk of rows with its own evaluator
 /// 2. **Combine**: Thread-local group maps are merged using accumulator.combine()
 /// 3. **Finalize**: Final aggregation results are returned
+///
+/// Timeout is checked before and after parallel processing (Issue #4151).
 ///
 /// # Arguments
 /// * `rows` - Input rows to group and aggregate
@@ -88,6 +92,12 @@ pub fn parallel_group_aggregate<'a>(
         // Fall back to sequential for small datasets
         return sequential_group_aggregate(rows, group_by_exprs, aggregate_infos, schema, database);
     }
+
+    // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
+    let timeout_ctx = TimeoutContext::new_default();
+
+    // Check timeout before parallel execution (can't check mid-parallel easily)
+    timeout_ctx.check()?;
 
     // Get number of threads for chunking
     let num_threads = rayon::current_num_threads();
@@ -135,6 +145,9 @@ pub fn parallel_group_aggregate<'a>(
                 Ok(state.groups)
             })
             .collect();
+
+    // Check timeout after parallel phase
+    timeout_ctx.check()?;
 
     // Check for errors from any thread
     let mut thread_results: Vec<AHashMap<Vec<SqlValue>, Vec<AggregateAccumulator>>> =
