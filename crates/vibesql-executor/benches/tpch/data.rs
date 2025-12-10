@@ -134,7 +134,21 @@ pub const COLORS: &[&str] = &[
     "white",
     "yellow",
 ];
-pub const TYPES: &[&str] = &["STANDARD", "SMALL", "MEDIUM", "LARGE", "ECONOMY", "PROMO"];
+// TPC-H P_TYPE is composed of three syllables: SIZE FINISH MATERIAL
+// e.g., "STANDARD ANODIZED BRASS", "SMALL POLISHED TIN"
+pub const TYPE_SYLLABLE1: &[&str] = &["STANDARD", "SMALL", "MEDIUM", "LARGE", "ECONOMY", "PROMO"];
+pub const TYPE_SYLLABLE2: &[&str] = &["ANODIZED", "BURNISHED", "PLATED", "POLISHED", "BRUSHED"];
+pub const TYPE_SYLLABLE3: &[&str] = &["TIN", "NICKEL", "BRASS", "STEEL", "COPPER"];
+
+/// Generates a TPC-H compliant P_TYPE value.
+/// Format: "{SYLLABLE1} {SYLLABLE2} {SYLLABLE3}"
+/// e.g., "STANDARD ANODIZED BRASS", "MEDIUM POLISHED TIN"
+pub fn generate_part_type(part_index: usize) -> String {
+    let s1 = TYPE_SYLLABLE1[part_index % TYPE_SYLLABLE1.len()];
+    let s2 = TYPE_SYLLABLE2[(part_index / TYPE_SYLLABLE1.len()) % TYPE_SYLLABLE2.len()];
+    let s3 = TYPE_SYLLABLE3[(part_index / (TYPE_SYLLABLE1.len() * TYPE_SYLLABLE2.len())) % TYPE_SYLLABLE3.len()];
+    format!("{} {} {}", s1, s2, s3)
+}
 pub const CONTAINERS: &[&str] = &[
     "SM CASE",
     "SM BOX",

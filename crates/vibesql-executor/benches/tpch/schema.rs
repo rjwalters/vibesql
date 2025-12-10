@@ -1348,7 +1348,7 @@ fn load_supplier_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 // =============================================================================
 
 fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
-    use super::data::{COLORS, CONTAINERS, TYPES};
+    use super::data::{generate_part_type, COLORS, CONTAINERS};
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
@@ -1357,14 +1357,15 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     for i in 0..data.part_count {
         let color1 = COLORS[i % COLORS.len()];
         let color2 = COLORS[(i * 7) % COLORS.len()];
-        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let p_type = generate_part_type(i);
+        let p_name = format!("{} {} {}", color1, p_type, color2);
         let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
         let row = Row::new(vec![
             SqlValue::Integer(i as i64 + 1),
             SqlValue::Varchar(arcstr::ArcStr::from(p_name)),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Manufacturer#{}", (i % 5) + 1))),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1))),
-            SqlValue::Varchar(arcstr::ArcStr::from(TYPES[i % TYPES.len()].to_string())),
+            SqlValue::Varchar(arcstr::ArcStr::from(p_type)),
             SqlValue::Integer(((i % 50) + 1) as i64),
             SqlValue::Varchar(arcstr::ArcStr::from(CONTAINERS[i % CONTAINERS.len()].to_string())),
             SqlValue::Numeric(retailprice),
@@ -1385,14 +1386,15 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
 
 #[cfg(feature = "sqlite-comparison")]
 fn load_part_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
-    use super::data::{COLORS, CONTAINERS, TYPES};
+    use super::data::{generate_part_type, COLORS, CONTAINERS};
 
     let mut stmt = conn.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 0..data.part_count {
         let color1 = COLORS[i % COLORS.len()];
         let color2 = COLORS[(i * 7) % COLORS.len()];
-        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let p_type = generate_part_type(i);
+        let p_name = format!("{} {} {}", color1, &p_type, color2);
         let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
 
         stmt.execute(rusqlite::params![
@@ -1400,7 +1402,7 @@ fn load_part_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
             p_name,
             format!("Manufacturer#{}", (i % 5) + 1),
             format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1),
-            TYPES[i % TYPES.len()],
+            p_type,
             ((i % 50) + 1) as i64,
             CONTAINERS[i % CONTAINERS.len()],
             retailprice,
@@ -1412,14 +1414,15 @@ fn load_part_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
 
 #[cfg(feature = "duckdb-comparison")]
 fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
-    use super::data::{COLORS, CONTAINERS, TYPES};
+    use super::data::{generate_part_type, COLORS, CONTAINERS};
 
     let mut stmt = conn.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
     for i in 0..data.part_count {
         let color1 = COLORS[i % COLORS.len()];
         let color2 = COLORS[(i * 7) % COLORS.len()];
-        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let p_type = generate_part_type(i);
+        let p_name = format!("{} {} {}", color1, &p_type, color2);
         let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
 
         stmt.execute(duckdb::params![
@@ -1427,7 +1430,7 @@ fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
             p_name,
             format!("Manufacturer#{}", (i % 5) + 1),
             format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1),
-            TYPES[i % TYPES.len()],
+            p_type,
             ((i % 50) + 1) as i64,
             CONTAINERS[i % CONTAINERS.len()],
             retailprice,
@@ -1853,12 +1856,13 @@ fn load_supplier_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
 
 #[cfg(feature = "mysql-comparison")]
 fn load_part_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
-    use super::data::{COLORS, CONTAINERS, TYPES};
+    use super::data::{generate_part_type, COLORS, CONTAINERS};
 
     for i in 0..data.part_count {
         let color1 = COLORS[i % COLORS.len()];
         let color2 = COLORS[(i * 7) % COLORS.len()];
-        let p_name = format!("{} {} {}", color1, TYPES[i % TYPES.len()], color2);
+        let p_type = generate_part_type(i);
+        let p_name = format!("{} {} {}", color1, &p_type, color2);
         let retailprice = (90000.0 + (i as f64 / 10.0) % 10000.0) / 100.0;
 
         conn.exec_drop(
@@ -1868,7 +1872,7 @@ fn load_part_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
                 p_name,
                 format!("Manufacturer#{}", (i % 5) + 1),
                 format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1),
-                TYPES[i % TYPES.len()],
+                p_type,
                 ((i % 50) + 1) as i64,
                 CONTAINERS[i % CONTAINERS.len()],
                 retailprice,
