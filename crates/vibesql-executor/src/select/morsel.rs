@@ -42,6 +42,7 @@ use std::collections::BinaryHeap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use vibesql_storage::Row;
+use vibesql_types::DataType;
 
 /// Environment variable to enable morsel execution debug logging
 const MORSEL_DEBUG_ENV: &str = "MORSEL_DEBUG";
@@ -101,6 +102,18 @@ pub struct MorselConfig {
     pub morsel_size: usize,
 }
 
+/// Target cache size for morsel data (2MB = typical L3 cache slice)
+const TARGET_CACHE_BYTES: usize = 2 * 1024 * 1024;
+
+/// Minimum morsel size to amortize work-stealing overhead
+const MIN_MORSEL_SIZE: usize = 10_000;
+
+/// Maximum morsel size to ensure enough morsels for load balancing
+const MAX_MORSEL_SIZE: usize = 100_000;
+
+/// Default morsel size when no hints are available
+const DEFAULT_MORSEL_SIZE: usize = 50_000;
+
 impl MorselConfig {
     /// Create a new configuration with the given morsel size.
     pub fn new(morsel_size: usize) -> Self {
@@ -120,17 +133,182 @@ impl MorselConfig {
     pub fn optimal() -> Self {
         // Check for user override
         let morsel_size = if let Ok(size_str) = std::env::var("MORSEL_SIZE") {
-            size_str.parse::<usize>().unwrap_or(50_000).max(1000).min(500_000)
+            size_str.parse::<usize>().unwrap_or(DEFAULT_MORSEL_SIZE).max(1000).min(500_000)
         } else {
             // Default: 50,000 rows
             // This balances:
             // - Cache efficiency (50K rows * 100 bytes = 5MB, fits L3)
             // - Load balancing (enough morsels for 16+ cores)
             // - Stealing overhead (large enough to amortize)
-            50_000
+            DEFAULT_MORSEL_SIZE
         };
 
         Self { morsel_size }
+    }
+
+    /// Create an adaptive configuration based on estimated row width in bytes.
+    ///
+    /// Adjusts morsel size to maintain consistent L3 cache occupancy regardless
+    /// of row width. Wide rows get smaller morsels, narrow rows get larger morsels.
+    ///
+    /// # Arguments
+    ///
+    /// * `avg_row_bytes` - Estimated average size of each row in bytes
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // For wide rows (~500 bytes each), use smaller morsels
+    /// let config = MorselConfig::for_row_width(500);
+    /// assert!(config.morsel_size < 50_000);
+    ///
+    /// // For narrow rows (~20 bytes each), use larger morsels
+    /// let config = MorselConfig::for_row_width(20);
+    /// assert!(config.morsel_size > 50_000);
+    /// ```
+    pub fn for_row_width(avg_row_bytes: usize) -> Self {
+        // Avoid division by zero, use minimum of 1 byte per row
+        let row_bytes = avg_row_bytes.max(1);
+
+        // Calculate morsel size to fit TARGET_CACHE_BYTES
+        let morsel_size = (TARGET_CACHE_BYTES / row_bytes).clamp(MIN_MORSEL_SIZE, MAX_MORSEL_SIZE);
+
+        if morsel_debug_enabled() {
+            eprintln!(
+                "[MORSEL] Adaptive sizing: {} bytes/row -> {} rows/morsel",
+                row_bytes, morsel_size
+            );
+        }
+
+        Self { morsel_size }
+    }
+
+    /// Create an adaptive configuration based on a schema (list of column types).
+    ///
+    /// Estimates row width from the schema and adjusts morsel size accordingly.
+    /// This is the recommended method when schema information is available.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Slice of column data types in the row
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use vibesql_types::DataType;
+    ///
+    /// let schema = [
+    ///     DataType::Integer,
+    ///     DataType::Varchar { max_length: Some(100) },
+    ///     DataType::Date,
+    /// ];
+    /// let config = MorselConfig::for_schema(&schema);
+    /// ```
+    pub fn for_schema(schema: &[DataType]) -> Self {
+        if schema.is_empty() {
+            return Self::optimal();
+        }
+
+        // Sum estimated sizes for all columns, plus Row struct overhead
+        const ROW_OVERHEAD: usize = 24; // Vec header for values
+        let row_bytes: usize =
+            ROW_OVERHEAD + schema.iter().map(|dt| dt.estimated_size_bytes()).sum::<usize>();
+
+        Self::for_row_width(row_bytes)
+    }
+
+    /// Create an adaptive configuration based on estimated filter selectivity.
+    ///
+    /// For filter operations with known selectivity, adjusts morsel size:
+    /// - Low selectivity (few rows pass) -> larger morsels to reduce overhead
+    /// - High selectivity (many rows pass) -> smaller morsels for better balancing
+    ///
+    /// # Arguments
+    ///
+    /// * `selectivity` - Fraction of rows expected to pass the filter (0.0 to 1.0)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // For a highly selective filter (1% pass rate), use larger morsels
+    /// let config = MorselConfig::for_selectivity(0.01);
+    /// assert!(config.morsel_size > 50_000);
+    ///
+    /// // For a low selectivity filter (90% pass rate), use default sizing
+    /// let config = MorselConfig::for_selectivity(0.90);
+    /// assert!(config.morsel_size <= 50_000);
+    /// ```
+    pub fn for_selectivity(selectivity: f64) -> Self {
+        // Clamp selectivity to valid range
+        let sel = selectivity.clamp(0.001, 1.0);
+
+        // For very low selectivity, increase morsel size to reduce overhead
+        // The idea: if only 1% of rows pass, we need larger input morsels
+        // to get meaningful output morsels
+        let adjusted = if sel < 0.1 {
+            // Scale inversely with selectivity, but cap at 2x default
+            ((DEFAULT_MORSEL_SIZE as f64) / sel).min((MAX_MORSEL_SIZE * 2) as f64) as usize
+        } else {
+            DEFAULT_MORSEL_SIZE
+        };
+
+        let morsel_size = adjusted.clamp(MIN_MORSEL_SIZE, MAX_MORSEL_SIZE * 2);
+
+        if morsel_debug_enabled() {
+            eprintln!(
+                "[MORSEL] Selectivity-based sizing: {:.1}% selectivity -> {} rows/morsel",
+                sel * 100.0,
+                morsel_size
+            );
+        }
+
+        Self { morsel_size }
+    }
+
+    /// Create an adaptive configuration combining row width and selectivity hints.
+    ///
+    /// This is the most accurate method when both schema and selectivity estimates
+    /// are available (e.g., from query optimizer statistics).
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Slice of column data types
+    /// * `selectivity` - Optional filter selectivity (0.0 to 1.0)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use vibesql_types::DataType;
+    ///
+    /// let schema = [DataType::Integer, DataType::Bigint];
+    /// let config = MorselConfig::adaptive(&schema, Some(0.05));
+    /// ```
+    pub fn adaptive(schema: &[DataType], selectivity: Option<f64>) -> Self {
+        // Start with schema-based sizing
+        let base_config = Self::for_schema(schema);
+
+        // Adjust for selectivity if provided
+        match selectivity {
+            Some(sel) if sel < 0.1 => {
+                // For low selectivity, scale up from the schema-based size
+                let adjusted =
+                    ((base_config.morsel_size as f64) / sel.clamp(0.001, 1.0)).min((MAX_MORSEL_SIZE * 2) as f64)
+                        as usize;
+                let morsel_size = adjusted.clamp(MIN_MORSEL_SIZE, MAX_MORSEL_SIZE * 2);
+
+                if morsel_debug_enabled() {
+                    eprintln!(
+                        "[MORSEL] Adaptive sizing: schema={} bytes, selectivity={:.1}% -> {} rows/morsel",
+                        schema.iter().map(|dt| dt.estimated_size_bytes()).sum::<usize>(),
+                        sel * 100.0,
+                        morsel_size
+                    );
+                }
+
+                Self { morsel_size }
+            }
+            _ => base_config,
+        }
     }
 }
 
@@ -1476,5 +1654,152 @@ mod tests {
         for row in sorted.iter() {
             assert!(matches!(row.values[0], SqlValue::Integer(42)));
         }
+    }
+
+    // ============================================
+    // Adaptive sizing tests
+    // ============================================
+
+    #[test]
+    fn test_for_row_width_wide_rows() {
+        // Wide rows (500 bytes) should use smaller morsels
+        let config = MorselConfig::for_row_width(500);
+        // 2MB / 500 bytes = 4096 rows, but clamped to MIN_MORSEL_SIZE (10,000)
+        assert_eq!(config.morsel_size, MIN_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_for_row_width_narrow_rows() {
+        // Narrow rows (20 bytes) should use larger morsels
+        let config = MorselConfig::for_row_width(20);
+        // 2MB / 20 bytes = 104,857 rows, but clamped to MAX_MORSEL_SIZE (100,000)
+        assert_eq!(config.morsel_size, MAX_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_for_row_width_medium_rows() {
+        // Medium rows (100 bytes) - typical case
+        let config = MorselConfig::for_row_width(100);
+        // 2MB / 100 bytes = 20,971 rows
+        assert_eq!(config.morsel_size, 20_971);
+    }
+
+    #[test]
+    fn test_for_row_width_zero_bytes() {
+        // Zero bytes should be treated as 1 byte (avoid division by zero)
+        let config = MorselConfig::for_row_width(0);
+        // 2MB / 1 byte = way more than MAX, clamped to MAX_MORSEL_SIZE
+        assert_eq!(config.morsel_size, MAX_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_for_schema_narrow() {
+        // Schema with just integers - narrow rows
+        let schema = [DataType::Integer, DataType::Integer];
+        let config = MorselConfig::for_schema(&schema);
+        // Row overhead (24) + 2 * (8 + 4) = 24 + 24 = 48 bytes
+        // 2MB / 48 = ~43,690, within bounds
+        assert!(config.morsel_size > 40_000 && config.morsel_size < 50_000);
+    }
+
+    #[test]
+    fn test_for_schema_wide() {
+        // Schema with varchars - wider rows
+        let schema = [
+            DataType::Integer,
+            DataType::Varchar { max_length: Some(200) },
+            DataType::Varchar { max_length: Some(200) },
+        ];
+        let config = MorselConfig::for_schema(&schema);
+        // Row overhead (24) + (8+4) + 2*(8+16+200) = 24 + 12 + 448 = 484 bytes
+        // Should result in smaller morsels due to wide rows
+        assert!(config.morsel_size <= DEFAULT_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_for_schema_empty() {
+        // Empty schema should use default
+        let schema: [DataType; 0] = [];
+        let config = MorselConfig::for_schema(&schema);
+        assert_eq!(config.morsel_size, DEFAULT_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_for_selectivity_low() {
+        // Low selectivity (1%) should use larger morsels
+        let config = MorselConfig::for_selectivity(0.01);
+        // 50,000 / 0.01 = 5,000,000, clamped to MAX_MORSEL_SIZE * 2 = 200,000
+        assert_eq!(config.morsel_size, MAX_MORSEL_SIZE * 2);
+    }
+
+    #[test]
+    fn test_for_selectivity_high() {
+        // High selectivity (90%) should use default morsels
+        let config = MorselConfig::for_selectivity(0.90);
+        assert_eq!(config.morsel_size, DEFAULT_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_for_selectivity_medium() {
+        // Medium-low selectivity (5%) should scale appropriately
+        let config = MorselConfig::for_selectivity(0.05);
+        // 50,000 / 0.05 = 1,000,000, clamped to MAX_MORSEL_SIZE * 2 = 200,000
+        assert_eq!(config.morsel_size, MAX_MORSEL_SIZE * 2);
+    }
+
+    #[test]
+    fn test_for_selectivity_boundary() {
+        // At 10% boundary, should still use default
+        let config = MorselConfig::for_selectivity(0.10);
+        assert_eq!(config.morsel_size, DEFAULT_MORSEL_SIZE);
+
+        // Just below 10% should scale up
+        let config = MorselConfig::for_selectivity(0.09);
+        assert!(config.morsel_size > DEFAULT_MORSEL_SIZE);
+    }
+
+    #[test]
+    fn test_adaptive_schema_only() {
+        // With schema but no selectivity
+        let schema = [DataType::Integer, DataType::Bigint];
+        let config = MorselConfig::adaptive(&schema, None);
+        // Should be same as for_schema
+        let expected = MorselConfig::for_schema(&schema);
+        assert_eq!(config.morsel_size, expected.morsel_size);
+    }
+
+    #[test]
+    fn test_adaptive_with_selectivity() {
+        // With schema and low selectivity
+        let schema = [DataType::Integer, DataType::Bigint];
+        let config = MorselConfig::adaptive(&schema, Some(0.01));
+        // Should be larger than schema-only due to low selectivity
+        let schema_only = MorselConfig::for_schema(&schema);
+        assert!(config.morsel_size > schema_only.morsel_size);
+    }
+
+    #[test]
+    fn test_adaptive_high_selectivity() {
+        // With schema and high selectivity - should be same as schema-only
+        let schema = [DataType::Integer, DataType::Bigint];
+        let config = MorselConfig::adaptive(&schema, Some(0.90));
+        let schema_only = MorselConfig::for_schema(&schema);
+        assert_eq!(config.morsel_size, schema_only.morsel_size);
+    }
+
+    #[test]
+    fn test_data_type_size_estimates() {
+        // Test a few key type size estimates
+        assert_eq!(DataType::Integer.estimated_size_bytes(), 8 + 4); // enum + value
+        assert_eq!(DataType::Bigint.estimated_size_bytes(), 8 + 8);
+        assert_eq!(DataType::Boolean.estimated_size_bytes(), 8 + 1);
+
+        // VARCHAR with max_length
+        let varchar = DataType::Varchar { max_length: Some(100) };
+        assert_eq!(varchar.estimated_size_bytes(), 8 + 16 + 100); // enum + arcstr + chars
+
+        // Vector type
+        let vector = DataType::Vector { dimensions: 128 };
+        assert_eq!(vector.estimated_size_bytes(), 8 + 24 + 128 * 4); // enum + vec header + floats
     }
 }

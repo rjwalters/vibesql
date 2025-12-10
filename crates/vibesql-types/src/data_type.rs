@@ -315,4 +315,75 @@ impl DataType {
     pub fn is_compatible_with(&self, other: &DataType) -> bool {
         self.coerce_to_common(other).is_some()
     }
+
+    /// Returns an estimated size in bytes for values of this type.
+    ///
+    /// This is used for adaptive morsel sizing to maintain cache efficiency.
+    /// Estimates are conservative (may overestimate) to ensure cache fitting.
+    ///
+    /// Returns the estimated size in bytes for a single value of this type,
+    /// including any overhead from the SqlValue enum representation.
+    pub fn estimated_size_bytes(&self) -> usize {
+        // Base overhead for SqlValue enum discriminant + alignment
+        const ENUM_OVERHEAD: usize = 8;
+
+        let value_size = match self {
+            // Fixed-size numeric types
+            DataType::Smallint => 2,
+            DataType::Integer => 4,
+            DataType::Bigint | DataType::Unsigned => 8,
+            DataType::Real => 4,
+            DataType::Float { .. } | DataType::DoublePrecision => 8,
+
+            // Decimal/Numeric - stored as rust_decimal::Decimal (16 bytes)
+            DataType::Decimal { .. } | DataType::Numeric { .. } => 16,
+
+            // Boolean
+            DataType::Boolean => 1,
+
+            // Character types - estimate based on length, with ArcStr overhead
+            DataType::Character { length } => {
+                const ARCSTR_OVERHEAD: usize = 16; // Arc pointer + length
+                ARCSTR_OVERHEAD + length
+            }
+            DataType::Varchar { max_length } => {
+                const ARCSTR_OVERHEAD: usize = 16;
+                // Use max_length if specified, otherwise assume 50 bytes average
+                ARCSTR_OVERHEAD + max_length.unwrap_or(50)
+            }
+            DataType::Name => {
+                const ARCSTR_OVERHEAD: usize = 16;
+                ARCSTR_OVERHEAD + 128 // NAME is VARCHAR(128)
+            }
+            DataType::CharacterLargeObject => {
+                const ARCSTR_OVERHEAD: usize = 16;
+                ARCSTR_OVERHEAD + 1000 // Conservative estimate for CLOB
+            }
+
+            // Date/time types
+            DataType::Date => 4,                    // i32 for days
+            DataType::Time { .. } => 8,             // i64 for nanoseconds
+            DataType::Timestamp { .. } => 8,        // i64 for timestamp
+            DataType::Interval { .. } => 16,        // IntervalValue struct
+
+            // Binary types
+            DataType::BinaryLargeObject => 1000, // Conservative estimate
+            DataType::Bit { length } => {
+                // Bits stored as bytes, rounded up
+                length.unwrap_or(1).div_ceil(8)
+            }
+
+            // Vector types
+            DataType::Vector { dimensions } => {
+                const VEC_OVERHEAD: usize = 24; // Vec header
+                VEC_OVERHEAD + (*dimensions as usize * 4) // f32 per dimension
+            }
+
+            // Special types
+            DataType::Null => 0,
+            DataType::UserDefined { .. } => 100, // Conservative estimate
+        };
+
+        ENUM_OVERHEAD + value_size
+    }
 }
