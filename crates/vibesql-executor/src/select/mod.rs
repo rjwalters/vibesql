@@ -9,6 +9,8 @@ mod iterator;
 pub mod join;
 #[allow(dead_code)] // Experimental feature with tests, not yet enabled in production
 pub mod late_materialization;
+#[cfg(feature = "parallel")]
+pub mod morsel;
 mod order;
 #[cfg(feature = "parallel")]
 mod parallel;

@@ -154,6 +154,8 @@ impl ParallelConfig {
 use rayon::prelude::*;
 use vibesql_storage::Row;
 
+use super::morsel::{global_config, morsel_parallel_filter, morsel_parallel_filter_map, morsel_parallel_map};
+
 /// Parallel scan with filtering predicate.
 ///
 /// Applies a predicate function to each row and returns only those rows
@@ -286,6 +288,80 @@ pub fn parallel_scan_materialize(rows: &[Row]) -> Vec<Row> {
     } else {
         // Sequential fallback for small datasets
         rows.to_vec()
+    }
+}
+
+//
+// Morsel-Driven Parallel Operations
+//
+// These functions use the morsel-driven dispatcher for dynamic load balancing.
+// Use these for large datasets where work distribution may be uneven.
+//
+
+/// Morsel-driven parallel scan with filtering predicate.
+///
+/// Uses work-stealing for dynamic load balancing when processing rows
+/// with varying predicate evaluation costs.
+///
+/// # When to Use
+///
+/// - Large datasets (>100K rows) with complex predicates
+/// - Predicates with varying evaluation cost per row
+/// - When you observe load imbalance with static partitioning
+///
+/// For simpler cases, `parallel_scan_filter` with static partitioning may suffice.
+#[allow(dead_code)]
+pub fn morsel_scan_filter<F>(rows: &[Row], predicate: F) -> Vec<Row>
+where
+    F: Fn(&Row) -> bool + Sync + Send,
+{
+    let config = ParallelConfig::global();
+
+    if config.should_parallelize_scan(rows.len()) {
+        // Use morsel-driven execution for dynamic load balancing
+        morsel_parallel_filter(rows, global_config(), predicate)
+    } else {
+        // Sequential fallback for small datasets
+        rows.iter().filter(|row| predicate(row)).cloned().collect()
+    }
+}
+
+/// Morsel-driven parallel scan with transformation function.
+///
+/// Uses work-stealing for dynamic load balancing when processing rows
+/// with varying transformation costs.
+#[allow(dead_code)]
+pub fn morsel_scan_map<F>(rows: &[Row], transform: F) -> Vec<Row>
+where
+    F: Fn(&Row) -> Row + Sync + Send,
+{
+    let config = ParallelConfig::global();
+
+    if config.should_parallelize_scan(rows.len()) {
+        // Use morsel-driven execution for dynamic load balancing
+        morsel_parallel_map(rows, global_config(), transform)
+    } else {
+        // Sequential fallback for small datasets
+        rows.iter().map(transform).collect()
+    }
+}
+
+/// Morsel-driven parallel scan with filter-map for combined filtering and transformation.
+///
+/// Uses work-stealing for dynamic load balancing.
+#[allow(dead_code)]
+pub fn morsel_scan_filter_map<F>(rows: &[Row], filter_map: F) -> Vec<Row>
+where
+    F: Fn(&Row) -> Option<Row> + Sync + Send,
+{
+    let config = ParallelConfig::global();
+
+    if config.should_parallelize_scan(rows.len()) {
+        // Use morsel-driven execution
+        morsel_parallel_filter_map(rows, global_config(), filter_map)
+    } else {
+        // Sequential fallback for small datasets
+        rows.iter().filter_map(filter_map).collect()
     }
 }
 
