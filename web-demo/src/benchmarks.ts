@@ -2477,6 +2477,36 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
         }),
       };
 
+      // Check if we have any server data
+      if (suite === 'sysbench-server' && filteredData.benchmarks.length === 0) {
+        // Show "no data" message for server mode
+        const tbody = document.getElementById('results-tbody');
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                <p class="mb-2">${t('bench-no-server-data')}</p>
+                <p class="text-sm">${t('bench-no-server-data-hint')}</p>
+              </td>
+            </tr>
+          `;
+        }
+        // Clear the chart
+        const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+        if (canvas && currentChart) {
+          currentChart.destroy();
+          currentChart = null;
+        }
+        // Update summary cards to show N/A
+        const sqliteEl = document.getElementById('avg-speedup-sqlite');
+        const duckdbEl = document.getElementById('avg-speedup-duckdb');
+        const opsTestedEl = document.getElementById('ops-tested');
+        if (sqliteEl) sqliteEl.textContent = 'N/A';
+        if (duckdbEl) duckdbEl.textContent = 'N/A';
+        if (opsTestedEl) opsTestedEl.textContent = '0';
+        return;
+      }
+
       renderSysbenchTable(filteredData, suite);
       renderSysbenchChart(filteredData, suite);
       return;

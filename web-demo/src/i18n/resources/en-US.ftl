@@ -259,6 +259,8 @@ bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
 bench-no-wasm-data = No WASM data available
+bench-no-server-data = No Sysbench server benchmark data available
+bench-no-server-data-hint = Server benchmarks require running sysbench_server with MySQL comparison enabled.
 
 # Table headers
 bench-table-operation = Operation
