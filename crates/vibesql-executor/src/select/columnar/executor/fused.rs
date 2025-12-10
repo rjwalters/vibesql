@@ -160,7 +160,14 @@ fn compute_fused_i64_aggregate(
     filter_mask: &[bool],
 ) -> Result<SqlValue, ExecutorError> {
     match op {
-        AggregateOp::Sum => Ok(SqlValue::Integer(simd_ops::sum_i64_filtered(values, filter_mask))),
+        AggregateOp::Sum => {
+            let count = simd_ops::count_filtered(filter_mask);
+            if count == 0 {
+                Ok(SqlValue::Null)
+            } else {
+                Ok(SqlValue::Integer(simd_ops::sum_i64_filtered(values, filter_mask)))
+            }
+        }
         AggregateOp::Count => Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask))),
         AggregateOp::Avg => {
             let sum = simd_ops::sum_i64_filtered(values, filter_mask);
@@ -193,7 +200,14 @@ fn compute_fused_f64_aggregate(
     filter_mask: &[bool],
 ) -> Result<SqlValue, ExecutorError> {
     match op {
-        AggregateOp::Sum => Ok(SqlValue::Double(simd_ops::sum_f64_filtered(values, filter_mask))),
+        AggregateOp::Sum => {
+            let count = simd_ops::count_filtered(filter_mask);
+            if count == 0 {
+                Ok(SqlValue::Null)
+            } else {
+                Ok(SqlValue::Double(simd_ops::sum_f64_filtered(values, filter_mask)))
+            }
+        }
         AggregateOp::Count => Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask))),
         AggregateOp::Avg => {
             let sum = simd_ops::sum_f64_filtered(values, filter_mask);
