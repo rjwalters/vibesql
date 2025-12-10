@@ -239,3 +239,7 @@ harness = false
 [[bench]]
 name = "delete_profiling"
 harness = false
+
+[[bench]]
+name = "morsel_scaling"
+harness = false
