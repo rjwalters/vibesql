@@ -7,6 +7,7 @@
 
 use crate::errors::ExecutorError;
 use crate::schema::CombinedSchema;
+use crate::select::vectorized::DEFAULT_BATCH_SIZE;
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
@@ -75,8 +76,8 @@ fn try_vectorized_binary_aggregate(
         let mut count = 0;
 
         // Batch processing: accumulate products in batches for better cache locality
-        const BATCH_SIZE: usize = 1024;
-        let mut batch_products = Vec::with_capacity(BATCH_SIZE);
+        // DEFAULT_BATCH_SIZE (1024) provides good throughput while fitting in cache
+        let mut batch_products = Vec::with_capacity(DEFAULT_BATCH_SIZE);
 
         for row_idx in 0..rows.len() {
             // Check filter
@@ -98,7 +99,7 @@ fn try_vectorized_binary_aggregate(
                 count += 1;
 
                 // Process batch when full
-                if batch_products.len() >= BATCH_SIZE {
+                if batch_products.len() >= DEFAULT_BATCH_SIZE {
                     sum += batch_products.iter().sum::<f64>();
                     batch_products.clear();
                 }

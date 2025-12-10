@@ -34,6 +34,10 @@ pub const JOIN_BATCH_SIZE: usize = 512;
 /// Assumes ~8 bytes per value, 4 columns: 32KB / (8 * 4) = 1024 rows
 pub const L1_CACHE_BATCH_SIZE: usize = 1024;
 
+/// Small batch size for tight loops where instruction cache locality matters
+/// Used for bitmap evaluation where keeping predicates hot in I-cache is beneficial
+pub const SMALL_BATCH_SIZE: usize = 256;
+
 /// Batch size optimized for L2 cache (256KB typical)
 /// Allows larger batches for better SIMD throughput
 pub const L2_CACHE_BATCH_SIZE: usize = 2048;

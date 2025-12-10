@@ -10,6 +10,7 @@ mod evaluation;
 mod predicates;
 
 use crate::errors::ExecutorError;
+use crate::select::vectorized::{DEFAULT_BATCH_SIZE, SMALL_BATCH_SIZE};
 
 // Re-export public types and functions
 pub(super) use comparison::parse_date_string;
@@ -45,12 +46,10 @@ where
     let mut bitmap = vec![false; row_count];
 
     // Process in batches for better cache locality and potential auto-vectorization
-    // Batch size of 256 chosen to fit in L1 cache (~32KB for row indices + column data)
+    // SMALL_BATCH_SIZE (256) chosen to fit in L1 cache (~32KB for row indices + column data)
     // This helps with issue #2397: SQLLogicTest queries scanning 1000-row tables
-    const BATCH_SIZE: usize = 256;
-
-    for batch_start in (0..row_count).step_by(BATCH_SIZE) {
-        let batch_end = (batch_start + BATCH_SIZE).min(row_count);
+    for batch_start in (0..row_count).step_by(SMALL_BATCH_SIZE) {
+        let batch_end = (batch_start + SMALL_BATCH_SIZE).min(row_count);
 
         // Evaluate batch - compiler can potentially auto-vectorize inner loops
         for row_idx in batch_start..batch_end {
@@ -216,14 +215,12 @@ pub fn apply_columnar_filter_simd_streaming(
 
     // Batch size tuned for L2 cache efficiency (~256KB)
     // With selective extraction, we use fewer columns so batches are smaller.
-    // We can potentially use larger batches, but 1024 is still reasonable.
-    const BATCH_SIZE: usize = 1024;
-
+    // DEFAULT_BATCH_SIZE (1024) provides good balance of throughput and memory.
     let mut matching_indices = Vec::with_capacity(rows.len() / 4); // Estimate 25% selectivity
 
     // Process rows in streaming batches
-    for batch_start in (0..rows.len()).step_by(BATCH_SIZE) {
-        let batch_end = (batch_start + BATCH_SIZE).min(rows.len());
+    for batch_start in (0..rows.len()).step_by(DEFAULT_BATCH_SIZE) {
+        let batch_end = (batch_start + DEFAULT_BATCH_SIZE).min(rows.len());
         let batch_slice = &rows[batch_start..batch_end];
 
         // Convert only the referenced columns to columnar format
