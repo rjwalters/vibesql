@@ -733,7 +733,7 @@ fn hash_sql_value<H: std::hash::Hasher>(value: &SqlValue, hasher: &mut H) {
 
 /// Estimate memory size of a row
 fn estimate_row_size(row: &[SqlValue]) -> usize {
-    let base_size = std::mem::size_of::<Vec<SqlValue>>() + row.len() * std::mem::size_of::<SqlValue>();
+    let base_size = std::mem::size_of::<Vec<SqlValue>>() + std::mem::size_of_val(row);
     let value_size: usize = row
         .iter()
         .map(|v| match v {

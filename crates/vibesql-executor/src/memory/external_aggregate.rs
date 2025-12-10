@@ -116,8 +116,8 @@ impl Partition {
     /// Estimate memory for a group entry
     fn estimate_group_memory(key_values: &[SqlValue], accumulators: &[AggregateAccumulator]) -> usize {
         let key_size: usize = key_values.iter().map(|v| v.estimated_size_bytes()).sum();
-        let acc_size = accumulators.len() * std::mem::size_of::<AggregateAccumulator>()
-            + accumulators.iter().map(|a| estimate_accumulator_memory(a)).sum::<usize>();
+        let acc_size = std::mem::size_of_val(accumulators)
+            + accumulators.iter().map(estimate_accumulator_memory).sum::<usize>();
         key_size + acc_size + 64 // overhead for hash map entry
     }
 }
@@ -380,7 +380,6 @@ impl ExternalAggregate {
             .into_iter()
             .enumerate()
             .filter(|(_, p)| p.spilled && p.rows_spilled > 0)
-            .map(|(idx, p)| (idx, p))
             .collect();
 
         Ok(AggregateResultIterator {
