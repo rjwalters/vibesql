@@ -175,10 +175,13 @@ VALUES ({run_id}, TIMESTAMP '{timestamp}', TIMESTAMP '{timestamp}', {total}, {pa
     for file_path in tested_files.get('passed', []):
         category, subcategory = categorize_test_file(file_path)
 
-        # Upsert into test_files using INSERT OR REPLACE (idempotent, works with append-only dumps)
-        # This handles both new files and updates to existing files
+        # Workaround: DELETE + INSERT instead of INSERT OR REPLACE
+        # (INSERT OR REPLACE has a bug in VibeSQL where it fails on existing rows)
         statements.append(f"""
-INSERT OR REPLACE INTO test_files (file_path, category, subcategory, status, last_tested, last_passed)
+DELETE FROM test_files WHERE file_path = {sql_escape(file_path)};
+""")
+        statements.append(f"""
+INSERT INTO test_files (file_path, category, subcategory, status, last_tested, last_passed)
 VALUES ({sql_escape(file_path)}, {sql_escape(category)}, {sql_escape(subcategory)}, 'PASS', TIMESTAMP '{timestamp}', TIMESTAMP '{timestamp}');
 """)
 
@@ -206,10 +209,13 @@ VALUES ({abs(hash(f'{run_id}_{file_path}'))}, {run_id}, {sql_escape(file_path)},
         # Get error message from lookup, or NULL if not available
         error_message = error_lookup.get(file_path, None)
 
-        # Upsert into test_files using INSERT OR REPLACE (idempotent, works with append-only dumps)
-        # This handles both new files and updates to existing files
+        # Workaround: DELETE + INSERT instead of INSERT OR REPLACE
+        # (INSERT OR REPLACE has a bug in VibeSQL where it fails on existing rows)
         statements.append(f"""
-INSERT OR REPLACE INTO test_files (file_path, category, subcategory, status, last_tested, last_passed)
+DELETE FROM test_files WHERE file_path = {sql_escape(file_path)};
+""")
+        statements.append(f"""
+INSERT INTO test_files (file_path, category, subcategory, status, last_tested, last_passed)
 VALUES ({sql_escape(file_path)}, {sql_escape(category)}, {sql_escape(subcategory)}, 'FAIL', TIMESTAMP '{timestamp}', NULL);
 """)
 
@@ -224,10 +230,13 @@ VALUES ({abs(hash(f'{run_id}_{file_path}'))}, {run_id}, {sql_escape(file_path)},
     for file_path in timed_out_files:
         category, subcategory = categorize_test_file(file_path)
 
-        # Upsert into test_files using INSERT OR REPLACE (idempotent, works with append-only dumps)
-        # This handles both new files and updates to existing files
+        # Workaround: DELETE + INSERT instead of INSERT OR REPLACE
+        # (INSERT OR REPLACE has a bug in VibeSQL where it fails on existing rows)
         statements.append(f"""
-INSERT OR REPLACE INTO test_files (file_path, category, subcategory, status, last_tested, last_passed)
+DELETE FROM test_files WHERE file_path = {sql_escape(file_path)};
+""")
+        statements.append(f"""
+INSERT INTO test_files (file_path, category, subcategory, status, last_tested, last_passed)
 VALUES ({sql_escape(file_path)}, {sql_escape(category)}, {sql_escape(subcategory)}, 'TIMEOUT', TIMESTAMP '{timestamp}', NULL);
 """)
 

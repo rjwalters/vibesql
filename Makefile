@@ -202,6 +202,11 @@ test-workspace:
 	cargo test --release --workspace --no-run
 	@$(MAKE) strip-quarantine
 	cargo test --release --workspace
+	@# Process SQLLogicTest results into database for analysis
+	@if [ -f target/sqllogictest_results.json ]; then \
+		echo "Processing SQLLogicTest results into database..."; \
+		python3 scripts/process_test_results.py --input target/sqllogictest_results.json 2>/dev/null || true; \
+	fi
 
 # Run SQLLogicTest suite (parallel mode recommended)
 test-sqllogictest:
