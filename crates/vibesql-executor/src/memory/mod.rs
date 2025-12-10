@@ -40,6 +40,7 @@
 mod arena;
 mod controller;
 mod external_aggregate;
+mod external_hash_join;
 mod external_sort;
 pub mod row_serialization;
 mod spill;
@@ -51,6 +52,9 @@ pub use controller::{
 };
 pub use external_aggregate::{
     AggregateResultIterator, AggregateSpec, ExternalAggregate, ExternalAggregateConfig,
+};
+pub use external_hash_join::{
+    ExternalHashJoin, ExternalHashJoinConfig, HashJoinResultIterator, JoinType,
 };
 pub use external_sort::{ExternalSort, ExternalSortConfig, SortKey, SortedIterator};
 pub use spill::{SpillFile, SpillFileSet};
