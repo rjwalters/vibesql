@@ -32,6 +32,82 @@ def get_repo_root() -> Path:
     return Path(__file__).parent.parent
 
 
+def collapse_by_commit(trend_data: List[Dict], metric_type: str = "time") -> List[Dict]:
+    """
+    Collapse multiple runs of the same commit into a single data point.
+
+    Uses the earliest timestamp for each commit and aggregates metrics:
+    - For time metrics: average the averages, min of mins, max of maxes
+    - For TPS metrics: average the TPS values
+
+    Args:
+        trend_data: List of data points with commit, date, and metrics
+        metric_type: "time" for latency metrics, "tps" for throughput metrics
+
+    Returns:
+        Collapsed list with one data point per commit, sorted by date
+    """
+    if not trend_data:
+        return []
+
+    by_commit: Dict[str, List[Dict]] = defaultdict(list)
+    for point in trend_data:
+        by_commit[point["commit"]].append(point)
+
+    collapsed = []
+    for commit, points in by_commit.items():
+        # Use earliest timestamp
+        earliest = min(p["date"] for p in points)
+
+        if metric_type == "tps":
+            # TPC-C style: average TPS, average latency
+            tps_values = [p["tps"] for p in points if p.get("tps") is not None]
+            latency_values = [p["latency_us"] for p in points if p.get("latency_us") is not None]
+            collapsed.append({
+                "date": earliest,
+                "commit": commit,
+                "tps": round(sum(tps_values) / len(tps_values), 2) if tps_values else None,
+                "latency_us": round(sum(latency_values) / len(latency_values), 2) if latency_values else None,
+            })
+        else:
+            # Time-based metrics (TPC-H, TPC-DS, Sysbench)
+            avg_values = [p["avg_ms"] for p in points if p.get("avg_ms") is not None]
+            min_values = [p["min_ms"] for p in points if p.get("min_ms") is not None]
+            max_values = [p["max_ms"] for p in points if p.get("max_ms") is not None]
+            geomean_values = [p["geomean_ms"] for p in points if p.get("geomean_ms") is not None]
+
+            result = {
+                "date": earliest,
+                "commit": commit,
+                "avg_ms": round(sum(avg_values) / len(avg_values), 2) if avg_values else None,
+                "min_ms": round(min(min_values), 2) if min_values else None,
+                "max_ms": round(max(max_values), 2) if max_values else None,
+            }
+
+            # Optional fields
+            if geomean_values:
+                result["geomean_ms"] = round(sum(geomean_values) / len(geomean_values), 2)
+
+            # queries_passed/total_queries: use values from run with most passed queries
+            if any("queries_passed" in p for p in points):
+                best_run = max(points, key=lambda p: p.get("queries_passed", 0))
+                result["queries_passed"] = best_run.get("queries_passed")
+                result["total_queries"] = best_run.get("total_queries")
+
+            # Sysbench workloads: merge all workloads, averaging duplicates
+            if any("workloads" in p for p in points):
+                all_workloads: Dict[str, List[float]] = defaultdict(list)
+                for p in points:
+                    for k, v in p.get("workloads", {}).items():
+                        all_workloads[k].append(v)
+                result["workloads"] = {k: round(sum(v) / len(v), 4) for k, v in all_workloads.items()}
+
+            collapsed.append(result)
+
+    # Sort by date (earliest first)
+    return sorted(collapsed, key=lambda x: x["date"])
+
+
 def get_git_info() -> tuple:
     """Get current git commit hash and timestamp."""
     try:
@@ -134,11 +210,14 @@ def export_tpch_trends(cursor: Any) -> Optional[Dict]:
                 "total_queries": total or 22
             })
 
+    # Collapse multiple runs of the same commit into single data points
+    collapsed_data = collapse_by_commit(trend_data, metric_type="time")
+
     return {
         "suite": "tpch",
         "display_name": "TPC-H",
         "description": "Decision support queries",
-        "data": trend_data
+        "data": collapsed_data
     }
 
 
@@ -185,11 +264,14 @@ def export_tpcds_trends(cursor: Any) -> Optional[Dict]:
                 "total_queries": total or 99
             })
 
+    # Collapse multiple runs of the same commit into single data points
+    collapsed_data = collapse_by_commit(trend_data, metric_type="time")
+
     return {
         "suite": "tpcds",
         "display_name": "TPC-DS",
         "description": "Decision support queries (complex)",
-        "data": trend_data
+        "data": collapsed_data
     }
 
 
@@ -232,13 +314,16 @@ def export_tpcc_trends(cursor: Any) -> Optional[Dict]:
                 "latency_us": round(vibesql_latency, 2) if vibesql_latency else None
             })
 
+    # Collapse multiple runs of the same commit into single data points
+    collapsed_data = collapse_by_commit(trend_data, metric_type="tps")
+
     return {
         "suite": "tpcc",
         "display_name": "TPC-C",
         "description": "OLTP transactions (mixed workload)",
         "metric": "tps",
         "metric_label": "Transactions/sec",
-        "data": trend_data
+        "data": collapsed_data
     }
 
 
@@ -281,11 +366,14 @@ def export_sysbench_trends(cursor: Any) -> Optional[Dict]:
                 "workloads": {k: round(v, 4) for k, v in vibesql_times.items()}
             })
 
+    # Collapse multiple runs of the same commit into single data points
+    collapsed_data = collapse_by_commit(trend_data, metric_type="time")
+
     return {
         "suite": "sysbench",
         "display_name": "Sysbench",
         "description": "OLTP micro-benchmarks",
-        "data": trend_data
+        "data": collapsed_data
     }
 
 

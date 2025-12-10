@@ -1,6 +1,6 @@
 {
-  "generated_at": "2025-12-10T13:43:03.442561",
-  "git_commit": "7406ce81",
+  "generated_at": "2025-12-10T14:19:00.976665",
+  "git_commit": "4d22d266",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -10,7 +10,6 @@
       "data": [
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T08:29:16.393852",
           "commit": "f26c3be8",
           "avg_ms": 25.83,
           "min_ms": 0.7,
@@ -21,7 +20,6 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T09:43:23.910431",
           "commit": "73661b51",
           "avg_ms": 28.41,
           "min_ms": 0.67,
@@ -32,7 +30,6 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T10:34:24.553735",
           "commit": "24da8758",
           "avg_ms": 29.65,
           "min_ms": 0.7,
@@ -43,51 +40,26 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T11:59:21.970049",
           "commit": "0b7732bb",
-          "avg_ms": 58.91,
-          "min_ms": 1.7,
-          "max_ms": 191.47,
-          "geomean_ms": 32.29,
-          "queries_passed": 22,
-          "total_queries": 22
-        },
-        {
-          "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:01:01.394905",
-          "commit": "0b7732bb",
-          "avg_ms": 31.39,
+          "avg_ms": 45.15,
           "min_ms": 0.71,
-          "max_ms": 137.8,
-          "geomean_ms": 16.17,
+          "max_ms": 191.47,
+          "geomean_ms": 24.23,
           "queries_passed": 22,
           "total_queries": 22
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:27:13.229683",
           "commit": "9d2cd67d",
-          "avg_ms": 29.12,
+          "avg_ms": 33.38,
           "min_ms": 0.68,
-          "max_ms": 135.14,
-          "geomean_ms": 14.84,
-          "queries_passed": 22,
-          "total_queries": 22
-        },
-        {
-          "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:37:13.817271",
-          "commit": "9d2cd67d",
-          "avg_ms": 37.64,
-          "min_ms": 1.0,
           "max_ms": 180.32,
-          "geomean_ms": 18.48,
+          "geomean_ms": 16.66,
           "queries_passed": 22,
           "total_queries": 22
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:51:55.603413",
           "commit": "2fc6ebe4",
           "avg_ms": 142.5,
           "min_ms": 142.5,
@@ -98,23 +70,21 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T13:02:54.773410",
           "commit": "5d0bb46c",
-          "avg_ms": 31.83,
+          "avg_ms": 36.11,
           "min_ms": 0.71,
-          "max_ms": 138.63,
-          "geomean_ms": 17.02,
+          "max_ms": 185.53,
+          "geomean_ms": 18.41,
           "queries_passed": 22,
           "total_queries": 22
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T13:08:59.424748",
-          "commit": "5d0bb46c",
-          "avg_ms": 40.39,
-          "min_ms": 1.15,
-          "max_ms": 185.53,
-          "geomean_ms": 19.8,
+          "commit": "c66221d9",
+          "avg_ms": 28.25,
+          "min_ms": 0.63,
+          "max_ms": 128.9,
+          "geomean_ms": 14.35,
           "queries_passed": 22,
           "total_queries": 22
         }
@@ -127,51 +97,46 @@
       "data": [
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T07:45:07.241224",
           "commit": "8a661da2",
           "avg_ms": 46.4,
           "min_ms": 0.03,
           "max_ms": 582.56,
-          "geomean_ms": 17.02,
+          "geomean_ms": Infinity,
           "queries_passed": 408,
           "total_queries": 408
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T08:42:02.757529",
           "commit": "f26c3be8",
           "avg_ms": 45.29,
           "min_ms": 0.03,
           "max_ms": 557.78,
-          "geomean_ms": 16.57,
+          "geomean_ms": Infinity,
           "queries_passed": 408,
           "total_queries": 408
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T09:56:19.729698",
           "commit": "73661b51",
           "avg_ms": 49.85,
           "min_ms": 0.03,
           "max_ms": 823.45,
-          "geomean_ms": 16.92,
+          "geomean_ms": Infinity,
           "queries_passed": 408,
           "total_queries": 408
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T10:46:57.106214",
           "commit": "24da8758",
           "avg_ms": 43.94,
           "min_ms": 0.03,
           "max_ms": 551.18,
-          "geomean_ms": 15.48,
+          "geomean_ms": Infinity,
           "queries_passed": 408,
           "total_queries": 408
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:36:41.344080",
           "commit": "9d2cd67d",
           "avg_ms": 69.9,
           "min_ms": 0.03,
@@ -182,12 +147,21 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T13:18:04.802379",
           "commit": "9a870cc5",
           "avg_ms": 61.79,
           "min_ms": 0.03,
           "max_ms": 1870.0,
-          "geomean_ms": 16.97,
+          "geomean_ms": Infinity,
+          "queries_passed": 408,
+          "total_queries": 408
+        },
+        {
+          "date": "2025-12-10",
+          "commit": "5ad9d296",
+          "avg_ms": 71.53,
+          "min_ms": 0.03,
+          "max_ms": 2750.0,
+          "geomean_ms": Infinity,
           "queries_passed": 408,
           "total_queries": 408
         }
@@ -202,45 +176,45 @@
       "data": [
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T08:35:34.457442",
           "commit": "f26c3be8",
           "tps": 23000.67,
           "latency_us": 64.14
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T09:49:00.756812",
           "commit": "73661b51",
           "tps": 22333.42,
           "latency_us": 66.97
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T10:40:50.899600",
           "commit": "24da8758",
           "tps": 24107.72,
           "latency_us": 59.85
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:06:37.896865",
           "commit": "0b7732bb",
           "tps": 20531.65,
           "latency_us": 78.93
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T12:33:45.782695",
           "commit": "9d2cd67d",
           "tps": 19797.73,
           "latency_us": 84.2
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T13:09:30.854303",
           "commit": "5d0bb46c",
           "tps": 21018.32,
           "latency_us": 72.13
+        },
+        {
+          "date": "2025-12-10",
+          "commit": "5ad9d296",
+          "tps": 20347.32,
+          "latency_us": 79.05
         }
       ]
     },
@@ -251,11 +225,10 @@
       "data": [
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T07:54:15.630282",
           "commit": "8a661da2",
-          "avg_ms": 0.0064,
-          "min_ms": 0.0008,
-          "max_ms": 0.0214,
+          "avg_ms": 0.01,
+          "min_ms": 0.0,
+          "max_ms": 0.02,
           "workloads": {
             "point_select": 0.0008,
             "insert": 0.0051,
@@ -267,11 +240,10 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T08:51:16.291712",
           "commit": "f26c3be8",
-          "avg_ms": 0.0055,
-          "min_ms": 0.0007,
-          "max_ms": 0.0199,
+          "avg_ms": 0.01,
+          "min_ms": 0.0,
+          "max_ms": 0.02,
           "workloads": {
             "point_select": 0.0007,
             "insert": 0.0046,
@@ -283,43 +255,25 @@
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T10:05:39.430953",
           "commit": "24da8758",
-          "avg_ms": 0.0062,
-          "min_ms": 0.0008,
-          "max_ms": 0.0216,
+          "avg_ms": 0.01,
+          "min_ms": 0.0,
+          "max_ms": 0.02,
           "workloads": {
             "point_select": 0.0008,
-            "insert": 0.0052,
-            "update_index": 0.0047,
-            "update_non_index": 0.0019,
-            "delete": 0.0029,
-            "range_queries": 0.0216
+            "insert": 0.0049,
+            "update_index": 0.0043,
+            "update_non_index": 0.0018,
+            "delete": 0.0027,
+            "range_queries": 0.0205
           }
         },
         {
           "date": "2025-12-10",
-          "timestamp": "2025-12-10T10:56:08.519226",
-          "commit": "24da8758",
-          "avg_ms": 0.0055,
-          "min_ms": 0.0007,
-          "max_ms": 0.0195,
-          "workloads": {
-            "point_select": 0.0007,
-            "insert": 0.0046,
-            "update_index": 0.004,
-            "update_non_index": 0.0017,
-            "delete": 0.0025,
-            "range_queries": 0.0195
-          }
-        },
-        {
-          "date": "2025-12-10",
-          "timestamp": "2025-12-10T13:27:49.149130",
           "commit": "0e6952f2",
-          "avg_ms": 0.0068,
-          "min_ms": 0.0008,
-          "max_ms": 0.0224,
+          "avg_ms": 0.01,
+          "min_ms": 0.0,
+          "max_ms": 0.02,
           "workloads": {
             "point_select": 0.0008,
             "insert": 0.0052,
@@ -327,6 +281,21 @@
             "update_non_index": 0.0039,
             "delete": 0.0033,
             "range_queries": 0.0224
+          }
+        },
+        {
+          "date": "2025-12-10",
+          "commit": "4d22d266",
+          "avg_ms": 0.01,
+          "min_ms": 0.0,
+          "max_ms": 0.02,
+          "workloads": {
+            "point_select": 0.0011,
+            "insert": 0.0074,
+            "update_index": 0.0052,
+            "update_non_index": 0.002,
+            "delete": 0.0027,
+            "range_queries": 0.0226
           }
         }
       ]
