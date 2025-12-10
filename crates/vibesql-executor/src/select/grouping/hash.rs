@@ -7,6 +7,7 @@ use rayon::prelude::*;
 #[cfg(feature = "parallel")]
 use std::sync::Arc;
 
+#[cfg(feature = "parallel")]
 use crate::timeout::TimeoutContext;
 
 #[cfg(feature = "parallel")]
