@@ -1,0 +1,463 @@
+#!/usr/bin/env bash
+#
+# SQLite TCL Test Suite Runner for VibeSQL
+#
+# Runs SQLite's TCL test files against VibeSQL, tracking results
+# in a database for conformance reporting.
+#
+# Usage:
+#   ./scripts/tcltest <command> [options]
+#
+# Commands:
+#   test <file>              Test a single TCL file
+#   run [options]            Run the full test suite
+#   analyze                  Analyze failure patterns
+#   status                   Show quick summary
+#
+# Examples:
+#   ./scripts/tcltest test select1.test
+#   ./scripts/tcltest run --pattern "select*.test"
+#   ./scripts/tcltest run --priority 1
+#   ./scripts/tcltest status
+#
+
+set -euo pipefail
+
+# Get repository root
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Print colored output
+print_error() { echo -e "${RED}❌ $1${NC}" >&2; }
+print_success() { echo -e "${GREEN}✓ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+print_info() { echo -e "${BLUE}ℹ $1${NC}"; }
+
+# Paths
+TCL_TEST_DIR="docs/reference/sqlite/test"
+RESULTS_DIR="$HOME/.vibesql/test_results"
+RESULTS_DB="$RESULTS_DIR/tcl_test_results.vbsql"
+VIBESQL_BIN="./target/release/vibesql"
+
+# Check if VibeSQL is built
+check_vibesql() {
+    if [ ! -f "$VIBESQL_BIN" ]; then
+        print_error "VibeSQL not built. Run: cargo build --release"
+        exit 1
+    fi
+}
+
+# Check if TCL test directory exists
+check_tcl_tests() {
+    if [ ! -d "$TCL_TEST_DIR" ]; then
+        print_error "TCL test directory not found: $TCL_TEST_DIR"
+        echo ""
+        echo "Make sure the SQLite submodule is initialized:"
+        echo "  git submodule update --init --recursive"
+        exit 1
+    fi
+}
+
+# Initialize results database
+init_results_db() {
+    mkdir -p "$RESULTS_DIR"
+
+    # Create the results database if it doesn't exist
+    if [ ! -f "$RESULTS_DB" ]; then
+        print_info "Initializing results database: $RESULTS_DB"
+        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            CREATE TABLE IF NOT EXISTS tcl_test_runs (
+                run_id INTEGER PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                git_commit TEXT,
+                total_files INTEGER DEFAULT 0,
+                total_tests INTEGER DEFAULT 0,
+                passed INTEGER DEFAULT 0,
+                failed INTEGER DEFAULT 0,
+                skipped INTEGER DEFAULT 0,
+                parse_errors INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS tcl_test_results (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                test_name TEXT NOT NULL,
+                test_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                sql_text TEXT,
+                expected_output TEXT,
+                actual_output TEXT,
+                error_message TEXT,
+                execution_time_ms REAL,
+                line_number INTEGER,
+                FOREIGN KEY (run_id) REFERENCES tcl_test_runs(run_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tcl_results_run ON tcl_test_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_tcl_results_file ON tcl_test_results(file_path);
+            CREATE INDEX IF NOT EXISTS idx_tcl_results_status ON tcl_test_results(status);
+        "
+    fi
+}
+
+# Show main help
+show_help() {
+    cat << 'EOF'
+SQLite TCL Test Suite Runner for VibeSQL
+
+Usage:
+  ./scripts/tcltest <command> [options]
+
+Commands:
+  test <file>              Test a single TCL file
+  run [options]            Run TCL test suite
+  parse <file>             Parse TCL file and show extracted tests
+  analyze                  Analyze failure patterns
+  status                   Show quick pass rate summary
+
+Options for 'run':
+  --pattern GLOB           Run only files matching pattern (e.g., "select*.test")
+  --priority N             Run priority level N tests (1=core, 2=advanced, 3=sqlite-specific)
+  --limit N                Limit to N files
+  --parallel               Run tests in parallel
+  --verbose                Show detailed output
+
+Examples:
+  # Test a specific file
+  ./scripts/tcltest test select1.test
+
+  # Parse and show tests in a file
+  ./scripts/tcltest parse select1.test
+
+  # Run all Priority 1 (core SQL) tests
+  ./scripts/tcltest run --priority 1
+
+  # Run just SELECT tests
+  ./scripts/tcltest run --pattern "select*.test"
+
+  # Quick status
+  ./scripts/tcltest status
+
+Priority Levels:
+  1 - Core SQL: select, insert, update, delete, where, join, aggregate, func
+  2 - Advanced: window, cte, trigger, fkey, collate
+  3 - SQLite-specific: wal, vacuum, attach, vtab, fts (likely to fail/skip)
+
+Environment Variables:
+  TCLTEST_VERBOSE          Enable verbose output
+  TCLTEST_TIMEOUT          Per-test timeout in seconds (default: 5)
+EOF
+}
+
+# Get priority patterns
+get_priority_patterns() {
+    local priority="$1"
+    case "$priority" in
+        1)
+            echo "select*.test,insert*.test,update*.test,delete*.test,where*.test,join*.test,aggregate*.test,func*.test,orderby*.test,index*.test,between*.test,in*.test"
+            ;;
+        2)
+            echo "window*.test,cte*.test,trigger*.test,fkey*.test,collate*.test,autoincr*.test,cast*.test,coalesce*.test,expr*.test,like*.test,null*.test,subquery*.test,union*.test,view*.test"
+            ;;
+        3)
+            echo "wal*.test,vacuum*.test,attach*.test,vtab*.test,fts*.test,rtree*.test,json*.test"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+# Parse command: parse and show tests in a file
+cmd_parse() {
+    if [ $# -eq 0 ] || [ "$1" = "--help" ]; then
+        cat << 'EOF'
+Parse a TCL test file and show extracted tests
+
+Usage:
+  ./scripts/tcltest parse <file>
+
+Arguments:
+  <file>    Path to test file relative to docs/reference/sqlite/test/
+
+Examples:
+  ./scripts/tcltest parse select1.test
+  ./scripts/tcltest parse where1.test
+EOF
+        exit 0
+    fi
+
+    local test_file="$1"
+    local full_path="$TCL_TEST_DIR/$test_file"
+
+    if [ ! -f "$full_path" ]; then
+        print_error "Test file not found: $full_path"
+        exit 1
+    fi
+
+    python3 scripts/tcl_parser.py "$full_path"
+}
+
+# Test command: run a single file
+cmd_test() {
+    if [ $# -eq 0 ] || [ "$1" = "--help" ]; then
+        cat << 'EOF'
+Test a single TCL test file against VibeSQL
+
+Usage:
+  ./scripts/tcltest test <file>
+
+Arguments:
+  <file>    Path to test file relative to docs/reference/sqlite/test/
+
+Examples:
+  ./scripts/tcltest test select1.test
+  ./scripts/tcltest test where1.test
+EOF
+        exit 0
+    fi
+
+    check_vibesql
+    check_tcl_tests
+
+    local test_file="$1"
+    local full_path="$TCL_TEST_DIR/$test_file"
+
+    if [ ! -f "$full_path" ]; then
+        print_error "Test file not found: $full_path"
+        echo ""
+        echo "Available test files (sample):"
+        ls "$TCL_TEST_DIR"/*.test 2>/dev/null | head -10 | xargs -I{} basename {}
+        exit 1
+    fi
+
+    print_info "Testing: $test_file"
+    echo ""
+
+    # Run the test using Python runner
+    python3 scripts/tcl_runner.py --file "$full_path" --vibesql "$VIBESQL_BIN"
+}
+
+# Run command: execute test suite
+cmd_run() {
+    local pattern=""
+    local priority=""
+    local limit=""
+    local parallel=false
+    local verbose=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --help)
+                cat << 'EOF'
+Run the TCL test suite against VibeSQL
+
+Usage:
+  ./scripts/tcltest run [options]
+
+Options:
+  --pattern GLOB           Run only files matching pattern
+  --priority N             Run priority level N tests (1, 2, or 3)
+  --limit N                Limit to N files
+  --parallel               Run tests in parallel
+  --verbose                Show detailed output
+
+Examples:
+  # Run Priority 1 tests (core SQL)
+  ./scripts/tcltest run --priority 1
+
+  # Run SELECT tests only
+  ./scripts/tcltest run --pattern "select*.test"
+
+  # Run first 10 files
+  ./scripts/tcltest run --limit 10
+EOF
+                exit 0
+                ;;
+            --pattern)
+                pattern="$2"
+                shift 2
+                ;;
+            --priority)
+                priority="$2"
+                shift 2
+                ;;
+            --limit)
+                limit="$2"
+                shift 2
+                ;;
+            --parallel)
+                parallel=true
+                shift
+                ;;
+            --verbose)
+                verbose=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    check_vibesql
+    check_tcl_tests
+    init_results_db
+
+    # Build file list
+    local files=()
+
+    if [ -n "$priority" ]; then
+        local patterns
+        patterns=$(get_priority_patterns "$priority")
+        IFS=',' read -ra pattern_array <<< "$patterns"
+        for p in "${pattern_array[@]}"; do
+            for f in "$TCL_TEST_DIR"/$p; do
+                [ -f "$f" ] && files+=("$f")
+            done
+        done
+    elif [ -n "$pattern" ]; then
+        for f in "$TCL_TEST_DIR"/$pattern; do
+            [ -f "$f" ] && files+=("$f")
+        done
+    else
+        for f in "$TCL_TEST_DIR"/*.test; do
+            [ -f "$f" ] && files+=("$f")
+        done
+    fi
+
+    # Apply limit
+    if [ -n "$limit" ]; then
+        files=("${files[@]:0:$limit}")
+    fi
+
+    local file_count=${#files[@]}
+    print_info "Running TCL test suite"
+    echo "Files to test: $file_count"
+    if [ -n "$pattern" ]; then
+        echo "Pattern: $pattern"
+    fi
+    if [ -n "$priority" ]; then
+        echo "Priority: $priority"
+    fi
+    echo ""
+
+    # Build Python command
+    local py_args=(
+        "scripts/tcl_runner.py"
+        "--vibesql" "$VIBESQL_BIN"
+        "--results-db" "$RESULTS_DB"
+    )
+
+    if $verbose; then
+        py_args+=("--verbose")
+    fi
+
+    if $parallel; then
+        py_args+=("--parallel")
+    fi
+
+    # Add files
+    py_args+=("--files" "${files[@]}")
+
+    python3 "${py_args[@]}"
+
+    print_success "Test run complete"
+    echo "Results database: $RESULTS_DB"
+}
+
+# Status command: quick summary
+cmd_status() {
+    check_vibesql
+    init_results_db
+
+    echo "=== TCL Test Suite Status ==="
+    echo ""
+    echo "Results database: $RESULTS_DB"
+    echo ""
+
+    # Query the database for latest run
+    "$VIBESQL_BIN" "$RESULTS_DB" -c "
+        SELECT
+            started_at as latest_run,
+            total_tests,
+            passed,
+            failed,
+            skipped,
+            ROUND(100.0 * passed / NULLIF(total_tests - skipped, 0), 1) as pass_rate
+        FROM tcl_test_runs
+        ORDER BY run_id DESC
+        LIMIT 1
+    " 2>/dev/null || print_warning "No test runs yet. Run: ./scripts/tcltest run"
+}
+
+# Analyze command: failure pattern analysis
+cmd_analyze() {
+    check_vibesql
+    init_results_db
+
+    echo "=== TCL Test Failure Analysis ==="
+    echo ""
+
+    # Query for failure patterns
+    "$VIBESQL_BIN" "$RESULTS_DB" -c "
+        SELECT
+            SUBSTR(error_message, 1, 60) as error_pattern,
+            COUNT(*) as count,
+            GROUP_CONCAT(DISTINCT SUBSTR(file_path, -30)) as sample_files
+        FROM tcl_test_results
+        WHERE status = 'failed'
+        AND run_id = (SELECT MAX(run_id) FROM tcl_test_runs)
+        GROUP BY SUBSTR(error_message, 1, 60)
+        ORDER BY count DESC
+        LIMIT 20
+    " 2>/dev/null || print_warning "No failure data yet. Run: ./scripts/tcltest run"
+}
+
+# Main command router
+main() {
+    if [ $# -eq 0 ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+        show_help
+        exit 0
+    fi
+
+    local command="$1"
+    shift
+
+    case "$command" in
+        test)
+            cmd_test "$@"
+            ;;
+        parse)
+            cmd_parse "$@"
+            ;;
+        run)
+            cmd_run "$@"
+            ;;
+        status)
+            cmd_status "$@"
+            ;;
+        analyze)
+            cmd_analyze "$@"
+            ;;
+        *)
+            print_error "Unknown command: $command"
+            echo ""
+            echo "Run './scripts/tcltest --help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
