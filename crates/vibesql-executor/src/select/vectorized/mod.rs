@@ -23,15 +23,11 @@ pub mod filter;
 pub mod predicate;
 
 pub use arithmetic::evaluate_arithmetic_simd;
-pub use batch::{record_batch_to_rows, rows_to_record_batch};
+pub use batch::{
+    record_batch_to_rows, rows_to_record_batch, DEFAULT_BATCH_SIZE, SMALL_BATCH_SIZE,
+};
 pub use filter::filter_record_batch_simd;
 pub use predicate::apply_where_filter_vectorized;
-
-/// Default chunk size for vectorized SIMD operations
-/// 2048 is the DuckDB standard - fits well in L1/L2 cache (2048 * 8 bytes = 16KB)
-/// while providing good SIMD utilization and reduced loop overhead
-#[allow(dead_code)]
-pub const DEFAULT_CHUNK_SIZE: usize = 2048;
 
 /// Threshold for using vectorized evaluation
 /// Increased proportionally with chunk size - below this, row-by-row

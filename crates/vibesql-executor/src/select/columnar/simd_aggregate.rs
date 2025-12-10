@@ -10,6 +10,7 @@ use super::aggregate::AggregateOp;
 use super::scan::ColumnarScan;
 use super::simd_ops;
 use crate::errors::ExecutorError;
+use crate::select::vectorized::DEFAULT_BATCH_SIZE;
 use vibesql_types::SqlValue;
 
 // Re-export optimized SIMD operations from simd_ops module
@@ -64,9 +65,8 @@ pub fn simd_aggregate_i64(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    const BATCH_SIZE: usize = 1024; // Process 1K values at a time
-
-    let mut batch = Vec::with_capacity(BATCH_SIZE);
+    // DEFAULT_BATCH_SIZE (1024) provides good SIMD throughput while fitting in cache
+    let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
     let mut original_type: Option<SqlValue> = None;
     let mut count = 0i64;
 
@@ -117,7 +117,7 @@ pub fn simd_aggregate_i64(
             count += 1;
 
             // Process batch when full
-            if batch.len() >= BATCH_SIZE {
+            if batch.len() >= DEFAULT_BATCH_SIZE {
                 match op {
                     AggregateOp::Sum | AggregateOp::Avg => {
                         sum += simd_sum_i64(&batch);
@@ -212,9 +212,8 @@ pub fn simd_aggregate_f64(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    const BATCH_SIZE: usize = 1024; // Process 1K values at a time
-
-    let mut batch = Vec::with_capacity(BATCH_SIZE);
+    // DEFAULT_BATCH_SIZE (1024) provides good SIMD throughput while fitting in cache
+    let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
     let mut count = 0i64;
 
     // Accumulators for different operations
@@ -252,7 +251,7 @@ pub fn simd_aggregate_f64(
             count += 1;
 
             // Process batch when full
-            if batch.len() >= BATCH_SIZE {
+            if batch.len() >= DEFAULT_BATCH_SIZE {
                 match op {
                     AggregateOp::Sum | AggregateOp::Avg => {
                         sum += simd_sum_f64(&batch);
