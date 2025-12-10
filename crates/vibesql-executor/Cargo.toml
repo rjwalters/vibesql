@@ -71,7 +71,7 @@ bytes = "1.0"
 tempfile = "3.19"
 
 [features]
-default = ["parallel", "spatial"]
+default = ["parallel", "spatial", "native-columnar"]
 # Parallel processing using rayon (disabled in WASM where it provides no benefit)
 parallel = ["rayon", "crossbeam-deque"]
 # Spatial/geospatial query support (optional, reduces binary size)
@@ -238,4 +238,8 @@ harness = false
 
 [[bench]]
 name = "delete_profiling"
+harness = false
+
+[[bench]]
+name = "morsel_scaling"
 harness = false
