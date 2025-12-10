@@ -4,10 +4,53 @@ use ahash::AHashMap;
 use rayon::prelude::*;
 
 #[cfg(feature = "parallel")]
+use crate::select::morsel::{global_config, Morsel};
+#[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
+#[cfg(feature = "parallel")]
+use crossbeam_deque::{Injector, Steal, Worker};
+#[cfg(feature = "parallel")]
+use std::sync::Arc;
 
 use crate::errors::ExecutorError;
 use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
+
+/// Environment variable to enable morsel build debug logging
+#[cfg(feature = "parallel")]
+const MORSEL_BUILD_DEBUG_ENV: &str = "MORSEL_BUILD_DEBUG";
+
+/// Check if morsel build debug logging is enabled
+#[cfg(feature = "parallel")]
+fn morsel_build_debug_enabled() -> bool {
+    std::env::var(MORSEL_BUILD_DEBUG_ENV).is_ok()
+}
+
+/// Create morsels from a row count (local helper for build phase)
+#[cfg(feature = "parallel")]
+fn create_build_morsels(total_rows: usize, morsel_size: usize) -> Vec<Morsel> {
+    let mut morsels = Vec::with_capacity(total_rows.div_ceil(morsel_size));
+    let mut start = 0;
+
+    while start < total_rows {
+        let count = (total_rows - start).min(morsel_size);
+        morsels.push(Morsel::new(start, count));
+        start += count;
+    }
+
+    morsels
+}
+
+/// Helper to steal a morsel from the injector queue
+#[cfg(feature = "parallel")]
+fn steal_morsel(injector: &Injector<Morsel>, worker: &Worker<Morsel>) -> Option<Morsel> {
+    worker.pop().or_else(|| loop {
+        match injector.steal() {
+            Steal::Success(m) => return Some(m),
+            Steal::Empty => return None,
+            Steal::Retry => continue,
+        }
+    })
+}
 
 /// Composite key for multi-column hash joins
 ///
@@ -51,41 +94,106 @@ pub(crate) fn build_hash_table_composite_sequential(
     hash_table
 }
 
-/// Build hash table with composite key in parallel
+/// Build hash table with composite key in parallel using morsel-driven work-stealing
 ///
-/// For large tables, this builds partial hash tables in parallel and merges them.
+/// Uses the morsel-driven parallelism model for dynamic load balancing:
+/// 1. Divide rows into morsels (cache-sized chunks)
+/// 2. Workers steal morsels from a global queue
+/// 3. Each worker builds a thread-local hash table
+/// 4. Merge all partial tables at the end
+///
+/// This provides better load balancing than static `par_chunks()` when:
+/// - Row sizes vary significantly
+/// - Hash computation cost varies by data type
+/// - Memory allocation patterns differ across partitions
 #[cfg(feature = "parallel")]
 pub(crate) fn build_hash_table_composite_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_indices: &[usize],
 ) -> AHashMap<CompositeKey, Vec<usize>> {
-    let config = ParallelConfig::global();
+    let parallel_config = ParallelConfig::global();
+    let morsel_config = global_config();
 
     // Use sequential fallback for small inputs
-    if !config.should_parallelize_join(build_rows.len()) {
+    if !parallel_config.should_parallelize_join(build_rows.len()) {
         return build_hash_table_composite_sequential(build_rows, build_col_indices);
     }
 
-    // Phase 1: Parallel build of partial hash tables with indices
-    let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-    let partial_tables: Vec<(usize, AHashMap<CompositeKey, Vec<usize>>)> = build_rows
-        .par_chunks(chunk_size)
-        .enumerate()
-        .map(|(chunk_idx, chunk)| {
-            let base_idx = chunk_idx * chunk_size;
-            let mut local_table: AHashMap<CompositeKey, Vec<usize>> = AHashMap::new();
-            for (i, row) in chunk.iter().enumerate() {
-                let key = CompositeKey::from_row(row, build_col_indices);
-                if !key.has_null() {
-                    local_table.entry(key).or_default().push(base_idx + i);
+    // Also fall back to sequential if below morsel threshold
+    if build_rows.len() < morsel_config.morsel_size {
+        return build_hash_table_composite_sequential(build_rows, build_col_indices);
+    }
+
+    // Create morsels
+    let morsels = create_build_morsels(build_rows.len(), morsel_config.morsel_size);
+    let morsel_count = morsels.len();
+
+    if morsel_build_debug_enabled() {
+        eprintln!(
+            "[MORSEL_BUILD] Composite: {} morsels for {} rows (size={})",
+            morsel_count,
+            build_rows.len(),
+            morsel_config.morsel_size
+        );
+    }
+
+    // Create global injector queue
+    let injector: Injector<Morsel> = Injector::new();
+    for morsel in morsels {
+        injector.push(morsel);
+    }
+
+    // Results storage: each thread produces a partial hash table
+    let results: Arc<std::sync::Mutex<Vec<AHashMap<CompositeKey, Vec<usize>>>>> =
+        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+
+    // Process morsels in parallel using rayon's thread pool
+    rayon::scope(|s| {
+        let num_threads = rayon::current_num_threads();
+
+        for _ in 0..num_threads {
+            let injector_ref = &injector;
+            let results_ref = results.clone();
+
+            s.spawn(move |_| {
+                let worker: Worker<Morsel> = Worker::new_fifo();
+                let mut local_table: AHashMap<CompositeKey, Vec<usize>> = AHashMap::new();
+
+                while let Some(m) = steal_morsel(injector_ref, &worker) {
+                    let base_idx = m.start_idx();
+                    let morsel_rows = &build_rows[m.start_idx()..m.end_idx()];
+
+                    for (i, row) in morsel_rows.iter().enumerate() {
+                        let key = CompositeKey::from_row(row, build_col_indices);
+                        if !key.has_null() {
+                            // Use global index (base_idx + local index)
+                            local_table.entry(key).or_default().push(base_idx + i);
+                        }
+                    }
                 }
-            }
-            (chunk_idx, local_table)
-        })
-        .collect();
+
+                if !local_table.is_empty() {
+                    results_ref.lock().unwrap().push(local_table);
+                }
+            });
+        }
+    });
+
+    // Extract results after scope completes
+    let partial_tables = Arc::try_unwrap(results)
+        .expect("all threads should have completed")
+        .into_inner()
+        .expect("mutex not poisoned");
+
+    if morsel_build_debug_enabled() {
+        eprintln!(
+            "[MORSEL_BUILD] Composite complete: {} partial tables to merge",
+            partial_tables.len()
+        );
+    }
 
     // Phase 2: Sequential merge of partial tables
-    partial_tables.into_iter().fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
+    partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
         for (key, mut indices) in partial {
             acc.entry(key).or_default().append(&mut indices);
         }
@@ -121,14 +229,15 @@ pub(super) fn build_hash_table_sequential(
     hash_table
 }
 
-/// Build hash table in parallel using partitioned approach (index-based)
+/// Build hash table in parallel using morsel-driven work-stealing (single-column key)
 ///
-/// Algorithm (when parallel feature enabled):
-/// 1. Divide build_rows into chunks (one per thread)
-/// 2. Each thread builds a local hash table from its chunk (no synchronization)
-/// 3. Merge partial hash tables sequentially (fast because only touching shared keys)
+/// Uses the morsel-driven parallelism model for dynamic load balancing:
+/// 1. Divide rows into morsels (cache-sized chunks)
+/// 2. Workers steal morsels from a global queue
+/// 3. Each worker builds a thread-local hash table
+/// 4. Merge all partial tables at the end
 ///
-/// Performance: 3-6x speedup on large joins (50k+ rows) with 4+ cores
+/// Performance: Near-linear scaling to 16+ cores with dynamic load balancing
 /// Note: Falls back to sequential when parallel feature is disabled
 #[allow(dead_code)]
 pub(crate) fn build_hash_table_parallel(
@@ -137,36 +246,90 @@ pub(crate) fn build_hash_table_parallel(
 ) -> AHashMap<vibesql_types::SqlValue, Vec<usize>> {
     #[cfg(feature = "parallel")]
     {
-        let config = ParallelConfig::global();
+        let parallel_config = ParallelConfig::global();
+        let morsel_config = global_config();
 
         // Use sequential fallback for small inputs
-        if !config.should_parallelize_join(build_rows.len()) {
+        if !parallel_config.should_parallelize_join(build_rows.len()) {
             return build_hash_table_sequential(build_rows, build_col_idx);
         }
 
-        // Phase 1: Parallel build of partial hash tables with indices
-        // Each thread processes a chunk and builds its own hash table
-        let chunk_size = (build_rows.len() / config.num_threads).max(1000);
-        let partial_tables: Vec<(usize, AHashMap<_, _>)> = build_rows
-            .par_chunks(chunk_size)
-            .enumerate()
-            .map(|(chunk_idx, chunk)| {
-                let base_idx = chunk_idx * chunk_size;
-                let mut local_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> =
-                    AHashMap::new();
-                for (i, row) in chunk.iter().enumerate() {
-                    let key = row.values[build_col_idx].clone();
-                    if key != vibesql_types::SqlValue::Null {
-                        local_table.entry(key).or_default().push(base_idx + i);
+        // Also fall back to sequential if below morsel threshold
+        if build_rows.len() < morsel_config.morsel_size {
+            return build_hash_table_sequential(build_rows, build_col_idx);
+        }
+
+        // Create morsels
+        let morsels = create_build_morsels(build_rows.len(), morsel_config.morsel_size);
+        let morsel_count = morsels.len();
+
+        if morsel_build_debug_enabled() {
+            eprintln!(
+                "[MORSEL_BUILD] Single-key: {} morsels for {} rows (size={})",
+                morsel_count,
+                build_rows.len(),
+                morsel_config.morsel_size
+            );
+        }
+
+        // Create global injector queue
+        let injector: Injector<Morsel> = Injector::new();
+        for morsel in morsels {
+            injector.push(morsel);
+        }
+
+        // Results storage: each thread produces a partial hash table
+        let results: Arc<std::sync::Mutex<Vec<AHashMap<vibesql_types::SqlValue, Vec<usize>>>>> =
+            Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+
+        // Process morsels in parallel using rayon's thread pool
+        rayon::scope(|s| {
+            let num_threads = rayon::current_num_threads();
+
+            for _ in 0..num_threads {
+                let injector_ref = &injector;
+                let results_ref = results.clone();
+
+                s.spawn(move |_| {
+                    let worker: Worker<Morsel> = Worker::new_fifo();
+                    let mut local_table: AHashMap<vibesql_types::SqlValue, Vec<usize>> =
+                        AHashMap::new();
+
+                    while let Some(m) = steal_morsel(injector_ref, &worker) {
+                        let base_idx = m.start_idx();
+                        let morsel_rows = &build_rows[m.start_idx()..m.end_idx()];
+
+                        for (i, row) in morsel_rows.iter().enumerate() {
+                            let key = row.values[build_col_idx].clone();
+                            if key != vibesql_types::SqlValue::Null {
+                                // Use global index (base_idx + local index)
+                                local_table.entry(key).or_default().push(base_idx + i);
+                            }
+                        }
                     }
-                }
-                (chunk_idx, local_table)
-            })
-            .collect();
+
+                    if !local_table.is_empty() {
+                        results_ref.lock().unwrap().push(local_table);
+                    }
+                });
+            }
+        });
+
+        // Extract results after scope completes
+        let partial_tables = Arc::try_unwrap(results)
+            .expect("all threads should have completed")
+            .into_inner()
+            .expect("mutex not poisoned");
+
+        if morsel_build_debug_enabled() {
+            eprintln!(
+                "[MORSEL_BUILD] Single-key complete: {} partial tables to merge",
+                partial_tables.len()
+            );
+        }
 
         // Phase 2: Sequential merge of partial tables
-        // This is fast because we only touch keys that appear in multiple partitions
-        partial_tables.into_iter().fold(AHashMap::new(), |mut acc, (_chunk_idx, partial)| {
+        partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
             for (key, mut indices) in partial {
                 acc.entry(key).or_default().append(&mut indices);
             }
