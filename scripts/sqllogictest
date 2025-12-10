@@ -336,7 +336,7 @@ EOF
         if [ -f "$results_file" ]; then
             print_info "Processing results into database..."
             if python3 scripts/process_test_results.py --input "$results_file"; then
-                print_success "Database updated: ~/.vibesql/test_results/sqllogictest_results.sql"
+                print_success "Database updated: ~/.vibesql/test_results/sqllogictest_results.vbsql"
             else
                 print_warning "Failed to update database (test results still in JSON)"
             fi
@@ -455,14 +455,14 @@ print(f'Work queue initialized with {count} test files')
             cargo "${cargo_args[@]}" -- --nocapture
 
         print_success "Serial run complete"
-        echo "Results database: ~/.vibesql/test_results/sqllogictest_results.sql"
+        echo "Results database: ~/.vibesql/test_results/sqllogictest_results.vbsql"
 
         # Process results into database
         local results_file="target/sqllogictest_results.json"
         if [ -f "$results_file" ]; then
             print_info "Processing results into database..."
             if python3 scripts/process_test_results.py --input "$results_file"; then
-                print_success "Database updated: ~/.vibesql/test_results/sqllogictest_results.sql"
+                print_success "Database updated: ~/.vibesql/test_results/sqllogictest_results.vbsql"
                 echo ""
                 echo "Query your results:"
                 echo "  ./scripts/query_test_results.py --preset failed-files"
@@ -631,7 +631,7 @@ cmd_status() {
 
 # Analyze command: failure pattern analysis
 cmd_analyze() {
-    local db_path="$HOME/.vibesql/test_results/sqllogictest_results.sql"
+    local db_path="$HOME/.vibesql/test_results/sqllogictest_results.vbsql"
     local show_summary=true
     local show_opportunities=false
     local show_patterns=false
@@ -678,7 +678,7 @@ Analysis Views:
   - failure_examples: Shows sample failures for each pattern
 
 Requirements:
-  - Test results database at ~/.vibesql/test_results/sqllogictest_results.sql
+  - Test results database at ~/.vibesql/test_results/sqllogictest_results.vbsql
   - Run tests first with: ./scripts/sqllogictest run
 EOF
                 exit 0

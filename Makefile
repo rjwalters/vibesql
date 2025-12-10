@@ -426,7 +426,19 @@ analyze-tests:
 	@echo "=========================================="
 	@echo "SQLLogicTest Analysis"
 	@echo "=========================================="
-	@./scripts/sqllogictest analyze --top-fixes 2>/dev/null || echo "Run 'make test-sqllogictest' first to generate test data"
+	@if [ -f ~/.vibesql/test_results/sqllogictest_results.vbsql ]; then \
+		python3 scripts/query_test_results.py --preset analyze-summary --database ~/.vibesql/test_results/sqllogictest_results.vbsql 2>/dev/null || true; \
+		FAILS=$$(echo "SELECT COUNT(*) as cnt FROM test_results WHERE status IN ('FAIL', 'TIMEOUT');" | ./target/release/vibesql ~/.vibesql/test_results/sqllogictest_results.vbsql 2>/dev/null | sed -n '4p' | tr -d '| '); \
+		if [ "$$FAILS" = "0" ] || [ -z "$$FAILS" ]; then \
+			echo ""; \
+			echo "✓ All SQLLogicTests passing - no failures to analyze"; \
+		else \
+			./scripts/sqllogictest analyze --top-fixes 2>/dev/null; \
+		fi \
+	else \
+		echo "Run tests first to generate database:"; \
+		echo "  ./scripts/sqllogictest run"; \
+	fi
 	@echo ""
 
 # Show all benchmark analysis from database

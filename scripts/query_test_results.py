@@ -179,7 +179,18 @@ LIMIT 20
     'analyze-summary': {
         'description': 'Show latest test run summary for analysis',
         'query': """
-SELECT * FROM latest_run_summary
+SELECT
+    run_id,
+    started_at,
+    total_files,
+    passed,
+    failed,
+    untested,
+    ROUND(100.0 * passed / total_files, 1) as pass_rate,
+    git_commit
+FROM test_runs
+ORDER BY run_id DESC
+LIMIT 1
 """
     },
 
@@ -187,13 +198,23 @@ SELECT * FROM latest_run_summary
         'description': 'Show failure patterns grouped by error type',
         'query': """
 SELECT
-    error_pattern,
-    error_type,
-    failure_count,
-    affected_files,
-    pct_of_failures
-FROM failure_patterns
-WHERE error_pattern != 'Other error'
+    CASE
+        WHEN error_message LIKE '%query result mismatch%' THEN 'Result Mismatch'
+        WHEN error_message LIKE '%ColumnNotFound%' THEN 'Column Not Found'
+        WHEN error_message LIKE '%TypeMismatch%' THEN 'Type Mismatch'
+        WHEN error_message LIKE '%Parse%Error%' THEN 'Parse Error'
+        WHEN error_message LIKE '%UnsupportedExpression%' THEN 'Unsupported Expression'
+        WHEN error_message LIKE '%DivisionByZero%' THEN 'Division By Zero'
+        WHEN error_message LIKE '%Not implemented%' THEN 'Not Implemented'
+        WHEN error_message LIKE '%InvalidLine%' THEN 'Invalid Line'
+        ELSE 'Other'
+    END as error_type,
+    COUNT(*) as failure_count,
+    COUNT(DISTINCT file_path) as affected_files
+FROM test_results
+WHERE status IN ('FAIL', 'TIMEOUT')
+  AND run_id = (SELECT MAX(run_id) FROM test_runs)
+GROUP BY error_type
 ORDER BY failure_count DESC
 LIMIT 20
 """
@@ -203,15 +224,40 @@ LIMIT 20
         'description': 'Show top fix opportunities prioritized by impact',
         'query': """
 SELECT
-    rank,
-    priority,
-    pattern,
-    tests_affected,
-    printf('%.1f%%', pct_failures) as pct_failures,
-    effort,
-    impact_ratio
-FROM fix_opportunities
-ORDER BY rank
+    ROW_NUMBER() OVER (ORDER BY cnt DESC) as rank,
+    CASE WHEN ROW_NUMBER() OVER (ORDER BY cnt DESC) <= 3 THEN 'P0'
+         WHEN ROW_NUMBER() OVER (ORDER BY cnt DESC) <= 7 THEN 'P1'
+         ELSE 'P2' END as priority,
+    error_type as pattern,
+    cnt as tests_affected,
+    CASE
+        WHEN error_type LIKE '%Mismatch%' THEN 'Medium'
+        WHEN error_type LIKE '%Parse%' THEN 'High'
+        WHEN error_type LIKE '%Not Found%' THEN 'Low'
+        ELSE 'Medium'
+    END as effort
+FROM (
+    SELECT
+        CASE
+            WHEN error_message LIKE '%query result mismatch%' THEN 'Result Mismatch'
+            WHEN error_message LIKE '%ColumnNotFound%' THEN 'Column Not Found'
+            WHEN error_message LIKE '%TypeMismatch%' THEN 'Type Mismatch'
+            WHEN error_message LIKE '%Parse%Error%' THEN 'Parse Error'
+            WHEN error_message LIKE '%UnsupportedExpression%' THEN 'Unsupported Expression'
+            WHEN error_message LIKE '%DivisionByZero%' THEN 'Division By Zero'
+            WHEN error_message LIKE '%Not implemented%' THEN 'Not Implemented'
+            WHEN error_message LIKE '%InvalidLine%' THEN 'Invalid Line'
+            ELSE 'Other'
+        END as error_type,
+        COUNT(*) as cnt
+    FROM test_results
+    WHERE status IN ('FAIL', 'TIMEOUT')
+      AND run_id = (SELECT MAX(run_id) FROM test_runs)
+    GROUP BY error_type
+) sub
+WHERE error_type != 'Other'
+ORDER BY cnt DESC
+LIMIT 10
 """
     },
 
@@ -219,12 +265,21 @@ ORDER BY rank
         'description': 'Show example failures for each pattern',
         'query': """
 SELECT
-    error_pattern,
+    CASE
+        WHEN error_message LIKE '%query result mismatch%' THEN 'Result Mismatch'
+        WHEN error_message LIKE '%ColumnNotFound%' THEN 'Column Not Found'
+        WHEN error_message LIKE '%TypeMismatch%' THEN 'Type Mismatch'
+        WHEN error_message LIKE '%Parse%Error%' THEN 'Parse Error'
+        WHEN error_message LIKE '%UnsupportedExpression%' THEN 'Unsupported Expression'
+        ELSE 'Other'
+    END as error_type,
     file_path,
-    error_type,
-    error_message_preview
-FROM failure_examples
-ORDER BY error_pattern, file_path
+    SUBSTR(error_message, 1, 100) as error_preview
+FROM test_results
+WHERE status IN ('FAIL', 'TIMEOUT')
+  AND run_id = (SELECT MAX(run_id) FROM test_runs)
+ORDER BY error_type, file_path
+LIMIT 30
 """
     },
 }
