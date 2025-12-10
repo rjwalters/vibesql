@@ -18,8 +18,10 @@ use std::collections::HashMap;
 ///
 /// Issue #3562: Added CTE context to enable IN subqueries referencing CTEs
 /// during parallel predicate evaluation.
+///
+/// Issue #4132: Made pub(crate) to allow use in parallel grouping.
 #[cfg(feature = "parallel")]
-pub(super) type ParallelComponents<'a> = (
+pub(crate) type ParallelComponents<'a> = (
     &'a CombinedSchema,
     Option<&'a vibesql_storage::Database>,
     Option<&'a vibesql_storage::Row>,
