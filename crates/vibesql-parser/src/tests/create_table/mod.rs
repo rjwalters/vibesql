@@ -11,3 +11,4 @@ mod storage_format;
 mod string_types;
 mod temporal_types;
 mod text_types;
+mod typeless_columns;
