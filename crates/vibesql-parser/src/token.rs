@@ -81,6 +81,32 @@ pub enum Token {
     Eof,
 }
 
+impl Token {
+    /// Convert token back to valid SQL string.
+    /// This is the inverse of lexing - it produces SQL that can be re-parsed.
+    pub fn to_sql(&self) -> String {
+        match self {
+            Token::Keyword(kw) => kw.to_string(),
+            Token::Identifier(id) => id.clone(),
+            Token::DelimitedIdentifier(id) => format!("\"{}\"", id),
+            Token::Number(n) => n.clone(),
+            Token::String(s) => format!("'{}'", s.replace('\'', "''")),
+            Token::Symbol(c) => c.to_string(),
+            Token::Operator(op) => op.to_string(),
+            Token::SessionVariable(v) => format!("@@{}", v),
+            Token::UserVariable(v) => format!("@{}", v),
+            Token::Placeholder => "?".to_string(),
+            Token::NumberedPlaceholder(n) => format!("${}", n),
+            Token::NamedPlaceholder(name) => format!(":{}", name),
+            Token::Semicolon => ";".to_string(),
+            Token::Comma => ",".to_string(),
+            Token::LParen => "(".to_string(),
+            Token::RParen => ")".to_string(),
+            Token::Eof => String::new(),
+        }
+    }
+}
+
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -4,14 +4,6 @@
 -- Adapted from PostgreSQL's src/test/regress/sql/triggers.sql
 -- Modified for VibeSQL's SQLite-compatible trigger syntax
 -- ============================================================================
---
--- KNOWN LIMITATIONS:
--- - VibeSQL's trigger parser stores trigger bodies as debug token format
---   which causes failures when the trigger body is later re-parsed for execution.
---   This is tracked and tests marked accordingly with SKIP directives.
--- - NEW/OLD pseudo-variables work when triggers are created programmatically
---   but fail when parsed from SQL due to the above limitation.
--- ============================================================================
 
 -- ============================================================================
 -- SECTION 1: Basic Table Creation (These always work)
@@ -197,7 +189,6 @@ CREATE VIEW trigtest_view AS
 SELECT id, value, name FROM trigtest WHERE value > 100;
 
 -- TEST: Create INSTEAD OF INSERT trigger - syntax test
--- SKIP: INSTEAD OF triggers on views not fully supported
 CREATE TRIGGER tr_instead_of_test
 INSTEAD OF INSERT ON trigtest_view
 FOR EACH ROW
@@ -205,7 +196,6 @@ BEGIN
 END;
 
 -- TEST: Drop INSTEAD OF trigger
--- SKIP: Previous trigger creation skipped
 DROP TRIGGER tr_instead_of_test;
 
 -- TEST: Drop view
@@ -288,7 +278,6 @@ CREATE TABLE trigger_counter (count INTEGER DEFAULT 0);
 INSERT INTO trigger_counter VALUES (0);
 
 -- TEST: Create trigger with simple SELECT (won't modify state but tests execution path)
--- SKIP: Trigger body parsing stores debug format, not valid SQL
 CREATE TRIGGER tr_simple_exec
 AFTER INSERT ON trigtest
 FOR EACH ROW
@@ -305,7 +294,6 @@ INSERT INTO trigtest (id, value, name) VALUES (1, 100, 'first');
 SELECT id, value, name FROM trigtest WHERE id = 1;
 
 -- TEST: Cleanup simple exec trigger
--- SKIP: Previous trigger creation may have failed
 DROP TRIGGER tr_simple_exec;
 
 -- ============================================================================

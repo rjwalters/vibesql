@@ -198,3 +198,65 @@ fn test_create_trigger_missing_action() {
     let result = Parser::parse_sql(sql);
     assert!(result.is_err(), "Should fail without triggered action");
 }
+
+#[test]
+fn test_create_trigger_body_preserved_as_valid_sql() {
+    use vibesql_ast::TriggerAction;
+
+    let sql = "CREATE TRIGGER my_trigger AFTER INSERT ON my_table FOR EACH ROW BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            match &trigger.triggered_action {
+                TriggerAction::RawSql(body) => {
+                    // Verify the body contains valid SQL that can be re-parsed
+                    assert!(body.contains("SELECT"), "Body should contain SELECT keyword");
+                    assert!(body.contains("1"), "Body should contain the number 1");
+                    assert!(body.contains("BEGIN"), "Body should contain BEGIN");
+                    assert!(body.contains("END"), "Body should contain END");
+                    // Most importantly: body should NOT contain debug format like "Keyword(Select)"
+                    assert!(
+                        !body.contains("Keyword("),
+                        "Body should NOT contain debug format. Got: {}",
+                        body
+                    );
+                    assert!(
+                        !body.contains("Number("),
+                        "Body should NOT contain debug format. Got: {}",
+                        body
+                    );
+                }
+            }
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_body_with_string_literal() {
+    use vibesql_ast::TriggerAction;
+
+    let sql = "CREATE TRIGGER my_trigger AFTER INSERT ON my_table BEGIN INSERT INTO log VALUES ('test'); END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            match &trigger.triggered_action {
+                TriggerAction::RawSql(body) => {
+                    // Verify string literals are properly quoted
+                    assert!(
+                        body.contains("'test'"),
+                        "Body should contain properly quoted string literal. Got: {}",
+                        body
+                    );
+                }
+            }
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
