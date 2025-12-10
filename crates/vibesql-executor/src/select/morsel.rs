@@ -37,6 +37,8 @@
 //! - [Leis et al., SIGMOD 2014](https://dl.acm.org/doi/10.1145/2588555.2610507)
 
 use crossbeam_deque::{Injector, Steal, Worker};
+use std::cmp::Ordering as CmpOrdering;
+use std::collections::BinaryHeap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use vibesql_storage::Row;
@@ -640,6 +642,248 @@ where
         .fold(AHashMap::new(), |acc, map| merge(acc, map))
 }
 
+/// Morsel-driven parallel sort with work-stealing.
+///
+/// Sorts rows using a two-phase approach:
+/// 1. **Phase 1 (Parallel)**: Workers steal morsels and sort them locally
+/// 2. **Phase 2 (Sequential)**: K-way merge of sorted morsels using a min-heap
+///
+/// This provides dynamic load balancing during the sort phase while maintaining
+/// O(n log k) merge complexity where k = number of morsels.
+///
+/// # Arguments
+///
+/// - `rows`: Source data to sort
+/// - `config`: Morsel configuration
+/// - `compare`: Comparison function for ordering rows
+///
+/// # Returns
+///
+/// Vector of rows sorted according to the comparison function.
+///
+/// # Example
+///
+/// ```ignore
+/// let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+///     a.values[0].partial_cmp(&b.values[0]).unwrap_or(CmpOrdering::Equal)
+/// });
+/// ```
+pub fn morsel_parallel_sort<F>(rows: &[Row], config: &MorselConfig, compare: F) -> Vec<Row>
+where
+    F: Fn(&Row, &Row) -> CmpOrdering + Sync + Send,
+{
+    if rows.is_empty() {
+        return Vec::new();
+    }
+
+    // For small datasets, sort directly (avoid morsel overhead)
+    if rows.len() < config.morsel_size {
+        let mut result = rows.to_vec();
+        result.sort_by(&compare);
+        return result;
+    }
+
+    // Create morsels
+    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsel_count = morsels.len();
+
+    if morsel_debug_enabled() {
+        eprintln!(
+            "[MORSEL] Sort: {} morsels for {} rows (size={})",
+            morsel_count,
+            rows.len(),
+            config.morsel_size
+        );
+    }
+
+    // Create global injector queue
+    let injector: Injector<Morsel> = Injector::new();
+    for morsel in morsels {
+        injector.push(morsel);
+    }
+
+    // Results storage: (morsel_index, sorted_rows)
+    // We track the original morsel order for deterministic merging
+    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<Row>)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let morsel_index = Arc::new(AtomicUsize::new(0));
+
+    // Phase 1: Parallel sort of each morsel
+    rayon::scope(|s| {
+        let num_threads = rayon::current_num_threads();
+
+        for _ in 0..num_threads {
+            let injector_ref = &injector;
+            let compare_ref = &compare;
+            let results_ref = results.clone();
+            let morsel_index_ref = morsel_index.clone();
+
+            s.spawn(move |_| {
+                let worker: Worker<Morsel> = Worker::new_fifo();
+
+                while let Some(m) = steal_morsel(injector_ref, &worker) {
+                    // Get a unique index for this morsel (for merge ordering)
+                    let idx = morsel_index_ref.fetch_add(1, Ordering::SeqCst);
+
+                    // Clone and sort the morsel's rows
+                    let mut sorted: Vec<Row> = m.rows(rows).to_vec();
+                    sorted.sort_by(compare_ref);
+
+                    if morsel_debug_enabled() {
+                        eprintln!(
+                            "[MORSEL] Thread sorted morsel {} ({} rows)",
+                            idx,
+                            sorted.len()
+                        );
+                    }
+
+                    results_ref.lock().unwrap().push((idx, sorted));
+                }
+            });
+        }
+    });
+
+    // Extract sorted morsels
+    let mut sorted_morsels = Arc::try_unwrap(results)
+        .expect("all threads should have completed")
+        .into_inner()
+        .expect("mutex not poisoned");
+
+    // Sort by morsel index to ensure deterministic merge order
+    sorted_morsels.sort_by_key(|(idx, _)| *idx);
+
+    if morsel_debug_enabled() {
+        eprintln!(
+            "[MORSEL] Sort phase 1 complete: {} sorted morsels",
+            sorted_morsels.len()
+        );
+    }
+
+    // Phase 2: K-way merge using a min-heap
+    // For single morsel, return directly
+    if sorted_morsels.len() == 1 {
+        return sorted_morsels.pop().unwrap().1;
+    }
+
+    // Convert to owned vectors for merging
+    let sorted_chunks: Vec<Vec<Row>> = sorted_morsels.into_iter().map(|(_, rows)| rows).collect();
+
+    // Use k-way merge with min-heap
+    let result = kway_merge(sorted_chunks, &compare);
+
+    if morsel_debug_enabled() {
+        eprintln!(
+            "[MORSEL] Sort complete: {} total rows",
+            result.len()
+        );
+    }
+
+    result
+}
+
+/// K-way merge of sorted vectors using a min-heap.
+///
+/// Merges k sorted vectors into a single sorted vector in O(n log k) time.
+fn kway_merge<F>(sorted_chunks: Vec<Vec<Row>>, compare: &F) -> Vec<Row>
+where
+    F: Fn(&Row, &Row) -> CmpOrdering,
+{
+    if sorted_chunks.is_empty() {
+        return Vec::new();
+    }
+
+    if sorted_chunks.len() == 1 {
+        return sorted_chunks.into_iter().next().unwrap();
+    }
+
+    // Calculate total size for pre-allocation
+    let total_size: usize = sorted_chunks.iter().map(|c| c.len()).sum();
+    let mut result = Vec::with_capacity(total_size);
+
+    // Create iterators for each chunk
+    let mut iters: Vec<std::vec::IntoIter<Row>> =
+        sorted_chunks.into_iter().map(|c| c.into_iter()).collect();
+
+    // Initialize heap with first element from each non-empty chunk
+    // We use a max-heap with reversed comparison to simulate min-heap
+    let mut heap: BinaryHeap<MergeItem<F>> = BinaryHeap::new();
+
+    for (chunk_idx, iter) in iters.iter_mut().enumerate() {
+        if let Some(row) = iter.next() {
+            heap.push(MergeItem {
+                row,
+                chunk_idx,
+                compare,
+            });
+        }
+    }
+
+    // Merge by repeatedly taking the smallest element
+    while let Some(MergeItem { row, chunk_idx, .. }) = heap.pop() {
+        result.push(row);
+
+        // Add next element from the same chunk
+        if let Some(next_row) = iters[chunk_idx].next() {
+            heap.push(MergeItem {
+                row: next_row,
+                chunk_idx,
+                compare,
+            });
+        }
+    }
+
+    result
+}
+
+/// Helper struct for k-way merge heap.
+///
+/// Implements Ord to work with BinaryHeap (which is a max-heap by default).
+/// We reverse the comparison to get min-heap behavior.
+struct MergeItem<'a, F> {
+    row: Row,
+    chunk_idx: usize,
+    compare: &'a F,
+}
+
+impl<'a, F> PartialEq for MergeItem<'a, F>
+where
+    F: Fn(&Row, &Row) -> CmpOrdering,
+{
+    fn eq(&self, other: &Self) -> bool {
+        (self.compare)(&self.row, &other.row) == CmpOrdering::Equal
+    }
+}
+
+impl<'a, F> Eq for MergeItem<'a, F> where F: Fn(&Row, &Row) -> CmpOrdering {}
+
+impl<'a, F> PartialOrd for MergeItem<'a, F>
+where
+    F: Fn(&Row, &Row) -> CmpOrdering,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<'a, F> Ord for MergeItem<'a, F>
+where
+    F: Fn(&Row, &Row) -> CmpOrdering,
+{
+    fn cmp(&self, other: &Self) -> CmpOrdering {
+        // Reverse comparison for min-heap behavior
+        // BinaryHeap is a max-heap, so we flip the comparison
+        (self.compare)(&other.row, &self.row)
+    }
+}
+
+/// Convenience function: morsel sort using global config.
+pub fn morsel_sort_by<F>(rows: &[Row], compare: F) -> Vec<Row>
+where
+    F: Fn(&Row, &Row) -> CmpOrdering + Sync + Send,
+{
+    morsel_parallel_sort(rows, global_config(), compare)
+}
+
 /// Convenience function: morsel filter using global config.
 pub fn morsel_filter<F>(rows: &[Row], predicate: F) -> Vec<Row>
 where
@@ -981,6 +1225,256 @@ mod tests {
         // Each group should have 50 rows
         for (_, group_rows) in groups.iter() {
             assert_eq!(group_rows.len(), 50);
+        }
+    }
+
+    // ==================== Morsel Sort Tests ====================
+
+    #[test]
+    fn test_morsel_sort_empty_input() {
+        let config = MorselConfig::new(100);
+        let rows: Vec<Row> = Vec::new();
+
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        assert!(sorted.is_empty());
+    }
+
+    #[test]
+    fn test_morsel_sort_small_dataset() {
+        let config = MorselConfig::new(100);
+        // Create rows in reverse order: 49, 48, ..., 1, 0
+        let rows: Vec<Row> = (0..50)
+            .rev()
+            .map(|i| {
+                Row::from_vec(vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(format!("row{}", i))),
+                ])
+            })
+            .collect();
+
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        // Verify sorted in ascending order
+        assert_eq!(sorted.len(), 50);
+        for (i, row) in sorted.iter().enumerate() {
+            assert!(matches!(row.values[0], SqlValue::Integer(x) if x == i as i64));
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_large_dataset() {
+        let config = MorselConfig::new(100); // Small morsel size to force multiple morsels
+        // Create rows in reverse order: 999, 998, ..., 1, 0
+        let rows: Vec<Row> = (0..1000)
+            .rev()
+            .map(|i| {
+                Row::from_vec(vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(format!("row{}", i))),
+                ])
+            })
+            .collect();
+
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        // Verify sorted in ascending order
+        assert_eq!(sorted.len(), 1000);
+        for (i, row) in sorted.iter().enumerate() {
+            assert!(matches!(row.values[0], SqlValue::Integer(x) if x == i as i64));
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_descending() {
+        let config = MorselConfig::new(100);
+        // Create rows in ascending order: 0, 1, 2, ..., 499
+        let rows = create_test_rows(500);
+
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            // Descending order
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => y.cmp(x),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        // Verify sorted in descending order
+        assert_eq!(sorted.len(), 500);
+        for (i, row) in sorted.iter().enumerate() {
+            let expected = (499 - i) as i64;
+            assert!(matches!(row.values[0], SqlValue::Integer(x) if x == expected));
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_with_nulls() {
+        let config = MorselConfig::new(100);
+        // Create rows with some NULLs interspersed
+        let mut rows: Vec<Row> = Vec::new();
+        for i in 0..200 {
+            if i % 10 == 0 {
+                rows.push(Row::from_vec(vec![SqlValue::Null]));
+            } else {
+                rows.push(Row::from_vec(vec![SqlValue::Integer(i as i64)]));
+            }
+        }
+
+        // Sort with NULLs last
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Null, SqlValue::Null) => CmpOrdering::Equal,
+                (SqlValue::Null, _) => CmpOrdering::Greater, // NULL sorts last
+                (_, SqlValue::Null) => CmpOrdering::Less,
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        // Verify: non-NULL values sorted first, then NULLs
+        assert_eq!(sorted.len(), 200);
+
+        // Count NULLs (should be 20: 0, 10, 20, ..., 190)
+        let null_count = sorted.iter().filter(|r| r.values[0] == SqlValue::Null).count();
+        assert_eq!(null_count, 20);
+
+        // Verify NULLs are at the end
+        for row in sorted.iter().skip(180) {
+            assert_eq!(row.values[0], SqlValue::Null);
+        }
+
+        // Verify non-NULLs are sorted ascending before NULLs
+        let mut last_val = -1i64;
+        for row in sorted.iter().take(180) {
+            if let SqlValue::Integer(x) = row.values[0] {
+                assert!(x > last_val, "Values should be ascending: {} > {}", x, last_val);
+                last_val = x;
+            }
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_multi_key() {
+        let config = MorselConfig::new(50);
+        // Create rows with two columns: group (0-9) and value (0-99)
+        // Multiple rows per group to test stable-like behavior
+        let mut rows: Vec<Row> = Vec::new();
+        for i in 0..100 {
+            rows.push(Row::from_vec(vec![
+                SqlValue::Integer((i % 10) as i64), // Group
+                SqlValue::Integer(i as i64),        // Value
+            ]));
+        }
+
+        // Sort by group ASC, then by value DESC within group
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            let group_a = match &a.values[0] { SqlValue::Integer(x) => *x, _ => 0 };
+            let group_b = match &b.values[0] { SqlValue::Integer(x) => *x, _ => 0 };
+            let val_a = match &a.values[1] { SqlValue::Integer(x) => *x, _ => 0 };
+            let val_b = match &b.values[1] { SqlValue::Integer(x) => *x, _ => 0 };
+
+            match group_a.cmp(&group_b) {
+                CmpOrdering::Equal => val_b.cmp(&val_a), // DESC within group
+                other => other,
+            }
+        });
+
+        assert_eq!(sorted.len(), 100);
+
+        // Verify: groups are in order 0-9, and within each group values are descending
+        let mut current_group = 0i64;
+        let mut last_val_in_group = i64::MAX;
+        for row in sorted.iter() {
+            let group = match &row.values[0] { SqlValue::Integer(x) => *x, _ => 0 };
+            let val = match &row.values[1] { SqlValue::Integer(x) => *x, _ => 0 };
+
+            if group != current_group {
+                assert!(group > current_group, "Groups should be ascending");
+                current_group = group;
+                last_val_in_group = i64::MAX;
+            }
+            assert!(val < last_val_in_group, "Values within group should be descending");
+            last_val_in_group = val;
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_by_convenience() {
+        // Create rows in reverse order
+        let rows: Vec<Row> = (0..100)
+            .rev()
+            .map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)]))
+            .collect();
+
+        let sorted = morsel_sort_by(&rows, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        assert_eq!(sorted.len(), 100);
+        for (i, row) in sorted.iter().enumerate() {
+            assert!(matches!(row.values[0], SqlValue::Integer(x) if x == i as i64));
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_single_morsel() {
+        // Test with exactly one morsel worth of data
+        let config = MorselConfig::new(100);
+        let rows: Vec<Row> = (0..100)
+            .rev()
+            .map(|i| Row::from_vec(vec![SqlValue::Integer(i as i64)]))
+            .collect();
+
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        assert_eq!(sorted.len(), 100);
+        for (i, row) in sorted.iter().enumerate() {
+            assert!(matches!(row.values[0], SqlValue::Integer(x) if x == i as i64));
+        }
+    }
+
+    #[test]
+    fn test_morsel_sort_all_equal() {
+        let config = MorselConfig::new(50);
+        // All rows have the same value
+        let rows: Vec<Row> = (0..200)
+            .map(|_| Row::from_vec(vec![SqlValue::Integer(42)]))
+            .collect();
+
+        let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
+            match (&a.values[0], &b.values[0]) {
+                (SqlValue::Integer(x), SqlValue::Integer(y)) => x.cmp(y),
+                _ => CmpOrdering::Equal,
+            }
+        });
+
+        assert_eq!(sorted.len(), 200);
+        for row in sorted.iter() {
+            assert!(matches!(row.values[0], SqlValue::Integer(42)));
         }
     }
 }
