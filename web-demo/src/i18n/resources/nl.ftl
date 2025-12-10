@@ -85,6 +85,19 @@ nav-compliance = SQL Test Conformiteitsrapport
 nav-benchmarks = Prestatiebenchmarks
 nav-github = GitHub Repository
 nav-home = Home
+nav-trends = Prestatietrends
+
+# Trends page
+trends-title = Prestatietrends - VibeSQL
+trends-heading = VibeSQL - Prestatietrends
+trends-total-runs = Totale Benchmark Uitvoeringen
+trends-across-suites = over alle suites
+trends-date-range = Datumbereik
+trends-first-to-last = eerste tot laatste uitvoering
+trends-latest-commit = Laatste Commit
+trends-most-recent = meest recente benchmark
+trends-generated = Gegenereerd
+trends-last-export = laatste data-export
 
 # Results
 results-success-zero = Query succesvol uitgevoerd (0 rijen)

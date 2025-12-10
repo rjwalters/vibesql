@@ -85,6 +85,19 @@ nav-compliance = Rapport de Conformité SQL
 nav-benchmarks = Benchmarks de Performance
 nav-github = Dépôt GitHub
 nav-home = Accueil
+nav-trends = Tendances de Performance
+
+# Trends page
+trends-title = Tendances de Performance - VibeSQL
+trends-heading = VibeSQL - Tendances de Performance
+trends-total-runs = Exécutions Totales
+trends-across-suites = sur toutes les suites
+trends-date-range = Plage de Dates
+trends-first-to-last = première à dernière exécution
+trends-latest-commit = Dernier Commit
+trends-most-recent = benchmark le plus récent
+trends-generated = Généré
+trends-last-export = dernière exportation de données
 
 # Results
 results-success-zero = Requête exécutée avec succès (0 lignes)

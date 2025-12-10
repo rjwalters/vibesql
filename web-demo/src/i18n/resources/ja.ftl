@@ -76,6 +76,19 @@ nav-compliance = SQLテスト準拠レポート
 nav-benchmarks = パフォーマンスベンチマーク
 nav-github = GitHubリポジトリ
 nav-home = ホーム
+nav-trends = パフォーマンス推移
+
+# Trends page
+trends-title = パフォーマンス推移 - VibeSQL
+trends-heading = VibeSQL - パフォーマンス推移
+trends-total-runs = 総ベンチマーク実行回数
+trends-across-suites = 全スイート合計
+trends-date-range = 日付範囲
+trends-first-to-last = 最初から最後の実行まで
+trends-latest-commit = 最新コミット
+trends-most-recent = 最新のベンチマーク
+trends-generated = 生成日時
+trends-last-export = 最終データエクスポート
 
 # Results
 results-success-zero = クエリが正常に実行されました（0行）
