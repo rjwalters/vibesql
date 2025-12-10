@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -76,6 +76,10 @@ help:
 	@echo "  make test-workspace     - Run all workspace tests (unit + integration + sqllogictest)"
 	@echo "  make test-sqllogictest  - Run SQLLogicTest standalone (with JSON output)"
 	@echo "  make test-sqllogictest-halting - Run SQLLogicTest, stop on first failure"
+	@echo "  make test-tcl           - Run SQLite TCL tests (Priority 1 - core SQL)"
+	@echo "  make test-tcl-all       - Run all SQLite TCL tests (1174 files)"
+	@echo "  make test-tcl-file FILE=X - Run specific TCL test file"
+	@echo "  make test-tcl-status    - Show TCL test status"
 	@echo ""
 	@echo "Fuzzing targets:"
 	@echo "  make fuzz               - Run all fuzz targets (5 min each)"
@@ -211,6 +215,30 @@ test-sqllogictest-halting:
 	@echo "Running SQLLogicTest suite (fail-fast mode)..."
 	@echo "Will stop on first test file failure for easier debugging"
 	./scripts/sqllogictest run --fail-fast
+
+# Run SQLite TCL test suite (Priority 1 - core SQL tests)
+# This is the canonical SQLite conformance test suite
+test-tcl:
+	@echo "Running SQLite TCL test suite (Priority 1 - core SQL)..."
+	@echo "Tests: select, insert, update, delete, where, join, aggregate, func"
+	./scripts/tcltest run --priority 1 --verbose
+
+# Run all SQLite TCL tests (all priorities)
+test-tcl-all:
+	@echo "Running full SQLite TCL test suite (all 1174 files)..."
+	./scripts/tcltest run --verbose
+
+# Run specific TCL test file
+test-tcl-file:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make test-tcl-file FILE=select1.test"; \
+		exit 1; \
+	fi
+	./scripts/tcltest test $(FILE)
+
+# Show TCL test status
+test-tcl-status:
+	./scripts/tcltest status
 
 #
 # Fuzzing Targets
