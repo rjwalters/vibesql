@@ -14,7 +14,7 @@
 
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
 - **100% SQLLogicTest conformance** - 622 files (~7.4M tests)
-- **5,500+ unit tests** - comprehensive test coverage
+- **6,200+ unit tests** - comprehensive test coverage
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **HTTP REST & GraphQL API** - Full CRUD and query endpoints
 - **Vector search** - AI/ML embeddings with similarity search
@@ -23,7 +23,7 @@
 - **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **400,000+ lines** of Rust across 12 crates
+- **430,000+ lines** of Rust across 12 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
@@ -154,7 +154,7 @@ function ChatRoom({ channelId }) {
 
 ## Benchmarks
 
-VibeSQL achieves **23,398 TPS** on TPC-C mixed workload (5x faster than SQLite) and passes 100% of TPC-H and TPC-DS queries.
+VibeSQL achieves **25,000 TPS** on TPC-C mixed workload (5.3x faster than SQLite) and passes 100% of TPC-H and TPC-DS queries.
 
 ### Test Coverage
 
@@ -162,7 +162,7 @@ VibeSQL achieves **23,398 TPS** on TPC-C mixed workload (5x faster than SQLite) 
 |-------|----------|-------|
 | SQL:1999 Core | 100% | 739/739 sqltest |
 | SQLLogicTest | 100% | 622 files (~7.4M tests) |
-| Unit Tests | - | 5,500+ tests |
+| Unit Tests | - | 6,200+ tests |
 | TPC-DS | 100% | 99/99 queries |
 | TPC-H | 100% | 22/22 queries |
 | TPC-C | 100% | All transactions |
@@ -171,9 +171,9 @@ VibeSQL achieves **23,398 TPS** on TPC-C mixed workload (5x faster than SQLite) 
 
 | Database | TPS | vs SQLite |
 |----------|-----|-----------|
-| **VibeSQL** | **23,398** | **5x faster** |
-| SQLite | 4,540 | baseline |
-| DuckDB | 385 | 12x slower |
+| **VibeSQL** | **24,995** | **5.3x faster** |
+| SQLite | 4,706 | baseline |
+| DuckDB | 383 | 12x slower |
 
 *Scale Factor 1, 60-second duration, mixed workload (New Order, Payment, Order Status, Delivery, Stock Level).*
 
