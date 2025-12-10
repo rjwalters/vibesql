@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = WASM 데이터가 없습니다
+bench-no-server-data = Sysbench 서버 벤치마크 데이터가 없습니다
+bench-no-server-data-hint = 서버 벤치마크는 MySQL 비교가 활성화된 상태에서 sysbench_server를 실행해야 합니다.
 
 # Table headers
 bench-table-operation = Operation
@@ -426,6 +428,43 @@ bench-sysbench-srv-disc-pooling = 고처리량 시나리오를 위한 연결 설
 bench-sysbench-srv-disc-caching = 연결 간 서버측 쿼리 계획 캐싱
 bench-sysbench-srv-disc-extended = 배치 작업을 위한 전체 PostgreSQL 확장 쿼리 프로토콜 지원
 
+# TPC-H Server specific
+bench-tpch-server-name = TPC-H (서버)
+bench-tpch-server-title = TPC-H 분석 벤치마크 (서버)
+bench-tpch-server-description = <strong>TPC-H 서버 벤치마크</strong>는 분석 쿼리 워크로드에 대해 VibeSQL Server(PostgreSQL 와이어 프로토콜)를 MySQL과 비교하여 클라이언트-서버 배포에서 OLAP 성능을 측정합니다.
+bench-tpch-server-ops-label = TPC-H 쿼리
+bench-tpch-server-note-intro = 서버 벤치마크는 네트워크 오버헤드를 포함한 종단간 쿼리 지연 시간을 측정하여 <strong>PostgreSQL 와이어 프로토콜</strong> 구현을 테스트합니다.
+bench-tpch-server-note-queries = 쿼리는 비즈니스 인텔리전스 워크로드에 일반적인 복잡한 JOIN, 서브쿼리 및 집계를 테스트합니다.
+
+# TPC-H Server Discussion
+bench-tpch-srv-disc-protocol-title = PostgreSQL 와이어 프로토콜
+bench-tpch-srv-disc-protocol = VibeSQL Server는 표준 PostgreSQL 드라이버와 도구를 사용할 수 있도록 PostgreSQL 와이어 프로토콜을 사용합니다. 이 벤치마크는 프로토콜 오버헤드를 포함한 전체 종단간 지연 시간을 측정합니다.
+bench-tpch-srv-disc-comparison-title = MySQL 비교
+bench-tpch-srv-disc-comparison = MySQL과의 비교는 분석 워크로드에서 기존 클라이언트-서버 데이터베이스의 기준선을 제공합니다. VibeSQL의 컬럼형 실행 엔진은 복잡한 집계 및 조인에 이점을 제공합니다.
+bench-tpch-srv-disc-roadmap-title = 서버 OLAP 로드맵
+bench-tpch-srv-disc-prepared = 연결 간 컴파일된 쿼리 계획 재사용
+bench-tpch-srv-disc-pooling = 고처리량 시나리오를 위한 효율적인 연결 처리
+bench-tpch-srv-disc-scale = 프로덕션 규모 검증을 위한 더 큰 데이터 세트 테스트 (SF 0.1, SF 1.0)
+
+# TPC-C Server specific
+bench-tpcc-server-name = TPC-C (서버)
+bench-tpcc-server-title = TPC-C OLTP 벤치마크 (서버)
+bench-tpcc-server-description = <strong>TPC-C 서버 벤치마크</strong>는 OLTP 트랜잭션 워크로드에 대해 VibeSQL Server(PostgreSQL 와이어 프로토콜)를 MySQL과 비교하여 다중 클라이언트 데이터베이스 배포의 처리량을 측정합니다.
+bench-tpcc-server-ops-label = TPC-C 트랜잭션
+bench-tpcc-server-note-intro = 서버 벤치마크는 네트워크 오버헤드를 포함한 트랜잭션 처리량을 측정하여 <strong>PostgreSQL 와이어 프로토콜</strong> 구현을 테스트합니다.
+bench-tpcc-server-note-results = 결과는 표준 TPC-C 트랜잭션 혼합에 대한 초당 트랜잭션(TPS)을 보고합니다.
+bench-tpcc-mixed = 혼합 워크로드 - 표준 TPC-C 트랜잭션 혼합 (45% 신규 주문, 43% 결제, 4% 주문 상태, 4% 배송, 4% 재고 수준)
+
+# TPC-C Server Discussion
+bench-tpcc-srv-disc-protocol-title = PostgreSQL 와이어 프로토콜
+bench-tpcc-srv-disc-protocol = VibeSQL Server는 표준 PostgreSQL 드라이버와 도구를 사용할 수 있도록 PostgreSQL 와이어 프로토콜을 사용합니다. 이 벤치마크는 프로토콜 오버헤드를 포함한 전체 종단간 트랜잭션 지연 시간을 측정합니다.
+bench-tpcc-srv-disc-comparison-title = MySQL 비교
+bench-tpcc-srv-disc-comparison = MySQL과의 비교는 OLTP 워크로드에서 기존 클라이언트-서버 데이터베이스의 기준선을 제공합니다. MySQL은 트랜잭션 워크로드의 산업 표준이며 TPC-C는 MySQL의 강점입니다.
+bench-tpcc-srv-disc-roadmap-title = 서버 OLTP 로드맵
+bench-tpcc-srv-disc-prepared = 연결 간 컴파일된 쿼리 계획 재사용
+bench-tpcc-srv-disc-pooling = 고처리량 시나리오를 위한 효율적인 연결 처리
+bench-tpcc-srv-disc-parallel = 다중 클라이언트 동시 트랜잭션 처리
+
 # Footprint Embedded specific
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
@@ -502,6 +541,9 @@ bench-bullet-modular = Modular builds
 bench-bullet-streaming = Streaming compilation
 bench-bullet-indexeddb = IndexedDB persistence
 bench-bullet-worker = Worker thread support
+bench-bullet-prepared-stmts = 준비된 문장
+bench-bullet-larger-scale = 더 큰 스케일 팩터
+bench-bullet-parallel-clients = 병렬 클라이언트
 
 # =============================================================================
 # Conformance Page

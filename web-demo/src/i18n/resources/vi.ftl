@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = Không có dữ liệu WASM
+bench-no-server-data = Không có dữ liệu benchmark server Sysbench
+bench-no-server-data-hint = Benchmark server yêu cầu chạy sysbench_server với so sánh MySQL được bật.
 
 # Table headers
 bench-table-operation = Operation
@@ -430,7 +432,44 @@ bench-sysbench-srv-disc-pooling = Giảm overhead thiết lập kết nối cho 
 bench-sysbench-srv-disc-caching = Caching kế hoạch truy vấn phía server qua các kết nối
 bench-sysbench-srv-disc-extended = Hỗ trợ đầy đủ giao thức truy vấn mở rộng PostgreSQL cho các thao tác batch
 
-# Footprint Embedded specific
+# TPC-H Server cụ thể
+bench-tpch-server-name = TPC-H (Server)
+bench-tpch-server-title = Benchmark Phân tích TPC-H (Server)
+bench-tpch-server-description = <strong>Benchmark server TPC-H</strong> so sánh VibeSQL Server (giao thức PostgreSQL) với MySQL cho các workload truy vấn phân tích, đo hiệu suất OLAP trong các triển khai client-server.
+bench-tpch-server-ops-label = truy vấn TPC-H
+bench-tpch-server-note-intro = Benchmark server kiểm tra việc triển khai <strong>giao thức PostgreSQL</strong>, đo độ trễ truy vấn end-to-end bao gồm overhead mạng.
+bench-tpch-server-note-queries = Các truy vấn kiểm tra các JOIN phức tạp, subquery và aggregation điển hình cho các workload business intelligence.
+
+# Thảo luận TPC-H Server
+bench-tpch-srv-disc-protocol-title = Giao thức PostgreSQL
+bench-tpch-srv-disc-protocol = VibeSQL Server nói giao thức PostgreSQL, cho phép sử dụng các driver và công cụ PostgreSQL chuẩn. Benchmark này đo độ trễ end-to-end đầy đủ bao gồm overhead giao thức.
+bench-tpch-srv-disc-comparison-title = So sánh với MySQL
+bench-tpch-srv-disc-comparison = So sánh với MySQL cung cấp baseline cho các cơ sở dữ liệu client-server truyền thống trên các workload phân tích. Engine thực thi theo cột của VibeSQL cung cấp lợi thế cho các aggregation và join phức tạp.
+bench-tpch-srv-disc-roadmap-title = Lộ trình Server OLAP
+bench-tpch-srv-disc-prepared = Tái sử dụng các kế hoạch truy vấn đã biên dịch qua các kết nối
+bench-tpch-srv-disc-pooling = Xử lý kết nối hiệu quả cho các kịch bản throughput cao
+bench-tpch-srv-disc-scale = Kiểm tra các tập dữ liệu lớn hơn (SF 0.1, SF 1.0) để xác thực quy mô sản xuất
+
+# TPC-C Server cụ thể
+bench-tpcc-server-name = TPC-C (Server)
+bench-tpcc-server-title = Benchmark OLTP TPC-C (Server)
+bench-tpcc-server-description = <strong>Benchmark server TPC-C</strong> so sánh VibeSQL Server (giao thức PostgreSQL) với MySQL cho các workload giao dịch OLTP, đo throughput cho các triển khai cơ sở dữ liệu đa client.
+bench-tpcc-server-ops-label = giao dịch TPC-C
+bench-tpcc-server-note-intro = Benchmark server kiểm tra việc triển khai <strong>giao thức PostgreSQL</strong>, đo throughput giao dịch bao gồm overhead mạng.
+bench-tpcc-server-note-results = Kết quả báo cáo giao dịch mỗi giây (TPS) cho hỗn hợp giao dịch TPC-C chuẩn.
+bench-tpcc-mixed = Workload Hỗn hợp - Hỗn hợp giao dịch TPC-C chuẩn (45% Đơn-Mới, 43% Thanh-Toán, 4% Trạng-Thái-Đơn, 4% Giao-Hàng, 4% Mức-Tồn-Kho)
+
+# Thảo luận TPC-C Server
+bench-tpcc-srv-disc-protocol-title = Giao thức PostgreSQL
+bench-tpcc-srv-disc-protocol = VibeSQL Server nói giao thức PostgreSQL, cho phép sử dụng các driver và công cụ PostgreSQL chuẩn. Benchmark này đo độ trễ giao dịch end-to-end đầy đủ bao gồm overhead giao thức.
+bench-tpcc-srv-disc-comparison-title = So sánh với MySQL
+bench-tpcc-srv-disc-comparison = So sánh với MySQL cung cấp baseline cho các cơ sở dữ liệu client-server truyền thống trên các workload OLTP. MySQL là tiêu chuẩn ngành cho các workload giao dịch, và TPC-C là thế mạnh của MySQL.
+bench-tpcc-srv-disc-roadmap-title = Lộ trình Server OLTP
+bench-tpcc-srv-disc-prepared = Tái sử dụng các kế hoạch truy vấn đã biên dịch qua các kết nối
+bench-tpcc-srv-disc-pooling = Xử lý kết nối hiệu quả cho các kịch bản throughput cao
+bench-tpcc-srv-disc-parallel = Xử lý giao dịch đồng thời đa client
+
+# Footprint Embedded cụ thể
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
 bench-footprint-embedded-description = <strong>Các benchmark footprint nhúng</strong> đo hiệu quả tài nguyên của các binary cơ sở dữ liệu native, so sánh kích thước binary, thời gian khởi động lạnh và sử dụng bộ nhớ đỉnh.

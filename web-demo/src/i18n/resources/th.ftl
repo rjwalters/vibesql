@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = ไม่มีข้อมูล WASM
+bench-no-server-data = ไม่มีข้อมูล Sysbench server benchmark
+bench-no-server-data-hint = Server benchmarks ต้องเรียกใช้ sysbench_server โดยเปิดใช้งานการเปรียบเทียบ MySQL
 
 # Table headers
 bench-table-operation = Operation
@@ -430,7 +432,44 @@ bench-sysbench-srv-disc-pooling = ลดค่าใช้จ่ายการ�
 bench-sysbench-srv-disc-caching = การแคชแผนการสืบค้นฝั่งเซิร์ฟเวอร์ข้ามการเชื่อมต่อ
 bench-sysbench-srv-disc-extended = การสนับสนุนโปรโตคอลการสืบค้นขยายเต็มรูปแบบของ PostgreSQL สำหรับการดำเนินการแบตช์
 
-# Footprint Embedded specific
+# TPC-H Server เฉพาะ
+bench-tpch-server-name = TPC-H (เซิร์ฟเวอร์)
+bench-tpch-server-title = เบนช์มาร์กวิเคราะห์ TPC-H (เซิร์ฟเวอร์)
+bench-tpch-server-description = <strong>เบนช์มาร์กเซิร์ฟเวอร์ TPC-H</strong> เปรียบเทียบ VibeSQL Server (โปรโตคอล PostgreSQL) กับ MySQL สำหรับเวิร์กโหลดการสืบค้นวิเคราะห์ วัดประสิทธิภาพ OLAP ในการใช้งานไคลเอนต์-เซิร์ฟเวอร์
+bench-tpch-server-ops-label = การสืบค้น TPC-H
+bench-tpch-server-note-intro = เบนช์มาร์กเซิร์ฟเวอร์ทดสอบการใช้งาน <strong>โปรโตคอล PostgreSQL</strong> วัดความล่าช้าของการสืบค้นแบบ end-to-end รวมถึง overhead ของเครือข่าย
+bench-tpch-server-note-queries = การสืบค้นทดสอบ JOIN ที่ซับซ้อน ซับเควรี และการรวมข้อมูลที่เป็นลักษณะเฉพาะของเวิร์กโหลด business intelligence
+
+# การอภิปราย TPC-H Server
+bench-tpch-srv-disc-protocol-title = โปรโตคอล PostgreSQL
+bench-tpch-srv-disc-protocol = VibeSQL Server พูดโปรโตคอล PostgreSQL ช่วยให้ใช้ไดรเวอร์และเครื่องมือ PostgreSQL มาตรฐานได้ เบนช์มาร์กนี้วัดความล่าช้าแบบ end-to-end เต็มรูปแบบรวมถึง overhead ของโปรโตคอล
+bench-tpch-srv-disc-comparison-title = การเปรียบเทียบกับ MySQL
+bench-tpch-srv-disc-comparison = การเปรียบเทียบกับ MySQL ให้เส้นฐานสำหรับฐานข้อมูลไคลเอนต์-เซิร์ฟเวอร์แบบดั้งเดิมบนเวิร์กโหลดวิเคราะห์ เอนจินการทำงานแบบคอลัมน์ของ VibeSQL ให้ข้อได้เปรียบสำหรับการรวมข้อมูลและการ join ที่ซับซ้อน
+bench-tpch-srv-disc-roadmap-title = แผนงานเซิร์ฟเวอร์ OLAP
+bench-tpch-srv-disc-prepared = นำแผนการสืบค้นที่คอมไพล์แล้วมาใช้ซ้ำข้ามการเชื่อมต่อ
+bench-tpch-srv-disc-pooling = การจัดการการเชื่อมต่อที่มีประสิทธิภาพสำหรับสถานการณ์ทรูพุตสูง
+bench-tpch-srv-disc-scale = การทดสอบชุดข้อมูลขนาดใหญ่ (SF 0.1, SF 1.0) สำหรับการตรวจสอบระดับการผลิต
+
+# TPC-C Server เฉพาะ
+bench-tpcc-server-name = TPC-C (เซิร์ฟเวอร์)
+bench-tpcc-server-title = เบนช์มาร์ก OLTP TPC-C (เซิร์ฟเวอร์)
+bench-tpcc-server-description = <strong>เบนช์มาร์กเซิร์ฟเวอร์ TPC-C</strong> เปรียบเทียบ VibeSQL Server (โปรโตคอล PostgreSQL) กับ MySQL สำหรับเวิร์กโหลดธุรกรรม OLTP วัดทรูพุตสำหรับการใช้งานฐานข้อมูลหลายไคลเอนต์
+bench-tpcc-server-ops-label = ธุรกรรม TPC-C
+bench-tpcc-server-note-intro = เบนช์มาร์กเซิร์ฟเวอร์ทดสอบการใช้งาน <strong>โปรโตคอล PostgreSQL</strong> วัดทรูพุตธุรกรรมรวมถึง overhead ของเครือข่าย
+bench-tpcc-server-note-results = ผลลัพธ์รายงานธุรกรรมต่อวินาที (TPS) สำหรับมิกซ์ธุรกรรม TPC-C มาตรฐาน
+bench-tpcc-mixed = เวิร์กโหลดผสม - มิกซ์ธุรกรรม TPC-C มาตรฐาน (45% คำสั่งซื้อใหม่, 43% การชำระเงิน, 4% สถานะคำสั่ง, 4% การจัดส่ง, 4% ระดับสต็อก)
+
+# การอภิปราย TPC-C Server
+bench-tpcc-srv-disc-protocol-title = โปรโตคอล PostgreSQL
+bench-tpcc-srv-disc-protocol = VibeSQL Server พูดโปรโตคอล PostgreSQL ช่วยให้ใช้ไดรเวอร์และเครื่องมือ PostgreSQL มาตรฐานได้ เบนช์มาร์กนี้วัดความล่าช้าธุรกรรมแบบ end-to-end เต็มรูปแบบรวมถึง overhead ของโปรโตคอล
+bench-tpcc-srv-disc-comparison-title = การเปรียบเทียบกับ MySQL
+bench-tpcc-srv-disc-comparison = การเปรียบเทียบกับ MySQL ให้เส้นฐานสำหรับฐานข้อมูลไคลเอนต์-เซิร์ฟเวอร์แบบดั้งเดิมบนเวิร์กโหลด OLTP MySQL เป็นมาตรฐานอุตสาหกรรมสำหรับเวิร์กโหลดธุรกรรม และ TPC-C เป็นจุดแข็งของ MySQL
+bench-tpcc-srv-disc-roadmap-title = แผนงานเซิร์ฟเวอร์ OLTP
+bench-tpcc-srv-disc-prepared = นำแผนการสืบค้นที่คอมไพล์แล้วมาใช้ซ้ำข้ามการเชื่อมต่อ
+bench-tpcc-srv-disc-pooling = การจัดการการเชื่อมต่อที่มีประสิทธิภาพสำหรับสถานการณ์ทรูพุตสูง
+bench-tpcc-srv-disc-parallel = การประมวลผลธุรกรรมพร้อมกันหลายไคลเอนต์
+
+# Footprint Embedded เฉพาะ
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
 bench-footprint-embedded-description = <strong>เบนช์มาร์กฟุตพริ้นท์แบบฝังตัว</strong> วัดประสิทธิภาพทรัพยากรของไบนารีฐานข้อมูลเนทีฟ เปรียบเทียบขนาดไบนารี เวลาเริ่มต้นเย็น และการใช้หน่วยความจำสูงสุด

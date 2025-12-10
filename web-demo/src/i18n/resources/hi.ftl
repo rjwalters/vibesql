@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = कोई WASM डेटा उपलब्ध नहीं है
+bench-no-server-data = कोई Sysbench सर्वर बेंचमार्क डेटा उपलब्ध नहीं है
+bench-no-server-data-hint = सर्वर बेंचमार्क के लिए MySQL तुलना सक्षम के साथ sysbench_server चलाना आवश्यक है।
 
 # Table headers
 bench-table-operation = Operation
@@ -430,7 +432,44 @@ bench-sysbench-srv-disc-pooling = हाई-थ्रूपुट परिद�
 bench-sysbench-srv-disc-caching = कनेक्शन के पार सर्वर-साइड क्वेरी प्लान कैशिंग
 bench-sysbench-srv-disc-extended = बैच ऑपरेशन के लिए फुल PostgreSQL एक्सटेंडेड क्वेरी प्रोटोकॉल सपोर्ट
 
-# Footprint Embedded specific
+# TPC-H Server विशिष्ट
+bench-tpch-server-name = TPC-H (सर्वर)
+bench-tpch-server-title = TPC-H एनालिटिकल बेंचमार्क (सर्वर)
+bench-tpch-server-description = <strong>TPC-H सर्वर बेंचमार्क</strong> एनालिटिकल क्वेरी वर्कलोड के लिए VibeSQL Server (PostgreSQL प्रोटोकॉल) की MySQL से तुलना करते हैं, क्लाइंट-सर्वर डिप्लॉयमेंट में OLAP प्रदर्शन को मापते हैं।
+bench-tpch-server-ops-label = TPC-H क्वेरीज़
+bench-tpch-server-note-intro = सर्वर बेंचमार्क <strong>PostgreSQL प्रोटोकॉल</strong> इम्प्लीमेंटेशन को टेस्ट करते हैं, नेटवर्क ओवरहेड सहित एंड-टू-एंड क्वेरी लेटेंसी को मापते हैं।
+bench-tpch-server-note-queries = क्वेरीज़ जटिल JOINs, सबक्वेरीज़ और एग्रीगेशंस को टेस्ट करती हैं जो बिजनेस इंटेलिजेंस वर्कलोड के लिए विशिष्ट हैं।
+
+# TPC-H Server चर्चा
+bench-tpch-srv-disc-protocol-title = PostgreSQL प्रोटोकॉल
+bench-tpch-srv-disc-protocol = VibeSQL Server PostgreSQL प्रोटोकॉल बोलता है, मानक PostgreSQL ड्राइवर और टूल्स के उपयोग को सक्षम करता है। यह बेंचमार्क प्रोटोकॉल ओवरहेड सहित पूर्ण एंड-टू-एंड लेटेंसी को मापता है।
+bench-tpch-srv-disc-comparison-title = MySQL तुलना
+bench-tpch-srv-disc-comparison = MySQL के साथ तुलना एनालिटिकल वर्कलोड पर पारंपरिक क्लाइंट-सर्वर डेटाबेस के लिए बेसलाइन प्रदान करती है। VibeSQL का कॉलमनर एक्जीक्यूशन इंजन जटिल एग्रीगेशंस और जॉइन्स के लिए फायदे प्रदान करता है।
+bench-tpch-srv-disc-roadmap-title = सर्वर OLAP रोडमैप
+bench-tpch-srv-disc-prepared = कनेक्शंस के बीच कंपाइल्ड क्वेरी प्लान का पुन: उपयोग
+bench-tpch-srv-disc-pooling = हाई-थ्रूपुट परिदृश्यों के लिए कुशल कनेक्शन हैंडलिंग
+bench-tpch-srv-disc-scale = प्रोडक्शन-स्केल वैलिडेशन के लिए बड़े डेटासेट (SF 0.1, SF 1.0) का परीक्षण
+
+# TPC-C Server विशिष्ट
+bench-tpcc-server-name = TPC-C (सर्वर)
+bench-tpcc-server-title = TPC-C OLTP बेंचमार्क (सर्वर)
+bench-tpcc-server-description = <strong>TPC-C सर्वर बेंचमार्क</strong> OLTP ट्रांजैक्शन वर्कलोड के लिए VibeSQL Server (PostgreSQL प्रोटोकॉल) की MySQL से तुलना करते हैं, मल्टी-क्लाइंट डेटाबेस डिप्लॉयमेंट के लिए थ्रूपुट को मापते हैं।
+bench-tpcc-server-ops-label = TPC-C ट्रांजैक्शंस
+bench-tpcc-server-note-intro = सर्वर बेंचमार्क <strong>PostgreSQL प्रोटोकॉल</strong> इम्प्लीमेंटेशन को टेस्ट करते हैं, नेटवर्क ओवरहेड सहित ट्रांजैक्शन थ्रूपुट को मापते हैं।
+bench-tpcc-server-note-results = परिणाम मानक TPC-C ट्रांजैक्शन मिक्स के लिए प्रति सेकंड ट्रांजैक्शंस (TPS) रिपोर्ट करते हैं।
+bench-tpcc-mixed = मिक्स्ड वर्कलोड - मानक TPC-C ट्रांजैक्शन मिक्स (45% न्यू-ऑर्डर, 43% पेमेंट, 4% ऑर्डर-स्टेटस, 4% डिलीवरी, 4% स्टॉक-लेवल)
+
+# TPC-C Server चर्चा
+bench-tpcc-srv-disc-protocol-title = PostgreSQL प्रोटोकॉल
+bench-tpcc-srv-disc-protocol = VibeSQL Server PostgreSQL प्रोटोकॉल बोलता है, मानक PostgreSQL ड्राइवर और टूल्स के उपयोग को सक्षम करता है। यह बेंचमार्क प्रोटोकॉल ओवरहेड सहित पूर्ण एंड-टू-एंड ट्रांजैक्शन लेटेंसी को मापता है।
+bench-tpcc-srv-disc-comparison-title = MySQL तुलना
+bench-tpcc-srv-disc-comparison = MySQL के साथ तुलना OLTP वर्कलोड पर पारंपरिक क्लाइंट-सर्वर डेटाबेस के लिए बेसलाइन प्रदान करती है। MySQL ट्रांजैक्शनल वर्कलोड के लिए उद्योग मानक है, और TPC-C MySQL की ताकत है।
+bench-tpcc-srv-disc-roadmap-title = सर्वर OLTP रोडमैप
+bench-tpcc-srv-disc-prepared = कनेक्शंस के बीच कंपाइल्ड क्वेरी प्लान का पुन: उपयोग
+bench-tpcc-srv-disc-pooling = हाई-थ्रूपुट परिदृश्यों के लिए कुशल कनेक्शन हैंडलिंग
+bench-tpcc-srv-disc-parallel = मल्टी-क्लाइंट समवर्ती ट्रांजैक्शन प्रोसेसिंग
+
+# Footprint Embedded विशिष्ट
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
 bench-footprint-embedded-description = <strong>एंबेडेड फुटप्रिंट बेंचमार्क</strong> नेटिव डेटाबेस बाइनरी की रिसोर्स एफिशिएंसी को मापते हैं, बाइनरी साइज, कोल्ड स्टार्टअप टाइम और पीक मेमोरी यूसेज की तुलना करते हैं।

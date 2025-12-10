@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = Data WASM tidak tersedia
+bench-no-server-data = Data benchmark server Sysbench tidak tersedia
+bench-no-server-data-hint = Benchmark server memerlukan menjalankan sysbench_server dengan perbandingan MySQL diaktifkan.
 
 # Table headers
 bench-table-operation = Operation
@@ -426,6 +428,43 @@ bench-sysbench-srv-disc-pooling = Mengurangi overhead pembentukan koneksi untuk 
 bench-sysbench-srv-disc-caching = Caching rencana kueri sisi server di seluruh koneksi
 bench-sysbench-srv-disc-extended = Dukungan protokol kueri diperluas PostgreSQL penuh untuk operasi batch
 
+# TPC-H Server specific
+bench-tpch-server-name = TPC-H (Server)
+bench-tpch-server-title = TPC-H Analytical Benchmark (Server)
+bench-tpch-server-description = <strong>Benchmark server TPC-H</strong> membandingkan VibeSQL Server (protokol wire PostgreSQL) dengan MySQL untuk beban kerja kueri analitis, mengukur kinerja OLAP dalam deployment client-server.
+bench-tpch-server-ops-label = Kueri TPC-H
+bench-tpch-server-note-intro = Benchmark server menguji implementasi <strong>protokol wire PostgreSQL</strong>, mengukur latensi kueri end-to-end termasuk overhead jaringan.
+bench-tpch-server-note-queries = Kueri menguji JOIN kompleks, subkueri, dan agregasi yang tipikal dari beban kerja business intelligence.
+
+# TPC-H Server Discussion
+bench-tpch-srv-disc-protocol-title = Protokol Wire PostgreSQL
+bench-tpch-srv-disc-protocol = VibeSQL Server berbicara protokol wire PostgreSQL, memungkinkan penggunaan driver dan tool PostgreSQL standar. Benchmark ini mengukur latensi end-to-end penuh termasuk overhead protokol.
+bench-tpch-srv-disc-comparison-title = Perbandingan MySQL
+bench-tpch-srv-disc-comparison = Perbandingan dengan MySQL memberikan baseline untuk database client-server tradisional pada beban kerja analitis. Mesin eksekusi kolumnar VibeSQL memberikan keunggulan untuk agregasi dan join kompleks.
+bench-tpch-srv-disc-roadmap-title = Roadmap Server OLAP
+bench-tpch-srv-disc-prepared = Menggunakan kembali rencana kueri yang dikompilasi di seluruh koneksi
+bench-tpch-srv-disc-pooling = Penanganan koneksi efisien untuk skenario throughput tinggi
+bench-tpch-srv-disc-scale = Menguji dataset yang lebih besar (SF 0.1, SF 1.0) untuk validasi skala produksi
+
+# TPC-C Server specific
+bench-tpcc-server-name = TPC-C (Server)
+bench-tpcc-server-title = TPC-C OLTP Benchmark (Server)
+bench-tpcc-server-description = <strong>Benchmark server TPC-C</strong> membandingkan VibeSQL Server (protokol wire PostgreSQL) dengan MySQL untuk beban kerja transaksi OLTP, mengukur throughput untuk deployment database multi-klien.
+bench-tpcc-server-ops-label = Transaksi TPC-C
+bench-tpcc-server-note-intro = Benchmark server menguji implementasi <strong>protokol wire PostgreSQL</strong>, mengukur throughput transaksi termasuk overhead jaringan.
+bench-tpcc-server-note-results = Hasil melaporkan transaksi per detik (TPS) untuk campuran transaksi TPC-C standar.
+bench-tpcc-mixed = Beban Kerja Campuran - Campuran transaksi TPC-C standar (45% New-Order, 43% Payment, 4% Order-Status, 4% Delivery, 4% Stock-Level)
+
+# TPC-C Server Discussion
+bench-tpcc-srv-disc-protocol-title = Protokol Wire PostgreSQL
+bench-tpcc-srv-disc-protocol = VibeSQL Server berbicara protokol wire PostgreSQL, memungkinkan penggunaan driver dan tool PostgreSQL standar. Benchmark ini mengukur latensi transaksi end-to-end penuh termasuk overhead protokol.
+bench-tpcc-srv-disc-comparison-title = Perbandingan MySQL
+bench-tpcc-srv-disc-comparison = Perbandingan dengan MySQL memberikan baseline untuk database client-server tradisional pada beban kerja OLTP. MySQL adalah standar industri untuk beban kerja transaksional, dan TPC-C adalah kekuatan MySQL.
+bench-tpcc-srv-disc-roadmap-title = Roadmap Server OLTP
+bench-tpcc-srv-disc-prepared = Menggunakan kembali rencana kueri yang dikompilasi di seluruh koneksi
+bench-tpcc-srv-disc-pooling = Penanganan koneksi efisien untuk skenario throughput tinggi
+bench-tpcc-srv-disc-parallel = Pemrosesan transaksi bersamaan multi-klien
+
 # Footprint Embedded specific
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
@@ -502,6 +541,9 @@ bench-bullet-modular = Modular builds
 bench-bullet-streaming = Streaming compilation
 bench-bullet-indexeddb = IndexedDB persistence
 bench-bullet-worker = Worker thread support
+bench-bullet-prepared-stmts = Prepared statements
+bench-bullet-larger-scale = Faktor skala lebih besar
+bench-bullet-parallel-clients = Klien paralel
 
 # =============================================================================
 # Conformance Page

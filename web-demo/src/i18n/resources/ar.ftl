@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = لا تتوفر بيانات WASM
+bench-no-server-data = لا تتوفر بيانات مقاييس أداء خادم Sysbench
+bench-no-server-data-hint = تتطلب مقاييس أداء الخادم تشغيل sysbench_server مع تمكين مقارنة MySQL.
 
 # Table headers
 bench-table-operation = Operation
@@ -430,7 +432,44 @@ bench-sysbench-srv-disc-pooling = تقليل عبء إنشاء الاتصال ل
 bench-sysbench-srv-disc-caching = التخزين المؤقت لخطط الاستعلام على جانب الخادم عبر الاتصالات
 bench-sysbench-srv-disc-extended = دعم بروتوكول الاستعلام الموسع الكامل لـ PostgreSQL للعمليات الدفعية
 
-# Footprint Embedded specific
+# TPC-H Server خاص
+bench-tpch-server-name = TPC-H (الخادم)
+bench-tpch-server-title = مقياس أداء TPC-H التحليلي (الخادم)
+bench-tpch-server-description = تقارن <strong>مقاييس أداء خادم TPC-H</strong> VibeSQL Server (بروتوكول PostgreSQL) مع MySQL لأحمال العمل التحليلية، وتقيس أداء OLAP في عمليات النشر العميل-الخادم.
+bench-tpch-server-ops-label = استعلامات TPC-H
+bench-tpch-server-note-intro = تختبر مقاييس أداء الخادم تنفيذ <strong>بروتوكول PostgreSQL</strong>، وتقيس زمن الوصول الشامل للاستعلام بما في ذلك الحمل الزائد للشبكة.
+bench-tpch-server-note-queries = تختبر الاستعلامات JOINs المعقدة والاستعلامات الفرعية والتجميعات النموذجية لأحمال عمل ذكاء الأعمال.
+
+# مناقشة TPC-H Server
+bench-tpch-srv-disc-protocol-title = بروتوكول PostgreSQL
+bench-tpch-srv-disc-protocol = يتحدث VibeSQL Server بروتوكول PostgreSQL، مما يتيح استخدام برامج تشغيل وأدوات PostgreSQL القياسية. يقيس هذا المقياس زمن الوصول الشامل الكامل بما في ذلك الحمل الزائد للبروتوكول.
+bench-tpch-srv-disc-comparison-title = مقارنة مع MySQL
+bench-tpch-srv-disc-comparison = توفر المقارنة مع MySQL خط أساس لقواعد البيانات التقليدية العميل-الخادم على أحمال العمل التحليلية. يوفر محرك التنفيذ العمودي لـ VibeSQL مزايا للتجميعات والربط المعقدة.
+bench-tpch-srv-disc-roadmap-title = خارطة طريق خادم OLAP
+bench-tpch-srv-disc-prepared = إعادة استخدام خطط الاستعلام المترجمة عبر الاتصالات
+bench-tpch-srv-disc-pooling = معالجة الاتصالات الفعالة لسيناريوهات الإنتاجية العالية
+bench-tpch-srv-disc-scale = اختبار مجموعات بيانات أكبر (SF 0.1، SF 1.0) للتحقق من صحة مقياس الإنتاج
+
+# TPC-C Server خاص
+bench-tpcc-server-name = TPC-C (الخادم)
+bench-tpcc-server-title = مقياس أداء TPC-C OLTP (الخادم)
+bench-tpcc-server-description = تقارن <strong>مقاييس أداء خادم TPC-C</strong> VibeSQL Server (بروتوكول PostgreSQL) مع MySQL لأحمال عمل معاملات OLTP، وتقيس الإنتاجية لعمليات نشر قواعد البيانات متعددة العملاء.
+bench-tpcc-server-ops-label = معاملات TPC-C
+bench-tpcc-server-note-intro = تختبر مقاييس أداء الخادم تنفيذ <strong>بروتوكول PostgreSQL</strong>، وتقيس إنتاجية المعاملات بما في ذلك الحمل الزائد للشبكة.
+bench-tpcc-server-note-results = تُبلغ النتائج عن المعاملات في الثانية (TPS) لمزيج معاملات TPC-C القياسي.
+bench-tpcc-mixed = حمل عمل مختلط - مزيج معاملات TPC-C القياسي (45% طلب جديد، 43% دفع، 4% حالة الطلب، 4% التسليم، 4% مستوى المخزون)
+
+# مناقشة TPC-C Server
+bench-tpcc-srv-disc-protocol-title = بروتوكول PostgreSQL
+bench-tpcc-srv-disc-protocol = يتحدث VibeSQL Server بروتوكول PostgreSQL، مما يتيح استخدام برامج تشغيل وأدوات PostgreSQL القياسية. يقيس هذا المقياس زمن الوصول الشامل الكامل للمعاملات بما في ذلك الحمل الزائد للبروتوكول.
+bench-tpcc-srv-disc-comparison-title = مقارنة مع MySQL
+bench-tpcc-srv-disc-comparison = توفر المقارنة مع MySQL خط أساس لقواعد البيانات التقليدية العميل-الخادم على أحمال عمل OLTP. MySQL هو المعيار الصناعي لأحمال العمل المعاملاتية، و TPC-C هو نقطة قوة MySQL.
+bench-tpcc-srv-disc-roadmap-title = خارطة طريق خادم OLTP
+bench-tpcc-srv-disc-prepared = إعادة استخدام خطط الاستعلام المترجمة عبر الاتصالات
+bench-tpcc-srv-disc-pooling = معالجة الاتصالات الفعالة لسيناريوهات الإنتاجية العالية
+bench-tpcc-srv-disc-parallel = معالجة المعاملات المتزامنة متعددة العملاء
+
+# Footprint Embedded خاص
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
 bench-footprint-embedded-description = تقيس <strong>مقاييس البصمة المضمنة</strong> كفاءة موارد ملفات قاعدة البيانات الأصلية، مقارنة حجم الملف الثنائي ووقت البدء البارد واستخدام الذاكرة القصوى.

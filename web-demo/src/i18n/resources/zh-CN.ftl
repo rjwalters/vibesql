@@ -249,6 +249,8 @@ bench-size-metrics = 大小指标
 bench-failed = 失败
 bench-failed-title = 查询失败（超时或错误）
 bench-no-wasm-data = 无可用的 WASM 数据
+bench-no-server-data = 无可用的 Sysbench 服务器基准测试数据
+bench-no-server-data-hint = 服务器基准测试需要启用 MySQL 比较并运行 sysbench_server。
 
 # 表头
 bench-table-operation = 操作
@@ -430,6 +432,43 @@ bench-sysbench-srv-disc-pooling = 减少高吞吐量场景的连接建立开销
 bench-sysbench-srv-disc-caching = 跨连接的查询计划服务器端缓存
 bench-sysbench-srv-disc-extended = 完整的 PostgreSQL 扩展查询协议支持批量操作
 
+# TPC-H 服务器相关
+bench-tpch-server-name = TPC-H (服务器)
+bench-tpch-server-title = TPC-H 分析基准测试 (服务器)
+bench-tpch-server-description = <strong>TPC-H 服务器基准测试</strong>将 VibeSQL Server（PostgreSQL 协议）与 MySQL 进行比较，测试分析查询工作负载，测量客户端-服务器部署中的 OLAP 性能。
+bench-tpch-server-ops-label = TPC-H 查询
+bench-tpch-server-note-intro = 服务器基准测试测试 <strong>PostgreSQL 协议</strong>实现，测量包括网络开销在内的端到端查询延迟。
+bench-tpch-server-note-queries = 查询测试商业智能工作负载中典型的复杂 JOIN、子查询和聚合。
+
+# TPC-H 服务器讨论
+bench-tpch-srv-disc-protocol-title = PostgreSQL 协议
+bench-tpch-srv-disc-protocol = VibeSQL Server 使用 PostgreSQL 协议，支持使用标准 PostgreSQL 驱动程序和工具。此基准测试测量包括协议开销在内的完整端到端延迟。
+bench-tpch-srv-disc-comparison-title = MySQL 比较
+bench-tpch-srv-disc-comparison = 与 MySQL 比较为传统客户端-服务器数据库在分析工作负载上提供基准。VibeSQL 的列式执行引擎在复杂聚合和连接方面具有优势。
+bench-tpch-srv-disc-roadmap-title = 服务器 OLAP 路线图
+bench-tpch-srv-disc-prepared = 跨连接重用已编译的查询计划
+bench-tpch-srv-disc-pooling = 高吞吐量场景的高效连接处理
+bench-tpch-srv-disc-scale = 测试更大的数据集（SF 0.1、SF 1.0）以进行生产规模验证
+
+# TPC-C 服务器相关
+bench-tpcc-server-name = TPC-C (服务器)
+bench-tpcc-server-title = TPC-C OLTP 基准测试 (服务器)
+bench-tpcc-server-description = <strong>TPC-C 服务器基准测试</strong>将 VibeSQL Server（PostgreSQL 协议）与 MySQL 进行比较，测试 OLTP 事务工作负载，测量多客户端数据库部署的吞吐量。
+bench-tpcc-server-ops-label = TPC-C 事务
+bench-tpcc-server-note-intro = 服务器基准测试测试 <strong>PostgreSQL 协议</strong>实现，测量包括网络开销在内的事务吞吐量。
+bench-tpcc-server-note-results = 结果报告标准 TPC-C 事务组合的每秒事务数 (TPS)。
+bench-tpcc-mixed = 混合工作负载 - 标准 TPC-C 事务组合（45% 新订单、43% 付款、4% 订单状态、4% 交付、4% 库存水平）
+
+# TPC-C 服务器讨论
+bench-tpcc-srv-disc-protocol-title = PostgreSQL 协议
+bench-tpcc-srv-disc-protocol = VibeSQL Server 使用 PostgreSQL 协议，支持使用标准 PostgreSQL 驱动程序和工具。此基准测试测量包括协议开销在内的完整端到端事务延迟。
+bench-tpcc-srv-disc-comparison-title = MySQL 比较
+bench-tpcc-srv-disc-comparison = 与 MySQL 比较为传统客户端-服务器数据库在 OLTP 工作负载上提供基准。MySQL 是事务工作负载的行业标准，TPC-C 是 MySQL 的强项。
+bench-tpcc-srv-disc-roadmap-title = 服务器 OLTP 路线图
+bench-tpcc-srv-disc-prepared = 跨连接重用已编译的查询计划
+bench-tpcc-srv-disc-pooling = 高吞吐量场景的高效连接处理
+bench-tpcc-srv-disc-parallel = 多客户端并发事务处理
+
 # 占用空间嵌入式相关
 bench-footprint-embedded-name = 占用空间（嵌入式）
 bench-footprint-embedded-title = 原生二进制占用空间
@@ -506,6 +545,9 @@ bench-bullet-modular = 模块化构建
 bench-bullet-streaming = 流式编译
 bench-bullet-indexeddb = IndexedDB 持久化
 bench-bullet-worker = 工作线程支持
+bench-bullet-prepared-stmts = 预处理语句
+bench-bullet-larger-scale = 更大的规模因子
+bench-bullet-parallel-clients = 并行客户端
 
 # =============================================================================
 # 合规性页面

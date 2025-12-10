@@ -262,6 +262,8 @@ bench-size-metrics = サイズ指標
 bench-failed = 失敗
 bench-failed-title = クエリ失敗（タイムアウトまたはエラー）
 bench-no-wasm-data = WASMデータがありません
+bench-no-server-data = Sysbenchサーバーベンチマークデータがありません
+bench-no-server-data-hint = サーバーベンチマークには、MySQL比較を有効にしてsysbench_serverを実行する必要があります。
 
 # テーブルヘッダー
 bench-table-operation = 操作
@@ -443,6 +445,43 @@ bench-sysbench-srv-disc-pooling = 高スループットシナリオの接続確�
 bench-sysbench-srv-disc-caching = 接続間でのクエリプランのサーバーサイドキャッシング
 bench-sysbench-srv-disc-extended = バッチ操作のための完全なPostgreSQL拡張クエリプロトコルサポート
 
+# TPC-Hサーバー固有
+bench-tpch-server-name = TPC-H（サーバー）
+bench-tpch-server-title = TPC-H分析ベンチマーク（サーバー）
+bench-tpch-server-description = <strong>TPC-Hサーバーベンチマーク</strong>は、分析クエリワークロードに対してVibeSQL Server（PostgreSQLプロトコル）とMySQLを比較し、クライアント・サーバー展開でのOLAPパフォーマンスを測定します。
+bench-tpch-server-ops-label = TPC-Hクエリ
+bench-tpch-server-note-intro = サーバーベンチマークは<strong>PostgreSQLプロトコル</strong>の実装をテストし、ネットワークオーバーヘッドを含むエンドツーエンドのクエリレイテンシを測定します。
+bench-tpch-server-note-queries = クエリは、ビジネスインテリジェンスワークロードに典型的な複雑なJOIN、サブクエリ、集計をテストします。
+
+# TPC-Hサーバーディスカッション
+bench-tpch-srv-disc-protocol-title = PostgreSQLプロトコル
+bench-tpch-srv-disc-protocol = VibeSQL ServerはPostgreSQLプロトコルを話し、標準のPostgreSQLドライバーとツールの使用を可能にします。このベンチマークは、プロトコルオーバーヘッドを含む完全なエンドツーエンドレイテンシを測定します。
+bench-tpch-srv-disc-comparison-title = MySQLとの比較
+bench-tpch-srv-disc-comparison = MySQLとの比較は、分析ワークロードにおける従来のクライアント・サーバーデータベースのベースラインを提供します。VibeSQLの列指向実行エンジンは、複雑な集計とJOINに利点を提供します。
+bench-tpch-srv-disc-roadmap-title = サーバーOLAPロードマップ
+bench-tpch-srv-disc-prepared = 接続間でコンパイル済みクエリプランを再利用
+bench-tpch-srv-disc-pooling = 高スループットシナリオのための効率的な接続処理
+bench-tpch-srv-disc-scale = 本番規模の検証のためのより大きなデータセット（SF 0.1、SF 1.0）のテスト
+
+# TPC-Cサーバー固有
+bench-tpcc-server-name = TPC-C（サーバー）
+bench-tpcc-server-title = TPC-C OLTPベンチマーク（サーバー）
+bench-tpcc-server-description = <strong>TPC-Cサーバーベンチマーク</strong>は、OLTPトランザクションワークロードに対してVibeSQL Server（PostgreSQLプロトコル）とMySQLを比較し、マルチクライアントデータベース展開のスループットを測定します。
+bench-tpcc-server-ops-label = TPC-Cトランザクション
+bench-tpcc-server-note-intro = サーバーベンチマークは<strong>PostgreSQLプロトコル</strong>の実装をテストし、ネットワークオーバーヘッドを含むトランザクションスループットを測定します。
+bench-tpcc-server-note-results = 結果は、標準TPC-Cトランザクションミックスの1秒あたりのトランザクション数（TPS）を報告します。
+bench-tpcc-mixed = 混合ワークロード - 標準TPC-Cトランザクションミックス（45% 新規注文、43% 支払い、4% 注文状況、4% 配送、4% 在庫レベル）
+
+# TPC-Cサーバーディスカッション
+bench-tpcc-srv-disc-protocol-title = PostgreSQLプロトコル
+bench-tpcc-srv-disc-protocol = VibeSQL ServerはPostgreSQLプロトコルを話し、標準のPostgreSQLドライバーとツールの使用を可能にします。このベンチマークは、プロトコルオーバーヘッドを含む完全なエンドツーエンドトランザクションレイテンシを測定します。
+bench-tpcc-srv-disc-comparison-title = MySQLとの比較
+bench-tpcc-srv-disc-comparison = MySQLとの比較は、OLTPワークロードにおける従来のクライアント・サーバーデータベースのベースラインを提供します。MySQLはトランザクションワークロードの業界標準であり、TPC-CはMySQLの強みです。
+bench-tpcc-srv-disc-roadmap-title = サーバーOLTPロードマップ
+bench-tpcc-srv-disc-prepared = 接続間でコンパイル済みクエリプランを再利用
+bench-tpcc-srv-disc-pooling = 高スループットシナリオのための効率的な接続処理
+bench-tpcc-srv-disc-parallel = マルチクライアント同時トランザクション処理
+
 # フットプリント組み込み固有
 bench-footprint-embedded-name = フットプリント（組み込み）
 bench-footprint-embedded-title = ネイティブバイナリフットプリント
@@ -519,6 +558,9 @@ bench-bullet-modular = モジュラービルド
 bench-bullet-streaming = ストリーミングコンパイル
 bench-bullet-indexeddb = IndexedDB永続化
 bench-bullet-worker = ワーカースレッドサポート
+bench-bullet-prepared-stmts = プリペアドステートメント
+bench-bullet-larger-scale = より大きなスケールファクター
+bench-bullet-parallel-clients = 並列クライアント
 
 # =============================================================================
 # 準拠ページ

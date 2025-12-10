@@ -271,6 +271,8 @@ bench-size-metrics = métricas de tamaño
 bench-failed = FALLIDO
 bench-failed-title = Consulta fallida (tiempo agotado o error)
 bench-no-wasm-data = No hay datos WASM disponibles
+bench-no-server-data = No hay datos de benchmark de servidor Sysbench disponibles
+bench-no-server-data-hint = Los benchmarks de servidor requieren ejecutar sysbench_server con la comparación de MySQL habilitada.
 
 # Encabezados de tabla
 bench-table-operation = Operación
@@ -452,6 +454,43 @@ bench-sysbench-srv-disc-pooling = Reducir sobrecarga de establecimiento de conex
 bench-sysbench-srv-disc-caching = Caché de planes de consulta del lado del servidor entre conexiones
 bench-sysbench-srv-disc-extended = Soporte completo del protocolo de consulta extendida PostgreSQL para operaciones por lotes
 
+# TPC-H Servidor específico
+bench-tpch-server-name = TPC-H (Servidor)
+bench-tpch-server-title = Benchmark Analítico TPC-H (Servidor)
+bench-tpch-server-description = Los <strong>benchmarks de servidor TPC-H</strong> comparan VibeSQL Server (protocolo PostgreSQL) contra MySQL para cargas de trabajo de consultas analíticas, midiendo el rendimiento OLAP en despliegues cliente-servidor.
+bench-tpch-server-ops-label = consultas TPC-H
+bench-tpch-server-note-intro = Los benchmarks de servidor prueban la implementación del <strong>protocolo PostgreSQL</strong>, midiendo la latencia de consulta de extremo a extremo incluyendo la sobrecarga de red.
+bench-tpch-server-note-queries = Las consultas prueban JOINs complejos, subconsultas y agregaciones típicas de cargas de trabajo de inteligencia empresarial.
+
+# Discusión TPC-H Servidor
+bench-tpch-srv-disc-protocol-title = Protocolo PostgreSQL
+bench-tpch-srv-disc-protocol = VibeSQL Server habla el protocolo PostgreSQL, permitiendo el uso de drivers y herramientas PostgreSQL estándar. Este benchmark mide la latencia completa de extremo a extremo incluyendo la sobrecarga del protocolo.
+bench-tpch-srv-disc-comparison-title = Comparación con MySQL
+bench-tpch-srv-disc-comparison = Comparar con MySQL proporciona una línea base para bases de datos cliente-servidor tradicionales en cargas de trabajo analíticas. El motor de ejecución columnar de VibeSQL proporciona ventajas para agregaciones y joins complejos.
+bench-tpch-srv-disc-roadmap-title = Hoja de Ruta OLAP Servidor
+bench-tpch-srv-disc-prepared = Reutilizar planes de consulta compilados entre conexiones
+bench-tpch-srv-disc-pooling = Manejo eficiente de conexiones para escenarios de alto rendimiento
+bench-tpch-srv-disc-scale = Pruebas con conjuntos de datos más grandes (SF 0.1, SF 1.0) para validación a escala de producción
+
+# TPC-C Servidor específico
+bench-tpcc-server-name = TPC-C (Servidor)
+bench-tpcc-server-title = Benchmark OLTP TPC-C (Servidor)
+bench-tpcc-server-description = Los <strong>benchmarks de servidor TPC-C</strong> comparan VibeSQL Server (protocolo PostgreSQL) contra MySQL para cargas de trabajo de transacciones OLTP, midiendo el rendimiento para despliegues de bases de datos multi-cliente.
+bench-tpcc-server-ops-label = transacciones TPC-C
+bench-tpcc-server-note-intro = Los benchmarks de servidor prueban la implementación del <strong>protocolo PostgreSQL</strong>, midiendo el rendimiento transaccional incluyendo la sobrecarga de red.
+bench-tpcc-server-note-results = Los resultados reportan transacciones por segundo (TPS) para la mezcla de transacciones TPC-C estándar.
+bench-tpcc-mixed = Carga Mixta - Mezcla de transacciones TPC-C estándar (45% Nueva-Orden, 43% Pago, 4% Estado-Orden, 4% Entrega, 4% Nivel-Stock)
+
+# Discusión TPC-C Servidor
+bench-tpcc-srv-disc-protocol-title = Protocolo PostgreSQL
+bench-tpcc-srv-disc-protocol = VibeSQL Server habla el protocolo PostgreSQL, permitiendo el uso de drivers y herramientas PostgreSQL estándar. Este benchmark mide la latencia transaccional completa de extremo a extremo incluyendo la sobrecarga del protocolo.
+bench-tpcc-srv-disc-comparison-title = Comparación con MySQL
+bench-tpcc-srv-disc-comparison = Comparar con MySQL proporciona una línea base para bases de datos cliente-servidor tradicionales en cargas de trabajo OLTP. MySQL es el estándar de la industria para cargas de trabajo transaccionales, y TPC-C es la fortaleza de MySQL.
+bench-tpcc-srv-disc-roadmap-title = Hoja de Ruta OLTP Servidor
+bench-tpcc-srv-disc-prepared = Reutilizar planes de consulta compilados entre conexiones
+bench-tpcc-srv-disc-pooling = Manejo eficiente de conexiones para escenarios de alto rendimiento
+bench-tpcc-srv-disc-parallel = Procesamiento concurrente de transacciones multi-cliente
+
 # Huella Embebida específico
 bench-footprint-embedded-name = Huella (Embebido)
 bench-footprint-embedded-title = Huella de Binario Nativo
@@ -528,6 +567,9 @@ bench-bullet-modular = Builds modulares
 bench-bullet-streaming = Compilación streaming
 bench-bullet-indexeddb = Persistencia IndexedDB
 bench-bullet-worker = Soporte de worker threads
+bench-bullet-prepared-stmts = Sentencias preparadas
+bench-bullet-larger-scale = Factores de escala mayores
+bench-bullet-parallel-clients = Clientes paralelos
 
 # =============================================================================
 # Conformance Page

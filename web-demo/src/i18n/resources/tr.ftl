@@ -248,7 +248,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = WASM verisi mevcut değil
+bench-no-server-data = Sysbench sunucu benchmark verisi mevcut değil
+bench-no-server-data-hint = Sunucu benchmarkları, MySQL karşılaştırması etkinleştirilmiş olarak sysbench_server çalıştırmayı gerektirir.
 
 # Table headers
 bench-table-operation = Operation
@@ -428,6 +430,43 @@ bench-sysbench-srv-disc-pooling = Yüksek verimlilik senaryoları için bağlant
 bench-sysbench-srv-disc-caching = Bağlantılar arasında sunucu taraflı sorgu planı önbellekleme
 bench-sysbench-srv-disc-extended = Toplu işlemler için tam PostgreSQL genişletilmiş sorgu protokolü desteği
 
+# TPC-H Server specific
+bench-tpch-server-name = TPC-H (Sunucu)
+bench-tpch-server-title = TPC-H Analitik Benchmark (Sunucu)
+bench-tpch-server-description = <strong>TPC-H sunucu benchmarkları</strong>, analitik sorgu iş yükleri için VibeSQL Sunucu'yu (PostgreSQL tel protokolü) MySQL ile karşılaştırarak istemci-sunucu dağıtımlarında OLAP performansını ölçer.
+bench-tpch-server-ops-label = TPC-H sorguları
+bench-tpch-server-note-intro = Sunucu benchmarkları, ağ yükü dahil uçtan uca sorgu gecikmesini ölçerek <strong>PostgreSQL tel protokolü</strong> uygulamasını test eder.
+bench-tpch-server-note-queries = Sorgular, iş zekası iş yüklerinde tipik olan karmaşık JOIN'leri, alt sorguları ve toplamları test eder.
+
+# TPC-H Server Discussion
+bench-tpch-srv-disc-protocol-title = PostgreSQL Tel Protokolü
+bench-tpch-srv-disc-protocol = VibeSQL Sunucu, standart PostgreSQL sürücüleri ve araçlarının kullanımını sağlayan PostgreSQL tel protokolünü konuşur. Bu benchmark, protokol yükü dahil tam uçtan uca gecikmeyi ölçer.
+bench-tpch-srv-disc-comparison-title = MySQL Karşılaştırması
+bench-tpch-srv-disc-comparison = MySQL ile karşılaştırma, analitik iş yüklerinde geleneksel istemci-sunucu veritabanları için bir temel sağlar. VibeSQL'in sütunlu yürütme motoru, karmaşık toplamlar ve birleştirmeler için avantajlar sağlar.
+bench-tpch-srv-disc-roadmap-title = Sunucu OLAP Yol Haritası
+bench-tpch-srv-disc-prepared = Bağlantılar arasında derlenmiş sorgu planlarını yeniden kullan
+bench-tpch-srv-disc-pooling = Yüksek verimlilik senaryoları için verimli bağlantı yönetimi
+bench-tpch-srv-disc-scale = Üretim ölçeğinde doğrulama için daha büyük veri setlerini test etme (SF 0.1, SF 1.0)
+
+# TPC-C Server specific
+bench-tpcc-server-name = TPC-C (Sunucu)
+bench-tpcc-server-title = TPC-C OLTP Benchmark (Sunucu)
+bench-tpcc-server-description = <strong>TPC-C sunucu benchmarkları</strong>, OLTP işlem iş yükleri için VibeSQL Sunucu'yu (PostgreSQL tel protokolü) MySQL ile karşılaştırarak çok istemcili veritabanı dağıtımları için verimi ölçer.
+bench-tpcc-server-ops-label = TPC-C işlemleri
+bench-tpcc-server-note-intro = Sunucu benchmarkları, ağ yükü dahil işlem verimini ölçerek <strong>PostgreSQL tel protokolü</strong> uygulamasını test eder.
+bench-tpcc-server-note-results = Sonuçlar, standart TPC-C işlem karışımı için saniyedeki işlemleri (TPS) raporlar.
+bench-tpcc-mixed = Karışık İş Yükü - Standart TPC-C işlem karışımı (%45 Yeni Sipariş, %43 Ödeme, %4 Sipariş Durumu, %4 Teslimat, %4 Stok Seviyesi)
+
+# TPC-C Server Discussion
+bench-tpcc-srv-disc-protocol-title = PostgreSQL Tel Protokolü
+bench-tpcc-srv-disc-protocol = VibeSQL Sunucu, standart PostgreSQL sürücüleri ve araçlarının kullanımını sağlayan PostgreSQL tel protokolünü konuşur. Bu benchmark, protokol yükü dahil tam uçtan uca işlem gecikmesini ölçer.
+bench-tpcc-srv-disc-comparison-title = MySQL Karşılaştırması
+bench-tpcc-srv-disc-comparison = MySQL ile karşılaştırma, OLTP iş yüklerinde geleneksel istemci-sunucu veritabanları için bir temel sağlar. MySQL, işlemsel iş yükleri için endüstri standardıdır ve TPC-C, MySQL'in güçlü yönüdür.
+bench-tpcc-srv-disc-roadmap-title = Sunucu OLTP Yol Haritası
+bench-tpcc-srv-disc-prepared = Bağlantılar arasında derlenmiş sorgu planlarını yeniden kullan
+bench-tpcc-srv-disc-pooling = Yüksek verimlilik senaryoları için verimli bağlantı yönetimi
+bench-tpcc-srv-disc-parallel = Çok istemcili eşzamanlı işlem işleme
+
 # Footprint Embedded specific
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
@@ -504,6 +543,9 @@ bench-bullet-modular = Modular builds
 bench-bullet-streaming = Streaming compilation
 bench-bullet-indexeddb = IndexedDB persistence
 bench-bullet-worker = Worker thread support
+bench-bullet-prepared-stmts = Hazırlanmış ifadeler
+bench-bullet-larger-scale = Daha büyük ölçek faktörleri
+bench-bullet-parallel-clients = Paralel istemciler
 
 # =============================================================================
 # Conformance Page

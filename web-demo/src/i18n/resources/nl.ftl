@@ -270,7 +270,9 @@ bench-uncompressed = uncompressed
 bench-size-metrics = size metrics
 bench-failed = FAILED
 bench-failed-title = Query failed (timeout or error)
-bench-no-wasm-data = No WASM data available
+bench-no-wasm-data = Geen WASM-gegevens beschikbaar
+bench-no-server-data = Geen Sysbench server benchmark gegevens beschikbaar
+bench-no-server-data-hint = Server benchmarks vereisen het uitvoeren van sysbench_server met MySQL vergelijking ingeschakeld.
 
 # Table headers
 bench-table-operation = Operation
@@ -446,9 +448,46 @@ bench-sysbench-srv-disc-mysql = Server benchmarks compare against MySQL to evalu
 bench-sysbench-srv-disc-roadmap-title = Server Roadmap
 bench-sysbench-srv-disc-pooling = Reduce connection establishment overhead for high-throughput scenarios
 bench-sysbench-srv-disc-caching = Server-side caching of query plans across connections
-bench-sysbench-srv-disc-extended = Full PostgreSQL extended query protocol support for batch operations
+bench-sysbench-srv-disc-extended = Volledige PostgreSQL extended query protocol ondersteuning voor batch operaties
 
-# Footprint Embedded specific
+# TPC-H Server specifiek
+bench-tpch-server-name = TPC-H (Server)
+bench-tpch-server-title = TPC-H Analytische Benchmark (Server)
+bench-tpch-server-description = <strong>TPC-H server benchmarks</strong> vergelijken VibeSQL Server (PostgreSQL protocol) met MySQL voor analytische query workloads, waarbij OLAP prestaties worden gemeten in client-server implementaties.
+bench-tpch-server-ops-label = TPC-H queries
+bench-tpch-server-note-intro = Server benchmarks testen de <strong>PostgreSQL protocol</strong> implementatie, waarbij end-to-end query latentie wordt gemeten inclusief netwerk overhead.
+bench-tpch-server-note-queries = Queries testen complexe JOINs, subqueries en aggregaties die typisch zijn voor business intelligence workloads.
+
+# TPC-H Server Discussie
+bench-tpch-srv-disc-protocol-title = PostgreSQL Protocol
+bench-tpch-srv-disc-protocol = VibeSQL Server spreekt het PostgreSQL protocol, waardoor standaard PostgreSQL drivers en tools kunnen worden gebruikt. Deze benchmark meet de volledige end-to-end latentie inclusief protocol overhead.
+bench-tpch-srv-disc-comparison-title = MySQL Vergelijking
+bench-tpch-srv-disc-comparison = Vergelijking met MySQL biedt een baseline voor traditionele client-server databases bij analytische workloads. De kolomgeoriënteerde uitvoeringsengine van VibeSQL biedt voordelen voor complexe aggregaties en joins.
+bench-tpch-srv-disc-roadmap-title = Server OLAP Roadmap
+bench-tpch-srv-disc-prepared = Hergebruik van gecompileerde query plannen over verbindingen
+bench-tpch-srv-disc-pooling = Efficiënte verbindingsafhandeling voor high-throughput scenario's
+bench-tpch-srv-disc-scale = Testen van grotere datasets (SF 0.1, SF 1.0) voor productie-schaal validatie
+
+# TPC-C Server specifiek
+bench-tpcc-server-name = TPC-C (Server)
+bench-tpcc-server-title = TPC-C OLTP Benchmark (Server)
+bench-tpcc-server-description = <strong>TPC-C server benchmarks</strong> vergelijken VibeSQL Server (PostgreSQL protocol) met MySQL voor OLTP transactie workloads, waarbij throughput wordt gemeten voor multi-client database implementaties.
+bench-tpcc-server-ops-label = TPC-C transacties
+bench-tpcc-server-note-intro = Server benchmarks testen de <strong>PostgreSQL protocol</strong> implementatie, waarbij transactie throughput wordt gemeten inclusief netwerk overhead.
+bench-tpcc-server-note-results = Resultaten rapporteren transacties per seconde (TPS) voor de standaard TPC-C transactie mix.
+bench-tpcc-mixed = Gemengde Workload - Standaard TPC-C transactie mix (45% Nieuwe-Order, 43% Betaling, 4% Order-Status, 4% Levering, 4% Voorraad-Niveau)
+
+# TPC-C Server Discussie
+bench-tpcc-srv-disc-protocol-title = PostgreSQL Protocol
+bench-tpcc-srv-disc-protocol = VibeSQL Server spreekt het PostgreSQL protocol, waardoor standaard PostgreSQL drivers en tools kunnen worden gebruikt. Deze benchmark meet de volledige end-to-end transactie latentie inclusief protocol overhead.
+bench-tpcc-srv-disc-comparison-title = MySQL Vergelijking
+bench-tpcc-srv-disc-comparison = Vergelijking met MySQL biedt een baseline voor traditionele client-server databases bij OLTP workloads. MySQL is de industriestandaard voor transactionele workloads, en TPC-C is MySQL's sterke punt.
+bench-tpcc-srv-disc-roadmap-title = Server OLTP Roadmap
+bench-tpcc-srv-disc-prepared = Hergebruik van gecompileerde query plannen over verbindingen
+bench-tpcc-srv-disc-pooling = Efficiënte verbindingsafhandeling voor high-throughput scenario's
+bench-tpcc-srv-disc-parallel = Gelijktijdige multi-client transactieverwerking
+
+# Footprint Embedded specifiek
 bench-footprint-embedded-name = Footprint (Embedded)
 bench-footprint-embedded-title = Native Binary Footprint
 bench-footprint-embedded-description = <strong>Embedded footprint benchmarks</strong> measure the resource efficiency of native database binaries, comparing binary size, cold startup time, and peak memory usage.
@@ -522,8 +561,11 @@ bench-bullet-feature-flags = Feature flags
 bench-bullet-lto = LTO optimization
 bench-bullet-modular = Modular builds
 bench-bullet-streaming = Streaming compilation
-bench-bullet-indexeddb = IndexedDB persistence
-bench-bullet-worker = Worker thread support
+bench-bullet-indexeddb = IndexedDB persistentie
+bench-bullet-worker = Worker thread ondersteuning
+bench-bullet-prepared-stmts = Prepared statements
+bench-bullet-larger-scale = Grotere schaalfactoren
+bench-bullet-parallel-clients = Parallelle clients
 
 # =============================================================================
 # Conformance Page
