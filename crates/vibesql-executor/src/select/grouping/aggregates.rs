@@ -30,6 +30,19 @@ pub enum AggregateAccumulator {
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
+    /// GROUP_CONCAT - Concatenate values with separator (SQLite compatible)
+    GroupConcat {
+        values: Vec<String>,
+        separator: String,
+        distinct: bool,
+        seen: Option<HashSet<String>>,
+    },
+    /// TOTAL - Like SUM but returns 0.0 for empty set instead of NULL (SQLite compatible)
+    Total {
+        sum: f64,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
 }
 
 impl AggregateAccumulator {
@@ -51,6 +64,17 @@ impl AggregateAccumulator {
             }),
             "MIN" => Ok(AggregateAccumulator::Min { value: None, distinct, seen }),
             "MAX" => Ok(AggregateAccumulator::Max { value: None, distinct, seen }),
+            "GROUP_CONCAT" => Ok(AggregateAccumulator::GroupConcat {
+                values: Vec::new(),
+                separator: ",".to_string(), // Default separator
+                distinct,
+                seen: if distinct { Some(HashSet::new()) } else { None },
+            }),
+            "TOTAL" => Ok(AggregateAccumulator::Total {
+                sum: 0.0,
+                distinct,
+                seen,
+            }),
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
                 function_name
@@ -172,6 +196,44 @@ impl AggregateAccumulator {
                     *current_max = Some(value.clone());
                 }
             }
+
+            // GROUP_CONCAT - concatenates values with separator
+            AggregateAccumulator::GroupConcat { ref mut values, distinct, seen, .. } => {
+                if value.is_null() {
+                    return; // Skip NULL values
+                }
+
+                let str_value = sql_value_to_string(value);
+
+                if *distinct {
+                    let seen_set = seen.as_mut().unwrap();
+                    if !seen_set.contains(&str_value) {
+                        seen_set.insert(str_value.clone());
+                        values.push(str_value);
+                    }
+                } else {
+                    values.push(str_value);
+                }
+            }
+
+            // TOTAL - sums numeric values, returns 0.0 for empty set
+            AggregateAccumulator::Total { ref mut sum, distinct, seen } => {
+                if value.is_null() || !is_numeric_value(value) {
+                    return; // Skip NULL and non-numeric values
+                }
+
+                if *distinct {
+                    let seen_set = seen.as_mut().unwrap();
+                    if !seen_set.contains(value) {
+                        seen_set.insert(value.clone());
+                        if let Some(f) = sql_value_to_f64(value) {
+                            *sum += f;
+                        }
+                    }
+                } else if let Some(f) = sql_value_to_f64(value) {
+                    *sum += f;
+                }
+            }
         }
     }
 
@@ -197,6 +259,17 @@ impl AggregateAccumulator {
             }
             AggregateAccumulator::Max { value, .. } => {
                 value.clone().unwrap_or(vibesql_types::SqlValue::Null)
+            }
+            AggregateAccumulator::GroupConcat { values, separator, .. } => {
+                if values.is_empty() {
+                    vibesql_types::SqlValue::Null
+                } else {
+                    vibesql_types::SqlValue::Varchar(values.join(separator).into())
+                }
+            }
+            AggregateAccumulator::Total { sum, .. } => {
+                // TOTAL always returns a real number, even for empty set (returns 0.0)
+                vibesql_types::SqlValue::Numeric(*sum)
             }
         }
     }
@@ -355,6 +428,66 @@ impl AggregateAccumulator {
                 }
             }
 
+            // GROUP_CONCAT: Concatenate values arrays
+            (
+                AggregateAccumulator::GroupConcat {
+                    values: v1,
+                    separator: sep1,
+                    distinct: d1,
+                    seen: seen1,
+                },
+                AggregateAccumulator::GroupConcat {
+                    values: v2,
+                    separator: _sep2,
+                    distinct: d2,
+                    seen: seen2,
+                },
+            ) => {
+                if *d1 != d2 {
+                    return Err(crate::errors::ExecutorError::UnsupportedExpression(
+                        "Cannot combine GROUP_CONCAT with different DISTINCT flags".into(),
+                    ));
+                }
+
+                if *d1 {
+                    // DISTINCT: Merge seen sets
+                    if let (Some(s1_set), Some(_s2_set)) = (seen1, seen2) {
+                        for val in v2 {
+                            if !s1_set.contains(&val) {
+                                s1_set.insert(val.clone());
+                                v1.push(val);
+                            }
+                        }
+                    }
+                } else {
+                    v1.extend(v2);
+                }
+                // Keep separator from first accumulator (sep1 already borrowed)
+                let _ = sep1;
+            }
+
+            // TOTAL: Add the sums
+            (
+                AggregateAccumulator::Total { sum: s1, distinct: d1, seen: seen1 },
+                AggregateAccumulator::Total { sum: s2, distinct: d2, seen: seen2 },
+            ) => {
+                if *d1 != d2 {
+                    return Err(crate::errors::ExecutorError::UnsupportedExpression(
+                        "Cannot combine TOTAL with different DISTINCT flags".into(),
+                    ));
+                }
+
+                if *d1 {
+                    // DISTINCT: Merge seen sets, recalculate sum
+                    if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
+                        s1_set.extend(s2_set);
+                        *s1 = s1_set.iter().filter_map(sql_value_to_f64).sum();
+                    }
+                } else {
+                    *s1 += s2;
+                }
+            }
+
             _ => {
                 return Err(crate::errors::ExecutorError::UnsupportedExpression(
                     "Cannot combine incompatible aggregate types".into(),
@@ -451,6 +584,32 @@ fn is_comparable_value(value: &vibesql_types::SqlValue) -> bool {
             | vibesql_types::SqlValue::Time(_)
             | vibesql_types::SqlValue::Timestamp(_)
     )
+}
+
+/// Convert SqlValue to string for GROUP_CONCAT
+fn sql_value_to_string(value: &vibesql_types::SqlValue) -> String {
+    match value {
+        vibesql_types::SqlValue::Null => String::new(),
+        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+            s.to_string()
+        }
+        vibesql_types::SqlValue::Integer(i) => i.to_string(),
+        vibesql_types::SqlValue::Bigint(i) => i.to_string(),
+        vibesql_types::SqlValue::Smallint(i) => i.to_string(),
+        vibesql_types::SqlValue::Unsigned(u) => u.to_string(),
+        vibesql_types::SqlValue::Numeric(n) => n.to_string(),
+        vibesql_types::SqlValue::Real(r) => r.to_string(),
+        vibesql_types::SqlValue::Double(d) => d.to_string(),
+        vibesql_types::SqlValue::Float(f) => f.to_string(),
+        vibesql_types::SqlValue::Boolean(b) => {
+            if *b {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }
+        }
+        _ => value.to_string(),
+    }
 }
 
 /// Divide a SqlValue by an integer count, handling all numeric types
@@ -703,5 +862,98 @@ mod tests {
             SqlValue::Integer(0) => {} // OK
             _ => panic!("SUM of values that sum to 0 should return 0, got {:?}", result),
         }
+    }
+
+    #[test]
+    fn test_group_concat_basic() {
+        let mut acc = AggregateAccumulator::new("GROUP_CONCAT", false).unwrap();
+
+        acc.accumulate(&SqlValue::Varchar("a".into()));
+        acc.accumulate(&SqlValue::Varchar("b".into()));
+        acc.accumulate(&SqlValue::Varchar("c".into()));
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Varchar("a,b,c".into()));
+    }
+
+    #[test]
+    fn test_group_concat_with_nulls() {
+        let mut acc = AggregateAccumulator::new("GROUP_CONCAT", false).unwrap();
+
+        acc.accumulate(&SqlValue::Varchar("a".into()));
+        acc.accumulate(&SqlValue::Null);
+        acc.accumulate(&SqlValue::Varchar("c".into()));
+
+        let result = acc.finalize();
+        // NULL values should be skipped
+        assert_eq!(result, SqlValue::Varchar("a,c".into()));
+    }
+
+    #[test]
+    fn test_group_concat_empty() {
+        let acc = AggregateAccumulator::new("GROUP_CONCAT", false).unwrap();
+
+        let result = acc.finalize();
+        // Empty GROUP_CONCAT returns NULL
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_group_concat_distinct() {
+        let mut acc = AggregateAccumulator::new("GROUP_CONCAT", true).unwrap();
+
+        acc.accumulate(&SqlValue::Varchar("a".into()));
+        acc.accumulate(&SqlValue::Varchar("b".into()));
+        acc.accumulate(&SqlValue::Varchar("a".into())); // Duplicate
+
+        let result = acc.finalize();
+        // With DISTINCT, should only have "a,b"
+        assert_eq!(result, SqlValue::Varchar("a,b".into()));
+    }
+
+    #[test]
+    fn test_total_basic() {
+        let mut acc = AggregateAccumulator::new("TOTAL", false).unwrap();
+
+        acc.accumulate(&SqlValue::Integer(1));
+        acc.accumulate(&SqlValue::Integer(2));
+        acc.accumulate(&SqlValue::Integer(3));
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Numeric(6.0));
+    }
+
+    #[test]
+    fn test_total_empty_returns_zero() {
+        // TOTAL returns 0.0 for empty set (unlike SUM which returns NULL)
+        let acc = AggregateAccumulator::new("TOTAL", false).unwrap();
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Numeric(0.0));
+    }
+
+    #[test]
+    fn test_total_with_nulls() {
+        let mut acc = AggregateAccumulator::new("TOTAL", false).unwrap();
+
+        acc.accumulate(&SqlValue::Integer(1));
+        acc.accumulate(&SqlValue::Null);
+        acc.accumulate(&SqlValue::Integer(2));
+
+        let result = acc.finalize();
+        // NULL values should be skipped
+        assert_eq!(result, SqlValue::Numeric(3.0));
+    }
+
+    #[test]
+    fn test_total_all_nulls_returns_zero() {
+        // TOTAL of all NULLs returns 0.0 (unlike SUM which returns NULL)
+        let mut acc = AggregateAccumulator::new("TOTAL", false).unwrap();
+
+        acc.accumulate(&SqlValue::Null);
+        acc.accumulate(&SqlValue::Null);
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Numeric(0.0));
     }
 }

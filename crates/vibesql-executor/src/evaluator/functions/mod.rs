@@ -25,6 +25,7 @@ mod null_handling;
 mod numeric;
 #[cfg(feature = "spatial")]
 pub(crate) mod spatial;
+mod sqlite_compat;
 mod storage;
 pub(crate) mod string;
 mod system;
@@ -116,6 +117,20 @@ pub(super) fn eval_scalar_function(
 
         // Control flow functions
         "IF" => control::if_func(args),
+        "IIF" => sqlite_compat::iif(args),
+
+        // SQLite compatibility functions
+        "TYPEOF" => sqlite_compat::typeof_func(args),
+        "LIKELY" => sqlite_compat::likely(args),
+        "UNLIKELY" => sqlite_compat::unlikely(args),
+        "LIKELIHOOD" => sqlite_compat::likelihood(args),
+        "IFNULL" => sqlite_compat::ifnull(args),
+        "HEX" => sqlite_compat::hex(args),
+        "UNHEX" => sqlite_compat::unhex(args),
+        "ZEROBLOB" => sqlite_compat::zeroblob(args),
+        "UNICODE" => sqlite_compat::unicode(args),
+        "CHAR" => sqlite_compat::char_func(args),
+        "PRINTF" => sqlite_compat::printf(args),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),
