@@ -218,3 +218,168 @@ fn test_parse_scalar_subquery_in_select() {
         _ => panic!("Expected SELECT statement"),
     }
 }
+
+// ============================================================================
+// Derived Table (Subquery in FROM) Tests - SQLite Compatibility
+// Issue #4229: Allow derived tables without explicit aliases
+// ============================================================================
+
+#[test]
+fn test_parse_derived_table_without_alias() {
+    // SQLite allows derived tables without explicit aliases
+    let sql = "SELECT * FROM (SELECT 1)";
+    let stmt = Parser::parse_sql(sql).unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            // FROM clause should be a Subquery with auto-generated alias
+            match &select.from {
+                Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
+                    // Alias should start with __derived_
+                    assert!(
+                        alias.starts_with("__derived_"),
+                        "Expected auto-generated alias starting with __derived_, got: {}",
+                        alias
+                    );
+                }
+                _ => panic!("Expected Subquery in FROM clause"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_derived_table_with_explicit_alias() {
+    // Explicit aliases should still work
+    let sql = "SELECT * FROM (SELECT 1) AS subq";
+    let stmt = Parser::parse_sql(sql).unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            match &select.from {
+                Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
+                    assert_eq!(alias, "SUBQ");
+                }
+                _ => panic!("Expected Subquery in FROM clause"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_derived_table_comma_join_without_alias() {
+    // From select1-17.1: SELECT * FROM t1,(SELECT * FROM t2 WHERE y=2 ORDER BY y,z);
+    let sql = "SELECT * FROM t1, (SELECT * FROM t2 WHERE y=2 ORDER BY y, z)";
+    let stmt = Parser::parse_sql(sql).unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            // Should have a join in FROM clause
+            match &select.from {
+                Some(vibesql_ast::FromClause::Join { right, .. }) => {
+                    // Right side should be the derived table
+                    match right.as_ref() {
+                        vibesql_ast::FromClause::Subquery { alias, .. } => {
+                            assert!(
+                                alias.starts_with("__derived_"),
+                                "Expected auto-generated alias, got: {}",
+                                alias
+                            );
+                        }
+                        _ => panic!("Expected Subquery on right side of join"),
+                    }
+                }
+                _ => panic!("Expected Join in FROM clause"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_multiple_derived_tables_without_aliases() {
+    // Multiple derived tables should get unique auto-generated aliases
+    let sql = "SELECT * FROM (SELECT 1), (SELECT 2)";
+    let stmt = Parser::parse_sql(sql).unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            match &select.from {
+                Some(vibesql_ast::FromClause::Join { left, right, .. }) => {
+                    // Both should have auto-generated aliases
+                    let left_alias = match left.as_ref() {
+                        vibesql_ast::FromClause::Subquery { alias, .. } => alias.clone(),
+                        _ => panic!("Expected Subquery on left side"),
+                    };
+                    let right_alias = match right.as_ref() {
+                        vibesql_ast::FromClause::Subquery { alias, .. } => alias.clone(),
+                        _ => panic!("Expected Subquery on right side"),
+                    };
+
+                    // Both should start with __derived_ and be unique
+                    assert!(left_alias.starts_with("__derived_"));
+                    assert!(right_alias.starts_with("__derived_"));
+                    assert_ne!(left_alias, right_alias, "Aliases should be unique");
+                }
+                _ => panic!("Expected Join in FROM clause"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_nested_derived_tables_without_aliases() {
+    // Nested derived tables: SELECT * FROM (SELECT * FROM (SELECT 1))
+    let sql = "SELECT * FROM (SELECT * FROM (SELECT 1))";
+    let stmt = Parser::parse_sql(sql).unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            match &select.from {
+                Some(vibesql_ast::FromClause::Subquery { query, alias, .. }) => {
+                    // Outer subquery should have auto-generated alias
+                    assert!(alias.starts_with("__derived_"));
+
+                    // Inner subquery should also have auto-generated alias
+                    match &query.from {
+                        Some(vibesql_ast::FromClause::Subquery { alias: inner_alias, .. }) => {
+                            assert!(inner_alias.starts_with("__derived_"));
+                        }
+                        _ => panic!("Expected nested Subquery"),
+                    }
+                }
+                _ => panic!("Expected Subquery in FROM clause"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_parse_derived_table_with_limit_without_alias() {
+    // From select1-17.2: SELECT * FROM t1,(SELECT * FROM t2 ORDER BY y LIMIT 4);
+    let sql = "SELECT * FROM t1, (SELECT * FROM t2 ORDER BY y LIMIT 4)";
+    let stmt = Parser::parse_sql(sql).unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            match &select.from {
+                Some(vibesql_ast::FromClause::Join { right, .. }) => {
+                    match right.as_ref() {
+                        vibesql_ast::FromClause::Subquery { query, alias, .. } => {
+                            assert!(alias.starts_with("__derived_"));
+                            // Verify LIMIT is parsed
+                            assert!(query.limit.is_some());
+                        }
+                        _ => panic!("Expected Subquery on right side"),
+                    }
+                }
+                _ => panic!("Expected Join in FROM clause"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}

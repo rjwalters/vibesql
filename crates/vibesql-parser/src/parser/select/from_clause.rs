@@ -1,4 +1,9 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Counter for generating unique derived table aliases when none is provided.
+/// SQLite allows derived tables without aliases, unlike SQL:1999 which requires them.
+static DERIVED_TABLE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl Parser {
     /// Parse FROM clause
@@ -78,7 +83,8 @@ impl Parser {
                         self.consume_keyword(Keyword::As)?;
                     }
 
-                    // Parse alias (required for derived tables) - keywords allowed as aliases
+                    // Parse alias - keywords allowed as aliases
+                    // SQLite allows derived tables without aliases; auto-generate if not provided
                     let alias = match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
                             let alias = id.clone();
@@ -92,9 +98,11 @@ impl Parser {
                             alias
                         }
                         _ => {
-                            return Err(ParseError {
-                                message: "Derived table must have an alias".to_string(),
-                            })
+                            // Auto-generate unique alias for SQLite compatibility
+                            format!(
+                                "__derived_{}",
+                                DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
+                            )
                         }
                     };
 
