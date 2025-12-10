@@ -813,6 +813,12 @@ impl<'a> SysbenchExecutor for MysqlExecutor<'a> {
 // Benchmark Runner
 // =============================================================================
 
+/// Batch size for timing fast operations like point_select.
+/// Timing individual sub-microsecond operations gives inaccurate results due to
+/// timer resolution (~100ns on macOS). By batching 1000 operations together,
+/// we get much more accurate per-operation latency measurements.
+const TIMING_BATCH_SIZE: usize = 1000;
+
 fn run_point_select_benchmark<E: SysbenchExecutor>(
     executor: &mut E,
     table_size: usize,
@@ -831,17 +837,21 @@ fn run_point_select_benchmark<E: SysbenchExecutor>(
         let _ = executor.point_select(id);
     }
 
-    // Benchmark
+    // Benchmark with batched timing for accuracy
+    // Individual sub-microsecond operations can't be timed accurately due to timer resolution
     let mut operations = 0u64;
     let mut total_time_us = 0u64;
     let bench_start = Instant::now();
 
     while bench_start.elapsed() < duration {
-        let id = rng.random_range(1..=table_size as i64);
-        let op_start = Instant::now();
-        let _ = executor.point_select(id);
-        total_time_us += op_start.elapsed().as_micros() as u64;
-        operations += 1;
+        // Time a batch of operations together for accuracy
+        let batch_start = Instant::now();
+        for _ in 0..TIMING_BATCH_SIZE {
+            let id = rng.random_range(1..=table_size as i64);
+            let _ = executor.point_select(id);
+        }
+        total_time_us += batch_start.elapsed().as_micros() as u64;
+        operations += TIMING_BATCH_SIZE as u64;
     }
 
     let avg_latency_us =
@@ -952,22 +962,22 @@ fn run_update_index_benchmark<E: SysbenchExecutor>(
         executor.update_index(id);
     }
 
-    // Benchmark
+    // Benchmark with batched timing for accuracy
     let mut operations = 0u64;
     let mut total_time_us = 0u64;
     let bench_start = Instant::now();
 
     while bench_start.elapsed() < duration {
-        // Generate an ID in this client's partition
-        let base_id = rng.random_range(0..(table_size / client_count.max(1)) as i64);
-        let id = base_id * client_count as i64 + client_offset as i64 + 1;
-        let id = id.min(table_size as i64); // Ensure within bounds
-
-        let op_start = Instant::now();
-        executor.update_index(id);
-        total_time_us += op_start.elapsed().as_micros() as u64;
-
-        operations += 1;
+        // Time a batch of operations together for accuracy
+        let batch_start = Instant::now();
+        for _ in 0..TIMING_BATCH_SIZE {
+            let base_id = rng.random_range(0..(table_size / client_count.max(1)) as i64);
+            let id = base_id * client_count as i64 + client_offset as i64 + 1;
+            let id = id.min(table_size as i64);
+            executor.update_index(id);
+        }
+        total_time_us += batch_start.elapsed().as_micros() as u64;
+        operations += TIMING_BATCH_SIZE as u64;
     }
 
     let avg_latency_us =
@@ -1013,22 +1023,23 @@ fn run_update_non_index_benchmark<E: SysbenchExecutor>(
         executor.update_non_index(id, &c);
     }
 
-    // Benchmark
+    // Benchmark with batched timing for accuracy
     let mut operations = 0u64;
     let mut total_time_us = 0u64;
     let bench_start = Instant::now();
 
     while bench_start.elapsed() < duration {
-        let base_id = rng.random_range(0..(table_size / client_count.max(1)) as i64);
-        let id = base_id * client_count as i64 + client_offset as i64 + 1;
-        let id = id.min(table_size as i64);
-        let c = generate_c_string(&mut rng);
-
-        let op_start = Instant::now();
-        executor.update_non_index(id, &c);
-        total_time_us += op_start.elapsed().as_micros() as u64;
-
-        operations += 1;
+        // Time a batch of operations together for accuracy
+        let batch_start = Instant::now();
+        for _ in 0..TIMING_BATCH_SIZE {
+            let base_id = rng.random_range(0..(table_size / client_count.max(1)) as i64);
+            let id = base_id * client_count as i64 + client_offset as i64 + 1;
+            let id = id.min(table_size as i64);
+            let c = generate_c_string(&mut rng);
+            executor.update_non_index(id, &c);
+        }
+        total_time_us += batch_start.elapsed().as_micros() as u64;
+        operations += TIMING_BATCH_SIZE as u64;
     }
 
     let avg_latency_us =
@@ -1081,20 +1092,28 @@ fn run_delete_benchmark<E: SysbenchExecutor>(
         executor.delete(id);
     }
 
-    // Benchmark
+    // Benchmark with batched timing for accuracy
+    // Use smaller batch size for delete since we're limited by available rows
+    let delete_batch_size = TIMING_BATCH_SIZE.min(100);
     let mut operations = 0u64;
     let mut total_time_us = 0u64;
     let bench_start = Instant::now();
 
-    while bench_start.elapsed() < duration && !available_ids.is_empty() {
-        let idx = rng.random_range(0..available_ids.len());
-        let id = available_ids.swap_remove(idx);
+    while bench_start.elapsed() < duration && available_ids.len() >= delete_batch_size {
+        // Pre-select IDs for the batch
+        let mut batch_ids = Vec::with_capacity(delete_batch_size);
+        for _ in 0..delete_batch_size {
+            let idx = rng.random_range(0..available_ids.len());
+            batch_ids.push(available_ids.swap_remove(idx));
+        }
 
-        let op_start = Instant::now();
-        executor.delete(id);
-        total_time_us += op_start.elapsed().as_micros() as u64;
-
-        operations += 1;
+        // Time the batch together
+        let batch_start = Instant::now();
+        for id in batch_ids {
+            executor.delete(id);
+        }
+        total_time_us += batch_start.elapsed().as_micros() as u64;
+        operations += delete_batch_size as u64;
     }
 
     let avg_latency_us =
