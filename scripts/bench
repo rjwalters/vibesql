@@ -484,16 +484,36 @@ def run_tpch_comparison(config: BenchConfig) -> int:
         print("❌ Could not find tpch_benchmark binary")
         return 1
 
-    result = subprocess.run(
-        [binaries[0]],
-        cwd=Path(__file__).parent.parent,
-        env=env
-    )
+    # Run benchmark and capture output for processing
+    output_file = "/tmp/tpch_results.txt"
+    with open(output_file, 'w') as f:
+        result = subprocess.run(
+            [binaries[0]],
+            cwd=Path(__file__).parent.parent,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        # Write output to file and also print it
+        print(result.stdout)
+        f.write(result.stdout)
 
     if result.returncode != 0:
         print("⚠ TPC-H benchmark completed with warnings")
     else:
         print("✓ TPC-H benchmark completed")
+
+    # Process results into database
+    print("\nProcessing results into database...")
+    timeout = config.timeout or 30
+    process_result = subprocess.run(
+        ["./scripts/process_results.py", "--type=tpch", "--input", output_file, "--timeout", str(timeout)],
+        cwd=Path(__file__).parent.parent
+    )
+
+    if process_result.returncode != 0:
+        print("⚠ Failed to process results into database")
 
     return 0
 
@@ -1227,14 +1247,12 @@ def run_all(config: BenchConfig) -> int:
             cwd=Path(__file__).parent.parent
         )
 
-    # Export results to JSON for web demo
+    # Note: JSON export is handled separately by 'make website'
+    # This keeps benchmark-all focused on data collection (dogfooding VibeSQL)
     print("\n" + "=" * 60)
-    print("Exporting results to web demo...")
+    print("Benchmark data stored in VibeSQL database")
+    print("Run 'make website' to export data to web demo JSON files")
     print("=" * 60)
-    subprocess.run(
-        ["python3", "./scripts/export_benchmark_json.py", "--all"],
-        cwd=Path(__file__).parent.parent
-    )
 
     return 0
 

@@ -441,12 +441,11 @@ clean:
 	rm -f /tmp/tpch_results.txt
 	rm -f profile-*.json.gz
 
-# Regenerate web dashboard data from benchmark database
+# Regenerate web demo data from VibeSQL benchmark database (dogfooding)
+# Single unified script exports all data in one database load
 website:
-	@echo "Regenerating web dashboard data..."
-	@./scripts/generate_web_dashboard.py 2>/dev/null || echo "Note: Run 'make benchmark' first to populate the database"
+	@python3 ./scripts/export_website_data.py || echo "Note: Run 'make benchmark-all' first to populate the database"
 	@echo ""
-	@echo "Output: web-demo/public/data/dashboard.json"
 	@echo "Run 'cd web-demo && pnpm run build' to rebuild the site"
 
 #

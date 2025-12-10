@@ -283,7 +283,22 @@ fn main() {
 
     // Get queries to run based on filter
     let query_filter = get_query_filter();
-    let queries = get_queries_to_run(&all_queries, &query_filter);
+    let mut queries = get_queries_to_run(&all_queries, &query_filter);
+
+    // Sort queries by ID (sanity queries first, then Q1, Q2, ..., Q99)
+    queries.sort_by(|(a, _), (b, _)| {
+        // Extract numeric part from query name (e.g., "Q42" -> 42, "sanity_date" -> stays first)
+        fn query_order(name: &str) -> (u8, u32) {
+            if name.starts_with("sanity") {
+                (0, 0) // Sanity queries first
+            } else if let Some(num_str) = name.strip_prefix('Q') {
+                (1, num_str.parse().unwrap_or(999))
+            } else {
+                (2, 0) // Unknown queries last
+            }
+        }
+        query_order(a).cmp(&query_order(b))
+    });
 
     if queries.is_empty() {
         eprintln!("No queries to run. Check QUERY_FILTER or command line arguments.");
