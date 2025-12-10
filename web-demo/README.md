@@ -277,26 +277,29 @@ Benchmark data is stored in `web-demo/public/benchmarks/` and committed to the r
 
 ```bash
 # Export latest benchmark data from dogfooded VibeSQL database
-./scripts/export_benchmark_json.py --all --verbose
+make website
+
+# Or run the script directly with options:
+python3 ./scripts/export_website_data.py --verbose
 
 # Verify the exported files
 ls -la web-demo/public/benchmarks/
 
 # Commit the updated data
-git add web-demo/public/benchmarks/
-git commit -m "chore(bench): Update benchmark data"
+git add web-demo/public/benchmarks/ web-demo/public/data/
+git commit -m "chore(web): Update benchmark data"
 ```
 
 The export script reads from `~/.vibesql/test_results/benchmark_results.vbsql` (our dogfooded database) and generates:
 
 | File | Description |
 |------|-------------|
-| `benchmark_results.json` | TPC-H comparison (vibesql vs sqlite) |
+| `benchmark_results.json` | TPC-H comparison (VibeSQL, SQLite, DuckDB) |
+| `tpcds_results.json` | TPC-DS decision support queries |
 | `tpcc_results.json` | TPC-C OLTP benchmark |
 | `sysbench_results.json` | Sysbench microbenchmarks |
-| `tpcds_results.json` | TPC-DS decision support queries |
-| `tpch_vibesql_only.json` | TPC-H vibesql-only timings |
-| `footprint_results.json` | Memory footprint measurements |
+| `trends_results.json` | Historical performance trends |
+| `data/dashboard.json` | Summary dashboard for web UI |
 
 ### Local Build & Preview (Production Build)
 

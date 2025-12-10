@@ -528,6 +528,63 @@ When debugging performance issues, see **[docs/performance/CPU_PROFILING.md](doc
 - **samply** (`make profile-tpch Q=X`) for CPU profiling / flame graphs
 - **Environment variables** (`JOIN_REORDER_VERBOSE=1`, etc.) for optimizer decision logging
 
+### Benchmarking and Website Updates
+
+VibeSQL uses a dogfooded SQLite-compatible database (`~/.vibesql/test_results/benchmark_results.vbsql`) to store all benchmark results. The web demo at https://rjwalters.github.io/vibesql/ displays this data.
+
+#### Running Benchmarks
+
+```bash
+# Quick benchmark (CI mode, ~25 min)
+make benchmark-quick
+
+# Full benchmarks - VibeSQL only (~2.5 hours)
+make benchmark
+
+# Full matrix - all engines (VibeSQL, SQLite, DuckDB, MySQL) (~8+ hours)
+make benchmark-all
+
+# Individual benchmark suites
+make benchmark-tpch       # TPC-H decision support (22 queries)
+make benchmark-tpcds      # TPC-DS decision support (99 queries)
+make benchmark-tpcc       # TPC-C OLTP transactions
+make benchmark-sysbench   # Sysbench micro-benchmarks
+```
+
+#### Updating Website Data
+
+After running benchmarks, export the data for the web demo:
+
+```bash
+# Export all benchmark data to web-demo/public/
+make website
+
+# This runs: python3 ./scripts/export_website_data.py
+# Exports: benchmark_results.json, tpcds_results.json, tpcc_results.json,
+#          sysbench_results.json, trends_results.json, dashboard.json
+```
+
+#### Committing Website Updates
+
+```bash
+# After make website, commit the updated data
+git add web-demo/public/benchmarks/ web-demo/public/data/
+git commit -m "chore(web): Update benchmark data"
+```
+
+The website is automatically deployed to GitHub Pages on push to `main`.
+
+#### Analyzing Benchmark Results
+
+```bash
+# Show analysis of all benchmark data
+make analyze
+
+# Individual analysis
+make analyze-tests        # SQLLogicTest conformance
+make analyze-benchmarks   # TPC-H, TPC-DS, TPC-C, Sysbench results
+```
+
 ## Support
 
 For issues with Loom itself:
