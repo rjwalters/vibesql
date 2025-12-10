@@ -39,6 +39,7 @@
 
 mod arena;
 mod controller;
+mod external_sort;
 pub mod row_serialization;
 mod spill;
 
@@ -47,4 +48,5 @@ pub use controller::{
     MemoryConfig, MemoryController, MemoryReservation, DEFAULT_MEMORY_BUDGET,
     DEFAULT_SPILL_THRESHOLD, DEFAULT_TARGET_PARTITION_BYTES, MIN_OPERATOR_MEMORY,
 };
+pub use external_sort::{ExternalSort, ExternalSortConfig, SortKey, SortedIterator};
 pub use spill::{SpillFile, SpillFileSet};
