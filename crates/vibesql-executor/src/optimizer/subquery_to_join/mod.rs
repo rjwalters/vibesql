@@ -195,6 +195,78 @@ fn try_extract_subqueries_to_joins(
             try_convert_exists_to_join(from, subquery, *negated)
         }
 
+        // Conjunction (flattened AND chain) - produced by arena parser
+        // Handle IN/EXISTS subqueries within the conjunction children
+        Expression::Conjunction(children) => {
+            // Look for IN or EXISTS subqueries among children
+            for (i, child) in children.iter().enumerate() {
+                match child {
+                    Expression::In { expr, subquery, negated } => {
+                        if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated)
+                        {
+                            // Build remaining WHERE from other children
+                            let remaining: Vec<_> = children
+                                .iter()
+                                .enumerate()
+                                .filter(|(j, _)| *j != i)
+                                .map(|(_, c)| c.clone())
+                                .collect();
+                            let new_where = match remaining.len() {
+                                0 => None,
+                                1 => Some(remaining.into_iter().next().unwrap()),
+                                _ => Some(Expression::Conjunction(remaining)),
+                            };
+                            return Some((result.from, new_where));
+                        }
+                    }
+                    Expression::Exists { subquery, negated } => {
+                        if let Some((join, _)) = try_convert_exists_to_join(from, subquery, *negated)
+                        {
+                            // Build remaining WHERE from other children
+                            let remaining: Vec<_> = children
+                                .iter()
+                                .enumerate()
+                                .filter(|(j, _)| *j != i)
+                                .map(|(_, c)| c.clone())
+                                .collect();
+                            let new_where = match remaining.len() {
+                                0 => None,
+                                1 => Some(remaining.into_iter().next().unwrap()),
+                                _ => Some(Expression::Conjunction(remaining)),
+                            };
+                            return Some((join, new_where));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Try recursively on each child (for nested expressions)
+            for (i, child) in children.iter().enumerate() {
+                if let Some((new_from, new_child_where)) =
+                    try_extract_subqueries_to_joins(from, child)
+                {
+                    let mut new_children: Vec<_> = children
+                        .iter()
+                        .enumerate()
+                        .filter(|(j, _)| *j != i)
+                        .map(|(_, c)| c.clone())
+                        .collect();
+                    if let Some(residual) = new_child_where {
+                        new_children.push(residual);
+                    }
+                    let combined_where = match new_children.len() {
+                        0 => None,
+                        1 => Some(new_children.into_iter().next().unwrap()),
+                        _ => Some(Expression::Conjunction(new_children)),
+                    };
+                    return Some((new_from, combined_where));
+                }
+            }
+
+            None
+        }
+
         _ => None,
     }
 }
