@@ -1,5 +1,7 @@
 //! Arena-allocated SELECT statement parsing.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::arena::{
     CommonTableExpr, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet, JoinType,
@@ -10,6 +12,10 @@ use super::ArenaParser;
 use crate::keywords::Keyword;
 use crate::token::Token;
 use crate::ParseError;
+
+/// Counter for generating unique derived table aliases when none is provided.
+/// SQLite allows derived tables without aliases, unlike SQL:1999 which requires them.
+static ARENA_DERIVED_TABLE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl<'arena> ArenaParser<'arena> {
     /// Parse a SELECT statement.
@@ -345,14 +351,19 @@ impl<'arena> ArenaParser<'arena> {
             let query = self.parse_select_statement()?;
             self.expect_token(Token::RParen)?;
 
-            // Subquery requires alias
+            // Parse optional alias - SQLite allows derived tables without aliases
             self.try_consume_keyword(Keyword::As);
             let alias = if let Token::Identifier(name) = self.peek() {
                 let name = name.clone();
                 self.advance();
                 self.intern(&name)
             } else {
-                return Err(ParseError { message: "Subquery requires alias".to_string() });
+                // Auto-generate unique alias for SQLite compatibility
+                let generated = format!(
+                    "__derived_{}",
+                    ARENA_DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
+                );
+                self.intern(&generated)
             };
 
             // Parse optional column aliases: (col1, col2, ...)
