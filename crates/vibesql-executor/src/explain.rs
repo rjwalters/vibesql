@@ -254,6 +254,18 @@ impl ExplainExecutor {
 
                 Ok(subquery_node)
             }
+            vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
+                let mut values_node = PlanNode::new("Values");
+                values_node.object = Some(format!("AS {}", alias));
+
+                values_node.details.push(format!("{} row(s)", rows.len()));
+
+                if let Some(aliases) = column_aliases {
+                    values_node.details.push(format!("Columns: {}", aliases.join(", ")));
+                }
+
+                Ok(values_node)
+            }
         }
     }
 

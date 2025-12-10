@@ -253,6 +253,14 @@ impl LiteralExtractor {
             vibesql_ast::FromClause::Table { .. } => {
                 // No literals in table references
             }
+            vibesql_ast::FromClause::Values { rows, .. } => {
+                // Extract literals from VALUES expressions
+                for row in rows {
+                    for expr in row {
+                        Self::extract_from_expression(expr, literals);
+                    }
+                }
+            }
         }
     }
 

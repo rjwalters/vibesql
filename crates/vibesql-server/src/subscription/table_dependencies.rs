@@ -121,6 +121,14 @@ fn visit_from_clause(from: &FromClause, tables: &mut HashSet<String>) {
                 visit_expression(cond, tables);
             }
         }
+        FromClause::Values { rows, .. } => {
+            // VALUES clause may contain subqueries in expressions
+            for row in rows {
+                for expr in row {
+                    visit_expression(expr, tables);
+                }
+            }
+        }
     }
 }
 

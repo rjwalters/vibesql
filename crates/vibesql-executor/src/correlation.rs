@@ -56,6 +56,10 @@ fn extract_table_names_recursive(from: &FromClause, tables: &mut Vec<String>) {
             // Derived tables are referenced by their alias
             tables.push(alias.clone());
         }
+        FromClause::Values { alias, .. } => {
+            // VALUES clauses are referenced by their alias
+            tables.push(alias.clone());
+        }
     }
 }
 
@@ -179,6 +183,12 @@ fn is_from_clause_correlated(
             // Extract their tables and check recursively
             let nested_tables = extract_table_names_from_from_clause(query.from.as_ref());
             is_select_stmt_correlated_impl(query, outer_schema, &nested_tables)
+        }
+        FromClause::Values { rows, .. } => {
+            // VALUES clauses can contain expressions that reference outer columns
+            rows.iter().any(|row| {
+                row.iter().any(|expr| is_expression_correlated(expr, outer_schema, subquery_tables))
+            })
         }
     }
 }

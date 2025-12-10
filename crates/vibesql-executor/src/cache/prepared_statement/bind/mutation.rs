@@ -210,6 +210,14 @@ fn bind_from_clause_mut(from: &mut FromClause, params: &[SqlValue]) {
             }
         }
         FromClause::Subquery { query, .. } => bind_select_mut(query, params),
+        FromClause::Values { rows, .. } => {
+            // Bind parameters in VALUES expressions
+            for row in rows {
+                for expr in row {
+                    bind_expression_mut(expr, params);
+                }
+            }
+        }
     }
 }
 
@@ -576,6 +584,14 @@ fn bind_from_clause_named_mut(from: &mut FromClause, params: &HashMap<String, Sq
             }
         }
         FromClause::Subquery { query, .. } => bind_select_named_mut(query, params),
+        FromClause::Values { rows, .. } => {
+            // Bind parameters in VALUES expressions
+            for row in rows {
+                for expr in row {
+                    bind_expression_named_mut(expr, params);
+                }
+            }
+        }
     }
 }
 

@@ -222,6 +222,7 @@ fn extract_single_table(from: &FromClause) -> Option<(String, Option<String>)> {
         }
         FromClause::Join { .. } => None, // Join means multiple tables
         FromClause::Subquery { .. } => None, // Subquery is complex
+        FromClause::Values { .. } => None, // VALUES is complex
     }
 }
 
@@ -343,6 +344,10 @@ fn collect_join_tables_recursive(
         }
         FromClause::Subquery { .. } => {
             // Can't easily extract table info from subqueries
+            *has_subquery = true;
+        }
+        FromClause::Values { .. } => {
+            // Can't easily extract table info from VALUES
             *has_subquery = true;
         }
     }

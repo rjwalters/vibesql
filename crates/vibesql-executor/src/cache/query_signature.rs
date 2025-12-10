@@ -209,6 +209,20 @@ impl QuerySignature {
                 Self::hash_select(query, hasher);
                 alias.hash(hasher);
             }
+            vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
+                "VALUES".hash(hasher);
+                rows.len().hash(hasher);
+                if let Some(first_row) = rows.first() {
+                    first_row.len().hash(hasher);
+                }
+                for row in rows {
+                    for expr in row {
+                        Self::hash_expression(expr, hasher);
+                    }
+                }
+                alias.hash(hasher);
+                column_aliases.hash(hasher);
+            }
         }
     }
 

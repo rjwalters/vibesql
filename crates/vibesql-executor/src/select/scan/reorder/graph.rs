@@ -48,6 +48,16 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
                 column_aliases: column_aliases.clone(),
             });
         }
+        FromClause::Values { alias, column_aliases, .. } => {
+            tables.push(TableRef {
+                name: alias.clone(),
+                alias: Some(alias.clone()),
+                is_cte: false,
+                is_subquery: false,
+                subquery: None,
+                column_aliases: column_aliases.clone(),
+            });
+        }
         FromClause::Join { left, right, .. } => {
             flatten_join_tree(left, tables);
             flatten_join_tree(right, tables);
@@ -58,7 +68,7 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
 /// Extract all join conditions and WHERE predicates from a FROM clause
 pub(super) fn extract_all_conditions(from: &FromClause, conditions: &mut Vec<Expression>) {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } => {
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {
             // No conditions in simple table refs
         }
         FromClause::Join { left, right, condition, .. } => {
@@ -79,7 +89,7 @@ pub(super) fn extract_conditions_with_types(
     conditions: &mut Vec<JoinConditionWithType>,
 ) {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } => {
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {
             // No conditions in simple table refs
         }
         FromClause::Join { left, right, join_type, condition, .. } => {

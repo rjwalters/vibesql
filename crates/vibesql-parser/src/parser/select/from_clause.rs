@@ -53,14 +53,34 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parse VALUES clause rows: VALUES(1,2), (3,4), ...
+    /// Returns Vec<Vec<Expression>> where each inner vec is a row
+    pub(crate) fn parse_values_rows(&mut self) -> Result<Vec<Vec<vibesql_ast::Expression>>, ParseError> {
+        self.expect_keyword(Keyword::Values)?;
+        let mut rows = Vec::new();
+        loop {
+            self.expect_token(Token::LParen)?;
+            let row = self.parse_comma_separated_list(|p| p.parse_expression())?;
+            self.expect_token(Token::RParen)?;
+            rows.push(row);
+
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(rows)
+    }
+
     /// Parse a single table reference (table name, subquery, or derived table with alias)
     pub(crate) fn parse_table_reference(&mut self) -> Result<vibesql_ast::FromClause, ParseError> {
         match self.peek() {
             Token::LParen => {
-                // Parenthesized expression: could be a subquery or a JOIN expression
+                // Parenthesized expression: could be a subquery, VALUES, or a JOIN expression
                 self.advance(); // Consume '('
 
-                // Check if this is a subquery (starts with SELECT) or a table reference/JOIN
+                // Check if this is a subquery (starts with SELECT), VALUES, or a table reference/JOIN
                 let result = if self.peek_keyword(Keyword::Select) {
                     // Parse the SELECT statement (subquery)
                     let query = Box::new(self.parse_select_statement()?);
@@ -111,6 +131,51 @@ impl Parser {
                     let column_aliases = self.parse_column_alias_list()?;
 
                     vibesql_ast::FromClause::Subquery { query, alias, column_aliases }
+                } else if self.peek_keyword(Keyword::Values) {
+                    // Parse VALUES clause as table constructor
+                    // Example: (VALUES(1,'a'), (2,'b')) AS t(x, y)
+                    let rows = self.parse_values_rows()?;
+
+                    // Expect closing ')'
+                    match self.peek() {
+                        Token::RParen => {
+                            self.advance();
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "Expected ')' after VALUES clause".to_string(),
+                            })
+                        }
+                    }
+
+                    // Parse optional AS keyword
+                    if self.peek_keyword(Keyword::As) {
+                        self.consume_keyword(Keyword::As)?;
+                    }
+
+                    // Parse alias (required for VALUES tables) - keywords allowed as aliases
+                    let alias = match self.peek() {
+                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                            let alias = id.clone();
+                            self.advance();
+                            alias
+                        }
+                        Token::Keyword(kw) => {
+                            let alias = kw.to_string();
+                            self.advance();
+                            alias
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "VALUES table must have an alias".to_string(),
+                            })
+                        }
+                    };
+
+                    // Parse optional column aliases: AS alias (col1, col2, ...)
+                    let column_aliases = self.parse_column_alias_list()?;
+
+                    vibesql_ast::FromClause::Values { rows, alias, column_aliases }
                 } else {
                     // Parenthesized table reference or JOIN expression
                     // Parse as a FROM clause (which handles JOINs)

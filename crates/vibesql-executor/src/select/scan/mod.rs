@@ -21,6 +21,7 @@ mod join_scan;
 mod predicates;
 mod reorder;
 mod table;
+mod values;
 
 /// Execute a FROM clause (table, join, or subquery) and return combined schema and rows
 ///
@@ -156,6 +157,9 @@ where
         }
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
             derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
+        }
+        vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
+            values::execute_values(rows, alias, column_aliases.as_ref())
         }
     }
 }

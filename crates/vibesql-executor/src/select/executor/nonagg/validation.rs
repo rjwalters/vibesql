@@ -170,6 +170,18 @@ fn count_columns_in_from_clause(
                 "Subqueries in FROM clause within IN predicates are not yet supported for schema validation".to_string(),
             ))
         }
+        vibesql_ast::FromClause::Values { rows, column_aliases, .. } => {
+            // VALUES clause column count is determined by either:
+            // 1. The column_aliases if provided, or
+            // 2. The number of expressions in the first row
+            if let Some(aliases) = column_aliases {
+                Ok(aliases.len())
+            } else if let Some(first_row) = rows.first() {
+                Ok(first_row.len())
+            } else {
+                Ok(0) // Empty VALUES clause
+            }
+        }
     }
 }
 

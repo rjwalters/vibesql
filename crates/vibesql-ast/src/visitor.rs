@@ -854,6 +854,13 @@ fn walk_from_clause<V: ExpressionVisitor>(visitor: &mut V, from: &FromClause) {
                 walk_expression(visitor, cond);
             }
         }
+        FromClause::Values { rows, .. } => {
+            for row in rows {
+                for expr in row {
+                    walk_expression(visitor, expr);
+                }
+            }
+        }
     }
 }
 
@@ -1031,6 +1038,14 @@ fn transform_from_clause<V: ExpressionMutVisitor>(visitor: &mut V, from: FromCla
             join_type,
             condition: condition.map(|c| transform_expression(visitor, c)),
             natural,
+        },
+        FromClause::Values { rows, alias, column_aliases } => FromClause::Values {
+            rows: rows
+                .into_iter()
+                .map(|row| row.into_iter().map(|e| transform_expression(visitor, e)).collect())
+                .collect(),
+            alias,
+            column_aliases,
         },
     }
 }

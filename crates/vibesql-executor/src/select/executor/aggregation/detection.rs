@@ -165,6 +165,7 @@ impl SelectExecutor<'_> {
             Some(vibesql_ast::FromClause::Table { name, .. }) => name.clone(),
             Some(vibesql_ast::FromClause::Join { .. }) => return None, // JOIN not allowed
             Some(vibesql_ast::FromClause::Subquery { .. }) => return None, // Subquery not allowed
+            Some(vibesql_ast::FromClause::Values { .. }) => return None, // VALUES not allowed
             None => return None,                                       // No FROM clause
         };
 

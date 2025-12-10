@@ -21,6 +21,9 @@ pub(super) fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {
         FromClause::Subquery { alias, .. } => {
             names.push(alias.clone());
         }
+        FromClause::Values { alias, .. } => {
+            names.push(alias.clone());
+        }
     }
 }
 

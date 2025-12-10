@@ -856,6 +856,21 @@ impl ToSql for FromClause {
                 }
                 result
             }
+            FromClause::Values { rows, alias, column_aliases } => {
+                let rows_sql: Vec<String> = rows
+                    .iter()
+                    .map(|row| {
+                        let cols: Vec<String> = row.iter().map(|e| e.to_sql()).collect();
+                        format!("({})", cols.join(", "))
+                    })
+                    .collect();
+                let mut result =
+                    format!("(VALUES {}) AS {}", rows_sql.join(", "), format_identifier(alias));
+                if let Some(cols) = column_aliases {
+                    result.push_str(&format!(" ({})", cols.join(", ")));
+                }
+                result
+            }
         }
     }
 }
