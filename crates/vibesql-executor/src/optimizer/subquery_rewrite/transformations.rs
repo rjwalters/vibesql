@@ -261,11 +261,19 @@ fn combine_predicates(left: Option<Expression>, right: Option<Expression>) -> Op
 ///
 /// This reduces the number of comparisons by eliminating duplicate values
 /// from the subquery result set.
+///
+/// Note: DISTINCT is NOT added when GROUP BY already guarantees uniqueness.
+/// This allows the native columnar path (which doesn't support DISTINCT) to
+/// be used for GROUP BY queries, providing significant performance benefits.
 pub(super) fn add_distinct_to_in_subquery(subquery: &SelectStmt) -> SelectStmt {
     let mut optimized = subquery.clone();
 
-    // Only add DISTINCT if not already present
-    if !subquery.distinct {
+    // Only add DISTINCT if not already present AND no GROUP BY
+    // GROUP BY already guarantees distinct results when grouping columns
+    // match the SELECT columns, so DISTINCT would be redundant.
+    // Skipping DISTINCT enables the native columnar execution path for
+    // GROUP BY + HAVING queries (Issue #4200: TPC-H Q18 optimization)
+    if !subquery.distinct && !group_by_ensures_distinct(subquery) {
         optimized.distinct = true;
     }
 
@@ -273,4 +281,68 @@ pub(super) fn add_distinct_to_in_subquery(subquery: &SelectStmt) -> SelectStmt {
     // to avoid circular dependencies between modules
 
     optimized
+}
+
+/// Check if GROUP BY clause ensures distinct results
+///
+/// Returns true when:
+/// 1. Subquery has a GROUP BY clause
+/// 2. SELECT list contains only columns from GROUP BY (or aggregates)
+///
+/// In these cases, GROUP BY guarantees uniqueness, making DISTINCT redundant.
+fn group_by_ensures_distinct(subquery: &SelectStmt) -> bool {
+    use vibesql_ast::{Expression, GroupByClause, SelectItem};
+
+    // Must have GROUP BY
+    let group_by_exprs = match &subquery.group_by {
+        Some(GroupByClause::Simple(exprs)) => exprs,
+        _ => return false,
+    };
+
+    if group_by_exprs.is_empty() {
+        return false;
+    }
+
+    // Extract column names from GROUP BY expressions
+    let group_by_cols: Vec<&str> = group_by_exprs
+        .iter()
+        .filter_map(|expr| match expr {
+            Expression::ColumnRef { column, .. } => Some(column.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    // If GROUP BY contains non-column expressions, be conservative
+    if group_by_cols.len() != group_by_exprs.len() {
+        return false;
+    }
+
+    // Check that all SELECT items are either:
+    // 1. Columns that appear in GROUP BY
+    // 2. Aggregate functions (which are grouped by definition)
+    for item in &subquery.select_list {
+        match item {
+            SelectItem::Expression { expr, .. } => match expr {
+                Expression::ColumnRef { column, .. } => {
+                    // Column must be in GROUP BY
+                    if !group_by_cols.iter().any(|&gc| gc.eq_ignore_ascii_case(column)) {
+                        return false;
+                    }
+                }
+                Expression::AggregateFunction { .. } => {
+                    // Aggregates are always OK - they produce one value per group
+                }
+                _ => {
+                    // Other expressions - be conservative
+                    return false;
+                }
+            },
+            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => {
+                // Wildcards could include non-grouped columns
+                return false;
+            }
+        }
+    }
+
+    true
 }

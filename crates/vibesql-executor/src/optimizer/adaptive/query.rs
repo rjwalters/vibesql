@@ -10,12 +10,23 @@ pub(super) fn has_group_by(query: &SelectStmt) -> bool {
 }
 
 /// Check if query contains aggregate functions (SUM, AVG, MIN, MAX, COUNT)
+///
+/// Checks both the SELECT list AND the HAVING clause for aggregate functions.
+/// This is important for queries like Q18 subquery:
+///   SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300
+/// where the aggregate is only in the HAVING clause, not in the SELECT list.
 pub(super) fn has_aggregate_functions(query: &SelectStmt) -> bool {
-    query.select_list.iter().any(|item| match item {
+    // Check SELECT list
+    let select_has_aggregate = query.select_list.iter().any(|item| match item {
         SelectItem::Expression { expr, .. } => contains_aggregate(expr),
         SelectItem::Wildcard { .. } => false,
         SelectItem::QualifiedWildcard { .. } => false,
-    })
+    });
+
+    // Check HAVING clause (Issue #4200: TPC-H Q18 optimization)
+    let having_has_aggregate = query.having.as_ref().is_some_and(contains_aggregate);
+
+    select_has_aggregate || having_has_aggregate
 }
 
 /// Check if query contains arithmetic expressions in SELECT list or WHERE clause
