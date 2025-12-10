@@ -141,10 +141,14 @@ def query_results_db() -> dict:
 
 
 def check_commit_for_baseline_update() -> bool:
-    """Check if the current commit message contains [tcl-baseline] flag."""
+    """Check if the current commit message subject contains [tcl-baseline] flag.
+
+    Only checks the subject line (first line) to avoid false positives from
+    documentation text in the commit body that mentions the flag.
+    """
     try:
         result = subprocess.run(
-            ["git", "log", "-1", "--format=%B"],
+            ["git", "log", "-1", "--format=%s"],  # %s = subject line only
             capture_output=True,
             text=True,
             timeout=5
