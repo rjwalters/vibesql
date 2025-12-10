@@ -547,3 +547,377 @@ fn test_not_exists_self_join_column_qualification() {
         _ => panic!("Expected ANTI JOIN in FROM clause"),
     }
 }
+
+// =============================================================================
+// Tests for Expression::Conjunction handling (arena parser output)
+// =============================================================================
+// The arena parser produces Expression::Conjunction for AND chains instead of
+// nested BinaryOp::And. These tests verify the optimizer handles both forms.
+
+#[test]
+fn test_conjunction_exists_to_semi_join() {
+    // Test EXISTS inside a Conjunction (arena parser output for TPC-H Q4 pattern)
+    // WHERE o_orderdate >= '1993-07-01' AND o_orderdate < '1993-10-01' AND EXISTS (...)
+    let outer_from = simple_table_from("orders");
+    let mut stmt = SelectStmt {
+        with_clause: None,
+        distinct: false,
+        select_list: vec![SelectItem::Wildcard { alias: None }],
+        into_table: None,
+        into_variables: None,
+        from: Some(outer_from),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        set_operation: None,
+    };
+
+    // Create correlated EXISTS subquery
+    let exists_subquery = SelectStmt {
+        with_clause: None,
+        distinct: false,
+        select_list: vec![SelectItem::Expression {
+            expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            alias: None,
+        }],
+        into_table: None,
+        into_variables: None,
+        from: Some(simple_table_from("lineitem")),
+        where_clause: Some(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(column_ref("l_orderkey")),
+            right: Box::new(column_ref("o_orderkey")),
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        set_operation: None,
+    };
+
+    // Build Conjunction: [predicate1, predicate2, EXISTS(...)]
+    // This is what the arena parser produces for: pred1 AND pred2 AND EXISTS(...)
+    let predicate1 = Expression::BinaryOp {
+        op: BinaryOperator::GreaterThanOrEqual,
+        left: Box::new(column_ref("o_orderdate")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "1993-07-01".into(),
+        ))),
+    };
+    let predicate2 = Expression::BinaryOp {
+        op: BinaryOperator::LessThan,
+        left: Box::new(column_ref("o_orderdate")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "1993-10-01".into(),
+        ))),
+    };
+    let exists_expr = Expression::Exists { subquery: Box::new(exists_subquery), negated: false };
+
+    stmt.where_clause = Some(Expression::Conjunction(vec![predicate1, predicate2, exists_expr]));
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should have created a SEMI JOIN
+    match &transformed.from {
+        Some(FromClause::Join { join_type, .. }) => {
+            assert!(
+                matches!(join_type, JoinType::Semi),
+                "EXISTS in Conjunction should transform to SEMI join, got: {:?}",
+                join_type
+            );
+        }
+        _ => panic!("Expected SEMI JOIN in FROM clause"),
+    }
+
+    // Remaining WHERE should be a Conjunction with the two predicates
+    assert!(
+        transformed.where_clause.is_some(),
+        "Other predicates should remain in WHERE clause"
+    );
+    match &transformed.where_clause {
+        Some(Expression::Conjunction(children)) => {
+            assert_eq!(children.len(), 2, "Should have 2 remaining predicates");
+        }
+        Some(Expression::BinaryOp { .. }) => {
+            // Also acceptable if there's only one predicate left after further transformations
+        }
+        other => panic!("Expected Conjunction or BinaryOp in WHERE, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_conjunction_not_exists_to_anti_join() {
+    // Test NOT EXISTS inside a Conjunction
+    let outer_from = simple_table_from("orders");
+    let mut stmt = SelectStmt {
+        with_clause: None,
+        distinct: false,
+        select_list: vec![SelectItem::Wildcard { alias: None }],
+        into_table: None,
+        into_variables: None,
+        from: Some(outer_from),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        set_operation: None,
+    };
+
+    // Create correlated NOT EXISTS subquery
+    let not_exists_subquery = SelectStmt {
+        with_clause: None,
+        distinct: false,
+        select_list: vec![SelectItem::Expression {
+            expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            alias: None,
+        }],
+        into_table: None,
+        into_variables: None,
+        from: Some(simple_table_from("lineitem")),
+        where_clause: Some(Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(column_ref("l_orderkey")),
+            right: Box::new(column_ref("o_orderkey")),
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        set_operation: None,
+    };
+
+    // Build Conjunction with NOT EXISTS
+    let predicate = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(column_ref("o_orderstatus")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("F".into()))),
+    };
+    let not_exists_expr =
+        Expression::Exists { subquery: Box::new(not_exists_subquery), negated: true };
+
+    stmt.where_clause = Some(Expression::Conjunction(vec![predicate, not_exists_expr]));
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should have created an ANTI JOIN
+    match &transformed.from {
+        Some(FromClause::Join { join_type, .. }) => {
+            assert!(
+                matches!(join_type, JoinType::Anti),
+                "NOT EXISTS in Conjunction should transform to ANTI join, got: {:?}",
+                join_type
+            );
+        }
+        _ => panic!("Expected ANTI JOIN in FROM clause"),
+    }
+
+    // Remaining WHERE should have the single predicate (not a Conjunction anymore)
+    assert!(
+        transformed.where_clause.is_some(),
+        "Other predicate should remain in WHERE clause"
+    );
+}
+
+#[test]
+fn test_conjunction_in_to_semi_join() {
+    // Test IN subquery inside a Conjunction
+    let mut stmt = simple_select("orders", "o_orderkey");
+    let subquery = simple_select("lineitem", "l_orderkey");
+
+    // Build Conjunction: [predicate, IN(...)]
+    let predicate = Expression::BinaryOp {
+        op: BinaryOperator::GreaterThan,
+        left: Box::new(column_ref("o_totalprice")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(1000))),
+    };
+    let in_expr = Expression::In {
+        expr: Box::new(column_ref("o_orderkey")),
+        subquery: Box::new(subquery),
+        negated: false,
+    };
+
+    stmt.where_clause = Some(Expression::Conjunction(vec![predicate, in_expr]));
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should have created a SEMI JOIN
+    match &transformed.from {
+        Some(FromClause::Join { join_type, .. }) => {
+            assert!(
+                matches!(join_type, JoinType::Semi),
+                "IN in Conjunction should transform to SEMI join, got: {:?}",
+                join_type
+            );
+        }
+        _ => panic!("Expected SEMI JOIN in FROM clause"),
+    }
+
+    // Remaining WHERE should have just the predicate
+    assert!(
+        transformed.where_clause.is_some(),
+        "Other predicate should remain in WHERE clause"
+    );
+}
+
+#[test]
+fn test_conjunction_not_in_to_anti_join() {
+    // Test NOT IN subquery inside a Conjunction
+    let mut stmt = simple_select("orders", "o_orderkey");
+    let subquery = simple_select("lineitem", "l_orderkey");
+
+    // Build Conjunction: [predicate, NOT IN(...)]
+    let predicate = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(column_ref("o_orderstatus")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("O".into()))),
+    };
+    let not_in_expr = Expression::In {
+        expr: Box::new(column_ref("o_orderkey")),
+        subquery: Box::new(subquery),
+        negated: true,
+    };
+
+    stmt.where_clause = Some(Expression::Conjunction(vec![predicate, not_in_expr]));
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should have created an ANTI JOIN
+    match &transformed.from {
+        Some(FromClause::Join { join_type, .. }) => {
+            assert!(
+                matches!(join_type, JoinType::Anti),
+                "NOT IN in Conjunction should transform to ANTI join, got: {:?}",
+                join_type
+            );
+        }
+        _ => panic!("Expected ANTI JOIN in FROM clause"),
+    }
+
+    // Remaining WHERE should have just the predicate
+    assert!(
+        transformed.where_clause.is_some(),
+        "Other predicate should remain in WHERE clause"
+    );
+}
+
+#[test]
+fn test_conjunction_preserves_all_other_predicates() {
+    // Test that all non-subquery predicates are preserved in the residual WHERE
+    let mut stmt = simple_select("orders", "o_orderkey");
+    let subquery = simple_select("lineitem", "l_orderkey");
+
+    // Build Conjunction with multiple predicates and one subquery
+    let pred1 = Expression::BinaryOp {
+        op: BinaryOperator::GreaterThan,
+        left: Box::new(column_ref("o_totalprice")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(1000))),
+    };
+    let pred2 = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(column_ref("o_orderstatus")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("F".into()))),
+    };
+    let pred3 = Expression::BinaryOp {
+        op: BinaryOperator::LessThan,
+        left: Box::new(column_ref("o_orderdate")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar(
+            "1995-01-01".into(),
+        ))),
+    };
+    let in_expr = Expression::In {
+        expr: Box::new(column_ref("o_orderkey")),
+        subquery: Box::new(subquery),
+        negated: false,
+    };
+
+    stmt.where_clause =
+        Some(Expression::Conjunction(vec![pred1.clone(), pred2.clone(), pred3.clone(), in_expr]));
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should have created a SEMI JOIN
+    match &transformed.from {
+        Some(FromClause::Join { join_type, .. }) => {
+            assert!(
+                matches!(join_type, JoinType::Semi),
+                "IN should transform to SEMI join"
+            );
+        }
+        _ => panic!("Expected SEMI JOIN in FROM clause"),
+    }
+
+    // Remaining WHERE should be a Conjunction with exactly 3 predicates
+    match &transformed.where_clause {
+        Some(Expression::Conjunction(children)) => {
+            assert_eq!(
+                children.len(),
+                3,
+                "Should have all 3 non-subquery predicates remaining"
+            );
+        }
+        _ => panic!("Expected Conjunction with 3 predicates in WHERE clause"),
+    }
+}
+
+#[test]
+fn test_conjunction_multiple_subqueries_iterative() {
+    // Test that multiple subqueries in a Conjunction are handled iteratively
+    let mut stmt = simple_select("orders", "o_orderkey");
+    let subquery1 = simple_select("lineitem", "l_orderkey");
+    let subquery2 = simple_select("supplier", "s_suppkey");
+
+    // Build Conjunction: [predicate, IN(...), NOT IN(...)]
+    let predicate = Expression::BinaryOp {
+        op: BinaryOperator::Equal,
+        left: Box::new(column_ref("o_orderstatus")),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("F".into()))),
+    };
+    let in_expr = Expression::In {
+        expr: Box::new(column_ref("o_orderkey")),
+        subquery: Box::new(subquery1),
+        negated: false,
+    };
+    let not_in_expr = Expression::In {
+        expr: Box::new(column_ref("o_custkey")),
+        subquery: Box::new(subquery2),
+        negated: true,
+    };
+
+    stmt.where_clause = Some(Expression::Conjunction(vec![predicate, in_expr, not_in_expr]));
+
+    let transformed = transform_subqueries_to_joins(&stmt);
+
+    // Should have two joins (nested)
+    match &transformed.from {
+        Some(FromClause::Join { left: inner_join_box, join_type: outer_type, .. }) => {
+            assert!(
+                matches!(outer_type, JoinType::Semi | JoinType::Anti),
+                "Outer join should be SEMI or ANTI"
+            );
+
+            match inner_join_box.as_ref() {
+                FromClause::Join { join_type: inner_type, .. } => {
+                    assert!(
+                        matches!(inner_type, JoinType::Semi | JoinType::Anti),
+                        "Inner join should be SEMI or ANTI"
+                    );
+                }
+                _ => panic!("Expected nested JOIN"),
+            }
+        }
+        _ => panic!("Expected JOIN in FROM clause"),
+    }
+
+    // Remaining WHERE should have just the one predicate
+    assert!(
+        transformed.where_clause.is_some(),
+        "Simple predicate should remain in WHERE clause"
+    );
+}
