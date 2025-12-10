@@ -243,3 +243,4 @@ harness = false
 [[bench]]
 name = "morsel_scaling"
 harness = false
+required-features = ["large-scale-benchmarks"]
