@@ -13,6 +13,7 @@ mod metadata;
 mod operations;
 mod resource_tracker;
 mod session;
+mod shared;
 
 pub mod indexes;
 pub mod transactions;
@@ -23,6 +24,7 @@ mod tests;
 pub use config::{DatabaseConfig, SpillPolicy, DEFAULT_COLUMNAR_CACHE_BUDGET};
 pub use core::{Database, ExportedSpatialIndexMetadata as SpatialIndexMetadata};
 pub use operations::SpatialIndexMetadata as OperationsSpatialIndexMetadata;
+pub use shared::SharedDatabase;
 
 pub use index_ops::{
     print_delete_profile_summary, reset_delete_profile_stats, DeleteProfileStats,
