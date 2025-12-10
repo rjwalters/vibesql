@@ -24,6 +24,7 @@ use crate::{
     schema::CombinedSchema,
     select::columnar::{simd_filter_batch, simd_filter_to_indices, ColumnPredicate, ColumnarBatch},
     select::cte::CteResult,
+    sqlite_schema::{execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table},
 };
 
 #[cfg(feature = "parallel")]
@@ -138,6 +139,22 @@ pub(crate) fn execute_table_scan(
         // No filtering needed - use zero-copy shared rows
         // This avoids O(n) cloning when CTE is referenced multiple times
         return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
+    }
+
+    // Check if it's sqlite_master or sqlite_schema (SQLite compatibility)
+    if is_sqlite_schema_table(table_name) {
+        // Execute sqlite_master query
+        let result = execute_sqlite_schema_query(&database.catalog)?;
+
+        // Get the schema for sqlite_master
+        let table_schema = get_sqlite_schema_table_schema();
+
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        // SQL:1999 E051-09: Apply column aliases if provided
+        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        let schema = CombinedSchema::from_table(effective_name, table_schema);
+
+        return Ok(super::FromResult::from_rows(schema, result.rows));
     }
 
     // Check if it's an information_schema table (e.g., "information_schema.tables")

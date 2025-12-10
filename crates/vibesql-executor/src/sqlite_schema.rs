@@ -1,0 +1,523 @@
+//! SQLite Schema Virtual Table
+//!
+//! Implements `sqlite_master` (and its alias `sqlite_schema`) for SQLite compatibility.
+//! These virtual tables return metadata about database objects in the standard SQLite format.
+//!
+//! Schema:
+//! ```sql
+//! CREATE TABLE sqlite_master (
+//!   type TEXT,      -- 'table', 'index', 'view', 'trigger'
+//!   name TEXT,      -- name of the object
+//!   tbl_name TEXT,  -- table the object is associated with
+//!   rootpage INT,   -- internal (always 0 for VibeSQL)
+//!   sql TEXT        -- CREATE statement that created the object
+//! );
+//! ```
+//!
+//! Reference: https://www.sqlite.org/schematab.html
+
+use vibesql_catalog::{ColumnSchema, ReferentialAction, SortOrder, TableSchema};
+use vibesql_storage::Row;
+use vibesql_types::{DataType, SqlValue};
+
+use crate::errors::ExecutorError;
+use crate::select::SelectResult;
+
+/// Check if a table reference is sqlite_master or sqlite_schema
+pub fn is_sqlite_schema_table(table_name: &str) -> bool {
+    let normalized = table_name.to_lowercase();
+    matches!(normalized.as_str(), "sqlite_master" | "sqlite_schema")
+}
+
+/// Get the schema for sqlite_master/sqlite_schema
+pub fn get_sqlite_schema_table_schema() -> TableSchema {
+    TableSchema::new(
+        "sqlite_master".to_string(),
+        vec![
+            ColumnSchema::new("type".to_string(), DataType::Varchar { max_length: None }, false),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: None }, false),
+            ColumnSchema::new(
+                "tbl_name".to_string(),
+                DataType::Varchar { max_length: None },
+                false,
+            ),
+            ColumnSchema::new("rootpage".to_string(), DataType::Integer, false),
+            ColumnSchema::new("sql".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+    )
+}
+
+/// Execute a sqlite_master/sqlite_schema query
+pub fn execute_sqlite_schema_query(
+    catalog: &vibesql_catalog::Catalog,
+) -> Result<SelectResult, ExecutorError> {
+    let schema = get_sqlite_schema_table_schema();
+    let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
+    let mut rows = Vec::new();
+
+    // Add tables
+    for table_name in catalog.list_tables() {
+        if let Some(table) = catalog.get_table(&table_name) {
+            let sql = generate_create_table_sql(table);
+            rows.push(Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("table")),
+                SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),
+                SqlValue::Varchar(arcstr::ArcStr::from(table_name)),
+                SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
+                SqlValue::Varchar(arcstr::ArcStr::from(sql)),
+            ]));
+        }
+    }
+
+    // Add indexes
+    for index in catalog.list_all_indexes() {
+        let sql = generate_create_index_sql(index);
+        rows.push(Row::new(vec![
+            SqlValue::Varchar(arcstr::ArcStr::from("index")),
+            SqlValue::Varchar(arcstr::ArcStr::from(index.name.clone())),
+            SqlValue::Varchar(arcstr::ArcStr::from(index.table_name.clone())),
+            SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
+            SqlValue::Varchar(arcstr::ArcStr::from(sql)),
+        ]));
+    }
+
+    // Add views
+    for view_name in catalog.list_views() {
+        if let Some(view) = catalog.get_view(&view_name) {
+            let sql = generate_create_view_sql(view);
+            rows.push(Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("view")),
+                SqlValue::Varchar(arcstr::ArcStr::from(view.name.clone())),
+                SqlValue::Varchar(arcstr::ArcStr::from(view.name.clone())), // tbl_name is same as name for views
+                SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
+                SqlValue::Varchar(arcstr::ArcStr::from(sql)),
+            ]));
+        }
+    }
+
+    // Add triggers
+    for trigger_name in catalog.list_triggers() {
+        if let Some(trigger) = catalog.get_trigger(&trigger_name) {
+            let sql = generate_create_trigger_sql(trigger);
+            rows.push(Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("trigger")),
+                SqlValue::Varchar(arcstr::ArcStr::from(trigger.name.clone())),
+                SqlValue::Varchar(arcstr::ArcStr::from(trigger.table_name.clone())),
+                SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
+                SqlValue::Varchar(arcstr::ArcStr::from(sql)),
+            ]));
+        }
+    }
+
+    Ok(SelectResult { columns: column_names, rows })
+}
+
+/// Generate CREATE TABLE SQL statement for a table
+fn generate_create_table_sql(table: &TableSchema) -> String {
+    let mut sql = format!("CREATE TABLE {} (\n", table.name);
+    let mut definitions: Vec<String> = Vec::new();
+
+    // Add column definitions
+    for col in &table.columns {
+        let mut col_def = format!("  {} {}", col.name, format_data_type(&col.data_type));
+
+        if !col.nullable {
+            col_def.push_str(" NOT NULL");
+        }
+
+        if let Some(ref default) = col.default_value {
+            col_def.push_str(&format!(" DEFAULT {}", format_expression(default)));
+        }
+
+        definitions.push(col_def);
+    }
+
+    // Add PRIMARY KEY constraint
+    if let Some(ref pk_cols) = table.primary_key {
+        definitions.push(format!("  PRIMARY KEY ({})", pk_cols.join(", ")));
+    }
+
+    // Add UNIQUE constraints
+    for unique_cols in &table.unique_constraints {
+        definitions.push(format!("  UNIQUE ({})", unique_cols.join(", ")));
+    }
+
+    // Add FOREIGN KEY constraints
+    for fk in &table.foreign_keys {
+        let mut fk_def = format!(
+            "  FOREIGN KEY ({}) REFERENCES {} ({})",
+            fk.column_names.join(", "),
+            fk.parent_table,
+            fk.parent_column_names.join(", ")
+        );
+
+        // Add ON DELETE action if not NO ACTION
+        if fk.on_delete != ReferentialAction::NoAction {
+            fk_def.push_str(&format!(" ON DELETE {}", format_referential_action(&fk.on_delete)));
+        }
+
+        // Add ON UPDATE action if not NO ACTION
+        if fk.on_update != ReferentialAction::NoAction {
+            fk_def.push_str(&format!(" ON UPDATE {}", format_referential_action(&fk.on_update)));
+        }
+
+        definitions.push(fk_def);
+    }
+
+    // Add CHECK constraints
+    for (name, expr) in &table.check_constraints {
+        definitions.push(format!("  CONSTRAINT {} CHECK ({})", name, format_expression(expr)));
+    }
+
+    sql.push_str(&definitions.join(",\n"));
+    sql.push_str("\n)");
+
+    sql
+}
+
+/// Generate CREATE INDEX SQL statement for an index
+fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
+    let unique_str = if index.is_unique { "UNIQUE " } else { "" };
+
+    let columns: Vec<String> = index
+        .columns
+        .iter()
+        .map(|col| {
+            let order_str = match col.order {
+                SortOrder::Ascending => "",
+                SortOrder::Descending => " DESC",
+            };
+            let prefix_str = col.prefix_length.map(|l| format!("({})", l)).unwrap_or_default();
+            format!("{}{}{}", col.column_name, prefix_str, order_str)
+        })
+        .collect();
+
+    format!(
+        "CREATE {}INDEX {} ON {} ({})",
+        unique_str,
+        index.name,
+        index.table_name,
+        columns.join(", ")
+    )
+}
+
+/// Generate CREATE VIEW SQL statement for a view
+fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
+    // Use stored SQL definition if available
+    if let Some(ref sql) = view.sql_definition {
+        return sql.clone();
+    }
+
+    // Otherwise generate from the view definition
+    let columns_str = view
+        .columns
+        .as_ref()
+        .map(|cols| format!(" ({})", cols.join(", ")))
+        .unwrap_or_default();
+
+    // For the query, use Debug format since we don't have a SQL pretty-printer for AST
+    format!("CREATE VIEW {}{} AS {:?}", view.name, columns_str, view.query)
+}
+
+/// Generate CREATE TRIGGER SQL statement for a trigger
+fn generate_create_trigger_sql(trigger: &vibesql_catalog::TriggerDefinition) -> String {
+    use vibesql_ast::{TriggerEvent, TriggerGranularity, TriggerTiming};
+
+    let timing = match trigger.timing {
+        TriggerTiming::Before => "BEFORE",
+        TriggerTiming::After => "AFTER",
+        TriggerTiming::InsteadOf => "INSTEAD OF",
+    };
+
+    let granularity = match trigger.granularity {
+        TriggerGranularity::Row => "ROW",
+        TriggerGranularity::Statement => "STATEMENT",
+    };
+
+    let event = match &trigger.event {
+        TriggerEvent::Insert => "INSERT".to_string(),
+        TriggerEvent::Update(None) => "UPDATE".to_string(),
+        TriggerEvent::Update(Some(cols)) => {
+            return format!(
+                "CREATE TRIGGER {} {} UPDATE OF {} ON {} FOR EACH {} ...",
+                trigger.name,
+                timing,
+                cols.join(", "),
+                trigger.table_name,
+                granularity
+            );
+        }
+        TriggerEvent::Delete => "DELETE".to_string(),
+    };
+
+    format!(
+        "CREATE TRIGGER {} {} {} ON {} FOR EACH {} ...",
+        trigger.name, timing, event, trigger.table_name, granularity
+    )
+}
+
+/// Format a DataType as a SQL string
+fn format_data_type(dt: &DataType) -> String {
+    match dt {
+        DataType::Integer => "INTEGER".to_string(),
+        DataType::Smallint => "SMALLINT".to_string(),
+        DataType::Bigint => "BIGINT".to_string(),
+        DataType::Unsigned => "UNSIGNED BIGINT".to_string(),
+        DataType::Real => "REAL".to_string(),
+        DataType::Float { precision } => format!("FLOAT({})", precision),
+        DataType::DoublePrecision => "DOUBLE PRECISION".to_string(),
+        DataType::Numeric { precision, scale } => format!("NUMERIC({}, {})", precision, scale),
+        DataType::Decimal { precision, scale } => format!("DECIMAL({}, {})", precision, scale),
+        DataType::Varchar { max_length } => {
+            if let Some(len) = max_length {
+                format!("VARCHAR({})", len)
+            } else {
+                "TEXT".to_string()
+            }
+        }
+        DataType::Character { length } => format!("CHAR({})", length),
+        DataType::CharacterLargeObject => "TEXT".to_string(),
+        DataType::Name => "TEXT".to_string(),
+        DataType::Boolean => "BOOLEAN".to_string(),
+        DataType::Date => "DATE".to_string(),
+        DataType::Time { with_timezone } => {
+            if *with_timezone {
+                "TIME WITH TIME ZONE".to_string()
+            } else {
+                "TIME".to_string()
+            }
+        }
+        DataType::Timestamp { with_timezone } => {
+            if *with_timezone {
+                "TIMESTAMP WITH TIME ZONE".to_string()
+            } else {
+                "TIMESTAMP".to_string()
+            }
+        }
+        DataType::Interval { start_field, end_field } => {
+            if let Some(end) = end_field {
+                format!("INTERVAL {:?} TO {:?}", start_field, end)
+            } else {
+                format!("INTERVAL {:?}", start_field)
+            }
+        }
+        DataType::BinaryLargeObject => "BLOB".to_string(),
+        DataType::Bit { length } => {
+            if let Some(len) = length {
+                format!("BIT({})", len)
+            } else {
+                "BIT".to_string()
+            }
+        }
+        DataType::UserDefined { type_name } => type_name.clone(),
+        DataType::Vector { dimensions } => format!("VECTOR({})", dimensions),
+        DataType::Null => "NULL".to_string(),
+    }
+}
+
+/// Format a referential action as a SQL string
+fn format_referential_action(action: &ReferentialAction) -> &'static str {
+    match action {
+        ReferentialAction::NoAction => "NO ACTION",
+        ReferentialAction::Restrict => "RESTRICT",
+        ReferentialAction::Cascade => "CASCADE",
+        ReferentialAction::SetNull => "SET NULL",
+        ReferentialAction::SetDefault => "SET DEFAULT",
+    }
+}
+
+/// Format an expression for SQL output
+fn format_expression(expr: &vibesql_ast::Expression) -> String {
+    // Use Debug formatting for now - a proper SQL formatter could be added later
+    format!("{:?}", expr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_catalog::{Catalog, IndexedColumn, IndexMetadata, IndexType};
+
+    #[test]
+    fn test_is_sqlite_schema_table() {
+        assert!(is_sqlite_schema_table("sqlite_master"));
+        assert!(is_sqlite_schema_table("sqlite_schema"));
+        assert!(is_sqlite_schema_table("SQLITE_MASTER"));
+        assert!(is_sqlite_schema_table("SQLITE_SCHEMA"));
+        assert!(is_sqlite_schema_table("Sqlite_Master"));
+        assert!(!is_sqlite_schema_table("users"));
+        assert!(!is_sqlite_schema_table("sqlite_stat1"));
+        assert!(!is_sqlite_schema_table("information_schema.tables"));
+    }
+
+    #[test]
+    fn test_sqlite_schema_empty_db() {
+        let catalog = Catalog::new();
+        let result = execute_sqlite_schema_query(&catalog).unwrap();
+
+        assert_eq!(result.columns, vec!["type", "name", "tbl_name", "rootpage", "sql"]);
+        assert!(result.rows.is_empty());
+    }
+
+    #[test]
+    fn test_get_sqlite_schema_table_schema() {
+        let schema = get_sqlite_schema_table_schema();
+
+        assert_eq!(schema.name, "sqlite_master");
+        assert_eq!(schema.columns.len(), 5);
+        assert_eq!(schema.columns[0].name, "type");
+        assert_eq!(schema.columns[1].name, "name");
+        assert_eq!(schema.columns[2].name, "tbl_name");
+        assert_eq!(schema.columns[3].name, "rootpage");
+        assert_eq!(schema.columns[4].name, "sql");
+    }
+
+    #[test]
+    fn test_format_data_type() {
+        assert_eq!(format_data_type(&DataType::Integer), "INTEGER");
+        assert_eq!(format_data_type(&DataType::Varchar { max_length: Some(255) }), "VARCHAR(255)");
+        assert_eq!(format_data_type(&DataType::Varchar { max_length: None }), "TEXT");
+        assert_eq!(format_data_type(&DataType::Boolean), "BOOLEAN");
+        assert_eq!(
+            format_data_type(&DataType::Numeric { precision: 10, scale: 2 }),
+            "NUMERIC(10, 2)"
+        );
+    }
+
+    #[test]
+    fn test_sqlite_schema_with_table() {
+        let mut catalog = Catalog::new();
+
+        // Create a simple table
+        let columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+        ];
+        let table = TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
+        catalog.create_table(table).unwrap();
+
+        let result = execute_sqlite_schema_query(&catalog).unwrap();
+
+        // Should have one row for the table
+        assert_eq!(result.rows.len(), 1);
+
+        // Check the type column
+        let type_val = &result.rows[0].values[0];
+        assert_eq!(type_val, &SqlValue::Varchar(arcstr::ArcStr::from("table")));
+
+        // Check the name column
+        let name_val = &result.rows[0].values[1];
+        assert_eq!(name_val, &SqlValue::Varchar(arcstr::ArcStr::from("users")));
+
+        // Check the tbl_name column (same as name for tables)
+        let tbl_name_val = &result.rows[0].values[2];
+        assert_eq!(tbl_name_val, &SqlValue::Varchar(arcstr::ArcStr::from("users")));
+
+        // Check the rootpage column (always 0)
+        let rootpage_val = &result.rows[0].values[3];
+        assert_eq!(rootpage_val, &SqlValue::Integer(0));
+
+        // Check the sql column contains CREATE TABLE
+        let sql_val = &result.rows[0].values[4];
+        if let SqlValue::Varchar(sql) = sql_val {
+            assert!(sql.contains("CREATE TABLE users"));
+            assert!(sql.contains("id INTEGER"));
+            assert!(sql.contains("name VARCHAR(100)"));
+            assert!(sql.contains("PRIMARY KEY"));
+        } else {
+            panic!("Expected VARCHAR for sql column");
+        }
+    }
+
+    #[test]
+    fn test_sqlite_schema_with_index() {
+        let mut catalog = Catalog::new();
+
+        // Create a table first
+        let columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+        ];
+        let table = TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
+        catalog.create_table(table).unwrap();
+
+        // Create an index
+        let index = IndexMetadata::new(
+            "idx_email".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn {
+                column_name: "email".to_string(),
+                order: SortOrder::Ascending,
+                prefix_length: None,
+            }],
+            true, // unique
+        );
+        catalog.add_index(index).unwrap();
+
+        let result = execute_sqlite_schema_query(&catalog).unwrap();
+
+        // Should have two rows: one for table, one for index
+        assert_eq!(result.rows.len(), 2);
+
+        // Find the index row
+        let index_row = result.rows.iter().find(|r| {
+            matches!(&r.values[0], SqlValue::Varchar(s) if s.as_str() == "index")
+        }).expect("Should have an index row");
+
+        // Check index name
+        assert_eq!(index_row.values[1], SqlValue::Varchar(arcstr::ArcStr::from("idx_email")));
+
+        // Check tbl_name for index
+        assert_eq!(index_row.values[2], SqlValue::Varchar(arcstr::ArcStr::from("users")));
+
+        // Check sql contains CREATE INDEX
+        if let SqlValue::Varchar(sql) = &index_row.values[4] {
+            assert!(sql.contains("CREATE UNIQUE INDEX idx_email ON users"));
+        } else {
+            panic!("Expected VARCHAR for sql column");
+        }
+    }
+
+    #[test]
+    fn test_generate_create_index_sql() {
+        let index = IndexMetadata::new(
+            "idx_name".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![
+                IndexedColumn {
+                    column_name: "last_name".to_string(),
+                    order: SortOrder::Ascending,
+                    prefix_length: None,
+                },
+                IndexedColumn {
+                    column_name: "first_name".to_string(),
+                    order: SortOrder::Descending,
+                    prefix_length: None,
+                },
+            ],
+            false, // not unique
+        );
+
+        let sql = generate_create_index_sql(&index);
+        assert_eq!(sql, "CREATE INDEX idx_name ON users (last_name, first_name DESC)");
+    }
+
+    #[test]
+    fn test_generate_create_index_sql_with_prefix() {
+        let index = IndexMetadata::new(
+            "idx_email".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn {
+                column_name: "email".to_string(),
+                order: SortOrder::Ascending,
+                prefix_length: Some(50),
+            }],
+            true, // unique
+        );
+
+        let sql = generate_create_index_sql(&index);
+        assert_eq!(sql, "CREATE UNIQUE INDEX idx_email ON users (email(50))");
+    }
+}

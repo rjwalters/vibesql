@@ -22,6 +22,7 @@ mod grant;
 pub mod index_ddl;
 pub mod information_schema;
 mod insert;
+pub mod sqlite_schema;
 mod introspection;
 pub mod limits;
 pub mod memory;
