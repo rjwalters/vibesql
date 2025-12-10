@@ -22,10 +22,10 @@ use vibesql_l10n::vibe_msg;
 #[command(long_about = "VibeSQL command-line interface
 
 USAGE MODES:
-  Interactive REPL:    vibesql [--database <FILE>]
-  Execute Command:     vibesql -c \"SELECT * FROM users\"
-  Execute File:        vibesql -f script.sql
-  Execute from stdin:  cat data.sql | vibesql
+  Interactive REPL:    vibesql [DATABASE] [OPTIONS]
+  Execute Command:     vibesql [DATABASE] -c \"SELECT * FROM users\"
+  Execute File:        vibesql [DATABASE] -f script.sql
+  Execute from stdin:  cat data.sql | vibesql [DATABASE]
   Generate Types:      vibesql codegen --schema schema.sql --output types.ts
 
 INTERACTIVE REPL:
@@ -60,20 +60,23 @@ EXAMPLES:
   # Start interactive REPL with in-memory database
   vibesql
 
-  # Use persistent database file
+  # Use persistent database file (positional argument)
+  vibesql mydata.db
+
+  # Use persistent database file (flag)
   vibesql --database mydata.db
 
   # Execute single command
-  vibesql -c \"CREATE TABLE users (id INT, name VARCHAR(100))\"
+  vibesql mydata.db -c \"SELECT * FROM users\"
 
   # Run SQL script file
-  vibesql -f schema.sql -v
+  vibesql mydata.db -f schema.sql -v
 
   # Import data from CSV
-  echo \"\\\\copy users FROM 'data.csv'\" | vibesql --database mydata.db
+  echo \"\\\\copy users FROM 'data.csv'\" | vibesql mydata.db
 
   # Export query results as JSON
-  vibesql -d mydata.db -c \"SELECT * FROM users\" --format json
+  vibesql mydata.db -c \"SELECT * FROM users\" --format json
 
   # Generate TypeScript types from a schema file
   vibesql codegen --schema schema.sql --output src/types.ts
@@ -81,6 +84,10 @@ EXAMPLES:
   # Generate TypeScript types from a running database
   vibesql codegen --database mydata.db --output src/types.ts")]
 struct Args {
+    /// Database file path (positional argument, optional)
+    #[arg(value_name = "DATABASE")]
+    database_positional: Option<String>,
+
     /// Database file path (if not specified, uses in-memory database)
     #[arg(short, long, value_name = "FILE", global = true)]
     database: Option<String>,
@@ -171,11 +178,15 @@ fn main() -> anyhow::Result<()> {
         eprintln!("Warning: Failed to initialize localization: {}", e);
     }
 
+    // Resolve database path: positional arg takes precedence over -d flag
+    // Error if both are provided with different values
+    let database_arg = resolve_database_arg(&args.database_positional, &args.database)?;
+
     // Handle subcommands first
     if let Some(cmd) = args.subcommand {
         return match cmd {
             Commands::Codegen { schema, output, camel_case, no_metadata } => {
-                run_codegen(args.database, schema, output, camel_case, no_metadata)
+                run_codegen(database_arg, schema, output, camel_case, no_metadata)
             }
         };
     }
@@ -191,7 +202,7 @@ fn main() -> anyhow::Result<()> {
         args.format.as_deref().and_then(parse_format).or_else(|| config.get_output_format());
 
     // Use command-line database if provided, otherwise use config default
-    let database = args.database.or(config.database.default_path.clone());
+    let database = database_arg.or(config.database.default_path.clone());
 
     if let Some(cmd) = args.command {
         // Execute command mode
@@ -243,6 +254,26 @@ fn run_codegen(
     println!("{}", vibe_msg!("codegen-written", path = output.as_str()));
 
     Ok(())
+}
+
+/// Resolve database path from positional argument and -d flag.
+/// Returns error if both are provided with different values.
+fn resolve_database_arg(
+    positional: &Option<String>,
+    flag: &Option<String>,
+) -> anyhow::Result<Option<String>> {
+    match (positional, flag) {
+        (Some(pos), Some(flg)) if pos != flg => {
+            Err(anyhow::anyhow!(
+                "Conflicting database paths: positional argument '{}' and --database '{}'. Use one or the other.",
+                pos,
+                flg
+            ))
+        }
+        (Some(pos), _) => Ok(Some(pos.clone())),
+        (None, Some(flg)) => Ok(Some(flg.clone())),
+        (None, None) => Ok(None),
+    }
 }
 
 fn parse_format(format_str: &str) -> Option<OutputFormat> {
