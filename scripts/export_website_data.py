@@ -980,6 +980,39 @@ def main():
         print(f"  -> {path.name}")
         exported.append(path)
 
+        # Generate pgsql-regress badge
+        pgsql_data = load_pgsql_regress_data()
+        if pgsql_data.get("summary"):
+            summary = pgsql_data["summary"]
+            passed = summary.get("passing", 0)
+            skipped = summary.get("skipped", 0)
+            pass_rate = summary.get("pass_rate", 0)
+
+            if pass_rate == 100:
+                color = "brightgreen"
+            elif pass_rate >= 95:
+                color = "green"
+            elif pass_rate >= 80:
+                color = "yellow"
+            else:
+                color = "red"
+
+            badge = {
+                "schemaVersion": 1,
+                "label": "PostgreSQL",
+                "message": f"{passed}\u2713 {skipped}\u2298 ({pass_rate:.0f}%)",
+                "color": color
+            }
+
+            badges_dir = base_dir / "badges"
+            badges_dir.mkdir(parents=True, exist_ok=True)
+            badge_path = badges_dir / "pgsql-regress.json"
+            with open(badge_path, 'w') as f:
+                json.dump(badge, f, indent=2)
+                f.write('\n')
+            print(f"  PostgreSQL badge: {passed} passed, {skipped} skipped ({pass_rate:.0f}%) -> {badge_path.name}")
+            exported.append(badge_path)
+
     print(f"\nExported {len(exported)} files")
     return 0
 
