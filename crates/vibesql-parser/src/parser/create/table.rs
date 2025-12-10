@@ -1,6 +1,7 @@
 //! CREATE TABLE parsing
 
 use super::super::*;
+use vibesql_types::DataType;
 
 impl Parser {
     /// Parse CREATE TABLE statement
@@ -62,8 +63,14 @@ impl Parser {
                 _ => return Err(ParseError { message: "Expected column name".to_string() }),
             };
 
-            // Parse data type
-            let data_type = self.parse_data_type()?;
+            // Parse data type (optional for SQLite compatibility)
+            // SQLite allows typeless columns with BLOB affinity
+            let data_type = if self.is_column_constraint_or_separator() {
+                // No data type specified - use BLOB affinity (SQLite default)
+                DataType::BinaryLargeObject
+            } else {
+                self.parse_data_type()?
+            };
 
             // Parse optional DEFAULT clause (before COMMENT, per MySQL standard)
             let default_value = if self.peek_keyword(Keyword::Default) {
@@ -145,5 +152,38 @@ impl Parser {
             table_constraints,
             table_options,
         })
+    }
+
+    /// Check if the current token indicates a column constraint or column separator
+    /// rather than a data type. This enables SQLite-style typeless column definitions.
+    ///
+    /// Returns true if the next token is:
+    /// - A column separator: `,` or `)`
+    /// - A column constraint keyword: `NULL`, `NOT`, `PRIMARY`, `UNIQUE`, `CHECK`,
+    ///   `REFERENCES`, `AUTO_INCREMENT`, `AUTOINCREMENT`, `KEY`, `CONSTRAINT`
+    /// - A column modifier: `DEFAULT`, `COMMENT`
+    fn is_column_constraint_or_separator(&self) -> bool {
+        match self.peek() {
+            // Column separators
+            Token::Comma | Token::RParen => true,
+
+            // Column constraint keywords
+            Token::Keyword(Keyword::Null) => true,
+            Token::Keyword(Keyword::Not) => true,
+            Token::Keyword(Keyword::Primary) => true,
+            Token::Keyword(Keyword::Unique) => true,
+            Token::Keyword(Keyword::Check) => true,
+            Token::Keyword(Keyword::References) => true,
+            Token::Keyword(Keyword::AutoIncrement) => true,
+            Token::Keyword(Keyword::Key) => true,
+            Token::Keyword(Keyword::Constraint) => true,
+
+            // Column modifiers (appear after data type normally)
+            Token::Keyword(Keyword::Default) => true,
+            Token::Keyword(Keyword::Comment) => true,
+
+            // Not a constraint/separator - likely a data type
+            _ => false,
+        }
     }
 }
