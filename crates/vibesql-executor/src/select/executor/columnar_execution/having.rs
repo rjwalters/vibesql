@@ -246,16 +246,48 @@ fn evaluate_expr_on_result_row(
         Expression::InList { expr, values, negated } => {
             let val =
                 evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
+
+            // SQL three-valued logic for IN:
+            // - NULL IN (list) -> NULL (unless list is empty)
+            // - x IN (NULL, ...) -> TRUE if x matches any non-NULL, else NULL
+            if matches!(val, SqlValue::Null) {
+                // NULL IN (empty list) -> FALSE per SQLite behavior
+                if values.is_empty() {
+                    return Ok(SqlValue::Boolean(*negated));
+                }
+                // NULL IN (non-empty list) -> NULL
+                return Ok(SqlValue::Null);
+            }
+
             let mut found = false;
+            let mut found_null = false;
             for v in values {
                 let list_val =
                     evaluate_expr_on_result_row(v, row, group_col_count, aggregates, schema)?;
+
+                // Track if we encounter NULL in the list
+                if matches!(list_val, SqlValue::Null) {
+                    found_null = true;
+                    continue;
+                }
+
                 if crate::evaluator::ExpressionEvaluator::values_are_equal(&val, &list_val) {
                     found = true;
                     break;
                 }
             }
-            Ok(SqlValue::Boolean(if *negated { !found } else { found }))
+
+            // SQL three-valued logic:
+            // - If found a match: return TRUE (or FALSE if negated)
+            // - If not found but list contains NULL: return NULL
+            // - If not found and no NULL: return FALSE (or TRUE if negated)
+            if found {
+                Ok(SqlValue::Boolean(!negated))
+            } else if found_null {
+                Ok(SqlValue::Null)
+            } else {
+                Ok(SqlValue::Boolean(*negated))
+            }
         }
 
         // BETWEEN
@@ -280,8 +312,35 @@ fn evaluate_expr_on_result_row(
                 SqlMode::default(),
             )?;
 
-            let in_range = is_truthy(&ge_low)? && is_truthy(&le_high)?;
-            Ok(SqlValue::Boolean(if *negated { !in_range } else { in_range }))
+            // SQL three-valued logic: if either comparison is NULL, the result is NULL
+            // (unless one is definitively false, which would make the whole thing false)
+            let in_range = match (&ge_low, &le_high) {
+                // Both are true booleans -> true
+                (SqlValue::Boolean(true), SqlValue::Boolean(true)) => SqlValue::Boolean(true),
+                // One is definitively false -> false (regardless of NULL on other side)
+                (SqlValue::Boolean(false), _) | (_, SqlValue::Boolean(false)) => {
+                    SqlValue::Boolean(false)
+                }
+                // Any NULL with non-false -> NULL
+                (SqlValue::Null, _) | (_, SqlValue::Null) => SqlValue::Null,
+                // Treat other truthy values as true
+                _ => {
+                    let left_truthy = is_truthy(&ge_low)?;
+                    let right_truthy = is_truthy(&le_high)?;
+                    SqlValue::Boolean(left_truthy && right_truthy)
+                }
+            };
+
+            // Apply negation with NULL propagation
+            match in_range {
+                SqlValue::Null => Ok(SqlValue::Null),
+                SqlValue::Boolean(b) => Ok(SqlValue::Boolean(if *negated { !b } else { b })),
+                other => {
+                    // Should not happen but handle gracefully
+                    let b = is_truthy(&other)?;
+                    Ok(SqlValue::Boolean(if *negated { !b } else { b }))
+                }
+            }
         }
 
         // IS NULL / IS NOT NULL
