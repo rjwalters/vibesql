@@ -121,6 +121,10 @@ pub struct ExternalHashJoin {
     build_row_count: usize,
     /// Total rows on probe side
     probe_row_count: usize,
+    /// Width of build rows (for outer joins)
+    build_row_width: Option<usize>,
+    /// Width of probe rows (for outer joins)
+    probe_row_width: Option<usize>,
 }
 
 impl ExternalHashJoin {
@@ -162,11 +166,18 @@ impl ExternalHashJoin {
             join_type,
             build_row_count: 0,
             probe_row_count: 0,
+            build_row_width: None,
+            probe_row_width: None,
         }
     }
 
     /// Add a row to the build side
     pub fn add_build_row(&mut self, row: &[SqlValue]) -> io::Result<()> {
+        // Capture row width on first row (for outer joins)
+        if self.build_row_width.is_none() {
+            self.build_row_width = Some(row.len());
+        }
+
         let key_values: Vec<SqlValue> = self
             .build_key_indices
             .iter()
@@ -209,6 +220,11 @@ impl ExternalHashJoin {
 
     /// Add a row to the probe side
     pub fn add_probe_row(&mut self, row: &[SqlValue]) -> io::Result<()> {
+        // Capture row width on first row (for outer joins)
+        if self.probe_row_width.is_none() {
+            self.probe_row_width = Some(row.len());
+        }
+
         let key_values: Vec<SqlValue> = self
             .probe_key_indices
             .iter()
@@ -446,14 +462,15 @@ impl ExternalHashJoin {
                 }
             }
             JoinType::LeftOuter => {
-                // Track which build rows were matched
-                let build_row_width = if let Some((_, row)) =
-                    hash_table.values().next().and_then(|v| v.first().map(|r| ((), r)))
-                {
-                    row.len()
-                } else {
-                    0
-                };
+                // Use stored width or fall back to hash table if available
+                let build_row_width = self.build_row_width.unwrap_or_else(|| {
+                    hash_table
+                        .values()
+                        .next()
+                        .and_then(|v| v.first())
+                        .map(|r| r.len())
+                        .unwrap_or(0)
+                });
 
                 for (key, probe_row) in probe_rows {
                     if let Some(build_rows) = hash_table.get(&key) {
@@ -474,7 +491,10 @@ impl ExternalHashJoin {
                 // Track which build rows were matched
                 let mut matched: std::collections::HashSet<usize> =
                     std::collections::HashSet::new();
-                let probe_row_width = probe_rows.first().map(|(_, r)| r.len()).unwrap_or(0);
+                // Use stored width or fall back to probe rows if available
+                let probe_row_width = self.probe_row_width.unwrap_or_else(|| {
+                    probe_rows.first().map(|(_, r)| r.len()).unwrap_or(0)
+                });
 
                 // First pass: find matches
                 let build_rows_vec: Vec<_> = hash_table

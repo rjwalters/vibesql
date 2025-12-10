@@ -121,6 +121,77 @@ impl MemoryConfig {
     }
 }
 
+/// Statistics snapshot from the memory controller
+///
+/// A point-in-time view of memory usage and spill statistics.
+/// Useful for monitoring, debugging, and query profiling.
+#[derive(Debug, Clone)]
+pub struct MemoryStats {
+    /// Total memory budget
+    pub budget_bytes: usize,
+    /// Currently reserved memory
+    pub reserved_bytes: usize,
+    /// Peak memory usage (high water mark)
+    pub peak_bytes: usize,
+    /// Total bytes written to disk during spills
+    pub bytes_spilled: usize,
+    /// Number of spill operations performed
+    pub spill_count: usize,
+    /// Number of currently active reservations
+    pub active_reservations: usize,
+    /// Spill threshold (0.0 - 1.0)
+    pub spill_threshold: f64,
+}
+
+impl MemoryStats {
+    /// Get memory utilization as a percentage (0.0 - 1.0)
+    pub fn utilization(&self) -> f64 {
+        if self.budget_bytes == 0 {
+            0.0
+        } else {
+            self.reserved_bytes as f64 / self.budget_bytes as f64
+        }
+    }
+
+    /// Check if memory is under pressure (above spill threshold)
+    pub fn is_under_pressure(&self) -> bool {
+        self.utilization() >= self.spill_threshold
+    }
+
+    /// Get available memory
+    pub fn available_bytes(&self) -> usize {
+        self.budget_bytes.saturating_sub(self.reserved_bytes)
+    }
+}
+
+impl std::fmt::Display for MemoryStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Memory: {}/{} ({:.1}%), peak: {}, spilled: {} ({} ops)",
+            format_bytes(self.reserved_bytes),
+            format_bytes(self.budget_bytes),
+            self.utilization() * 100.0,
+            format_bytes(self.peak_bytes),
+            format_bytes(self.bytes_spilled),
+            self.spill_count,
+        )
+    }
+}
+
+/// Format bytes as human-readable string
+fn format_bytes(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.2}GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.2}MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.2}KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{}B", bytes)
+    }
+}
+
 /// Parse memory size strings like "4GB", "512MB", "1024K", "1073741824"
 fn parse_memory_size(s: &str) -> Option<usize> {
     let s = s.trim().to_uppercase();
@@ -185,6 +256,12 @@ pub struct MemoryController {
 
     /// Total bytes spilled to disk (for metrics)
     bytes_spilled: AtomicUsize,
+
+    /// Number of spill operations (for metrics)
+    spill_count: AtomicUsize,
+
+    /// Peak memory usage (high water mark)
+    peak_memory: AtomicUsize,
 }
 
 impl MemoryController {
@@ -195,6 +272,8 @@ impl MemoryController {
             reserved: AtomicUsize::new(0),
             active_reservations: AtomicUsize::new(0),
             bytes_spilled: AtomicUsize::new(0),
+            spill_count: AtomicUsize::new(0),
+            peak_memory: AtomicUsize::new(0),
         }
     }
 
@@ -260,6 +339,7 @@ impl MemoryController {
     /// Record that bytes were spilled to disk (for metrics)
     pub fn record_spill(&self, bytes: usize) {
         self.bytes_spilled.fetch_add(bytes, Ordering::Relaxed);
+        self.spill_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get total bytes spilled to disk
@@ -267,9 +347,32 @@ impl MemoryController {
         self.bytes_spilled.load(Ordering::Relaxed)
     }
 
+    /// Get number of spill operations
+    pub fn spill_count(&self) -> usize {
+        self.spill_count.load(Ordering::Relaxed)
+    }
+
+    /// Get peak memory usage
+    pub fn peak_memory(&self) -> usize {
+        self.peak_memory.load(Ordering::Relaxed)
+    }
+
     /// Get number of active reservations
     pub fn active_reservations(&self) -> usize {
         self.active_reservations.load(Ordering::Relaxed)
+    }
+
+    /// Get comprehensive statistics snapshot
+    pub fn stats(&self) -> MemoryStats {
+        MemoryStats {
+            budget_bytes: self.config.budget_bytes,
+            reserved_bytes: self.reserved.load(Ordering::Relaxed),
+            peak_bytes: self.peak_memory.load(Ordering::Relaxed),
+            bytes_spilled: self.bytes_spilled.load(Ordering::Relaxed),
+            spill_count: self.spill_count.load(Ordering::Relaxed),
+            active_reservations: self.active_reservations.load(Ordering::Relaxed),
+            spill_threshold: self.config.spill_threshold,
+        }
     }
 
     /// Try to reserve memory, returning true if successful
@@ -293,8 +396,28 @@ impl MemoryController {
                 Ordering::SeqCst,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return true,
+                Ok(_) => {
+                    // Update peak memory if this is a new high
+                    self.update_peak_memory(new_reserved);
+                    return true;
+                }
                 Err(_) => continue, // Retry on contention
+            }
+        }
+    }
+
+    /// Update peak memory tracking
+    fn update_peak_memory(&self, current: usize) {
+        let mut peak = self.peak_memory.load(Ordering::Relaxed);
+        while current > peak {
+            match self.peak_memory.compare_exchange_weak(
+                peak,
+                current,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => peak = actual,
             }
         }
     }
@@ -620,5 +743,142 @@ mod tests {
 
         // All memory should be released after threads complete
         assert_eq!(controller.reserved(), 0);
+    }
+
+    #[test]
+    fn test_memory_stats() {
+        let config = MemoryConfig {
+            budget_bytes: 1000,
+            spill_threshold: 0.8,
+            temp_directory: std::env::temp_dir(),
+            target_partition_bytes: DEFAULT_TARGET_PARTITION_BYTES,
+        };
+        let controller = Arc::new(MemoryController::new(config));
+
+        // Initial stats
+        let stats = controller.stats();
+        assert_eq!(stats.budget_bytes, 1000);
+        assert_eq!(stats.reserved_bytes, 0);
+        assert_eq!(stats.peak_bytes, 0);
+        assert_eq!(stats.bytes_spilled, 0);
+        assert_eq!(stats.spill_count, 0);
+        assert_eq!(stats.active_reservations, 0);
+        assert_eq!(stats.spill_threshold, 0.8);
+
+        // After reservations
+        let mut res = controller.create_reservation();
+        res.try_grow(500);
+
+        let stats = controller.stats();
+        assert_eq!(stats.reserved_bytes, 500);
+        assert_eq!(stats.peak_bytes, 500);
+        assert_eq!(stats.active_reservations, 1);
+
+        // Test utilization
+        assert!((stats.utilization() - 0.5).abs() < 0.001);
+        assert_eq!(stats.available_bytes(), 500);
+        assert!(!stats.is_under_pressure()); // 50% < 80%
+
+        // Go above spill threshold
+        res.try_grow(400);
+        let stats = controller.stats();
+        assert!(stats.is_under_pressure()); // 90% >= 80%
+    }
+
+    #[test]
+    fn test_peak_memory_tracking() {
+        let controller = Arc::new(MemoryController::with_budget(1000));
+
+        // Reserve and release
+        {
+            let mut res = controller.create_reservation();
+            res.try_grow(800);
+            assert_eq!(controller.peak_memory(), 800);
+        }
+
+        // Memory released but peak preserved
+        assert_eq!(controller.reserved(), 0);
+        assert_eq!(controller.peak_memory(), 800);
+
+        // New peak
+        {
+            let mut res = controller.create_reservation();
+            res.try_grow(900);
+            assert_eq!(controller.peak_memory(), 900);
+        }
+
+        // Lower usage doesn't affect peak
+        {
+            let mut res = controller.create_reservation();
+            res.try_grow(100);
+            assert_eq!(controller.peak_memory(), 900);
+        }
+    }
+
+    #[test]
+    fn test_memory_stats_display() {
+        let stats = MemoryStats {
+            budget_bytes: 1024 * 1024 * 1024,
+            reserved_bytes: 512 * 1024 * 1024,
+            peak_bytes: 950 * 1024 * 1024,
+            bytes_spilled: 2 * 1024 * 1024 * 1024,
+            spill_count: 3,
+            active_reservations: 2,
+            spill_threshold: 0.8,
+        };
+
+        let display = format!("{}", stats);
+        assert!(display.contains("512.00MB"));
+        assert!(display.contains("1.00GB"));
+        assert!(display.contains("50.0%"));
+        assert!(display.contains("950.00MB"));
+        assert!(display.contains("2.00GB"));
+        assert!(display.contains("3 ops"));
+    }
+
+    #[test]
+    fn test_spill_count_tracking() {
+        let controller = Arc::new(MemoryController::with_budget(1024));
+
+        assert_eq!(controller.spill_count(), 0);
+        assert_eq!(controller.bytes_spilled(), 0);
+
+        controller.record_spill(100);
+        assert_eq!(controller.spill_count(), 1);
+        assert_eq!(controller.bytes_spilled(), 100);
+
+        controller.record_spill(200);
+        assert_eq!(controller.spill_count(), 2);
+        assert_eq!(controller.bytes_spilled(), 300);
+
+        controller.record_spill(50);
+        assert_eq!(controller.spill_count(), 3);
+        assert_eq!(controller.bytes_spilled(), 350);
+    }
+
+    #[test]
+    fn test_format_bytes_helper() {
+        // Test the format_bytes function through MemoryStats Display
+        let make_stats = |bytes| MemoryStats {
+            budget_bytes: bytes,
+            reserved_bytes: bytes,
+            peak_bytes: bytes,
+            bytes_spilled: 0,
+            spill_count: 0,
+            active_reservations: 0,
+            spill_threshold: 0.8,
+        };
+
+        let s = format!("{}", make_stats(500));
+        assert!(s.contains("500B"));
+
+        let s = format!("{}", make_stats(2048));
+        assert!(s.contains("2.00KB"));
+
+        let s = format!("{}", make_stats(5 * 1024 * 1024));
+        assert!(s.contains("5.00MB"));
+
+        let s = format!("{}", make_stats(3 * 1024 * 1024 * 1024));
+        assert!(s.contains("3.00GB"));
     }
 }
