@@ -14,7 +14,7 @@ PID_FILE := /tmp/vibesql-make-all.pid
 # Use 'make all-fg' for foreground execution
 all:
 	@echo "══════════════════════════════════════════════════════════════════"
-	@echo "  Starting 'make all' in background (build + test + benchmark-quick)"
+	@echo "  Starting 'make all' in background (build + test)"
 	@echo "══════════════════════════════════════════════════════════════════"
 	@echo ""
 	@echo "  Log file: $(LOG_FILE)"
@@ -29,9 +29,9 @@ all:
 	@echo ""
 	@echo "══════════════════════════════════════════════════════════════════"
 
-# Run all targets in foreground (build, test, benchmark)
+# Run all targets in foreground (build, test)
 # This is what 'make all' runs in the background
-all-fg: build-all test benchmark-quick
+all-fg: build-all test
 
 # Tail the background make output
 logs:
@@ -141,7 +141,7 @@ help:
 	@echo "Utility targets:"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make website            - Regenerate web dashboard data from benchmark database"
-	@echo "  make all                - Build, test, benchmark-quick (runs in BACKGROUND by default)"
+	@echo "  make all                - Build and test (runs in BACKGROUND by default)"
 	@echo "  make all-fg             - Run 'make all' in foreground (blocking)"
 	@echo "  make logs               - Tail the background make output"
 	@echo "  make status             - Check if background make is running and show recent output"
