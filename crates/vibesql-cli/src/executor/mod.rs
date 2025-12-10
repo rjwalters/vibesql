@@ -30,9 +30,16 @@ impl SqlExecutor {
         let db = if let Some(db_path) = database {
             // Check if file exists
             if std::path::Path::new(&db_path).exists() {
-                // Load existing database from SQL dump using shared executor function
-                vibesql_executor::load_sql_dump(&db_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))?
+                // Try auto-detecting format first (handles binary, compressed, JSON)
+                // Fall back to SQL dump if that fails
+                match Database::load(&db_path) {
+                    Ok(db) => db,
+                    Err(_) => {
+                        // Fall back to SQL dump loading (requires executor for parsing)
+                        vibesql_executor::load_sql_dump(&db_path)
+                            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))?
+                    }
+                }
             } else {
                 // File doesn't exist, create new database
                 // (Will be saved when user uses \save or when modifications occur)
