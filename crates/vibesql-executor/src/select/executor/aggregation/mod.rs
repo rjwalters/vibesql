@@ -153,15 +153,6 @@ impl SelectExecutor<'_> {
         // Process GROUP BY clause (handles ROLLUP, CUBE, GROUPING SETS)
         let mut result_rows = Vec::new();
 
-        // Debug: Log aggregation path (Issue #4168)
-        if std::env::var("GROUP_BY_DEBUG").is_ok() {
-            eprintln!(
-                "[GROUP_BY] execute_with_aggregation: {} filtered_rows, group_by={}",
-                filtered_rows.len(),
-                stmt.group_by.is_some()
-            );
-        }
-
         if let Some(group_by_clause) = &stmt.group_by {
             // Expand GROUP BY clause into list of grouping sets
             let grouping_sets = expand_group_by_clause(group_by_clause);

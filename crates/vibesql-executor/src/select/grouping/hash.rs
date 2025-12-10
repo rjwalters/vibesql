@@ -30,15 +30,6 @@ pub fn group_rows<'a>(
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
     executor: &crate::SelectExecutor<'a>,
 ) -> Result<GroupedRows, crate::errors::ExecutorError> {
-    // Debug: Log entry to group_rows (Issue #4168)
-    if std::env::var("GROUP_BY_DEBUG").is_ok() {
-        eprintln!(
-            "[GROUP_BY] group_rows called: {} rows, {} exprs",
-            rows.len(),
-            group_by_exprs.len()
-        );
-    }
-
     #[cfg(feature = "parallel")]
     {
         use crate::select::parallel::ParallelConfig;
@@ -84,14 +75,6 @@ fn group_rows_sequential<'a>(
     let mut groups_map: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
         AHashMap::with_capacity(estimated_groups);
 
-    // Debug: Log that we're using indexed grouping (Issue #4168)
-    if std::env::var("GROUP_BY_DEBUG").is_ok() {
-        eprintln!(
-            "[GROUP_BY] Index-based grouping: {} rows, estimated {} groups",
-            rows.len(),
-            estimated_groups
-        );
-    }
     let mut rows_processed = 0;
     const CHECK_INTERVAL: usize = 1000;
 
@@ -127,15 +110,6 @@ fn group_rows_sequential<'a>(
             group_rows.push(rows[idx].clone());
         }
         result.push((key, group_rows));
-    }
-
-    // Debug: Log grouping results
-    if std::env::var("GROUP_BY_DEBUG").is_ok() {
-        eprintln!(
-            "[GROUP_BY] Grouping complete: {} groups from {} rows",
-            group_count,
-            rows.len()
-        );
     }
 
     Ok(result)
@@ -199,12 +173,13 @@ fn group_rows_parallel<'a>(
         injector.push(morsel);
     }
 
-    // Results storage shared across threads
+    // Results storage shared across threads - stores INDICES not rows (Issue #4168)
+    // This reduces memory pressure and improves cache locality during grouping
     let results: Arc<
         std::sync::Mutex<
             Vec<
                 Result<
-                    AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>>,
+                    AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>>,
                     crate::errors::ExecutorError,
                 >,
             >,
@@ -236,19 +211,19 @@ fn group_rows_parallel<'a>(
                 );
 
                 // Thread-local group map that accumulates across all morsels this thread processes
+                // Stores INDICES instead of rows (Issue #4168)
                 let estimated_groups = (config.morsel_size / 10).max(16);
-                let mut local_groups: AHashMap<
-                    Vec<vibesql_types::SqlValue>,
-                    Vec<vibesql_storage::Row>,
-                > = AHashMap::with_capacity(estimated_groups);
+                let mut local_groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
+                    AHashMap::with_capacity(estimated_groups);
 
                 // Steal and process morsels until queue is empty
                 while let Some(m) = steal_morsel(injector_ref, &worker) {
-                    let morsel_rows = &rows[m.start_idx()..m.end_idx()];
+                    let morsel_start = m.start_idx();
+                    let morsel_rows = &rows[morsel_start..m.end_idx()];
 
                     // Process all rows in this morsel
                     let result: Result<(), crate::errors::ExecutorError> = (|| {
-                        for row in morsel_rows {
+                        for (local_idx, row) in morsel_rows.iter().enumerate() {
                             // Clear CSE cache before evaluating each row
                             evaluator.clear_cse_cache();
 
@@ -259,8 +234,9 @@ fn group_rows_parallel<'a>(
                                 key.push(value);
                             }
 
-                            // Insert into thread-local map
-                            local_groups.entry(key).or_default().push(row.clone());
+                            // Store ABSOLUTE index instead of cloning the row
+                            let absolute_idx = morsel_start + local_idx;
+                            local_groups.entry(key).or_default().push(absolute_idx);
                         }
                         Ok(())
                     })();
@@ -298,32 +274,44 @@ fn group_rows_parallel<'a>(
     }
 
     // Check for errors from any thread
-    let mut validated_results: Vec<
-        AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>>,
-    > = Vec::with_capacity(thread_results.len());
+    let mut validated_results: Vec<AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>>> =
+        Vec::with_capacity(thread_results.len());
     for result in thread_results {
         validated_results.push(result?);
     }
 
-    // Phase 2: Sequential reduce - merge thread-local maps into global map
-    // Start with the largest map to minimize re-insertions
+    // Phase 2: Sequential reduce - merge thread-local index maps into global map
     let mut iter = validated_results.into_iter();
-    let mut global_groups = iter.next().unwrap_or_default();
+    let mut global_groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
+        iter.next().unwrap_or_default();
 
     for local_groups in iter {
-        for (key, mut local_rows) in local_groups {
-            global_groups.entry(key).or_default().append(&mut local_rows);
+        for (key, mut local_indices) in local_groups {
+            global_groups.entry(key).or_default().append(&mut local_indices);
         }
     }
 
-    // Convert HashMap back to Vec for compatibility with existing code
-    Ok(global_groups.into_iter().collect())
+    // Phase 3: Materialize rows from indices (Issue #4168)
+    // This clones each row exactly once at the end
+    let group_count = global_groups.len();
+    let mut result: GroupedRows = Vec::with_capacity(group_count);
+    for (key, indices) in global_groups {
+        let mut group_rows: Vec<vibesql_storage::Row> = Vec::with_capacity(indices.len());
+        for idx in indices {
+            group_rows.push(rows[idx].clone());
+        }
+        result.push((key, group_rows));
+    }
+
+    Ok(result)
 }
 
 /// Simple parallel grouping for datasets smaller than morsel size.
 ///
 /// Uses static `par_chunks()` partitioning since overhead of work-stealing
 /// isn't justified for small datasets.
+///
+/// Updated to use index-based grouping (Issue #4168) for better memory efficiency.
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 fn group_rows_parallel_simple<'a>(
@@ -342,14 +330,15 @@ fn group_rows_parallel_simple<'a>(
     let chunk_size = rows.len().div_ceil(num_threads);
 
     // Phase 1: Parallel map - each thread groups its chunk with a thread-local evaluator
+    // Returns (chunk_start_index, local_groups with local indices) for each chunk
     let thread_results: Vec<
-        Result<
-            AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>>,
-            crate::errors::ExecutorError,
-        >,
+        Result<(usize, AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>>), crate::errors::ExecutorError>,
     > = rows
         .par_chunks(chunk_size.max(1))
-        .map(|chunk| {
+        .enumerate()
+        .map(|(chunk_idx, chunk)| {
+            let chunk_start = chunk_idx * chunk_size;
+
             // Create thread-local evaluator (fresh instance, no Rc/RefCell sharing)
             let evaluator = CombinedExpressionEvaluator::from_parallel_components(
                 schema,
@@ -361,14 +350,12 @@ fn group_rows_parallel_simple<'a>(
                 enable_cse,
             );
 
-            // Thread-local group map
+            // Thread-local group map - stores INDICES instead of rows (Issue #4168)
             let estimated_groups = (chunk.len() / 10).max(16);
-            let mut local_groups: AHashMap<
-                Vec<vibesql_types::SqlValue>,
-                Vec<vibesql_storage::Row>,
-            > = AHashMap::with_capacity(estimated_groups);
+            let mut local_groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
+                AHashMap::with_capacity(estimated_groups);
 
-            for row in chunk {
+            for (local_idx, row) in chunk.iter().enumerate() {
                 // Clear CSE cache before evaluating each row
                 evaluator.clear_cse_cache();
 
@@ -379,11 +366,12 @@ fn group_rows_parallel_simple<'a>(
                     key.push(value);
                 }
 
-                // Insert into thread-local map
-                local_groups.entry(key).or_default().push(row.clone());
+                // Store ABSOLUTE index instead of cloning the row
+                let absolute_idx = chunk_start + local_idx;
+                local_groups.entry(key).or_default().push(absolute_idx);
             }
 
-            Ok(local_groups)
+            Ok((chunk_start, local_groups))
         })
         .collect();
 
@@ -391,25 +379,37 @@ fn group_rows_parallel_simple<'a>(
     timeout_ctx.check()?;
 
     // Check for errors from any thread
-    let mut validated_results: Vec<
-        AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>>,
-    > = Vec::with_capacity(thread_results.len());
+    let mut validated_results: Vec<AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>>> =
+        Vec::with_capacity(thread_results.len());
     for result in thread_results {
-        validated_results.push(result?);
+        let (_, local_groups) = result?;
+        validated_results.push(local_groups);
     }
 
-    // Phase 2: Sequential reduce - merge thread-local maps into global map
+    // Phase 2: Sequential reduce - merge thread-local index maps into global map
     let mut iter = validated_results.into_iter();
-    let mut global_groups = iter.next().unwrap_or_default();
+    let mut global_groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
+        iter.next().unwrap_or_default();
 
     for local_groups in iter {
-        for (key, mut local_rows) in local_groups {
-            global_groups.entry(key).or_default().append(&mut local_rows);
+        for (key, mut local_indices) in local_groups {
+            global_groups.entry(key).or_default().append(&mut local_indices);
         }
     }
 
-    // Convert HashMap back to Vec for compatibility with existing code
-    Ok(global_groups.into_iter().collect())
+    // Phase 3: Materialize rows from indices (Issue #4168)
+    // This clones each row exactly once at the end
+    let group_count = global_groups.len();
+    let mut result: GroupedRows = Vec::with_capacity(group_count);
+    for (key, indices) in global_groups {
+        let mut group_rows: Vec<vibesql_storage::Row> = Vec::with_capacity(indices.len());
+        for idx in indices {
+            group_rows.push(rows[idx].clone());
+        }
+        result.push((key, group_rows));
+    }
+
+    Ok(result)
 }
 
 /// Create morsels from a row count.
