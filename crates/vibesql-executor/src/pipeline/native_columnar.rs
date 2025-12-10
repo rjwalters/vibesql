@@ -271,48 +271,47 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             }
         };
 
-        // Get batch directly if input is already columnar, otherwise convert
-        // This is the key optimization: avoid row conversion if data is already in batch format
-        let batch = match input {
-            PipelineInput::Batch(batch) => batch,
-            PipelineInput::Rows(rows) => {
-                if rows.is_empty() {
-                    // Handle empty input per SQL standard
-                    let values: Vec<vibesql_types::SqlValue> = agg_specs
-                        .iter()
-                        .map(|spec| match spec.op {
-                            AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
-                            _ => vibesql_types::SqlValue::Null,
-                        })
-                        .collect();
-                    return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
-                }
-                ColumnarBatch::from_rows(rows)?
-            }
-            PipelineInput::RowsOwned(rows) => {
-                if rows.is_empty() {
-                    // Handle empty input per SQL standard
-                    let values: Vec<vibesql_types::SqlValue> = agg_specs
-                        .iter()
-                        .map(|spec| match spec.op {
-                            AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
-                            _ => vibesql_types::SqlValue::Null,
-                        })
-                        .collect();
-                    return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
-                }
-                ColumnarBatch::from_rows(&rows)?
-            }
-            PipelineInput::Empty => {
-                // Handle empty input per SQL standard
-                let values: Vec<vibesql_types::SqlValue> = agg_specs
+        // Check if there's a GROUP BY with non-empty expressions
+        let has_group_by = group_by.is_some_and(|exprs| !exprs.is_empty());
+
+        // Helper to return empty result for GROUP BY with empty input
+        // SQL semantics: GROUP BY on empty input returns 0 rows (no groups)
+        // Without GROUP BY: aggregates on empty input return 1 row (COUNT=0, others=NULL)
+        let return_empty_result = |has_gb: bool, specs: &[AggregateSpec]| -> PipelineOutput {
+            if has_gb {
+                // GROUP BY with empty input: return 0 rows
+                PipelineOutput::from_rows(vec![])
+            } else {
+                // No GROUP BY: return 1 row with COUNT=0, others=NULL
+                let values: Vec<vibesql_types::SqlValue> = specs
                     .iter()
                     .map(|spec| match spec.op {
                         AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
                         _ => vibesql_types::SqlValue::Null,
                     })
                     .collect();
-                return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
+                PipelineOutput::from_rows(vec![Row::new(values)])
+            }
+        };
+
+        // Get batch directly if input is already columnar, otherwise convert
+        // This is the key optimization: avoid row conversion if data is already in batch format
+        let batch = match input {
+            PipelineInput::Batch(batch) => batch,
+            PipelineInput::Rows(rows) => {
+                if rows.is_empty() {
+                    return Ok(return_empty_result(has_group_by, &agg_specs));
+                }
+                ColumnarBatch::from_rows(rows)?
+            }
+            PipelineInput::RowsOwned(rows) => {
+                if rows.is_empty() {
+                    return Ok(return_empty_result(has_group_by, &agg_specs));
+                }
+                ColumnarBatch::from_rows(&rows)?
+            }
+            PipelineInput::Empty => {
+                return Ok(return_empty_result(has_group_by, &agg_specs));
             }
             PipelineInput::NativeColumnar { table_name, .. } => {
                 // Get columnar data directly from storage
@@ -331,14 +330,7 @@ impl ExecutionPipeline for NativeColumnarPipeline {
 
         // Handle empty batch
         if batch.row_count() == 0 {
-            let values: Vec<vibesql_types::SqlValue> = agg_specs
-                .iter()
-                .map(|spec| match spec.op {
-                    AggregateOp::Count => vibesql_types::SqlValue::Integer(0),
-                    _ => vibesql_types::SqlValue::Null,
-                })
-                .collect();
-            return Ok(PipelineOutput::from_rows(vec![Row::new(values)]));
+            return Ok(return_empty_result(has_group_by, &agg_specs));
         }
 
         // Check if we have GROUP BY

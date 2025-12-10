@@ -787,4 +787,48 @@ mod tests {
             _ => panic!("Expected normalized BinaryOp, got {:?}", optimized),
         }
     }
+
+    #[test]
+    fn test_null_is_not_null_optimization() {
+        // NULL IS NOT NULL should fold to FALSE
+        let expr = Expression::IsNull {
+            expr: Box::new(Expression::Literal(SqlValue::Null)),
+            negated: true,  // IS NOT NULL
+        };
+
+        let db = vibesql_storage::Database::new();
+        let schema = TableSchema::new("test".to_string(), vec![]);
+        let combined = crate::schema::CombinedSchema::from_table("test".to_string(), schema);
+        let evaluator = CombinedExpressionEvaluator::with_database(&combined, &db);
+
+        let optimized = optimize_expression(&expr, &evaluator).unwrap();
+
+        // Should be folded to FALSE
+        match optimized {
+            Expression::Literal(SqlValue::Boolean(false)) => {} // Good, folded to FALSE
+            _ => panic!("Expected folded FALSE literal, got {:?}", optimized),
+        }
+    }
+
+    #[test]
+    fn test_null_is_not_null_where_optimization() {
+        // WHERE NULL IS NOT NULL should evaluate to AlwaysFalse
+        let expr = Expression::IsNull {
+            expr: Box::new(Expression::Literal(SqlValue::Null)),
+            negated: true,  // IS NOT NULL
+        };
+
+        let db = vibesql_storage::Database::new();
+        let schema = TableSchema::new("test".to_string(), vec![]);
+        let combined = crate::schema::CombinedSchema::from_table("test".to_string(), schema);
+        let evaluator = CombinedExpressionEvaluator::with_database(&combined, &db);
+
+        let result = optimize_where_clause(Some(&expr), &evaluator).unwrap();
+
+        assert!(
+            matches!(result, WhereOptimization::AlwaysFalse),
+            "Expected AlwaysFalse, got {:?}",
+            result
+        );
+    }
 }
