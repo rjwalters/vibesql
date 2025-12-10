@@ -4,6 +4,7 @@ import type {
   ErrorTest,
   DashboardConformance,
   DashboardMilestone,
+  TCLTestData,
 } from './types'
 import { getStatusColor, getStatusText, escapeHtml } from './render-utils'
 import { t } from '../../i18n'
@@ -559,11 +560,160 @@ export function renderRunningTestsLocally(): string {
           <div>cargo test --test sqltest_conformance -- --nocapture</div>
           <div class="mt-4 text-green-600 dark:text-green-400">${t('conformance-run-sqllogictest')}</div>
           <div>cargo test --test sqllogictest_suite -- --nocapture</div>
+          <div class="mt-4 text-green-600 dark:text-green-400"># Run SQLite TCL test suite</div>
+          <div>make test-tcl</div>
           <div class="mt-4 text-green-600 dark:text-green-400">${t('conformance-generate-coverage')}</div>
           <div>cargo coverage</div>
           <div class="mt-2 text-green-600 dark:text-green-400">${t('conformance-open-coverage')}</div>
           <div>open target/llvm-cov/html/index.html</div>
         </div>
+      </div>
+    </div>
+  `
+}
+
+/**
+ * Render TCL Test Suite results section
+ */
+export function renderTCLTestResults(tclData: TCLTestData): string {
+  const passRate = (tclData.summary.pass_rate || 0).toFixed(1)
+  const { summary, categories, failure_patterns } = tclData
+
+  // Build category rows sorted by total tests descending
+  const categoryRows = Object.entries(categories)
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 10) // Show top 10 categories
+    .map(([name, cat]) => {
+      const catPassRate = cat.pass_rate.toFixed(1)
+      const isComplete = cat.pass_rate === 100
+
+      return `
+        <tr class="border-b border-gray-200 dark:border-gray-700 last:border-0">
+          <td class="py-2 px-3 font-medium text-gray-900 dark:text-white font-mono text-sm">${escapeHtml(name)}</td>
+          <td class="py-2 px-3">
+            <span class="font-semibold ${isComplete ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}">
+              ${catPassRate}%
+            </span>
+          </td>
+          <td class="py-2 px-3 w-1/4">
+            <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                class="h-full ${isComplete ? 'bg-green-500' : 'bg-orange-500'} rounded-full"
+                style="width: ${cat.pass_rate}%"
+              ></div>
+            </div>
+          </td>
+          <td class="py-2 px-3 text-right text-gray-600 dark:text-gray-400 text-sm">
+            ${formatNumber(cat.passed)} / ${formatNumber(cat.total)}
+          </td>
+        </tr>
+      `
+    })
+    .join('')
+
+  // Build failure pattern list
+  const failurePatternsList = failure_patterns
+    .slice(0, 5)
+    .map(
+      fp => `
+      <li class="flex justify-between items-start py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
+        <span class="text-sm text-gray-700 dark:text-gray-300 font-mono truncate max-w-xs" title="${escapeHtml(fp.error)}">${escapeHtml(fp.error.substring(0, 50))}${fp.error.length > 50 ? '...' : ''}</span>
+        <span class="text-sm font-semibold text-red-600 dark:text-red-400 ml-2">${fp.count}</span>
+      </li>
+    `
+    )
+    .join('')
+
+  return `
+    <div id="tcl-tests" class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-8">
+      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">SQLite TCL Test Suite</h2>
+
+      <p class="text-gray-700 dark:text-gray-300 mb-6">
+        Results from SQLite's canonical
+        <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL test suite</a>
+        containing 1,174 test files. This suite is the gold standard for SQLite compatibility testing.
+      </p>
+
+      <!-- Overall Results -->
+      <div class="bg-gradient-to-br from-orange-500 to-orange-700 rounded-lg shadow-lg p-6 text-white mb-6">
+        <div class="text-sm font-semibold uppercase tracking-wider opacity-90 mb-2">Overall Pass Rate</div>
+        <div class="text-4xl font-bold mb-2">${passRate}%</div>
+        <div class="text-sm opacity-75">${formatNumber(summary.passed)} of ${formatNumber(summary.total_tests)} tests passing</div>
+        <div class="mt-4 bg-white/20 rounded-full h-2 overflow-hidden">
+          <div
+            class="bg-white h-full rounded-full transition-all duration-500"
+            style="width: ${passRate}%"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Passed</div>
+          <div class="text-2xl font-bold text-green-600 dark:text-green-400">${formatNumber(summary.passed)}</div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Failed</div>
+          <div class="text-2xl font-bold text-red-600 dark:text-red-400">${formatNumber(summary.failed)}</div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Skipped</div>
+          <div class="text-2xl font-bold text-gray-600 dark:text-gray-400">${formatNumber(summary.skipped)}</div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Total</div>
+          <div class="text-2xl font-bold text-gray-900 dark:text-white">${formatNumber(summary.total_tests)}</div>
+        </div>
+      </div>
+
+      <!-- Two Column Layout: Categories and Failure Patterns -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Category Breakdown -->
+        <div>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Test Categories</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-gray-200 dark:border-gray-700 text-left text-xs text-gray-600 dark:text-gray-400">
+                  <th class="py-2 px-3 font-medium">Category</th>
+                  <th class="py-2 px-3 font-medium">Rate</th>
+                  <th class="py-2 px-3 font-medium">Progress</th>
+                  <th class="py-2 px-3 font-medium text-right">Tests</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${categoryRows}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Failure Patterns -->
+        ${
+          failure_patterns.length > 0
+            ? `
+        <div>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Common Failures</h3>
+          <ul class="space-y-1">
+            ${failurePatternsList}
+          </ul>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-3">
+            Top ${Math.min(5, failure_patterns.length)} failure patterns by occurrence count
+          </p>
+        </div>
+        `
+            : ''
+        }
+      </div>
+
+      <!-- Info Box -->
+      <div class="mt-6 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800 p-4">
+        <p class="text-sm text-gray-700 dark:text-gray-300">
+          <strong>About TCL Tests:</strong> SQLite's TCL test suite is the canonical conformance test for SQLite compatibility.
+          It tests specific SQLite behaviors, quirks, and edge cases that may not be covered by standard SQL test suites.
+          High pass rates here indicate strong SQLite compatibility for application migration scenarios.
+        </p>
       </div>
     </div>
   `

@@ -79,10 +79,74 @@ export interface DashboardData {
   milestones?: DashboardMilestone[]
 }
 
+// TCL Test Suite types
+
+export interface TCLTestCategory {
+  total: number
+  passed: number
+  failed: number
+  skipped: number
+  pass_rate: number
+}
+
+export interface TCLTestFile {
+  file: string
+  path: string
+  total: number
+  passed: number
+  failed: number
+  skipped: number
+}
+
+export interface TCLFailurePattern {
+  error: string
+  count: number
+}
+
+export interface TCLHistoryEntry {
+  run_id: number
+  date: string
+  commit: string
+  total: number
+  passed: number
+  failed: number
+  skipped: number
+  pass_rate: number
+}
+
+export interface TCLTestData {
+  version: string
+  generated_at: string
+  latest_run: {
+    run_id: number
+    started_at: string
+    completed_at: string
+    git_commit: string
+    total_files: number
+    total_tests: number
+    passed: number
+    failed: number
+    skipped: number
+    parse_errors: number
+  }
+  summary: {
+    total_tests: number
+    passed: number
+    failed: number
+    skipped: number
+    pass_rate: number
+  }
+  categories: Record<string, TCLTestCategory>
+  by_file: TCLTestFile[]
+  failure_patterns: TCLFailurePattern[]
+  history: TCLHistoryEntry[]
+}
+
 export interface ConformanceReportState {
   data: ConformanceData | null
   sltData: SQLLogicTestData | null
   dashboardData: DashboardData | null
+  tclData: TCLTestData | null
   loading: boolean
   error: string | null
 }

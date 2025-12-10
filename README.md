@@ -4,6 +4,7 @@
 [![Demo](https://img.shields.io/badge/demo-live-success)](https://rjwalters.github.io/vibesql/)
 [![sqltest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json)](https://rjwalters.github.io/vibesql/conformance.html)
 [![SQLLogicTest](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sqllogictest.json)](https://rjwalters.github.io/vibesql/conformance.html#SQLlogicTest)
+[![TCL Tests](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/tcl-tests.json)](https://rjwalters.github.io/vibesql/conformance.html#tcl-tests)
 [![PostgreSQL](https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/pgsql-regress.json)](https://rjwalters.github.io/vibesql/conformance.html#postgresql)
 [![i18n](https://img.shields.io/badge/i18n-19%20languages-blue)](docs/CONTRIBUTING_TRANSLATIONS.md)
 

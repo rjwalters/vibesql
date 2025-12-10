@@ -980,6 +980,17 @@ def main():
         print(f"  -> {path.name}")
         exported.append(path)
 
+        # Export TCL test results
+        try:
+            from export_tcl_results import export_tcl_results
+            tcl_result = export_tcl_results(verbose=args.verbose)
+            if tcl_result:
+                print(f"  TCL Tests: {tcl_result['summary']['pass_rate']}% ({tcl_result['summary']['passed']}/{tcl_result['summary']['total_tests']} tests)")
+                exported.append(base_dir / "conformance" / "tcl_results.json")
+                exported.append(base_dir / "badges" / "tcl-tests.json")
+        except Exception as e:
+            print(f"  TCL export skipped: {e}")
+
         # Generate pgsql-regress badge
         pgsql_data = load_pgsql_regress_data()
         if pgsql_data.get("summary"):
