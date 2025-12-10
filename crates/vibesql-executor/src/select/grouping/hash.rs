@@ -96,6 +96,7 @@ fn group_rows_sequential<'a>(
 ///
 /// Timeout is checked before and after parallel processing (Issue #4151).
 #[cfg(feature = "parallel")]
+#[allow(clippy::type_complexity)] // Complex type is inherent to parallel aggregation pattern
 fn group_rows_parallel<'a>(
     rows: &[vibesql_storage::Row],
     group_by_exprs: &[vibesql_ast::Expression],
@@ -112,7 +113,7 @@ fn group_rows_parallel<'a>(
 
     // Get number of threads for chunking
     let num_threads = rayon::current_num_threads();
-    let chunk_size = (rows.len() + num_threads - 1) / num_threads;
+    let chunk_size = rows.len().div_ceil(num_threads);
 
     // Phase 1: Parallel map - each thread groups its chunk with a thread-local evaluator
     let thread_results: Vec<

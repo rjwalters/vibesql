@@ -45,12 +45,14 @@ use crate::timeout::TimeoutContext;
 /// Each thread maintains its own group map and evaluator to avoid
 /// synchronization overhead during the sink phase.
 #[cfg(feature = "parallel")]
+#[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
 struct ThreadLocalAggregationState {
     /// Thread-local group accumulators: group_key -> accumulators
     groups: AHashMap<Vec<SqlValue>, Vec<AggregateAccumulator>>,
 }
 
 #[cfg(feature = "parallel")]
+#[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
 impl ThreadLocalAggregationState {
     fn new() -> Self {
         Self { groups: AHashMap::new() }
@@ -76,6 +78,8 @@ impl ThreadLocalAggregationState {
 /// # Returns
 /// Vector of (group_key, finalized_values) pairs
 #[cfg(feature = "parallel")]
+#[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
+#[allow(clippy::type_complexity)] // Complex type is inherent to parallel aggregation pattern
 pub fn parallel_group_aggregate<'a>(
     rows: &[Row],
     group_by_exprs: &[vibesql_ast::Expression],
@@ -101,7 +105,7 @@ pub fn parallel_group_aggregate<'a>(
 
     // Get number of threads for chunking
     let num_threads = rayon::current_num_threads();
-    let chunk_size = (rows.len() + num_threads - 1) / num_threads;
+    let chunk_size = rows.len().div_ceil(num_threads);
 
     // Phase 1: Sink - Process chunks in parallel with thread-local state
     let thread_local_results: Vec<Result<AHashMap<Vec<SqlValue>, Vec<AggregateAccumulator>>, ExecutorError>> =
@@ -193,6 +197,8 @@ pub fn parallel_group_aggregate<'a>(
 
 /// Sequential fallback for small datasets
 #[cfg(feature = "parallel")]
+#[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
+#[allow(clippy::type_complexity)] // Complex type is inherent to parallel aggregation pattern
 fn sequential_group_aggregate<'a>(
     rows: &[Row],
     group_by_exprs: &[vibesql_ast::Expression],
@@ -245,6 +251,7 @@ fn sequential_group_aggregate<'a>(
 
 /// Information about an aggregate function to compute
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
 pub struct AggregateInfo {
     /// Function name (COUNT, SUM, AVG, MIN, MAX)
     pub function_name: String,
@@ -254,6 +261,7 @@ pub struct AggregateInfo {
     pub distinct: bool,
 }
 
+#[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
 impl AggregateInfo {
     /// Create a new AggregateInfo
     pub fn new(function_name: String, expr: vibesql_ast::Expression, distinct: bool) -> Self {

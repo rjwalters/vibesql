@@ -23,5 +23,6 @@ pub(super) use grouping_sets::{
 };
 pub(super) use hash::group_rows;
 pub(crate) use keys::{GroupKey, GroupKeySpec};
-#[cfg(feature = "parallel")]
-pub(crate) use parallel_sink::{parallel_group_aggregate, AggregateInfo};
+// Note: parallel_sink contains WIP code for Issue #4132. The items are not
+// re-exported until the integration is complete. The module is compiled
+// to ensure it stays buildable.
