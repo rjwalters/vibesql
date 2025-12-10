@@ -161,3 +161,55 @@ jobs:
               echo "Status: Some tests failed (see logs)" >> $GITHUB_STEP_SUMMARY
             fi
           fi
+
+  # ============================================================================
+  # PostgreSQL Regression Tests (trigger and DDL conformance)
+  # Tests PostgreSQL-style trigger syntax and DDL operations
+  # ============================================================================
+  pgsql-regress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Run PostgreSQL Regression Tests
+        run: |
+          cargo test -p vibesql --test pgsql_regress --release -- --nocapture 2>&1 | tee pgsql_regress_output.txt
+
+      - name: Display PostgreSQL Regression results
+        if: always()
+        run: |
+          echo "## PostgreSQL Regression Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Testing PostgreSQL-compatible trigger syntax and DDL operations" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f pgsql_regress_output.txt ]; then
+            # Extract summary line
+            SUMMARY=$(grep -E "^Total:" pgsql_regress_output.txt || echo "")
+            if [ -n "$SUMMARY" ]; then
+              echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
+            fi
+            # Extract pass rate
+            PASS_RATE=$(grep -E "^Pass rate:" pgsql_regress_output.txt || echo "")
+            if [ -n "$PASS_RATE" ]; then
+              echo "$PASS_RATE" >> $GITHUB_STEP_SUMMARY
+            fi
+            # Check final status
+            if grep -q "test result: ok" pgsql_regress_output.txt; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Status: PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Status: FAILED (see logs)" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
