@@ -388,11 +388,179 @@ fn compute_group_aggregate_indexed(
             }
         }
 
-        // For String/Boolean columns, aggregate operations are not supported
-        _ => Err(ExecutorError::UnsupportedExpression(format!(
-            "GROUP BY aggregate not supported for column type: {:?}",
-            column.data_type()
-        ))),
+        // String columns - only COUNT is supported
+        ColumnArray::String(_values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                _ => Err(ExecutorError::UnsupportedExpression(format!(
+                    "Aggregate operation {:?} not supported for String column type",
+                    op
+                ))),
+            }
+        }
+
+        // FixedString columns - only COUNT is supported
+        ColumnArray::FixedString(_values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                _ => Err(ExecutorError::UnsupportedExpression(format!(
+                    "Aggregate operation {:?} not supported for FixedString column type",
+                    op
+                ))),
+            }
+        }
+
+        // Boolean columns - only COUNT is supported
+        ColumnArray::Boolean(_values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                _ => Err(ExecutorError::UnsupportedExpression(format!(
+                    "Aggregate operation {:?} not supported for Boolean column type",
+                    op
+                ))),
+            }
+        }
+
+        // Int32 columns - support all aggregate operations
+        ColumnArray::Int32(values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+            if count == 0 {
+                return Ok(match op {
+                    AggregateOp::Count => SqlValue::Integer(0),
+                    _ => SqlValue::Null,
+                });
+            }
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                AggregateOp::Sum => {
+                    let sum: i64 = indices
+                        .iter()
+                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .map(|&i| values[i] as i64)
+                        .sum();
+                    Ok(SqlValue::Integer(sum))
+                }
+                AggregateOp::Avg => {
+                    let sum: i64 = indices
+                        .iter()
+                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .map(|&i| values[i] as i64)
+                        .sum();
+                    Ok(SqlValue::Double(sum as f64 / count as f64))
+                }
+                AggregateOp::Min => indices
+                    .iter()
+                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .map(|&i| values[i])
+                    .min()
+                    .map(|v| SqlValue::Integer(v as i64))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MIN".to_string(),
+                        reason: "empty group".to_string(),
+                    }),
+                AggregateOp::Max => indices
+                    .iter()
+                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .map(|&i| values[i])
+                    .max()
+                    .map(|v| SqlValue::Integer(v as i64))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MAX".to_string(),
+                        reason: "empty group".to_string(),
+                    }),
+            }
+        }
+
+        // Float32 columns - support all aggregate operations
+        ColumnArray::Float32(values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+            if count == 0 {
+                return Ok(match op {
+                    AggregateOp::Count => SqlValue::Integer(0),
+                    _ => SqlValue::Null,
+                });
+            }
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                AggregateOp::Sum => {
+                    let sum: f64 = indices
+                        .iter()
+                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .map(|&i| values[i] as f64)
+                        .sum();
+                    Ok(SqlValue::Double(sum))
+                }
+                AggregateOp::Avg => {
+                    let sum: f64 = indices
+                        .iter()
+                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .map(|&i| values[i] as f64)
+                        .sum();
+                    Ok(SqlValue::Double(sum / count as f64))
+                }
+                AggregateOp::Min => indices
+                    .iter()
+                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .map(|&i| values[i])
+                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|v| SqlValue::Double(v as f64))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MIN".to_string(),
+                        reason: "empty group".to_string(),
+                    }),
+                AggregateOp::Max => indices
+                    .iter()
+                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .map(|&i| values[i])
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|v| SqlValue::Double(v as f64))
+                    .ok_or_else(|| ExecutorError::SimdOperationFailed {
+                        operation: "MAX".to_string(),
+                        reason: "empty group".to_string(),
+                    }),
+            }
+        }
+
+        // Date columns - only COUNT is supported (MIN/MAX would need i32-to-Date conversion)
+        ColumnArray::Date(_values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                _ => Err(ExecutorError::UnsupportedExpression(format!(
+                    "Aggregate operation {:?} not supported for Date column type in GROUP BY",
+                    op
+                ))),
+            }
+        }
+
+        // Timestamp columns - only COUNT is supported
+        ColumnArray::Timestamp(_values, nulls) => {
+            let null_slice = nulls.as_ref().map(|v| v.as_slice());
+            let count = count_indexed(indices, null_slice);
+
+            match op {
+                AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
+                _ => Err(ExecutorError::UnsupportedExpression(format!(
+                    "Aggregate operation {:?} not supported for Timestamp column type in GROUP BY",
+                    op
+                ))),
+            }
+        }
     }
 }
 
