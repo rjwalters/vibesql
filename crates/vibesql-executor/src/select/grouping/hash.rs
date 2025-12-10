@@ -3,6 +3,7 @@ use ahash::AHashMap;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+#[cfg(feature = "parallel")]
 use crate::timeout::TimeoutContext;
 
 /// Grouped rows: (group key values, rows in group)
