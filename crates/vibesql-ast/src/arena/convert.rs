@@ -19,11 +19,12 @@
 //! ```
 
 use crate::{
-    Assignment, CaseWhen, CharacterUnit, CommonTableExpr, ConflictClause, DeleteStmt, Expression,
-    FrameBound, FrameUnit, FromClause, FulltextMode, GroupByClause, GroupingElement, GroupingSet,
-    InsertSource, InsertStmt, IntervalUnit, JoinType, MixedGroupingItem, OrderByItem,
-    OrderDirection, PseudoTable, Quantifier, SelectItem, SelectStmt, SetOperation, SetOperator,
-    TrimPosition, UpdateStmt, WhereClause, WindowFrame, WindowFunctionSpec, WindowSpec,
+    Assignment, BinaryOperator, CaseWhen, CharacterUnit, CommonTableExpr, ConflictClause,
+    DeleteStmt, Expression, FrameBound, FrameUnit, FromClause, FulltextMode, GroupByClause,
+    GroupingElement, GroupingSet, InsertSource, InsertStmt, IntervalUnit, JoinType,
+    MixedGroupingItem, OrderByItem, OrderDirection, PseudoTable, Quantifier, SelectItem,
+    SelectStmt, SetOperation, SetOperator, TrimPosition, UpdateStmt, WhereClause, WindowFrame,
+    WindowFunctionSpec, WindowSpec,
 };
 
 use super::interner::{ArenaInterner, Symbol};
@@ -55,6 +56,44 @@ impl<'a, 'arena> Converter<'a, 'arena> {
         sym.map(|s| self.resolve(s))
     }
 
+    /// Build a nested BinaryOp tree from a slice of arena expressions.
+    ///
+    /// Converts `[a, b, c, d]` with `And` to:
+    /// ```text
+    /// BinaryOp(And, BinaryOp(And, BinaryOp(And, a, b), c), d)
+    /// ```
+    ///
+    /// This normalization ensures compatibility with optimizer code paths
+    /// that only handle `BinaryOp::And`/`BinaryOp::Or` and not the flattened
+    /// `Conjunction`/`Disjunction` variants.
+    fn build_nested_binary_op(
+        &self,
+        children: &[arena_expr::Expression<'arena>],
+        op: BinaryOperator,
+    ) -> Expression {
+        debug_assert!(
+            children.len() >= 2,
+            "Conjunction/Disjunction must have at least 2 children"
+        );
+
+        let mut iter = children.iter();
+
+        // Start with the first child
+        let first = iter.next().expect("at least one child");
+        let mut result = self.convert_expression(first);
+
+        // Build left-associative tree: ((a AND b) AND c) AND d
+        for child in iter {
+            result = Expression::BinaryOp {
+                op,
+                left: Box::new(result),
+                right: Box::new(self.convert_expression(child)),
+            };
+        }
+
+        result
+    }
+
     // ========================================================================
     // Expression Conversion
     // ========================================================================
@@ -78,12 +117,20 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 left: Box::new(self.convert_expression(left)),
                 right: Box::new(self.convert_expression(right)),
             },
-            arena_expr::Expression::Conjunction(children) => Expression::Conjunction(
-                children.iter().map(|e| self.convert_expression(e)).collect(),
-            ),
-            arena_expr::Expression::Disjunction(children) => Expression::Disjunction(
-                children.iter().map(|e| self.convert_expression(e)).collect(),
-            ),
+            arena_expr::Expression::Conjunction(children) => {
+                // Normalize flattened Conjunction to nested BinaryOp::And.
+                // This ensures all optimizer code paths work correctly,
+                // since many only handle BinaryOp::And, not Conjunction.
+                // See issue #4174 for details.
+                self.build_nested_binary_op(children, BinaryOperator::And)
+            }
+            arena_expr::Expression::Disjunction(children) => {
+                // Normalize flattened Disjunction to nested BinaryOp::Or.
+                // This ensures all optimizer code paths work correctly,
+                // since many only handle BinaryOp::Or, not Disjunction.
+                // See issue #4174 for details.
+                self.build_nested_binary_op(children, BinaryOperator::Or)
+            }
             arena_expr::Expression::UnaryOp { op, expr } => {
                 Expression::UnaryOp { op: *op, expr: Box::new(self.convert_expression(expr)) }
             }
@@ -652,5 +699,155 @@ impl From<arena_dml::ConflictClause> for ConflictClause {
             arena_dml::ConflictClause::Replace => ConflictClause::Replace,
             arena_dml::ConflictClause::Ignore => ConflictClause::Ignore,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bumpalo::Bump;
+    use bumpalo::collections::Vec as BumpVec;
+
+    /// Helper to create a Conjunction in the arena
+    fn make_conjunction<'arena>(
+        arena: &'arena Bump,
+        exprs: Vec<arena_expr::Expression<'arena>>,
+    ) -> arena_expr::Expression<'arena> {
+        let mut children = BumpVec::new_in(arena);
+        for e in exprs {
+            children.push(e);
+        }
+        arena_expr::Expression::Conjunction(children)
+    }
+
+    /// Helper to create a Disjunction in the arena
+    fn make_disjunction<'arena>(
+        arena: &'arena Bump,
+        exprs: Vec<arena_expr::Expression<'arena>>,
+    ) -> arena_expr::Expression<'arena> {
+        let mut children = BumpVec::new_in(arena);
+        for e in exprs {
+            children.push(e);
+        }
+        arena_expr::Expression::Disjunction(children)
+    }
+
+    /// Verify that Conjunction is normalized to nested BinaryOp::And
+    #[test]
+    fn test_conjunction_normalizes_to_nested_binary_and() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
+        let converter = Converter::new(&interner);
+
+        // Create a Conjunction with 3 children: a AND b AND c
+        let a = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(1));
+        let b = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(2));
+        let c = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(3));
+
+        let conjunction = make_conjunction(&arena, vec![a, b, c]);
+        let result = converter.convert_expression(&conjunction);
+
+        // Should produce: ((1 AND 2) AND 3)
+        match result {
+            Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+                // right should be 3
+                assert!(matches!(*right, Expression::Literal(vibesql_types::SqlValue::Integer(3))));
+                // left should be (1 AND 2)
+                match *left {
+                    Expression::BinaryOp { op: BinaryOperator::And, left: ll, right: lr } => {
+                        assert!(matches!(*ll, Expression::Literal(vibesql_types::SqlValue::Integer(1))));
+                        assert!(matches!(*lr, Expression::Literal(vibesql_types::SqlValue::Integer(2))));
+                    }
+                    _ => panic!("Expected nested BinaryOp::And, got {:?}", left),
+                }
+            }
+            _ => panic!("Expected BinaryOp::And, got {:?}", result),
+        }
+    }
+
+    /// Verify that Disjunction is normalized to nested BinaryOp::Or
+    #[test]
+    fn test_disjunction_normalizes_to_nested_binary_or() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
+        let converter = Converter::new(&interner);
+
+        // Create a Disjunction with 3 children: a OR b OR c
+        let a = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(1));
+        let b = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(2));
+        let c = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(3));
+
+        let disjunction = make_disjunction(&arena, vec![a, b, c]);
+        let result = converter.convert_expression(&disjunction);
+
+        // Should produce: ((1 OR 2) OR 3)
+        match result {
+            Expression::BinaryOp { op: BinaryOperator::Or, left, right } => {
+                // right should be 3
+                assert!(matches!(*right, Expression::Literal(vibesql_types::SqlValue::Integer(3))));
+                // left should be (1 OR 2)
+                match *left {
+                    Expression::BinaryOp { op: BinaryOperator::Or, left: ll, right: lr } => {
+                        assert!(matches!(*ll, Expression::Literal(vibesql_types::SqlValue::Integer(1))));
+                        assert!(matches!(*lr, Expression::Literal(vibesql_types::SqlValue::Integer(2))));
+                    }
+                    _ => panic!("Expected nested BinaryOp::Or, got {:?}", left),
+                }
+            }
+            _ => panic!("Expected BinaryOp::Or, got {:?}", result),
+        }
+    }
+
+    /// Verify that 2-element Conjunction produces simple BinaryOp::And
+    #[test]
+    fn test_two_element_conjunction() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
+        let converter = Converter::new(&interner);
+
+        let a = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(1));
+        let b = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(2));
+
+        let conjunction = make_conjunction(&arena, vec![a, b]);
+        let result = converter.convert_expression(&conjunction);
+
+        // Should produce: (1 AND 2)
+        match result {
+            Expression::BinaryOp { op: BinaryOperator::And, left, right } => {
+                assert!(matches!(*left, Expression::Literal(vibesql_types::SqlValue::Integer(1))));
+                assert!(matches!(*right, Expression::Literal(vibesql_types::SqlValue::Integer(2))));
+            }
+            _ => panic!("Expected BinaryOp::And, got {:?}", result),
+        }
+    }
+
+    /// Verify that 4-element Conjunction produces left-associative tree
+    #[test]
+    fn test_four_element_conjunction_is_left_associative() {
+        let arena = Bump::new();
+        let interner = ArenaInterner::new(&arena);
+        let converter = Converter::new(&interner);
+
+        // a AND b AND c AND d -> (((a AND b) AND c) AND d)
+        let a = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(1));
+        let b = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(2));
+        let c = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(3));
+        let d = arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(4));
+
+        let conjunction = make_conjunction(&arena, vec![a, b, c, d]);
+        let result = converter.convert_expression(&conjunction);
+
+        // Verify structure: (((1 AND 2) AND 3) AND 4)
+        // Count depth on the left side - should be 3 levels for 4 elements
+        fn count_left_depth(expr: &Expression) -> usize {
+            match expr {
+                Expression::BinaryOp { op: BinaryOperator::And, left, .. } => {
+                    1 + count_left_depth(left)
+                }
+                _ => 0,
+            }
+        }
+
+        assert_eq!(count_left_depth(&result), 3, "Expected 3 levels of nesting for 4 elements");
     }
 }
