@@ -227,7 +227,7 @@ impl Repl {
     fn print_help(&self) {
         println!(
             "
-Meta-commands:
+Meta-commands (PostgreSQL-style):
   \\d [table]      - Describe table or list all tables
   \\dt             - List tables
   \\ds             - List schemas
@@ -242,6 +242,17 @@ Meta-commands:
   \\h, \\help      - Show this help
   \\q, \\quit      - Exit
 
+Dot-commands (SQLite-style):
+  .tables         - List tables
+  .schema [table] - Show table schema or list tables
+  .indexes        - List indexes
+  .databases      - List schemas
+  .mode <format>  - Set output format (table, json, csv, markdown, html)
+  .timer          - Toggle query timing
+  .import FILE TABLE - Import data from file
+  .save [file]    - Save database
+  .quit, .exit    - Exit
+
 SQL Introspection:
   SHOW TABLES                  - List all tables
   SHOW DATABASES               - List all schemas/databases
@@ -254,15 +265,11 @@ Examples:
   CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));
   INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
   SELECT * FROM users;
-  SHOW TABLES;
-  SHOW COLUMNS FROM users;
-  DESCRIBE users;
-  \\f json
+  .tables
+  .schema users
+  .mode json
   \\f markdown
   \\copy users TO '/tmp/users.csv'
-  \\copy users FROM '/tmp/users.csv'
-  \\copy users TO '/tmp/users.json'
-  \\errors
 "
         );
     }
