@@ -684,6 +684,15 @@ conformance-failing-tests-desc = Las siguientes pruebas están fallando actualme
 conformance-view-failing = Ver detalles de pruebas fallidas ({ $count } pruebas)
 conformance-error-label = Error:
 
+# Pruebas de Regresión de PostgreSQL
+conformance-pgsql-title = Pruebas de Regresión de PostgreSQL
+conformance-pgsql-desc = Resultados de ejecutar la <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">suite de pruebas de regresión de PostgreSQL</a> - la suite de pruebas canónica utilizada para validar la compatibilidad con PostgreSQL.
+conformance-pgsql-tests-passing = pruebas aprobadas
+conformance-pgsql-tests-excluded = pruebas excluidas
+conformance-pgsql-pass-rate = Tasa de Aprobación
+conformance-pgsql-excluded-reason = Las pruebas excluidas utilizan características específicas de PostgreSQL no aplicables a VibeSQL
+conformance-pgsql-note = <strong>Nota:</strong> Las pruebas de regresión de PostgreSQL validan el comportamiento SQL contra la implementación de referencia de PostgreSQL. Las pruebas excluidas involucran características específicas de PostgreSQL como catálogos del sistema, lenguajes procedurales o módulos de extensión.
+
 # Metadatos
 conformance-generated = Generado:
 conformance-commit = Commit:

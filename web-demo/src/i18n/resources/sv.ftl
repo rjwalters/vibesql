@@ -666,3 +666,12 @@ conformance-what-is-core = What is SQL:1999 Core?
 conformance-what-is-slt = What is SQLLogicTest?
 conformance-what-is-sqltest = What is sqltest?
 conformance-what-mean = What do our pass rates mean?
+
+# PostgreSQL Regression Tests
+conformance-pgsql-title = PostgreSQL Regressionstester
+conformance-pgsql-desc = Resultat från körning av <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">PostgreSQL:s regressionstestsvit</a> - den kanoniska testsviten för att validera PostgreSQL-kompatibilitet.
+conformance-pgsql-tests-passing = tester godkända
+conformance-pgsql-tests-excluded = tester exkluderade
+conformance-pgsql-pass-rate = Godkännandegrad
+conformance-pgsql-excluded-reason = Exkluderade tester använder PostgreSQL-specifika funktioner som inte är tillämpliga på VibeSQL
+conformance-pgsql-note = <strong>Obs:</strong> PostgreSQL regressionstester validerar SQL-beteende mot PostgreSQL:s referensimplementation. Exkluderade tester involverar PostgreSQL-specifika funktioner som systemkataloger, procedurspråk eller tilläggsmoduler.

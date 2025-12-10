@@ -662,6 +662,15 @@ conformance-failing-tests-desc = 以下测试目前失败。点击展开详情�
 conformance-view-failing = 查看失败测试详情（{ $count } 个测试）
 conformance-error-label = 错误：
 
+# PostgreSQL 回归测试
+conformance-pgsql-title = PostgreSQL 回归测试
+conformance-pgsql-desc = 运行 <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">PostgreSQL 回归测试套件</a>的结果 - 用于验证 PostgreSQL 兼容性的标准测试套件。
+conformance-pgsql-tests-passing = 测试通过
+conformance-pgsql-tests-excluded = 测试排除
+conformance-pgsql-pass-rate = 通过率
+conformance-pgsql-excluded-reason = 排除的测试使用了不适用于 VibeSQL 的 PostgreSQL 特定功能
+conformance-pgsql-note = <strong>注意：</strong>PostgreSQL 回归测试根据 PostgreSQL 参考实现验证 SQL 行为。排除的测试涉及 PostgreSQL 特定功能，如系统目录、过程语言或扩展模块。
+
 # 元数据
 conformance-generated = 生成时间：
 conformance-commit = 提交：

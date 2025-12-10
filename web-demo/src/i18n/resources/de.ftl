@@ -671,6 +671,15 @@ conformance-failing-tests-desc = Die folgenden Tests schlagen derzeit fehl. Klic
 conformance-view-failing = Details der fehlgeschlagenen Tests anzeigen ({ $count } Tests)
 conformance-error-label = Fehler:
 
+# PostgreSQL Regressionstests
+conformance-pgsql-title = PostgreSQL-Regressionstests
+conformance-pgsql-desc = Ergebnisse der <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">PostgreSQL-Regressionstestsuite</a> - die kanonische Testsuite zur Validierung der PostgreSQL-Kompatibilität.
+conformance-pgsql-tests-passing = Tests bestanden
+conformance-pgsql-tests-excluded = Tests ausgeschlossen
+conformance-pgsql-pass-rate = Erfolgsrate
+conformance-pgsql-excluded-reason = Ausgeschlossene Tests verwenden PostgreSQL-spezifische Funktionen, die nicht auf VibeSQL anwendbar sind
+conformance-pgsql-note = <strong>Hinweis:</strong> PostgreSQL-Regressionstests validieren das SQL-Verhalten gegen die PostgreSQL-Referenzimplementierung. Ausgeschlossene Tests betreffen PostgreSQL-spezifische Funktionen wie Systemkataloge, prozedurale Sprachen oder Erweiterungsmodule.
+
 # Metadaten
 conformance-generated = Generiert:
 conformance-commit = Commit:

@@ -658,3 +658,12 @@ conformance-what-is-core = What is SQL:1999 Core?
 conformance-what-is-slt = What is SQLLogicTest?
 conformance-what-is-sqltest = What is sqltest?
 conformance-what-mean = What do our pass rates mean?
+
+# PostgreSQL Regression Tests
+conformance-pgsql-title = اختبارات الانحدار لـ PostgreSQL
+conformance-pgsql-desc = نتائج تشغيل <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">مجموعة اختبارات الانحدار لـ PostgreSQL</a> - مجموعة الاختبارات القياسية المستخدمة للتحقق من توافق PostgreSQL.
+conformance-pgsql-tests-passing = اختبارات ناجحة
+conformance-pgsql-tests-excluded = اختبارات مستبعدة
+conformance-pgsql-pass-rate = معدل النجاح
+conformance-pgsql-excluded-reason = الاختبارات المستبعدة تستخدم ميزات خاصة بـ PostgreSQL غير قابلة للتطبيق على VibeSQL
+conformance-pgsql-note = <strong>ملاحظة:</strong> تتحقق اختبارات الانحدار لـ PostgreSQL من سلوك SQL مقارنة بالتنفيذ المرجعي لـ PostgreSQL. تتضمن الاختبارات المستبعدة ميزات خاصة بـ PostgreSQL مثل كتالوجات النظام واللغات الإجرائية ووحدات الإضافات.

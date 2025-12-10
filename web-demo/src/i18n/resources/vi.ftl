@@ -658,3 +658,12 @@ conformance-what-is-core = What is SQL:1999 Core?
 conformance-what-is-slt = What is SQLLogicTest?
 conformance-what-is-sqltest = What is sqltest?
 conformance-what-mean = What do our pass rates mean?
+
+# PostgreSQL Regression Tests
+conformance-pgsql-title = Kiểm Tra Hồi Quy PostgreSQL
+conformance-pgsql-desc = Kết quả chạy <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">bộ kiểm tra hồi quy PostgreSQL</a> - bộ kiểm tra tiêu chuẩn được sử dụng để xác nhận tính tương thích với PostgreSQL.
+conformance-pgsql-tests-passing = bài kiểm tra đạt
+conformance-pgsql-tests-excluded = bài kiểm tra loại trừ
+conformance-pgsql-pass-rate = Tỷ Lệ Đạt
+conformance-pgsql-excluded-reason = Các bài kiểm tra bị loại trừ sử dụng các tính năng riêng của PostgreSQL không áp dụng cho VibeSQL
+conformance-pgsql-note = <strong>Lưu ý:</strong> Các bài kiểm tra hồi quy PostgreSQL xác nhận hành vi SQL so với triển khai tham chiếu của PostgreSQL. Các bài kiểm tra bị loại trừ liên quan đến các tính năng riêng của PostgreSQL như danh mục hệ thống, ngôn ngữ thủ tục hoặc module mở rộng.

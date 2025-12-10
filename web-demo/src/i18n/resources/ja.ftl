@@ -675,6 +675,15 @@ conformance-failing-tests-desc = 以下のテストが現在失敗していま�
 conformance-view-failing = 失敗テストの詳細を表示（{ $count }テスト）
 conformance-error-label = エラー:
 
+# PostgreSQLリグレッションテスト
+conformance-pgsql-title = PostgreSQLリグレッションテスト
+conformance-pgsql-desc = <a href="https://www.postgresql.org/docs/current/regress.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">PostgreSQLのリグレッションテストスイート</a>の実行結果 - PostgreSQL互換性を検証するための標準テストスイートです。
+conformance-pgsql-tests-passing = テスト合格
+conformance-pgsql-tests-excluded = テスト除外
+conformance-pgsql-pass-rate = 合格率
+conformance-pgsql-excluded-reason = 除外されたテストはVibeSQL に適用できないPostgreSQL固有の機能を使用しています
+conformance-pgsql-note = <strong>注:</strong> PostgreSQLリグレッションテストは、PostgreSQLの参照実装に対してSQLの動作を検証します。除外されたテストは、システムカタログ、手続き型言語、または拡張モジュールなどのPostgreSQL固有の機能を含みます。
+
 # メタデータ
 conformance-generated = 生成日:
 conformance-commit = コミット:
