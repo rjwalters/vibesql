@@ -256,7 +256,7 @@ impl SharedDatabase {
         F: FnOnce(&Database) -> R,
     {
         let guard = self.read();
-        f(&*guard)
+        f(&guard)
     }
 
     /// Execute a write operation using a closure.
@@ -277,7 +277,7 @@ impl SharedDatabase {
         F: FnOnce(&mut Database) -> R,
     {
         let mut guard = self.write();
-        f(&mut *guard)
+        f(&mut guard)
     }
 
     /// Check if a table exists.
