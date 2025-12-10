@@ -996,15 +996,36 @@ function resetSummaryCardHeaders(): void {
 }
 
 /**
- * Update both speedup summary cards (vs SQLite and vs DuckDB)
+ * Update both speedup summary cards (vs SQLite and vs DuckDB, or vs MySQL for server mode)
  */
 function updateSpeedupSummary(
   sqliteSpeedup: { total: number; count: number },
-  duckdbSpeedup: { total: number; count: number }
+  duckdbSpeedup: { total: number; count: number },
+  isServerMode: boolean = false
 ): void {
   // Reset headers to default first
   resetSummaryCardHeaders();
-  // Update SQLite speedup
+
+  // For server mode, update labels to show MySQL comparison
+  if (isServerMode) {
+    const sqliteLabel = document.querySelector('#avg-speedup-sqlite')?.closest('.bg-white, .dark\\:bg-gray-800')?.querySelector('p');
+    if (sqliteLabel) {
+      sqliteLabel.textContent = t('bench-vs-mysql');
+    }
+    // Hide DuckDB card in server mode
+    const duckdbCard = document.getElementById('avg-speedup-duckdb')?.closest('.bg-white, .dark\\:bg-gray-800') as HTMLElement;
+    if (duckdbCard) {
+      duckdbCard.style.display = 'none';
+    }
+  } else {
+    // Show DuckDB card in embedded mode
+    const duckdbCard = document.getElementById('avg-speedup-duckdb')?.closest('.bg-white, .dark\\:bg-gray-800') as HTMLElement;
+    if (duckdbCard) {
+      duckdbCard.style.display = '';
+    }
+  }
+
+  // Update first speedup card (SQLite for embedded, MySQL for server)
   if (sqliteSpeedup.count > 0) {
     updateSpeedupDisplay('avg-speedup-sqlite', sqliteSpeedup.total / sqliteSpeedup.count);
   } else {
@@ -1015,14 +1036,16 @@ function updateSpeedupSummary(
     }
   }
 
-  // Update DuckDB speedup
-  if (duckdbSpeedup.count > 0) {
-    updateSpeedupDisplay('avg-speedup-duckdb', duckdbSpeedup.total / duckdbSpeedup.count);
-  } else {
-    const duckdbEl = document.getElementById('avg-speedup-duckdb');
-    if (duckdbEl) {
-      duckdbEl.textContent = t('bench-na');
-      duckdbEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
+  // Update DuckDB speedup (only for embedded mode)
+  if (!isServerMode) {
+    if (duckdbSpeedup.count > 0) {
+      updateSpeedupDisplay('avg-speedup-duckdb', duckdbSpeedup.total / duckdbSpeedup.count);
+    } else {
+      const duckdbEl = document.getElementById('avg-speedup-duckdb');
+      if (duckdbEl) {
+        duckdbEl.textContent = t('bench-na');
+        duckdbEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
+      }
     }
   }
 }
@@ -1036,53 +1059,90 @@ let currentChart: any = null;
 
 /**
  * Parse benchmark name to extract database and operation info
+ *
+ * Server benchmark formats:
+ *   tpch_server_q1_vibesql_server -> database: vibesql_server, queryNum: q1
+ *   tpch_server_q1_mysql -> database: mysql, queryNum: q1
+ *   tpcc_server_new_order_vibesql_server -> database: vibesql_server
+ *   sysbench_server_point_select_mysql -> database: mysql
+ *
+ * Embedded benchmark formats:
+ *   tpch_q1_pricing_summary_report_vibesql -> database: vibesql, queryNum: q1
+ *   tpcc_new_order_vibesql -> database: vibesql
  */
 function parseBenchmarkName(name: string, suite: BenchmarkSuite): { operation: string; database: string; queryNum?: string; description?: string } {
   const config = SUITE_CONFIGS[suite];
   const parts = name.split('_');
-  const database = parts[parts.length - 1]; // Last part is database name
 
-  // Check if this is a TPC-H query
+  // Handle vibesql_server as a compound database name (last two parts)
+  let database: string;
+  let endSlice: number;
+  if (parts.length >= 2 && parts[parts.length - 2] === 'vibesql' && parts[parts.length - 1] === 'server') {
+    database = 'vibesql_server';
+    endSlice = -2;
+  } else {
+    database = parts[parts.length - 1];
+    endSlice = -1;
+  }
+
+  // TPC-H Server format: "tpch_server_q1_vibesql_server" or "tpch_server_q1_mysql"
+  if (name.startsWith('tpch_server_')) {
+    // parts: ['tpch', 'server', 'q1', 'vibesql', 'server'] or ['tpch', 'server', 'q1', 'mysql']
+    const queryNum = parts[2]; // e.g., "q1"
+    const description = config.descriptions[queryNum];
+    const operation = parts.slice(3, endSlice).join('_');
+    return { operation, database, queryNum, description };
+  }
+
+  // TPC-H Embedded format: "tpch_q1_vibesql" or "tpch_q1_pricing_summary_report_vibesql"
   if (name.startsWith('tpch_')) {
-    // Extract query number (q1, q2, etc.)
     const queryNum = parts[1]; // e.g., "q1"
     const description = config.descriptions[queryNum];
-
-    // Operation name is everything except "tpch_", query number, and database
-    // e.g., "tpch_q1_pricing_summary_report_vibesql" -> "pricing_summary_report"
-    const operation = parts.slice(2, -1).join('_');
-
+    // Use queryNum as operation for grouping (handles both simple "tpch_q1_vibesql" and
+    // extended "tpch_q1_pricing_summary_report_vibesql" formats)
+    const operation = queryNum;
     return { operation, database, queryNum, description };
   }
 
   // TPC-DS format: "tpcds_q1_vibesql" or "tpcds_q1_store_returns_vibesql"
   if (name.startsWith('tpcds_')) {
-    // Extract query number (q1, q2, etc.)
     const queryNum = parts[1]; // e.g., "q1"
     const description = config.descriptions[queryNum];
-
-    // Operation name is everything except "tpcds_", query number, and database
-    const operation = parts.slice(2, -1).join('_');
-
+    // Use queryNum as operation for grouping (since TPC-DS has only query number + database)
+    const operation = queryNum;
     return { operation, database, queryNum, description };
   }
 
-  // TPC-C format: "tpcc_new_order_vibesql"
-  if (name.startsWith('tpcc_')) {
-    const operation = parts.slice(1, -1).join('_');
+  // TPC-C Server format: "tpcc_server_new_order_vibesql_server"
+  if (name.startsWith('tpcc_server_')) {
+    const operation = parts.slice(2, endSlice).join('_');
     const description = config.descriptions[operation];
     return { operation, database, description };
   }
 
-  // Sysbench format: "sysbench_point_select_vibesql"
+  // TPC-C Embedded format: "tpcc_new_order_vibesql"
+  if (name.startsWith('tpcc_')) {
+    const operation = parts.slice(1, endSlice).join('_');
+    const description = config.descriptions[operation];
+    return { operation, database, description };
+  }
+
+  // Sysbench Server format: "sysbench_server_point_select_mysql"
+  if (name.startsWith('sysbench_server_')) {
+    const operation = parts.slice(2, endSlice).join('_');
+    const description = config.descriptions[operation];
+    return { operation, database, description };
+  }
+
+  // Sysbench Embedded format: "sysbench_point_select_vibesql"
   if (name.startsWith('sysbench_')) {
-    const operation = parts.slice(1, -1).join('_');
+    const operation = parts.slice(1, endSlice).join('_');
     const description = config.descriptions[operation];
     return { operation, database, description };
   }
 
   // Legacy format
-  const operation = parts.slice(1, -1).join('_');
+  const operation = parts.slice(1, endSlice).join('_');
   return { operation, database };
 }
 
@@ -1113,6 +1173,22 @@ function calculateSpeedup(vibesql: number, sqlite: number): number {
 }
 
 /**
+ * Sort entries by query number (Q1, Q2, ..., Q9, Q10, Q11, ... Q99)
+ * Handles formats like "q1", "q10", "q99"
+ */
+function sortEntriesByQueryNumber<T>(entries: [string, T][]): [string, T][] {
+  return entries.sort((a, b) => {
+    const aMatch = a[0].match(/^q(\d+)$/i);
+    const bMatch = b[0].match(/^q(\d+)$/i);
+    if (aMatch && bMatch) {
+      return parseInt(aMatch[1]) - parseInt(bMatch[1]);
+    }
+    // Fall back to string comparison for non-query operations
+    return a[0].localeCompare(b[0]);
+  });
+}
+
+/**
  * Render results table
  */
 function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void {
@@ -1127,7 +1203,10 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
   const sqliteSpeedup = { total: 0, count: 0 };
   const duckdbSpeedup = { total: 0, count: 0 };
 
-  for (const [operation, databases] of grouped.entries()) {
+  // Sort entries by query number for TPC suites
+  const sortedEntries = sortEntriesByQueryNumber([...grouped.entries()]);
+
+  for (const [operation, databases] of sortedEntries) {
     const vibesql = databases.get('vibesql');
     const vibesqlServer = databases.get('vibesql_server');
     const sqlite = databases.get('sqlite');
@@ -1193,20 +1272,28 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
       return cell;
     };
 
-    // Create cells for each database
-    const vibesqlCell = createTimeCell(vibesql, 'vibesql');
-    row.appendChild(vibesqlCell);
+    // Create cells for each database based on benchmark type
+    // Server benchmarks (tpch-server, tpcc-server, sysbench-server) compare vibesql_server vs mysql
+    // Embedded benchmarks compare vibesql vs sqlite vs duckdb
+    const isServerBenchmark = suite.endsWith('-server');
 
-    const sqliteCell = createTimeCell(sqlite, 'sqlite');
-    row.appendChild(sqliteCell);
+    if (isServerBenchmark) {
+      // Server mode: VibeSQL Server vs MySQL
+      const vibesqlServerCell = createTimeCell(vibesqlServer, 'vibesql_server');
+      row.appendChild(vibesqlServerCell);
 
-    const duckdbCell = createTimeCell(duckdb, 'duckdb');
-    row.appendChild(duckdbCell);
-
-    // MySQL time - only show for sysbench-server
-    if (suite === 'sysbench-server') {
       const mysqlCell = createTimeCell(mysql, 'mysql');
       row.appendChild(mysqlCell);
+    } else {
+      // Embedded mode: VibeSQL vs SQLite vs DuckDB
+      const vibesqlCell = createTimeCell(vibesql, 'vibesql');
+      row.appendChild(vibesqlCell);
+
+      const sqliteCell = createTimeCell(sqlite, 'sqlite');
+      row.appendChild(sqliteCell);
+
+      const duckdbCell = createTimeCell(duckdb, 'duckdb');
+      row.appendChild(duckdbCell);
     }
 
     // Find and highlight the winner (fastest time)
@@ -1215,23 +1302,33 @@ function renderResultsTable(data: BenchmarkResults, suite: BenchmarkSuite): void
       winner.cell.className = CELL_CLASSES.winner;
     }
 
-    // Track speedup for summary cards (VibeSQL vs SQLite and DuckDB)
-    if (vibesql && vibesql.stats.mean > 0) {
-      if (sqlite && sqlite.stats.mean > 0) {
-        sqliteSpeedup.total += calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
+    // Track speedup for summary cards
+    if (isServerBenchmark) {
+      // Server mode: VibeSQL Server vs MySQL
+      if (vibesqlServer && vibesqlServer.stats.mean > 0 && mysql && mysql.stats.mean > 0) {
+        // Use sqliteSpeedup slot for MySQL comparison in server mode
+        sqliteSpeedup.total += calculateSpeedup(vibesqlServer.stats.mean, mysql.stats.mean);
         sqliteSpeedup.count++;
       }
-      if (duckdb && duckdb.stats.mean > 0) {
-        duckdbSpeedup.total += calculateSpeedup(vibesql.stats.mean, duckdb.stats.mean);
-        duckdbSpeedup.count++;
+    } else {
+      // Embedded mode: VibeSQL vs SQLite and DuckDB
+      if (vibesql && vibesql.stats.mean > 0) {
+        if (sqlite && sqlite.stats.mean > 0) {
+          sqliteSpeedup.total += calculateSpeedup(vibesql.stats.mean, sqlite.stats.mean);
+          sqliteSpeedup.count++;
+        }
+        if (duckdb && duckdb.stats.mean > 0) {
+          duckdbSpeedup.total += calculateSpeedup(vibesql.stats.mean, duckdb.stats.mean);
+          duckdbSpeedup.count++;
+        }
       }
     }
 
     tbody.appendChild(row);
   }
 
-  // Update summary cards
-  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
+  // Update summary cards (for server mode, sqliteSpeedup contains MySQL comparison)
+  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup, suite.endsWith('-server'));
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -1255,29 +1352,40 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
   }
 
   const grouped = groupBenchmarksByOperation(data.benchmarks, suite);
+  const isServerBenchmark = suite.endsWith('-server');
 
   const labels: string[] = [];
   const vibesqlData: number[] = [];
+  const vibesqlServerData: number[] = [];
   const sqliteData: number[] = [];
   const duckdbData: number[] = [];
   const mysqlData: number[] = [];
 
-  for (const [operation, databases] of grouped.entries()) {
+  // Sort entries by query number for TPC suites
+  const sortedEntries = sortEntriesByQueryNumber([...grouped.entries()]);
+
+  for (const [operation, databases] of sortedEntries) {
     const vibesql = databases.get('vibesql');
+    const vibesqlServer = databases.get('vibesql_server');
     const sqlite = databases.get('sqlite');
     const duckdb = databases.get('duckdb');
     const mysql = databases.get('mysql');
 
     // Skip failed queries (negative mean) in the chart
     const vibesqlValid = vibesql && vibesql.stats.mean > 0;
+    const vibesqlServerValid = vibesqlServer && vibesqlServer.stats.mean > 0;
     const sqliteValid = sqlite && sqlite.stats.mean > 0;
     const duckdbValid = duckdb && duckdb.stats.mean > 0;
     const mysqlValid = mysql && mysql.stats.mean > 0;
 
-    if (vibesqlValid || sqliteValid || duckdbValid || mysqlValid) {
+    const hasValidData = isServerBenchmark
+      ? (vibesqlServerValid || mysqlValid)
+      : (vibesqlValid || sqliteValid || duckdbValid);
+
+    if (hasValidData) {
       // Get label - prefer query number if available (TPC-H)
       let label = operation.replace(/_/g, ' ').toUpperCase();
-      const firstBench = vibesql || sqlite || duckdb || mysql;
+      const firstBench = vibesql || vibesqlServer || sqlite || duckdb || mysql;
       if (firstBench) {
         const parsed = parseBenchmarkName(firstBench.name, suite);
         if (parsed.queryNum) {
@@ -1287,22 +1395,28 @@ function renderChart(data: BenchmarkResults, suite: BenchmarkSuite): void {
 
       labels.push(label);
       vibesqlData.push(vibesqlValid ? vibesql!.stats.mean * 1000 : 0); // Convert to ms
+      vibesqlServerData.push(vibesqlServerValid ? vibesqlServer!.stats.mean * 1000 : 0);
       sqliteData.push(sqliteValid ? sqlite!.stats.mean * 1000 : 0);
       duckdbData.push(duckdbValid ? duckdb!.stats.mean * 1000 : 0);
       mysqlData.push(mysqlValid ? mysql!.stats.mean * 1000 : 0);
     }
   }
 
-  // Build datasets array - MySQL only for sysbench-server
-  const datasets = [
-    createDataset('vibesql', vibesqlData),
-    createDataset('sqlite', sqliteData),
-    createDataset('duckdb', duckdbData),
-  ];
-
-  // Only add MySQL dataset for sysbench-server
-  if (suite === 'sysbench-server') {
-    datasets.push(createDataset('mysql', mysqlData));
+  // Build datasets array based on benchmark mode
+  let datasets;
+  if (isServerBenchmark) {
+    // Server mode: VibeSQL Server vs MySQL
+    datasets = [
+      createDataset('vibesql_server', vibesqlServerData),
+      createDataset('mysql', mysqlData),
+    ];
+  } else {
+    // Embedded mode: VibeSQL vs SQLite vs DuckDB
+    datasets = [
+      createDataset('vibesql', vibesqlData),
+      createDataset('sqlite', sqliteData),
+      createDataset('duckdb', duckdbData),
+    ];
   }
 
   currentChart = new Chart(canvas, {
@@ -1764,14 +1878,8 @@ function renderSysbenchTable(data: BenchmarkResults, suite: BenchmarkSuite): voi
     tbody.appendChild(row);
   }
 
-  // Update summary cards
-  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup);
-
-  // Update header labels for server mode (SQLite card shows MySQL comparison)
-  if (isServer) {
-    const sqliteHeader = document.querySelector('#avg-speedup-sqlite')?.parentElement?.querySelector('h3');
-    if (sqliteHeader) sqliteHeader.textContent = t('bench-vs-mysql');
-  }
+  // Update summary cards (pass isServer to correctly show MySQL comparison label)
+  updateSpeedupSummary(sqliteSpeedup, duckdbSpeedup, isServer);
 
   const opsTestedEl = document.getElementById('ops-tested');
   if (opsTestedEl) {
@@ -2319,23 +2427,15 @@ function restoreTPCTableHeaders(suite?: BenchmarkSuite): void {
 
   const thead = table.querySelector('thead tr');
   if (thead) {
-    // Sysbench embedded shows VibeSQL vs SQLite vs DuckDB
-    if (suite === 'sysbench-embedded') {
-      thead.innerHTML = `
-        <th class="px-4 py-3">${t('bench-table-operation')}</th>
-        <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>
-        <th class="px-4 py-3 text-right">${t('bench-table-sqlite')}</th>
-        <th class="px-4 py-3 text-right">${t('bench-table-duckdb')}</th>
-      `;
-    // Sysbench server shows VibeSQL Server vs MySQL
-    } else if (suite === 'sysbench-server') {
+    // Server benchmarks (tpch-server, tpcc-server, sysbench-server) show VibeSQL Server vs MySQL
+    if (suite?.endsWith('-server')) {
       thead.innerHTML = `
         <th class="px-4 py-3">${t('bench-table-operation')}</th>
         <th class="px-4 py-3 text-right" title="${t('bench-vibesql-server-title')}">${t('bench-table-vibesql-server')}</th>
         <th class="px-4 py-3 text-right">${t('bench-table-mysql')}</th>
       `;
     } else {
-      // TPC-H, TPC-DS, TPC-C: VibeSQL vs SQLite vs DuckDB (embedded databases only)
+      // Embedded benchmarks (tpch, tpcds, tpcc, sysbench-embedded): VibeSQL vs SQLite vs DuckDB
       thead.innerHTML = `
         <th class="px-4 py-3">${t('bench-table-operation')}</th>
         <th class="px-4 py-3 text-right">${t('bench-table-vibesql')}</th>

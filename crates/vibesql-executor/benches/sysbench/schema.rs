@@ -250,6 +250,15 @@ fn load_sbtest_sqlite(conn: &SqliteConn, data: &mut SysbenchData) {
 
 #[cfg(feature = "duckdb-comparison")]
 fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
+    // Note: We intentionally DO NOT create the secondary index k_1 on the k column.
+    // DuckDB 1.4.2 has a bug in its ART (Adaptive Radix Tree) index implementation
+    // that causes a FATAL exception during index deletion when updating indexed columns:
+    //   "INTERNAL Error: invalid node type for ART ARTScanner: 0"
+    // This bug manifests during the update_index workload with larger datasets (10K+ rows).
+    // Since the update_index benchmark updates the k column, avoiding the index prevents
+    // the crash. This makes DuckDB results for update_index slightly unfair (no index
+    // maintenance overhead) but allows the benchmark to complete.
+    // See: https://github.com/duckdb/duckdb/issues (ART index deletion bug)
     conn.execute_batch(
         r#"
         CREATE TABLE sbtest1 (
@@ -258,7 +267,6 @@ fn create_sbtest_schema_duckdb(conn: &DuckDBConn) {
             c VARCHAR(120) NOT NULL DEFAULT '',
             padding VARCHAR(60) NOT NULL DEFAULT ''
         );
-        CREATE INDEX k_1 ON sbtest1(k);
         "#,
     )
     .unwrap();
