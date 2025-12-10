@@ -435,11 +435,21 @@ impl SelectExecutor<'_> {
         let batch = columnar::ColumnarBatch::from_storage_columnar(&columnar_arc)?;
 
         // Extract predicates from WHERE clause
-        let predicates = stmt
-            .where_clause
-            .as_ref()
-            .and_then(|where_expr| columnar::extract_column_predicates(where_expr, &schema))
-            .unwrap_or_default();
+        // IMPORTANT: If we have a WHERE clause but can't extract predicates (e.g., IS NULL,
+        // IS NOT NULL, or other unsupported expressions), we MUST fall back to row-based
+        // execution. Using an empty predicate list would incorrectly skip filtering! (#4XXX)
+        let predicates = match stmt.where_clause.as_ref() {
+            Some(where_expr) => match columnar::extract_column_predicates(where_expr, &schema) {
+                Some(preds) => preds,
+                None => {
+                    log::debug!(
+                        "Native columnar: skipping - WHERE clause contains unsupported predicates"
+                    );
+                    return Ok(None);
+                }
+            },
+            None => vec![],
+        };
 
         // Extract select expressions
         // For GROUP BY queries, filter to only aggregate functions (GROUP BY columns are handled separately)
