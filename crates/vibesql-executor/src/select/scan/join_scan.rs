@@ -98,8 +98,18 @@ where
     if matches!(join_type, vibesql_ast::JoinType::Semi) {
         let left_row_count = left_result.as_slice().len();
         if left_row_count > 0 && left_row_count < INL_THRESHOLD {
+            // Try exact-match INL first (requires full PK coverage)
             if let Some(result) =
                 try_index_nested_loop_semi_join(&left_result, right, condition, database)?
+            {
+                return Ok(result);
+            }
+
+            // Try prefix-scan INL (works with partial index key match)
+            // This handles cases like TPC-H Q4 where we join on L_ORDERKEY but the
+            // index is on (L_ORDERKEY, L_LINENUMBER) - we can still use a prefix scan
+            if let Some(result) =
+                try_prefix_scan_semi_join(&left_result, right, condition, database)?
             {
                 return Ok(result);
             }
@@ -919,4 +929,184 @@ fn find_column_index(schema: &CombinedSchema, col_name: &str) -> Option<usize> {
     }
 
     None
+}
+
+/// Prefix-scan based semi-join for cases where an index exists but not all key columns
+/// are covered by the join condition.
+///
+/// This handles cases like TPC-H Q4:
+/// - Join on `o_orderkey = l_orderkey`
+/// - Index on `(l_orderkey, l_linenumber)`
+/// - Additional filter: `l_commitdate < l_receiptdate`
+///
+/// Instead of building a hash table from 60K lineitem rows, we do ~500 prefix scans
+/// (one per qualifying order), which is much faster when the left side is small.
+fn try_prefix_scan_semi_join(
+    left_result: &super::FromResult,
+    right_from: &vibesql_ast::FromClause,
+    condition: &Option<vibesql_ast::Expression>,
+    database: &vibesql_storage::Database,
+) -> Result<Option<super::FromResult>, ExecutorError> {
+    let debug = std::env::var("PREFIX_SEMI_DEBUG").is_ok();
+
+    // Must have a join condition
+    let cond = match condition {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // Right side must be a simple table (not a join or subquery)
+    let (right_table_name, _right_alias) = match right_from {
+        vibesql_ast::FromClause::Table { name, alias, .. } => (name.clone(), alias.clone()),
+        _ => return Ok(None),
+    };
+
+    // Get the right table
+    let right_table = match database.get_table(&right_table_name) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // Parse the join condition to extract equi-join columns and additional filters
+    let (equi_join, right_filters) =
+        match parse_semi_join_condition(cond, left_result, &right_table_name) {
+            Some(parsed) => parsed,
+            None => return Ok(None),
+        };
+
+    if debug {
+        eprintln!(
+            "[PREFIX_SEMI] left_rows={}, join on {}={}, right_filters={:?}",
+            left_result.as_slice().len(),
+            equi_join.left_col,
+            equi_join.right_col,
+            right_filters
+        );
+    }
+
+    // Find an index on the right table that starts with the join key column
+    let right_col_upper = equi_join.right_col.to_uppercase();
+    let index_names = database.list_indexes_for_table(&right_table_name);
+
+    // Find an index where the first column is the join key
+    let mut usable_index_name: Option<String> = None;
+    for index_name in &index_names {
+        if let Some(idx_metadata) = database.get_index(index_name) {
+            if let Some(first_col) = idx_metadata.columns.first() {
+                if first_col.column_name.to_uppercase() == right_col_upper {
+                    usable_index_name = Some(index_name.clone());
+                    break;
+                }
+            }
+        }
+    }
+
+    let index_name = match usable_index_name {
+        Some(name) => name,
+        None => {
+            if debug {
+                eprintln!(
+                    "[PREFIX_SEMI] No index starting with {} on {}",
+                    equi_join.right_col, right_table_name
+                );
+            }
+            return Ok(None);
+        }
+    };
+
+    let index = match database.get_index_data(&index_name) {
+        Some(idx) => idx,
+        None => return Ok(None),
+    };
+
+    if debug {
+        eprintln!(
+            "[PREFIX_SEMI] Using index {} for prefix scan on {}",
+            index_name,
+            right_table_name
+        );
+    }
+
+    // Get left column index for extracting join keys
+    let left_col_idx = match find_column_index(&left_result.schema, &equi_join.left_col) {
+        Some(idx) => idx,
+        None => return Ok(None),
+    };
+
+    // Build evaluator for right-side filter (e.g., l_commitdate < l_receiptdate)
+    let right_schema =
+        CombinedSchema::from_table(right_table_name.clone(), right_table.schema.clone());
+    let evaluator = right_filters
+        .as_ref()
+        .map(|_| CombinedExpressionEvaluator::with_database(&right_schema, database));
+
+    // Collect distinct join keys from left side
+    let left_slice = left_result.as_slice();
+    let mut seen_keys: AHashSet<vibesql_types::SqlValue> =
+        AHashSet::with_capacity(left_slice.len());
+    let mut matching_keys: AHashSet<vibesql_types::SqlValue> = AHashSet::new();
+
+    let start = std::time::Instant::now();
+
+    for left_row in left_slice {
+        let join_key = &left_row.values[left_col_idx];
+
+        // Skip NULL join keys
+        if *join_key == vibesql_types::SqlValue::Null {
+            continue;
+        }
+
+        // Skip duplicate keys (we only need one match for SEMI join)
+        if seen_keys.contains(join_key) {
+            continue;
+        }
+        seen_keys.insert(join_key.clone());
+
+        // Do prefix lookup: find all rows where the first index column = join_key
+        let row_indices = index.prefix_multi_lookup(&[join_key.clone()]);
+
+        // Check if any of the matching rows pass the additional filter
+        for row_idx in row_indices {
+            // Get the row data
+            let right_row = match right_table.get_row(row_idx) {
+                Some(row) => row,
+                None => continue, // Row deleted or invalid
+            };
+
+            // Apply filter if any
+            let passes = if let (Some(filter), Some(eval)) = (&right_filters, &evaluator) {
+                eval.clear_cse_cache();
+                matches!(eval.eval(filter, right_row), Ok(vibesql_types::SqlValue::Boolean(true)))
+            } else {
+                true // No filter
+            };
+
+            if passes {
+                matching_keys.insert(join_key.clone());
+                break; // Semi-join: we only need one match per left row
+            }
+        }
+    }
+
+    if debug {
+        let elapsed = start.elapsed();
+        eprintln!(
+            "[PREFIX_SEMI] {} distinct keys, {} matches, {:?} elapsed",
+            seen_keys.len(),
+            matching_keys.len(),
+            elapsed
+        );
+    }
+
+    // Build result: all left rows whose join key is in matching_keys
+    let result_rows: Vec<vibesql_storage::Row> = left_slice
+        .iter()
+        .filter(|row| {
+            let key = &row.values[left_col_idx];
+            matching_keys.contains(key)
+        })
+        .cloned()
+        .collect();
+
+    Ok(Some(super::FromResult::from_rows(left_result.schema.clone(), result_rows)))
 }
