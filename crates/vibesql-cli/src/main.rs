@@ -109,7 +109,7 @@ struct Args {
     verbose: bool,
 
     /// Output format for query results
-    #[arg(long, value_parser = ["table", "json", "csv", "markdown", "html"], value_name = "FORMAT")]
+    #[arg(long, value_parser = ["table", "json", "csv", "markdown", "html", "raw"], value_name = "FORMAT")]
     format: Option<String>,
 
     /// Set the display language (e.g., en-US, es, ja)
@@ -283,6 +283,7 @@ fn parse_format(format_str: &str) -> Option<OutputFormat> {
         "csv" => Some(OutputFormat::Csv),
         "markdown" => Some(OutputFormat::Markdown),
         "html" => Some(OutputFormat::Html),
+        "raw" => Some(OutputFormat::Raw),
         _ => None,
     }
 }

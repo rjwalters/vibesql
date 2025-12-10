@@ -68,6 +68,7 @@ impl MetaCommand {
                         "csv" => Some(MetaCommand::SetFormat(OutputFormat::Csv)),
                         "markdown" | "md" => Some(MetaCommand::SetFormat(OutputFormat::Markdown)),
                         "html" => Some(MetaCommand::SetFormat(OutputFormat::Html)),
+                        "raw" => Some(MetaCommand::SetFormat(OutputFormat::Raw)),
                         _ => None,
                     }
                 } else {
@@ -156,6 +157,7 @@ impl MetaCommand {
                         "csv" => Some(MetaCommand::SetFormat(OutputFormat::Csv)),
                         "markdown" => Some(MetaCommand::SetFormat(OutputFormat::Markdown)),
                         "html" => Some(MetaCommand::SetFormat(OutputFormat::Html)),
+                        "raw" => Some(MetaCommand::SetFormat(OutputFormat::Raw)),
                         _ => None,
                     }
                 } else {
@@ -277,6 +279,10 @@ mod tests {
             MetaCommand::parse("\\f html"),
             Some(MetaCommand::SetFormat(OutputFormat::Html))
         ));
+        assert!(matches!(
+            MetaCommand::parse("\\f raw"),
+            Some(MetaCommand::SetFormat(OutputFormat::Raw))
+        ));
     }
 
     #[test]
@@ -394,6 +400,10 @@ mod tests {
         assert!(matches!(
             MetaCommand::parse(".mode html"),
             Some(MetaCommand::SetFormat(OutputFormat::Html))
+        ));
+        assert!(matches!(
+            MetaCommand::parse(".mode raw"),
+            Some(MetaCommand::SetFormat(OutputFormat::Raw))
         ));
         // SQLite aliases
         assert!(matches!(
