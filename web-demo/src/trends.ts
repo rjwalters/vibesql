@@ -132,16 +132,17 @@ function createTimeSeriesChart(
     return timeA.localeCompare(timeB);
   });
 
-  // Create labels from timestamps
-  const labels = sortedData.map(point =>
-    formatTimestampForAxis(point.timestamp, point.date)
-  );
-
-  // Prepare datasets
+  // Create time-based data points (x = timestamp, y = value)
   const datasets = config.datasets.map(ds => ({
     label: ds.label,
-    data: sortedData.map(point => point[ds.key] as number)
-      .map(v => (v !== undefined && v !== null) ? v : null),
+    data: sortedData.map(point => {
+      const value = point[ds.key] as number;
+      if (value === undefined || value === null) return null;
+      // Parse timestamp or date into a Date object for time scale
+      const timeStr = point.timestamp || point.date;
+      const time = new Date(timeStr);
+      return { x: time, y: value };
+    }).filter(d => d !== null),
     backgroundColor: ds.color.bg,
     borderColor: ds.color.border,
     borderWidth: 2,
@@ -159,7 +160,7 @@ function createTimeSeriesChart(
 
   const chart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets },
+    data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -169,7 +170,16 @@ function createTimeSeriesChart(
       },
       scales: {
         x: {
-          type: 'category',
+          type: 'time',
+          time: {
+            tooltipFormat: 'MMM d, yyyy HH:mm',
+            displayFormats: {
+              hour: 'MMM d HH:mm',
+              day: 'MMM d',
+              week: 'MMM d',
+              month: 'MMM yyyy',
+            },
+          },
           title: {
             display: true,
             text: 'Run Time',
@@ -214,9 +224,11 @@ function createTimeSeriesChart(
               if (items.length === 0) return '';
               const idx = items[0].dataIndex;
               const point = sortedData[idx];
-              const time = point.timestamp
-                ? new Date(point.timestamp).toLocaleString()
-                : point.date;
+              // Use the raw data's x value (Date object) for display
+              const rawData = items[0].raw;
+              const time = rawData?.x instanceof Date
+                ? rawData.x.toLocaleString()
+                : (point.timestamp ? new Date(point.timestamp).toLocaleString() : point.date);
               return `${time} (${point.commit || 'unknown'})`;
             },
             label: (context: any) => {

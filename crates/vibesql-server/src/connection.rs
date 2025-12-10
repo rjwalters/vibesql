@@ -1645,16 +1645,6 @@ impl ConnectionHandler {
         self.flush_write_buffer().await
     }
 
-    async fn send_row_description(&mut self, fields: Vec<FieldDescription>) -> Result<()> {
-        BackendMessage::RowDescription { fields }.encode(&mut self.write_buf);
-        self.flush_write_buffer().await
-    }
-
-    async fn send_data_row(&mut self, values: Vec<Option<Vec<u8>>>) -> Result<()> {
-        BackendMessage::DataRow { values }.encode(&mut self.write_buf);
-        self.flush_write_buffer().await
-    }
-
     async fn send_command_complete(&mut self, tag: &str) -> Result<()> {
         BackendMessage::CommandComplete { tag: tag.to_string() }.encode(&mut self.write_buf);
         self.flush_write_buffer().await
