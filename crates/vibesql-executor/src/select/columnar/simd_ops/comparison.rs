@@ -40,22 +40,47 @@ impl_comparison!(ge_i32, i32, >=);
 impl_comparison!(eq_i32, i32, ==);
 impl_comparison!(ne_i32, i32, !=);
 
-// f64 comparisons
-impl_comparison!(lt_f64, f64, <);
-impl_comparison!(gt_f64, f64, >);
-impl_comparison!(le_f64, f64, <=);
-impl_comparison!(ge_f64, f64, >=);
+// f64 comparisons with epsilon tolerance
+// These use epsilon comparison to handle precision issues when comparing
+// Float(f32) column values against f64 literals. When f32 values are stored
+// as f64 in columnar format, they retain f32 precision artifacts.
+// Example: 0.07_f32 as f64 = 0.07000000029... vs 0.07_f64 = 0.07000000000...
+const F64_EPSILON: f64 = 1e-9;
 
-/// Equality comparison for f64 (exact bit equality).
+/// Less-than comparison for f64 with epsilon tolerance.
 #[inline]
-pub fn eq_f64(values: &[f64], target: f64) -> Vec<bool> {
-    values.iter().map(|&v| v == target).collect()
+pub fn lt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v < threshold - F64_EPSILON).collect()
 }
 
-/// Inequality comparison for f64.
+/// Greater-than comparison for f64 with epsilon tolerance.
+#[inline]
+pub fn gt_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v > threshold + F64_EPSILON).collect()
+}
+
+/// Less-than-or-equal comparison for f64 with epsilon tolerance.
+#[inline]
+pub fn le_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v <= threshold + F64_EPSILON).collect()
+}
+
+/// Greater-than-or-equal comparison for f64 with epsilon tolerance.
+#[inline]
+pub fn ge_f64(values: &[f64], threshold: f64) -> Vec<bool> {
+    values.iter().map(|&v| v >= threshold - F64_EPSILON).collect()
+}
+
+/// Equality comparison for f64 with epsilon tolerance.
+#[inline]
+pub fn eq_f64(values: &[f64], target: f64) -> Vec<bool> {
+    values.iter().map(|&v| (v - target).abs() < F64_EPSILON).collect()
+}
+
+/// Inequality comparison for f64 with epsilon tolerance.
 #[inline]
 pub fn ne_f64(values: &[f64], target: f64) -> Vec<bool> {
-    values.iter().map(|&v| v != target).collect()
+    values.iter().map(|&v| (v - target).abs() >= F64_EPSILON).collect()
 }
 
 // ============================================================================
@@ -76,11 +101,12 @@ pub fn between_i32(values: &[i32], low: i32, high: i32) -> Vec<bool> {
     values.iter().map(|&v| v >= low && v <= high).collect()
 }
 
-/// Check if f64 values are in range [low, high] (inclusive).
+/// Check if f64 values are in range [low, high] (inclusive) with epsilon tolerance.
 /// More efficient than separate ge + le comparisons + AND.
+/// Uses epsilon tolerance to handle f32→f64 conversion precision artifacts.
 #[inline]
 pub fn between_f64(values: &[f64], low: f64, high: f64) -> Vec<bool> {
-    values.iter().map(|&v| v >= low && v <= high).collect()
+    values.iter().map(|&v| v >= low - F64_EPSILON && v <= high + F64_EPSILON).collect()
 }
 
 // ============================================================================
@@ -401,7 +427,7 @@ pub fn ne_i32_packed(values: &[i32], target: i32) -> PackedMask {
     PackedMask::from_words(words, len)
 }
 
-/// Less-than comparison for f64 returning packed mask.
+/// Less-than comparison for f64 returning packed mask with epsilon tolerance.
 #[inline]
 pub fn lt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     let len = values.len();
@@ -417,7 +443,7 @@ pub fn lt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v < threshold {
+            if v < threshold - F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
@@ -427,7 +453,7 @@ pub fn lt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     PackedMask::from_words(words, len)
 }
 
-/// Greater-than comparison for f64 returning packed mask.
+/// Greater-than comparison for f64 returning packed mask with epsilon tolerance.
 #[inline]
 pub fn gt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     let len = values.len();
@@ -443,7 +469,7 @@ pub fn gt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v > threshold {
+            if v > threshold + F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
@@ -453,7 +479,7 @@ pub fn gt_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     PackedMask::from_words(words, len)
 }
 
-/// Less-than-or-equal comparison for f64 returning packed mask.
+/// Less-than-or-equal comparison for f64 returning packed mask with epsilon tolerance.
 #[inline]
 pub fn le_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     let len = values.len();
@@ -469,7 +495,7 @@ pub fn le_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v <= threshold {
+            if v <= threshold + F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
@@ -479,7 +505,7 @@ pub fn le_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     PackedMask::from_words(words, len)
 }
 
-/// Greater-than-or-equal comparison for f64 returning packed mask.
+/// Greater-than-or-equal comparison for f64 returning packed mask with epsilon tolerance.
 #[inline]
 pub fn ge_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     let len = values.len();
@@ -495,7 +521,7 @@ pub fn ge_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v >= threshold {
+            if v >= threshold - F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
@@ -505,7 +531,7 @@ pub fn ge_f64_packed(values: &[f64], threshold: f64) -> PackedMask {
     PackedMask::from_words(words, len)
 }
 
-/// Equality comparison for f64 returning packed mask.
+/// Equality comparison for f64 returning packed mask with epsilon tolerance.
 #[inline]
 pub fn eq_f64_packed(values: &[f64], target: f64) -> PackedMask {
     let len = values.len();
@@ -521,7 +547,7 @@ pub fn eq_f64_packed(values: &[f64], target: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v == target {
+            if (v - target).abs() < F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
@@ -531,7 +557,7 @@ pub fn eq_f64_packed(values: &[f64], target: f64) -> PackedMask {
     PackedMask::from_words(words, len)
 }
 
-/// Inequality comparison for f64 returning packed mask.
+/// Inequality comparison for f64 returning packed mask with epsilon tolerance.
 #[inline]
 pub fn ne_f64_packed(values: &[f64], target: f64) -> PackedMask {
     let len = values.len();
@@ -547,7 +573,7 @@ pub fn ne_f64_packed(values: &[f64], target: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v != target {
+            if (v - target).abs() >= F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
@@ -614,6 +640,7 @@ pub fn between_i32_packed(values: &[i32], low: i32, high: i32) -> PackedMask {
 }
 
 /// Check if f64 values are in range [low, high] (inclusive), returning packed mask.
+/// Uses epsilon tolerance to handle f32→f64 conversion precision artifacts.
 #[inline]
 pub fn between_f64_packed(values: &[f64], low: f64, high: f64) -> PackedMask {
     let len = values.len();
@@ -629,7 +656,7 @@ pub fn between_f64_packed(values: &[f64], low: f64, high: f64) -> PackedMask {
         let end = (start + 64).min(len);
         let mut bits = 0u64;
         for (bit_idx, &v) in values[start..end].iter().enumerate() {
-            if v >= low && v <= high {
+            if v >= low - F64_EPSILON && v <= high + F64_EPSILON {
                 bits |= 1u64 << bit_idx;
             }
         }
