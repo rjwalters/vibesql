@@ -312,6 +312,10 @@ harness = false
 name = "sqltest_conformance"
 path = "tests/compliance/sqltest_conformance.rs"
 
+[[test]]
+name = "pgsql_regress"
+path = "tests/compliance/pgsql_regress.rs"
+
 # Integration tests - End-to-end scenarios
 [[test]]
 name = "benchmark_example"

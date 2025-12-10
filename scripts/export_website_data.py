@@ -549,6 +549,45 @@ def count_sqllogictest_statements() -> Tuple[int, int]:
     return total_statements, file_count
 
 
+def load_pgsql_regress_data() -> Dict[str, Any]:
+    """Load PostgreSQL regression test results from JSON file."""
+    json_path = Path.home() / ".vibesql" / "test_results" / "pgsql_regress_results.json"
+
+    if json_path.exists():
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+
+            summary = data.get("summary", {})
+            by_category = data.get("by_category", {})
+
+            return {
+                "summary": {
+                    "total_tests": summary.get("total", 0),
+                    "passing": summary.get("passed", 0),
+                    "failing": summary.get("failed", 0),
+                    "skipped": summary.get("skipped", 0),
+                    "errors": summary.get("errors", 0),
+                    "pass_rate": round(summary.get("pass_rate", 0), 2)
+                },
+                "by_category": {
+                    cat: {
+                        "total": stats.get("total", 0),
+                        "passed": stats.get("passed", 0),
+                        "failed": stats.get("failed", 0),
+                        "skipped": stats.get("skipped", 0),
+                        "pass_rate": round(stats.get("pass_rate", 0), 2)
+                    }
+                    for cat, stats in by_category.items()
+                },
+                "files": data.get("files", {})
+            }
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return {"summary": {}, "by_category": {}, "files": {}}
+
+
 def load_conformance_data() -> Dict[str, Any]:
     """Load conformance data from JSON files."""
     json_paths = [
@@ -556,6 +595,8 @@ def load_conformance_data() -> Dict[str, Any]:
         get_repo_root() / "web-demo" / "public" / "badges" / "sqllogictest_cumulative.json",
         get_repo_root() / "web-demo" / "public" / "badges" / "sqllogictest_summary.json",
     ]
+
+    sqllogictest_data = {"summary": {}, "files": {}}
 
     for json_path in json_paths:
         if json_path.exists():
@@ -575,7 +616,7 @@ def load_conformance_data() -> Dict[str, Any]:
                         tests_passing = summary.get("passed", 0)
                         actual_tests = summary.get("total_available_files", 0)
 
-                    return {
+                    sqllogictest_data = {
                         "summary": {
                             "total_tests": actual_tests,
                             "passing": tests_passing,
@@ -588,10 +629,18 @@ def load_conformance_data() -> Dict[str, Any]:
                             "pass_rate": round(pass_rate, 2)
                         }
                     }
+                    break
             except (json.JSONDecodeError, KeyError):
                 continue
 
-    return {"summary": {}, "files": {}}
+    # Also load PostgreSQL regression test data
+    pgsql_data = load_pgsql_regress_data()
+
+    return {
+        "summary": sqllogictest_data.get("summary", {}),
+        "files": sqllogictest_data.get("files", {}),
+        "pgsql_regress": pgsql_data
+    }
 
 
 def export_dashboard(data: BenchmarkData, previous_url: Optional[str] = None) -> Dict:
@@ -708,6 +757,9 @@ def export_dashboard(data: BenchmarkData, previous_url: Optional[str] = None) ->
     # Build dashboard
     commit, branch = get_git_info()
 
+    # Extract pgsql_regress summary for dashboard
+    pgsql_regress_summary = conformance.get("pgsql_regress", {}).get("summary", {})
+
     dashboard = {
         "generated_at": datetime.now().isoformat() + "Z",
         "version": DASHBOARD_VERSION,
@@ -719,6 +771,14 @@ def export_dashboard(data: BenchmarkData, previous_url: Optional[str] = None) ->
                 "files_passing": conformance.get("files", {}).get("passing"),
                 "files_total": conformance.get("files", {}).get("total")
             },
+            "pgsql_regress": {
+                "pass_rate": pgsql_regress_summary.get("pass_rate"),
+                "passing": pgsql_regress_summary.get("passing"),
+                "total_tests": pgsql_regress_summary.get("total_tests"),
+                "failing": pgsql_regress_summary.get("failing"),
+                "skipped": pgsql_regress_summary.get("skipped"),
+                "errors": pgsql_regress_summary.get("errors")
+            } if pgsql_regress_summary else None,
             "tpch": {
                 "queries_passing": tpch_passed,
                 "queries_total": tpch_total,
@@ -907,13 +967,16 @@ def main():
         tpcds = summary.get("tpcds", {})
         tpcc = summary.get("tpcc", {})
         conformance = summary.get("conformance", {})
+        pgsql_regress = summary.get("pgsql_regress", {})
 
         print(f"  TPC-H: {tpch.get('queries_passing')}/{tpch.get('queries_total')} queries, geo mean: {tpch.get('geo_mean_ms')}ms")
         if tpcds:
             print(f"  TPC-DS: {tpcds.get('queries_passing')}/{tpcds.get('queries_total')} queries, geo mean: {tpcds.get('geo_mean_ms')}ms")
         if tpcc:
             print(f"  TPC-C: {tpcc.get('vibesql_tps')} TPS")
-        print(f"  Conformance: {conformance.get('pass_rate')}% ({conformance.get('tests_passing')}/{conformance.get('tests_total')} tests)")
+        print(f"  SQLLogicTest: {conformance.get('pass_rate')}% ({conformance.get('tests_passing')}/{conformance.get('tests_total')} tests)")
+        if pgsql_regress and pgsql_regress.get('total_tests'):
+            print(f"  PostgreSQL Regress: {pgsql_regress.get('pass_rate')}% ({pgsql_regress.get('passing')}/{pgsql_regress.get('total_tests')} tests, {pgsql_regress.get('skipped', 0)} skipped)")
         print(f"  -> {path.name}")
         exported.append(path)
 
