@@ -5,6 +5,7 @@ use std::{
 use vibesql_l10n::vibe_msg;
 
 use crate::{
+    commands::MetaCommand,
     executor::SqlExecutor,
     formatter::{OutputFormat, ResultFormatter},
 };
@@ -73,6 +74,24 @@ impl ScriptExecutor {
                 println!("{}", vibe_msg!("script-executing", current = (idx + 1) as i64, total = statements.len() as i64));
             }
 
+            // Check if this is a meta-command (dot or backslash command)
+            if let Some(meta_cmd) = MetaCommand::parse(stmt) {
+                match self.handle_meta_command(meta_cmd) {
+                    Ok(should_exit) => {
+                        if should_exit {
+                            // .quit/.exit in script mode - stop processing
+                            return Ok(());
+                        }
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("{}", vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string()));
+                        error_count += 1;
+                    }
+                }
+                continue;
+            }
+
             match self.executor.execute(stmt) {
                 Ok(result) => {
                     self.formatter.print_result(&result);
@@ -109,6 +128,86 @@ impl ScriptExecutor {
             Ok(())
         }
     }
+
+    /// Handle a meta-command. Returns Ok(true) if the script should exit.
+    fn handle_meta_command(&mut self, cmd: MetaCommand) -> anyhow::Result<bool> {
+        match cmd {
+            MetaCommand::Quit => {
+                return Ok(true);
+            }
+            MetaCommand::Help => {
+                self.print_help();
+            }
+            MetaCommand::DescribeTable(table_name) => {
+                self.executor.describe_table(&table_name)?;
+            }
+            MetaCommand::ListTables => {
+                self.executor.list_tables()?;
+            }
+            MetaCommand::ListSchemas => {
+                self.executor.list_schemas()?;
+            }
+            MetaCommand::ListIndexes => {
+                self.executor.list_indexes()?;
+            }
+            MetaCommand::ListRoles => {
+                self.executor.list_roles()?;
+            }
+            MetaCommand::SetFormat(format) => {
+                self.formatter.set_format(format);
+            }
+            MetaCommand::Timing => {
+                self.executor.toggle_timing();
+            }
+            MetaCommand::Copy { table, file_path, direction, format } => {
+                self.executor.handle_copy(&table, &file_path, direction, format)?;
+            }
+            MetaCommand::Save(path) => {
+                let save_path = path.or_else(|| self.database_path.clone());
+                match save_path {
+                    Some(ref p) => {
+                        self.executor.save_database(p)?;
+                        println!("{}", vibe_msg!("database-saved", path = p.as_str()));
+                    }
+                    None => {
+                        eprintln!("{}", vibe_msg!("no-database-file"));
+                    }
+                }
+            }
+            MetaCommand::Errors => {
+                // No error history in script mode - just skip
+            }
+        }
+        Ok(false)
+    }
+
+    fn print_help(&self) {
+        println!(
+            "
+Meta-commands (PostgreSQL-style):
+  \\d [table]      - Describe table or list all tables
+  \\dt             - List tables
+  \\ds             - List schemas
+  \\di             - List indexes
+  \\f <format>     - Set output format
+  \\timing         - Toggle query timing
+  \\copy           - Import/export data
+  \\save [file]    - Save database
+  \\q, \\quit      - Exit
+
+Dot-commands (SQLite-style):
+  .tables         - List tables
+  .schema [table] - Show CREATE statement or list tables
+  .indexes        - List indexes
+  .databases      - List schemas
+  .mode <format>  - Set output format (table, json, csv, markdown, html)
+  .timer          - Toggle query timing
+  .import FILE TABLE - Import data from file
+  .save [file]    - Save database
+  .quit, .exit    - Exit
+"
+        );
+    }
 }
 
 /// Check if a SQL statement is a modification (DDL/DML) that should trigger auto-save
@@ -129,6 +228,7 @@ fn is_modification_statement(sql: &str) -> bool {
 /// 2. Removes multi-line comments (/* ... */)
 /// 3. Splits on semicolons, but respects string literals and comments
 /// 4. Handles escaped quotes within strings ('' for SQL)
+/// 5. Treats newlines as delimiters for dot-commands (SQLite compatibility)
 fn parse_statements(script: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current_statement = String::new();
@@ -185,6 +285,17 @@ fn parse_statements(script: &str) -> Vec<String> {
             }
             current_statement.clear();
             continue;
+        }
+
+        // Handle newlines as delimiters for dot-commands (SQLite compatibility)
+        // Dot-commands don't require semicolons - a newline ends them
+        if !in_string && ch == '\n' {
+            let trimmed = current_statement.trim();
+            if !trimmed.is_empty() && (trimmed.starts_with('.') || trimmed.starts_with('\\')) {
+                statements.push(trimmed.to_string());
+                current_statement.clear();
+                continue;
+            }
         }
 
         // Regular character
@@ -304,5 +415,37 @@ INSERT INTO logs VALUES (2, 'Success');
         assert_eq!(stmts.len(), 2);
         assert!(stmts[0].contains("parse failed; retry"));
         assert!(stmts[1].contains("Success"));
+    }
+
+    #[test]
+    fn test_parse_dot_commands_without_semicolons() {
+        // SQLite dot-commands don't require semicolons - newline ends them
+        let script = ".tables\n.schema users\nSELECT * FROM users;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 3);
+        assert_eq!(stmts[0], ".tables");
+        assert_eq!(stmts[1], ".schema users");
+        assert_eq!(stmts[2], "SELECT * FROM users");
+    }
+
+    #[test]
+    fn test_parse_backslash_commands_without_semicolons() {
+        // Backslash commands also work without semicolons
+        let script = "\\dt\n\\d users\nSELECT 1;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 3);
+        assert_eq!(stmts[0], "\\dt");
+        assert_eq!(stmts[1], "\\d users");
+        assert_eq!(stmts[2], "SELECT 1");
+    }
+
+    #[test]
+    fn test_parse_mixed_commands_and_sql() {
+        let script = ".mode json\nSELECT * FROM users;\n.tables";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 3);
+        assert_eq!(stmts[0], ".mode json");
+        assert_eq!(stmts[1], "SELECT * FROM users");
+        assert_eq!(stmts[2], ".tables");
     }
 }
