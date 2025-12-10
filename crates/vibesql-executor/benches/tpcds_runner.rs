@@ -33,7 +33,7 @@
 //!
 //! Usage:
 //!   cargo run --release --bench tpcds_runner
-//!   SCALE_FACTOR=0.001 cargo run --release --bench tpcds_runner  # Smaller dataset
+//!   SCALE_FACTOR=0.005 cargo run --release --bench tpcds_runner  # Minimum scale factor
 //!   SKIP_SLOW=1 cargo run --release --bench tpcds_runner  # Skip known slow queries
 //!   BATCH_SIZE=5 cargo run --release --bench tpcds_runner  # Run 5 queries per batch
 //!   MEMORY_WARN_MB=4000 cargo run --release --bench tpcds_runner  # Warn at 4GB RSS
@@ -81,6 +81,15 @@ const SLOW_QUERIES: &[&str] = &[
 
 /// Default batch size for query execution
 const DEFAULT_BATCH_SIZE: usize = 10;
+
+/// Minimum scale factor to ensure meaningful benchmark results.
+///
+/// At very small scale factors (e.g., 0.001), many TPC-DS queries return zero
+/// or very few rows due to filter selectivity on sparse data. This causes
+/// misleadingly fast execution times (sub-millisecond) that don't reflect
+/// actual query performance. SF 0.005 provides enough data for meaningful
+/// query execution while remaining fast enough for quick iteration.
+const MIN_SCALE_FACTOR: f64 = 0.005;
 
 /// Default memory warning threshold in MB
 const DEFAULT_MEMORY_WARN_MB: f64 = 6000.0;
@@ -219,8 +228,19 @@ fn main() {
     println!("=== TPC-DS Benchmark Runner ===\n");
 
     // Get configuration from environment
-    let scale_factor: f64 =
-        std::env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01);
+    let requested_scale_factor: Option<f64> =
+        std::env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok());
+    let scale_factor = requested_scale_factor.unwrap_or(0.01).max(MIN_SCALE_FACTOR);
+
+    // Warn if scale factor was overridden
+    if let Some(requested) = requested_scale_factor {
+        if requested < MIN_SCALE_FACTOR {
+            println!(
+                "⚠ SCALE_FACTOR={} too small, using minimum {} (small scale factors produce unreliable results)",
+                requested, MIN_SCALE_FACTOR
+            );
+        }
+    }
 
     let batch_size: usize =
         std::env::var("BATCH_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_BATCH_SIZE);

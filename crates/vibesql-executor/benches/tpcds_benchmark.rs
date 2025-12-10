@@ -26,7 +26,7 @@
 //! - `WARMUP_ITERATIONS` - Number of warmup runs per query (default: 3)
 //! - `BENCHMARK_ITERATIONS` - Number of timed runs per query (default: 10)
 //! - `BENCHMARK_TIMEOUT_SECS` - Timeout per query (default: 30)
-//! - `SCALE_FACTOR` - TPC-DS scale factor (default: 0.001)
+//! - `SCALE_FACTOR` - TPC-DS scale factor (default: 0.005, minimum: 0.005)
 //! - `QUERY_FILTER` - Comma-separated list of queries to run (e.g., "Q1,Q6,Q9")
 //! - `VIBESQL_MEMORY_THRESHOLD` - Memory pressure threshold (default: 80%)
 //! - `MYSQL_URL` - MySQL connection string (optional)
@@ -59,7 +59,16 @@ use mysql::PooledConn;
 use rusqlite::Connection as SqliteConn;
 
 /// Default scale factor for TPC-DS benchmarks
-const DEFAULT_SCALE_FACTOR: f64 = 0.001;
+const DEFAULT_SCALE_FACTOR: f64 = 0.005;
+
+/// Minimum scale factor to ensure meaningful benchmark results.
+///
+/// At very small scale factors (e.g., 0.001), many TPC-DS queries return zero
+/// or very few rows due to filter selectivity on sparse data. This causes
+/// misleadingly fast execution times (sub-millisecond) that don't reflect
+/// actual query performance. SF 0.005 provides enough data for meaningful
+/// query execution while remaining fast enough for quick iteration.
+const MIN_SCALE_FACTOR: f64 = 0.005;
 
 /// Queries that use SQL features SQLite doesn't support (ROLLUP, CUBE, STDDEV_SAMP, parenthesized UNION)
 #[cfg(feature = "sqlite-comparison")]
@@ -234,7 +243,7 @@ fn print_help(program: &str) {
     eprintln!("  WARMUP_ITERATIONS        Warmup runs per query (default: 3)");
     eprintln!("  BENCHMARK_ITERATIONS     Timed runs per query (default: 10)");
     eprintln!("  BENCHMARK_TIMEOUT_SECS   Timeout per query (default: 30)");
-    eprintln!("  SCALE_FACTOR             TPC-DS scale factor (default: 0.001)");
+    eprintln!("  SCALE_FACTOR             TPC-DS scale factor (default: 0.005, min: 0.005)");
     eprintln!("  QUERY_FILTER             Queries to run (e.g., Q1,Q6,Q9)");
     eprintln!("  VIBESQL_MEMORY_THRESHOLD Memory threshold percentage (default: 80)");
     eprintln!("  TPCDS_ENGINE             Engine selection: sqlite,duckdb,mysql,all");
@@ -258,10 +267,19 @@ fn main() {
     eprintln!("=== TPC-DS Benchmark ===");
 
     // Get configuration
-    let scale_factor: f64 = env::var("SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_SCALE_FACTOR);
+    let requested_scale_factor: Option<f64> =
+        env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok());
+    let scale_factor = requested_scale_factor.unwrap_or(DEFAULT_SCALE_FACTOR).max(MIN_SCALE_FACTOR);
+
+    // Warn if scale factor was overridden
+    if let Some(requested) = requested_scale_factor {
+        if requested < MIN_SCALE_FACTOR {
+            eprintln!(
+                "⚠ SCALE_FACTOR={} too small, using minimum {} (small scale factors produce unreliable results)",
+                requested, MIN_SCALE_FACTOR
+            );
+        }
+    }
 
     let config = BenchConfig::default();
     let harness = Harness::with_config(config.clone());
