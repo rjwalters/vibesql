@@ -159,6 +159,7 @@ impl Repl {
                     crate::formatter::OutputFormat::Csv => "csv",
                     crate::formatter::OutputFormat::Markdown => "markdown",
                     crate::formatter::OutputFormat::Html => "html",
+                    crate::formatter::OutputFormat::Raw => "raw",
                 };
                 println!("{}", vibe_msg!("format-changed", format = format_name));
             }

@@ -10,6 +10,10 @@ pub enum OutputFormat {
     Csv,
     Markdown,
     Html,
+    /// Raw output format: space-separated values, one row per line.
+    /// NULL values are represented as empty strings.
+    /// Compatible with SQLite TCL test harness expectations.
+    Raw,
 }
 
 pub struct ResultFormatter {
@@ -32,9 +36,14 @@ impl ResultFormatter {
             OutputFormat::Csv => self.print_csv(result),
             OutputFormat::Markdown => self.print_markdown(result),
             OutputFormat::Html => self.print_html(result),
+            OutputFormat::Raw => {
+                // Raw format: no timing info, just raw values
+                self.print_raw(result);
+                return;
+            }
         }
 
-        // Print timing if available
+        // Print timing if available (not for raw format)
         if let Some(time_ms) = result.execution_time_ms {
             println!("{}", vibe_msg!("rows-with-time", count = result.row_count as i64, time = format!("{:.3}", time_ms / 1000.0)));
         } else {
@@ -155,6 +164,28 @@ impl ResultFormatter {
             .replace('"', "&quot;")
             .replace('\'', "&#39;")
     }
+
+    /// Print results in raw format for SQLite TCL test compatibility.
+    /// - Space-separated values within each row
+    /// - One row per line
+    /// - NULL values output as empty strings
+    /// - No headers, no borders, no row count
+    fn print_raw(&self, result: &QueryResult) {
+        for row in &result.rows {
+            let values: Vec<&str> = row
+                .iter()
+                .map(|val| {
+                    // SQLite TCL tests expect NULL to be empty string
+                    if val == "NULL" || val.is_empty() {
+                        ""
+                    } else {
+                        val.as_str()
+                    }
+                })
+                .collect();
+            println!("{}", values.join(" "));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -209,5 +240,45 @@ mod tests {
         // These should handle empty results gracefully
         formatter.print_markdown(&result);
         formatter.print_html(&result);
+    }
+
+    #[test]
+    fn test_raw_format() {
+        let mut formatter = ResultFormatter::new();
+        formatter.set_format(OutputFormat::Raw);
+        let result = create_test_result();
+
+        // Just verify it doesn't panic - output goes to stdout
+        formatter.print_raw(&result);
+    }
+
+    #[test]
+    fn test_raw_format_with_nulls() {
+        let mut formatter = ResultFormatter::new();
+        formatter.set_format(OutputFormat::Raw);
+        let result = QueryResult {
+            columns: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            rows: vec![
+                vec!["1".to_string(), "NULL".to_string(), "3".to_string()],
+                vec!["".to_string(), "test".to_string(), "NULL".to_string()],
+            ],
+            row_count: 2,
+            execution_time_ms: None,
+        };
+
+        // Just verify it doesn't panic - output goes to stdout
+        // NULL values should be converted to empty strings
+        formatter.print_raw(&result);
+    }
+
+    #[test]
+    fn test_raw_format_empty_result() {
+        let mut formatter = ResultFormatter::new();
+        formatter.set_format(OutputFormat::Raw);
+        let result =
+            QueryResult { columns: vec![], rows: vec![], row_count: 0, execution_time_ms: None };
+
+        // Should handle empty results gracefully
+        formatter.print_raw(&result);
     }
 }
