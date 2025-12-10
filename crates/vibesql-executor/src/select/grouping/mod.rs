@@ -6,11 +6,14 @@
 //! - ROLLUP, CUBE, and GROUPING SETS expansion
 //! - SQL value comparison and arithmetic helpers
 //! - Specialized GROUP BY key types for efficient hashing
+//! - Parallel aggregation using Sink/Combine/Finalize pattern (Issue #4132)
 
 mod aggregates;
 mod grouping_sets;
 mod hash;
 mod keys;
+#[cfg(feature = "parallel")]
+mod parallel_sink;
 
 // Re-export public API
 pub(crate) use aggregates::{compare_sql_values, AggregateAccumulator};
@@ -20,3 +23,5 @@ pub(super) use grouping_sets::{
 };
 pub(super) use hash::group_rows;
 pub(crate) use keys::{GroupKey, GroupKeySpec};
+#[cfg(feature = "parallel")]
+pub(crate) use parallel_sink::{parallel_group_aggregate, AggregateInfo};

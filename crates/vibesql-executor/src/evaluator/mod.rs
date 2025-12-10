@@ -14,6 +14,9 @@ mod expression_hash;
 mod expressions;
 pub(crate) mod functions;
 pub(crate) mod operators;
+#[cfg(feature = "parallel")]
+pub(crate) mod parallel;
+#[cfg(not(feature = "parallel"))]
 mod parallel;
 pub(crate) mod pattern;
 mod single;
