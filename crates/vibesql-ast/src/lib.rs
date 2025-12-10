@@ -20,8 +20,19 @@
 //! - [`visitor::StatementVisitor`]: Statement traversal
 //!
 //! See the module documentation for usage examples.
+//!
+//! # SQL Pretty-Printing
+//!
+//! The [`pretty_print`] module provides the [`pretty_print::ToSql`] trait for converting
+//! AST nodes back to valid SQL strings:
+//!
+//! ```ignore
+//! use vibesql_ast::pretty_print::ToSql;
+//! let sql = select_stmt.to_sql();
+//! ```
 
 pub mod arena;
+pub mod pretty_print;
 pub mod visitor;
 
 mod ddl;

@@ -215,8 +215,9 @@ fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
         .map(|cols| format!(" ({})", cols.join(", ")))
         .unwrap_or_default();
 
-    // For the query, use Debug format since we don't have a SQL pretty-printer for AST
-    format!("CREATE VIEW {}{} AS {:?}", view.name, columns_str, view.query)
+    // Use the ToSql trait to generate valid SQL from the AST
+    use vibesql_ast::pretty_print::ToSql;
+    format!("CREATE VIEW {}{} AS {}", view.name, columns_str, view.query.to_sql())
 }
 
 /// Generate CREATE TRIGGER SQL statement for a trigger
@@ -331,8 +332,8 @@ fn format_referential_action(action: &ReferentialAction) -> &'static str {
 
 /// Format an expression for SQL output
 fn format_expression(expr: &vibesql_ast::Expression) -> String {
-    // Use Debug formatting for now - a proper SQL formatter could be added later
-    format!("{:?}", expr)
+    use vibesql_ast::pretty_print::ToSql;
+    expr.to_sql()
 }
 
 #[cfg(test)]
