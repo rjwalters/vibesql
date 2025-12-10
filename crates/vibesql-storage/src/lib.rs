@@ -36,7 +36,7 @@ pub use columnar_cache::{CacheStats, ColumnarCache};
 pub use database::{
     print_delete_profile_summary, reset_delete_profile_stats, Database, DatabaseConfig,
     DeleteProfileStats, IndexData, IndexManager, IndexMetadata, OwnedStreamingRangeScan,
-    SpatialIndexMetadata, SpillPolicy, TransactionState, DELETE_PROFILE_STATS,
+    SharedDatabase, SpatialIndexMetadata, SpillPolicy, TransactionState, DELETE_PROFILE_STATS,
 };
 pub use error::{StorageError, StorageResult};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};
