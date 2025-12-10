@@ -154,7 +154,7 @@ impl ParallelConfig {
 use rayon::prelude::*;
 use vibesql_storage::Row;
 
-use super::morsel::{global_config, morsel_parallel_filter, morsel_parallel_filter_map, morsel_parallel_map};
+use super::morsel::{global_config, morsel_parallel_filter, morsel_parallel_filter_map, morsel_parallel_map, morsel_parallel_sort};
 
 /// Parallel scan with filtering predicate.
 ///
@@ -362,6 +362,47 @@ where
     } else {
         // Sequential fallback for small datasets
         rows.iter().filter_map(filter_map).collect()
+    }
+}
+
+/// Morsel-driven parallel sort with work-stealing.
+///
+/// Sorts rows using a two-phase approach:
+/// 1. **Phase 1 (Parallel)**: Workers steal morsels and sort them locally
+/// 2. **Phase 2 (Sequential)**: K-way merge of sorted morsels using a min-heap
+///
+/// This provides dynamic load balancing during the sort phase, which is beneficial
+/// when comparison costs vary across rows (e.g., variable-length strings, complex keys).
+///
+/// # When to Use
+///
+/// - Large datasets (>100K rows) with varying comparison costs
+/// - When you observe load imbalance with static partitioning (`par_sort_by`)
+/// - Queries with ORDER BY on multiple columns or complex expressions
+///
+/// For simpler cases with uniform comparison costs, rayon's `par_sort_by` may suffice.
+///
+/// # Arguments
+/// * `rows` - Input rows to sort
+/// * `compare` - Comparison function for ordering rows
+///
+/// # Returns
+/// New vector containing sorted rows
+#[allow(dead_code)]
+pub fn morsel_scan_sort<F>(rows: &[Row], compare: F) -> Vec<Row>
+where
+    F: Fn(&Row, &Row) -> std::cmp::Ordering + Sync + Send,
+{
+    let config = ParallelConfig::global();
+
+    if config.should_parallelize_sort(rows.len()) {
+        // Use morsel-driven execution for dynamic load balancing
+        morsel_parallel_sort(rows, global_config(), compare)
+    } else {
+        // Sequential fallback for small datasets
+        let mut result = rows.to_vec();
+        result.sort_by(compare);
+        result
     }
 }
 
