@@ -241,13 +241,33 @@ impl MysqlExecutor {
 // Query Filter Parsing
 // =============================================================================
 
+/// Check if a string looks like a valid query filter (e.g., "Q6", "Q1,Q6,Q14")
+fn is_valid_query_filter(s: &str) -> bool {
+    // Must be non-empty and each comma-separated part should be Q followed by digits
+    !s.is_empty()
+        && s.split(',').all(|part| {
+            let part = part.trim();
+            !part.is_empty()
+                && part.starts_with(|c: char| c == 'Q' || c == 'q')
+                && part.len() > 1
+                && part[1..].chars().all(|c| c.is_ascii_digit())
+        })
+}
+
 fn get_query_filter() -> Option<Vec<String>> {
     let args: Vec<String> = env::args().collect();
-    let user_args: Vec<_> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
 
-    if !user_args.is_empty() && user_args[0] != "help" && user_args[0] != "--help" {
+    // Find the first argument that looks like a valid query filter
+    // This ignores file paths from glob expansion (e.g., ./target/release/deps/tpch_server-*)
+    let query_arg = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--") && *a != "help")
+        .find(|a| is_valid_query_filter(a));
+
+    if let Some(filter) = query_arg {
         return Some(
-            user_args[0]
+            filter
                 .split(',')
                 .map(|s| s.trim().to_uppercase())
                 .filter(|s| !s.is_empty())
