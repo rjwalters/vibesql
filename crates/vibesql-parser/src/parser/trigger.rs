@@ -157,14 +157,9 @@ impl Parser {
                         message: "Unexpected end of input in trigger action".to_string(),
                     });
                 }
-                Token::Semicolon => {
-                    // Semicolon inside trigger body, not end of statement
-                    sql_parts.push(";".to_string());
-                    self.advance();
-                }
                 token => {
-                    // Collect other tokens
-                    sql_parts.push(format!("{:?}", token));
+                    // Convert token back to valid SQL using to_sql()
+                    sql_parts.push(token.to_sql());
                     self.advance();
                 }
             }

@@ -2,7 +2,9 @@
 //!
 //! Handles CREATE TRIGGER, ALTER TRIGGER, and DROP TRIGGER statements
 
-use vibesql_ast::{AlterTriggerAction, AlterTriggerStmt, CreateTriggerStmt, DropTriggerStmt};
+use vibesql_ast::{
+    AlterTriggerAction, AlterTriggerStmt, CreateTriggerStmt, DropTriggerStmt, TriggerTiming,
+};
 use vibesql_catalog::TriggerDefinition;
 use vibesql_storage::Database;
 
@@ -17,9 +19,21 @@ impl TriggerExecutor {
         db: &mut Database,
         stmt: &CreateTriggerStmt,
     ) -> Result<String, ExecutorError> {
-        // Verify the target table exists
-        if !db.catalog.table_exists(&stmt.table_name) {
-            return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
+        // INSTEAD OF triggers can only be created on views
+        // BEFORE and AFTER triggers can only be created on tables
+        if stmt.timing == TriggerTiming::InsteadOf {
+            // Verify the target view exists
+            if db.catalog.get_view(&stmt.table_name).is_none() {
+                return Err(ExecutorError::Other(format!(
+                    "INSTEAD OF trigger requires a view, but '{}' is not a view",
+                    stmt.table_name
+                )));
+            }
+        } else {
+            // Verify the target table exists
+            if !db.catalog.table_exists(&stmt.table_name) {
+                return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
+            }
         }
 
         // Create trigger definition from statement
