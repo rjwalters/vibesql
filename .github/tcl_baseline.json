@@ -1,0 +1,8 @@
+{
+  "priority1_pass_rate": 3.1,
+  "total_tests": 64,
+  "passed": 2,
+  "updated_at": "2025-12-10",
+  "git_commit": "2fc6ebe4",
+  "note": "Initial baseline from Priority 1 tests (5 files: select1-5.test)"
+}
