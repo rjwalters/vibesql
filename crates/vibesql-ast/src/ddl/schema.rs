@@ -103,6 +103,9 @@ pub struct CreateViewStmt {
     pub or_replace: bool,
     /// Whether this is a temporary view (CREATE TEMP VIEW or CREATE TEMPORARY VIEW)
     pub temporary: bool,
+    /// Original SQL definition for sqlite_master compatibility
+    /// This is populated during parsing to preserve the exact SQL text
+    pub sql_definition: Option<String>,
 }
 
 /// DROP VIEW statement

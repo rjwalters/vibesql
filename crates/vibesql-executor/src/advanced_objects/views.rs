@@ -22,12 +22,22 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
         stmt.columns.clone()
     };
 
-    let view = ViewDefinition::new(
-        stmt.view_name.clone(),
-        columns,
-        (*stmt.query).clone(),
-        stmt.with_check_option,
-    );
+    let view = if let Some(ref sql) = stmt.sql_definition {
+        ViewDefinition::new_with_sql(
+            stmt.view_name.clone(),
+            columns,
+            (*stmt.query).clone(),
+            stmt.with_check_option,
+            sql.clone(),
+        )
+    } else {
+        ViewDefinition::new(
+            stmt.view_name.clone(),
+            columns,
+            (*stmt.query).clone(),
+            stmt.with_check_option,
+        )
+    };
 
     if stmt.or_replace {
         // DROP the view if it exists, then CREATE

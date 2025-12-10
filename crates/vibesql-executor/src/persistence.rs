@@ -69,7 +69,7 @@ pub fn load_sql_dump<P: AsRef<Path>>(path: P) -> Result<Database, ExecutorError>
         })?;
 
         // Execute the statement
-        execute_statement_for_load(&mut db, statement).map_err(|e| {
+        execute_statement_for_load(&mut db, statement, trimmed).map_err(|e| {
             ExecutorError::Other(format!(
                 "Failed to execute statement {} in {:?}: {}\nStatement: {}",
                 idx + 1,
@@ -90,6 +90,7 @@ pub fn load_sql_dump<P: AsRef<Path>>(path: P) -> Result<Database, ExecutorError>
 fn execute_statement_for_load(
     db: &mut Database,
     statement: vibesql_ast::Statement,
+    original_sql: &str,
 ) -> Result<(), ExecutorError> {
     match statement {
         vibesql_ast::Statement::CreateSchema(schema_stmt) => {
@@ -101,7 +102,9 @@ fn execute_statement_for_load(
         vibesql_ast::Statement::CreateIndex(index_stmt) => {
             CreateIndexExecutor::execute(&index_stmt, db)?;
         }
-        vibesql_ast::Statement::CreateView(view_stmt) => {
+        vibesql_ast::Statement::CreateView(mut view_stmt) => {
+            // Store original SQL for sqlite_master compatibility
+            view_stmt.sql_definition = Some(original_sql.to_string());
             ViewExecutor::execute_create_view(&view_stmt, db)?;
         }
         vibesql_ast::Statement::CreateRole(role_stmt) => {

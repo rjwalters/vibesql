@@ -100,6 +100,7 @@ impl Parser {
             with_check_option,
             or_replace,
             temporary,
+            sql_definition: None, // Will be populated by the statement executor if needed
         })
     }
 

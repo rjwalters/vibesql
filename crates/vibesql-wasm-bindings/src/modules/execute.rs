@@ -325,7 +325,9 @@ impl Database {
                 serde_wasm_bindgen::to_value(&result)
                     .map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))
             }
-            vibesql_ast::Statement::CreateView(stmt) => {
+            vibesql_ast::Statement::CreateView(mut stmt) => {
+                // Store original SQL for sqlite_master compatibility
+                stmt.sql_definition = Some(sql.to_string());
                 vibesql_executor::advanced_objects::execute_create_view(&stmt, &mut self.db)
                     .map_err(|e| JsValue::from_str(&format!("Execution error: {:?}", e)))?;
                 let result = ExecuteResult {

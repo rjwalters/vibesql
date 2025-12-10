@@ -221,7 +221,7 @@ fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
 
 /// Generate CREATE TRIGGER SQL statement for a trigger
 fn generate_create_trigger_sql(trigger: &vibesql_catalog::TriggerDefinition) -> String {
-    use vibesql_ast::{TriggerEvent, TriggerGranularity, TriggerTiming};
+    use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
 
     let timing = match trigger.timing {
         TriggerTiming::Before => "BEFORE",
@@ -237,22 +237,25 @@ fn generate_create_trigger_sql(trigger: &vibesql_catalog::TriggerDefinition) -> 
     let event = match &trigger.event {
         TriggerEvent::Insert => "INSERT".to_string(),
         TriggerEvent::Update(None) => "UPDATE".to_string(),
-        TriggerEvent::Update(Some(cols)) => {
-            return format!(
-                "CREATE TRIGGER {} {} UPDATE OF {} ON {} FOR EACH {} ...",
-                trigger.name,
-                timing,
-                cols.join(", "),
-                trigger.table_name,
-                granularity
-            );
-        }
+        TriggerEvent::Update(Some(cols)) => format!("UPDATE OF {}", cols.join(", ")),
         TriggerEvent::Delete => "DELETE".to_string(),
     };
 
+    // Include WHEN clause if present
+    let when_clause = trigger
+        .when_condition
+        .as_ref()
+        .map(|expr| format!(" WHEN ({})", format_expression(expr)))
+        .unwrap_or_default();
+
+    // Include trigger body from TriggerAction
+    let body = match &trigger.triggered_action {
+        TriggerAction::RawSql(sql) => sql.clone(),
+    };
+
     format!(
-        "CREATE TRIGGER {} {} {} ON {} FOR EACH {} ...",
-        trigger.name, timing, event, trigger.table_name, granularity
+        "CREATE TRIGGER {} {} {} ON {} FOR EACH {}{}{}",
+        trigger.name, timing, event, trigger.table_name, granularity, when_clause, body
     )
 }
 
@@ -519,5 +522,125 @@ mod tests {
 
         let sql = generate_create_index_sql(&index);
         assert_eq!(sql, "CREATE UNIQUE INDEX idx_email ON users (email(50))");
+    }
+
+    #[test]
+    fn test_generate_create_trigger_sql_basic() {
+        use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+        use vibesql_catalog::TriggerDefinition;
+
+        let trigger = TriggerDefinition {
+            name: "audit_insert".to_string(),
+            table_name: "users".to_string(),
+            timing: TriggerTiming::After,
+            event: TriggerEvent::Insert,
+            granularity: TriggerGranularity::Row,
+            when_condition: None,
+            triggered_action: TriggerAction::RawSql(" BEGIN INSERT INTO audit VALUES (NEW.id); END".to_string()),
+            enabled: true,
+        };
+
+        let sql = generate_create_trigger_sql(&trigger);
+        assert_eq!(
+            sql,
+            "CREATE TRIGGER audit_insert AFTER INSERT ON users FOR EACH ROW BEGIN INSERT INTO audit VALUES (NEW.id); END"
+        );
+    }
+
+    #[test]
+    fn test_generate_create_trigger_sql_with_update_of() {
+        use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+        use vibesql_catalog::TriggerDefinition;
+
+        let trigger = TriggerDefinition {
+            name: "track_status_change".to_string(),
+            table_name: "orders".to_string(),
+            timing: TriggerTiming::Before,
+            event: TriggerEvent::Update(Some(vec!["status".to_string(), "updated_at".to_string()])),
+            granularity: TriggerGranularity::Row,
+            when_condition: None,
+            triggered_action: TriggerAction::RawSql(" BEGIN SELECT 1; END".to_string()),
+            enabled: true,
+        };
+
+        let sql = generate_create_trigger_sql(&trigger);
+        assert!(sql.contains("UPDATE OF status, updated_at"));
+        assert!(sql.contains("CREATE TRIGGER track_status_change BEFORE UPDATE OF"));
+    }
+
+    #[test]
+    fn test_generate_create_trigger_sql_instead_of() {
+        use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+        use vibesql_catalog::TriggerDefinition;
+
+        let trigger = TriggerDefinition {
+            name: "instead_delete".to_string(),
+            table_name: "my_view".to_string(),
+            timing: TriggerTiming::InsteadOf,
+            event: TriggerEvent::Delete,
+            granularity: TriggerGranularity::Row,
+            when_condition: None,
+            triggered_action: TriggerAction::RawSql(" BEGIN DELETE FROM base_table WHERE id = OLD.id; END".to_string()),
+            enabled: true,
+        };
+
+        let sql = generate_create_trigger_sql(&trigger);
+        assert!(sql.contains("INSTEAD OF DELETE"));
+        assert!(sql.contains("FOR EACH ROW"));
+    }
+
+    /// Create a minimal SelectStmt for testing purposes
+    fn create_minimal_select_stmt() -> vibesql_ast::SelectStmt {
+        vibesql_ast::SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+        }
+    }
+
+    #[test]
+    fn test_generate_create_view_sql_with_definition() {
+        use vibesql_catalog::ViewDefinition;
+
+        // Create a view with sql_definition set
+        let view = ViewDefinition::new_with_sql(
+            "active_users".to_string(),
+            Some(vec!["id".to_string(), "name".to_string()]),
+            create_minimal_select_stmt(),
+            false,
+            "CREATE VIEW active_users (id, name) AS SELECT id, name FROM users WHERE active = 1".to_string(),
+        );
+
+        let sql = generate_create_view_sql(&view);
+        assert_eq!(sql, "CREATE VIEW active_users (id, name) AS SELECT id, name FROM users WHERE active = 1");
+    }
+
+    #[test]
+    fn test_generate_create_view_sql_fallback() {
+        use vibesql_catalog::ViewDefinition;
+
+        // Create a view without sql_definition (fallback path)
+        let view = ViewDefinition::new(
+            "test_view".to_string(),
+            Some(vec!["col1".to_string()]),
+            create_minimal_select_stmt(),
+            false,
+        );
+
+        let sql = generate_create_view_sql(&view);
+        // Should contain CREATE VIEW and the view name
+        assert!(sql.contains("CREATE VIEW test_view"));
+        // With column list specified
+        assert!(sql.contains("(col1)"));
     }
 }

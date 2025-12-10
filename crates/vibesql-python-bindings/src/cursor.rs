@@ -261,7 +261,9 @@ impl Cursor {
 
                 Ok(())
             }
-            vibesql_ast::Statement::CreateView(view_stmt) => {
+            vibesql_ast::Statement::CreateView(mut view_stmt) => {
+                // Store original SQL for sqlite_master compatibility
+                view_stmt.sql_definition = Some(sql.to_string());
                 let mut db = self.db.lock();
                 vibesql_executor::advanced_objects::execute_create_view(&view_stmt, &mut db)
                     .map_err(|e| OperationalError::new_err(format!("Execution error: {:?}", e)))?;

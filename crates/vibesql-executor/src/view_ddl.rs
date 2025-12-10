@@ -27,12 +27,22 @@ impl ViewExecutor {
         }
 
         // Create the view definition
-        let view_def = ViewDefinition::new(
-            stmt.view_name.clone(),
-            stmt.columns.clone(),
-            *stmt.query.clone(),
-            stmt.with_check_option,
-        );
+        let view_def = if let Some(ref sql) = stmt.sql_definition {
+            ViewDefinition::new_with_sql(
+                stmt.view_name.clone(),
+                stmt.columns.clone(),
+                *stmt.query.clone(),
+                stmt.with_check_option,
+                sql.clone(),
+            )
+        } else {
+            ViewDefinition::new(
+                stmt.view_name.clone(),
+                stmt.columns.clone(),
+                *stmt.query.clone(),
+                stmt.with_check_option,
+            )
+        };
 
         // Add to catalog
         database
