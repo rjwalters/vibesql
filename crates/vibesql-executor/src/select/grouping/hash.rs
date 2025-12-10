@@ -30,6 +30,15 @@ pub fn group_rows<'a>(
     evaluator: &crate::evaluator::CombinedExpressionEvaluator,
     executor: &crate::SelectExecutor<'a>,
 ) -> Result<GroupedRows, crate::errors::ExecutorError> {
+    // Debug: Log entry to group_rows (Issue #4168)
+    if std::env::var("GROUP_BY_DEBUG").is_ok() {
+        eprintln!(
+            "[GROUP_BY] group_rows called: {} rows, {} exprs",
+            rows.len(),
+            group_by_exprs.len()
+        );
+    }
+
     #[cfg(feature = "parallel")]
     {
         use crate::select::parallel::ParallelConfig;
@@ -50,7 +59,15 @@ pub fn group_rows<'a>(
     group_rows_sequential(rows, group_by_exprs, evaluator, executor)
 }
 
-/// Sequential grouping implementation
+/// Sequential grouping implementation using index-based approach (Issue #4168)
+///
+/// Optimization: Instead of cloning rows during grouping, we store row indices
+/// and materialize the rows at the end. This reduces memory pressure during
+/// HashMap operations (smaller entries = faster rehashing) and improves cache
+/// locality during the grouping phase.
+///
+/// Performance: For TPC-H Q18 subquery (60K rows, 15K groups), this reduces
+/// the memory footprint during grouping from ~60K Row structs to ~60K usize.
 fn group_rows_sequential<'a>(
     rows: &[vibesql_storage::Row],
     group_by_exprs: &[vibesql_ast::Expression],
@@ -61,12 +78,24 @@ fn group_rows_sequential<'a>(
     // Pre-allocate with reasonable capacity to reduce rehashing
     // Most GROUP BY queries have < 1000 groups; estimate 10% of rows as groups
     let estimated_groups = (rows.len() / 10).max(16);
-    let mut groups_map: AHashMap<Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>> =
+
+    // Phase 1: Group by indices (no row cloning during grouping)
+    // This uses much less memory per entry (usize vs Row struct)
+    let mut groups_map: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
         AHashMap::with_capacity(estimated_groups);
+
+    // Debug: Log that we're using indexed grouping (Issue #4168)
+    if std::env::var("GROUP_BY_DEBUG").is_ok() {
+        eprintln!(
+            "[GROUP_BY] Index-based grouping: {} rows, estimated {} groups",
+            rows.len(),
+            estimated_groups
+        );
+    }
     let mut rows_processed = 0;
     const CHECK_INTERVAL: usize = 1000;
 
-    for row in rows {
+    for (idx, row) in rows.iter().enumerate() {
         // Check timeout every 1000 rows
         rows_processed += 1;
         if rows_processed % CHECK_INTERVAL == 0 {
@@ -78,18 +107,38 @@ fn group_rows_sequential<'a>(
         evaluator.clear_cse_cache();
 
         // Evaluate GROUP BY expressions to get the group key
-        let mut key = Vec::new();
+        let mut key = Vec::with_capacity(group_by_exprs.len());
         for expr in group_by_exprs {
             let value = evaluator.eval(expr, row)?;
             key.push(value);
         }
 
-        // Insert or update group using HashMap (O(1) lookup)
-        groups_map.entry(key).or_default().push(row.clone());
+        // Store index instead of cloning the row
+        groups_map.entry(key).or_default().push(idx);
     }
 
-    // Convert HashMap back to Vec for compatibility with existing code
-    Ok(groups_map.into_iter().collect())
+    // Phase 2: Materialize rows from indices
+    // This clones each row exactly once at the end
+    let group_count = groups_map.len();
+    let mut result: GroupedRows = Vec::with_capacity(group_count);
+    for (key, indices) in groups_map {
+        let mut group_rows: Vec<vibesql_storage::Row> = Vec::with_capacity(indices.len());
+        for idx in indices {
+            group_rows.push(rows[idx].clone());
+        }
+        result.push((key, group_rows));
+    }
+
+    // Debug: Log grouping results
+    if std::env::var("GROUP_BY_DEBUG").is_ok() {
+        eprintln!(
+            "[GROUP_BY] Grouping complete: {} groups from {} rows",
+            group_count,
+            rows.len()
+        );
+    }
+
+    Ok(result)
 }
 
 /// Parallel grouping implementation using morsel-driven work-stealing (Issue #4161)

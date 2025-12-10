@@ -66,6 +66,62 @@ use crate::{
 };
 use vibesql_ast::Expression;
 
+/// Collect aggregate function expressions from an expression tree.
+///
+/// This is used to extract aggregates from HAVING clauses so they can be
+/// included in columnar execution (Issue #4168).
+fn collect_aggregates_from_expr(expr: &Expression) -> Vec<Expression> {
+    let mut aggregates = vec![];
+    collect_aggregates_recursive(expr, &mut aggregates);
+    aggregates
+}
+
+fn collect_aggregates_recursive(expr: &Expression, aggregates: &mut Vec<Expression>) {
+    match expr {
+        Expression::AggregateFunction { .. } => {
+            aggregates.push(expr.clone());
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            collect_aggregates_recursive(left, aggregates);
+            collect_aggregates_recursive(right, aggregates);
+        }
+        Expression::UnaryOp { expr: inner, .. } => {
+            collect_aggregates_recursive(inner, aggregates);
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                collect_aggregates_recursive(op, aggregates);
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    collect_aggregates_recursive(cond, aggregates);
+                }
+                collect_aggregates_recursive(&case_when.result, aggregates);
+            }
+            if let Some(else_expr) = else_result {
+                collect_aggregates_recursive(else_expr, aggregates);
+            }
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                collect_aggregates_recursive(arg, aggregates);
+            }
+        }
+        Expression::InList { expr: inner, values, .. } => {
+            collect_aggregates_recursive(inner, aggregates);
+            for item in values {
+                collect_aggregates_recursive(item, aggregates);
+            }
+        }
+        Expression::Between { expr: inner, low, high, .. } => {
+            collect_aggregates_recursive(inner, aggregates);
+            collect_aggregates_recursive(low, aggregates);
+            collect_aggregates_recursive(high, aggregates);
+        }
+        _ => {}
+    }
+}
+
 impl SelectExecutor<'_> {
     /// Try to execute using columnar (auto-vectorized) execution
     ///
@@ -366,14 +422,43 @@ impl SelectExecutor<'_> {
             })
             .collect();
 
-        // Extract aggregates from select expressions
-        let aggregates = match columnar::extract_aggregates(&select_exprs, &schema) {
-            Some(aggs) if !aggs.is_empty() => aggs,
-            _ => {
-                log::debug!("Native columnar: skipping - no aggregates or unsupported expressions");
-                return Ok(None);
-            }
+        // Also check HAVING clause for aggregates (Issue #4168)
+        // Queries like "SELECT col FROM t GROUP BY col HAVING SUM(x) > N" have aggregates
+        // only in HAVING, not in SELECT list. We need to include those for columnar execution.
+        let having_aggregates = if let Some(having_expr) = &stmt.having {
+            collect_aggregates_from_expr(having_expr)
+        } else {
+            vec![]
         };
+
+        // Extract aggregates from select expressions
+        let mut aggregates = columnar::extract_aggregates(&select_exprs, &schema).unwrap_or_default();
+
+        // Add aggregates from HAVING if not already present
+        if !having_aggregates.is_empty() {
+            if let Some(having_aggs) = columnar::extract_aggregates(&having_aggregates, &schema) {
+                for agg in having_aggs {
+                    // Check if aggregate already exists (avoid duplicates)
+                    if !aggregates.iter().any(|a| a.source == agg.source && a.op == agg.op) {
+                        aggregates.push(agg);
+                    }
+                }
+            }
+        }
+
+        // For GROUP BY queries with HAVING but no SELECT aggregates, we still need columnar
+        // to compute the HAVING aggregates efficiently (Issue #4168)
+        if aggregates.is_empty() && !has_group_by {
+            log::debug!("Native columnar: skipping - no aggregates or unsupported expressions");
+            return Ok(None);
+        }
+
+        // Skip native columnar for HAVING - requires row-based evaluation of HAVING condition
+        // TODO(#4168): Add columnar HAVING support by filtering grouped results
+        if stmt.having.is_some() {
+            log::debug!("Native columnar: skipping - HAVING clause requires row-based evaluation");
+            return Ok(None);
+        }
 
         // Skip native columnar for complex GROUP BY (ROLLUP/CUBE/GROUPING SETS)
         // These require special handling that the columnar path doesn't support
