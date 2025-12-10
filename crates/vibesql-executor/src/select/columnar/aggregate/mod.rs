@@ -42,7 +42,7 @@ pub enum AggregateOp {
 }
 
 /// Source of data for an aggregate - either a simple column or an expression
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AggregateSource {
     /// Simple column reference (fast path) - just a column index
     Column(usize),
