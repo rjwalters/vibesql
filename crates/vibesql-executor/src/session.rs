@@ -1015,4 +1015,197 @@ mod tests {
         let select_result = session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
         assert_eq!(select_result.rows().unwrap().len(), 0);
     }
+
+    // =========================================================================
+    // Concurrent Session Tests (Phase 3: Session with &Database)
+    // =========================================================================
+    // These tests verify that multiple Session instances can coexist and
+    // execute queries concurrently against the same &Database reference.
+    // This is the foundation for concurrent read queries in the server.
+
+    #[test]
+    fn test_concurrent_sessions_coexist() {
+        let db = create_test_db();
+
+        // Multiple Sessions can be created with the same &Database
+        let session1 = Session::new(&db);
+        let session2 = Session::new(&db);
+        let session3 = Session::new(&db);
+
+        // All sessions can prepare statements
+        let stmt1 = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        let stmt2 = session2.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        let stmt3 = session3.prepare("SELECT name FROM users WHERE id = ?").unwrap();
+
+        // All can execute queries concurrently (sequentially here, but proves they coexist)
+        let result1 = session1.execute_prepared(&stmt1, &[SqlValue::Integer(1)]).unwrap();
+        let result2 = session2.execute_prepared(&stmt2, &[SqlValue::Integer(2)]).unwrap();
+        let result3 = session3.execute_prepared(&stmt3, &[SqlValue::Integer(3)]).unwrap();
+
+        // All results should be correct
+        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
+        assert_eq!(result3.rows().unwrap()[0].values[0], SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
+    }
+
+    #[test]
+    fn test_concurrent_sessions_shared_cache() {
+        let db = create_test_db();
+
+        // Create a shared cache
+        let shared_cache = Arc::new(PreparedStatementCache::default_cache());
+
+        // Multiple sessions sharing the same cache
+        let session1 = Session::with_shared_cache(&db, Arc::clone(&shared_cache));
+        let session2 = Session::with_shared_cache(&db, Arc::clone(&shared_cache));
+
+        // First session prepares a statement (cache miss)
+        let stmt = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        let stats_after_first = shared_cache.stats();
+        assert_eq!(stats_after_first.misses, 1);
+
+        // Second session uses the same SQL (cache hit)
+        let _stmt2 = session2.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        let stats_after_second = shared_cache.stats();
+        assert_eq!(stats_after_second.misses, 1); // Still 1 miss
+        assert!(stats_after_second.hits >= 1); // At least 1 hit
+
+        // Both sessions can execute the same prepared statement
+        let r1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
+        let r2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
+
+        assert_eq!(r1.rows().unwrap().len(), 1);
+        assert_eq!(r2.rows().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_concurrent_sessions_different_queries() {
+        let db = create_test_db();
+
+        let session1 = Session::new(&db);
+        let session2 = Session::new(&db);
+
+        // Different query types
+        let point_query = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+        let range_query = session2.prepare("SELECT * FROM users WHERE id >= ? AND id <= ?").unwrap();
+        let all_query = session1.prepare("SELECT * FROM users").unwrap();
+        let projection_query = session2.prepare("SELECT name FROM users WHERE id = ?").unwrap();
+
+        // Execute all queries
+        let r1 = session1.execute_prepared(&point_query, &[SqlValue::Integer(1)]).unwrap();
+        let r2 = session2.execute_prepared(&range_query, &[SqlValue::Integer(1), SqlValue::Integer(2)]).unwrap();
+        let r3 = session1.execute_prepared(&all_query, &[]).unwrap();
+        let r4 = session2.execute_prepared(&projection_query, &[SqlValue::Integer(3)]).unwrap();
+
+        assert_eq!(r1.rows().unwrap().len(), 1);
+        assert_eq!(r2.rows().unwrap().len(), 2);
+        assert_eq!(r3.rows().unwrap().len(), 3);
+        assert_eq!(r4.rows().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_concurrent_sessions_interleaved_execution() {
+        let db = create_test_db();
+
+        let session1 = Session::new(&db);
+        let session2 = Session::new(&db);
+
+        let stmt = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+
+        // Interleave executions between sessions
+        // This pattern mimics what happens with concurrent connections
+        let r1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
+        let r2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
+        let r3 = session1.execute_prepared(&stmt, &[SqlValue::Integer(3)]).unwrap();
+        let r4 = session2.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
+
+        // Verify correctness
+        assert_eq!(r1.rows().unwrap()[0].values[0], SqlValue::Integer(1));
+        assert_eq!(r2.rows().unwrap()[0].values[0], SqlValue::Integer(2));
+        assert_eq!(r3.rows().unwrap()[0].values[0], SqlValue::Integer(3));
+        assert_eq!(r4.rows().unwrap()[0].values[0], SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_session_immutable_borrow_allows_multiple() {
+        let db = create_test_db();
+
+        // This test explicitly verifies the Rust borrow checker allows multiple
+        // immutable borrows of Database for concurrent Sessions
+        let session1 = Session::new(&db);
+        let session2 = Session::new(&db);
+
+        // Both sessions hold references to the same database
+        // This compiles because Session only needs &Database (immutable borrow)
+        let db_ref1 = session1.database();
+        let db_ref2 = session2.database();
+
+        // Both point to the same database
+        assert!(std::ptr::eq(db_ref1, db_ref2));
+
+        // And both can still execute queries
+        let stmt = session1.prepare("SELECT COUNT(*) FROM users").unwrap();
+        let r1 = session1.execute_prepared(&stmt, &[]).unwrap();
+        let r2 = session2.execute_prepared(&stmt, &[]).unwrap();
+
+        assert_eq!(r1.rows().unwrap().len(), 1);
+        assert_eq!(r2.rows().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_session_execute_uses_immutable_self() {
+        let db = create_test_db();
+        let session = Session::new(&db);
+
+        // Prepare a statement
+        let stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+
+        // execute_prepared takes &self, so we can call it multiple times
+        // without needing mutable access to session
+        let _ = session.execute_prepared(&stmt, &[SqlValue::Integer(1)]);
+        let _ = session.execute_prepared(&stmt, &[SqlValue::Integer(2)]);
+        let _ = session.execute_prepared(&stmt, &[SqlValue::Integer(3)]);
+
+        // We can still access session immutably after all executions
+        let cache = session.cache();
+        let _stats = cache.stats();
+        // Stats accessible - session is still usable after multiple executions
+    }
+
+    #[test]
+    fn test_concurrent_sessions_with_aggregates() {
+        let db = create_test_db();
+
+        let session1 = Session::new(&db);
+        let session2 = Session::new(&db);
+
+        // Aggregate queries
+        let count_stmt = session1.prepare("SELECT COUNT(*) FROM users").unwrap();
+        let sum_stmt = session2.prepare("SELECT COUNT(*) FROM users WHERE id <= ?").unwrap();
+
+        let r1 = session1.execute_prepared(&count_stmt, &[]).unwrap();
+        let r2 = session2.execute_prepared(&sum_stmt, &[SqlValue::Integer(2)]).unwrap();
+
+        // Verify aggregate results
+        assert_eq!(r1.rows().unwrap()[0].values[0], SqlValue::Integer(3));
+        assert_eq!(r2.rows().unwrap()[0].values[0], SqlValue::Integer(2));
+    }
+
+    #[test]
+    fn test_concurrent_sessions_with_pk_fast_path() {
+        let db = create_test_db();
+
+        let session1 = Session::new(&db);
+        let session2 = Session::new(&db);
+
+        // PK point lookup queries use the fast path
+        let stmt = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
+
+        // Both sessions use the fast path
+        let r1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
+        let r2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
+
+        assert_eq!(r1.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+        assert_eq!(r2.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
+    }
 }
