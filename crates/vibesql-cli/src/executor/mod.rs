@@ -111,7 +111,9 @@ impl SqlExecutor {
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
             }
-            vibesql_ast::Statement::CreateView(view_stmt) => {
+            vibesql_ast::Statement::CreateView(mut view_stmt) => {
+                // Store original SQL for sqlite_master compatibility
+                view_stmt.sql_definition = Some(sql.to_string());
                 match vibesql_executor::advanced_objects::execute_create_view(
                     &view_stmt,
                     &mut self.db,
