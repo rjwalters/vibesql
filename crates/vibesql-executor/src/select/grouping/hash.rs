@@ -276,6 +276,7 @@ fn group_rows_parallel<'a>(
 /// Uses static `par_chunks()` partitioning since overhead of work-stealing
 /// isn't justified for small datasets.
 #[cfg(feature = "parallel")]
+#[allow(clippy::type_complexity)]
 fn group_rows_parallel_simple<'a>(
     rows: &[vibesql_storage::Row],
     group_by_exprs: &[vibesql_ast::Expression],

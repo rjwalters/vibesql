@@ -36,13 +36,23 @@
 //!
 //! - [Leis et al., SIGMOD 2014](https://dl.acm.org/doi/10.1145/2588555.2610507)
 
+use ahash::AHashMap;
 use crossbeam_deque::{Injector, Steal, Worker};
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::BinaryHeap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vibesql_storage::Row;
-use vibesql_types::DataType;
+use vibesql_types::{DataType, SqlValue};
+
+/// Thread-safe container for collecting morsel results with ordering info
+type MorselResultsOrdered = Arc<Mutex<Vec<(usize, Vec<Row>)>>>;
+
+/// Thread-safe container for collecting grouped rows from parallel workers
+type GroupedRowResults = Arc<Mutex<Vec<AHashMap<Vec<SqlValue>, Vec<Row>>>>>;
+
+/// Thread-safe container for collecting join results (row index pairs)
+type JoinPairResults = Arc<Mutex<Vec<(usize, Vec<(usize, usize)>)>>>;
 
 /// Environment variable to enable morsel execution debug logging
 const MORSEL_DEBUG_ENV: &str = "MORSEL_DEBUG";
@@ -133,7 +143,7 @@ impl MorselConfig {
     pub fn optimal() -> Self {
         // Check for user override
         let morsel_size = if let Ok(size_str) = std::env::var("MORSEL_SIZE") {
-            size_str.parse::<usize>().unwrap_or(DEFAULT_MORSEL_SIZE).max(1000).min(500_000)
+            size_str.parse::<usize>().unwrap_or(DEFAULT_MORSEL_SIZE).clamp(1000, 500_000)
         } else {
             // Default: 50,000 rows
             // This balances:
@@ -402,8 +412,8 @@ where
     }
 
     // Results storage shared across threads
-    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<Row>)>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let results: MorselResultsOrdered =
+        Arc::new(Mutex::new(Vec::with_capacity(morsel_count)));
     let results_count = Arc::new(AtomicUsize::new(0));
 
     // Process morsels in parallel using rayon's thread pool
@@ -497,8 +507,8 @@ where
     }
 
     // Results storage shared across threads
-    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<Row>)>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let results: MorselResultsOrdered =
+        Arc::new(Mutex::new(Vec::with_capacity(morsel_count)));
 
     // Process morsels in parallel
     rayon::scope(|s| {
@@ -571,8 +581,8 @@ where
     }
 
     // Results storage shared across threads
-    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<Row>)>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let results: MorselResultsOrdered =
+        Arc::new(Mutex::new(Vec::with_capacity(morsel_count)));
 
     // Process morsels in parallel
     rayon::scope(|s| {
@@ -765,8 +775,8 @@ where
     }
 
     // Results storage shared across threads
-    let results: Arc<std::sync::Mutex<Vec<AHashMap<Vec<vibesql_types::SqlValue>, Vec<Row>>>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let results: GroupedRowResults =
+        Arc::new(Mutex::new(Vec::with_capacity(morsel_count)));
 
     // Process morsels in parallel
     rayon::scope(|s| {
@@ -801,7 +811,6 @@ where
 
     // Extract results after scope completes
     let thread_results = Arc::try_unwrap(results)
-        .ok()
         .expect("all threads should have completed")
         .into_inner()
         .expect("mutex not poisoned");
@@ -817,7 +826,7 @@ where
     // Merge all thread-local maps
     thread_results
         .into_iter()
-        .fold(AHashMap::new(), |acc, map| merge(acc, map))
+        .fold(AHashMap::new(), merge)
 }
 
 /// Morsel-driven parallel sort with work-stealing.
@@ -882,8 +891,8 @@ where
 
     // Results storage: (morsel_index, sorted_rows)
     // We track the original morsel order for deterministic merging
-    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<Row>)>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let results: MorselResultsOrdered =
+        Arc::new(Mutex::new(Vec::with_capacity(morsel_count)));
     let morsel_index = Arc::new(AtomicUsize::new(0));
 
     // Phase 1: Parallel sort of each morsel
@@ -1142,8 +1151,8 @@ pub fn morsel_parallel_probe_sqlvalue(
     }
 
     // Results storage shared across threads
-    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<(usize, usize)>)>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(morsel_count)));
+    let results: JoinPairResults =
+        Arc::new(Mutex::new(Vec::with_capacity(morsel_count)));
 
     // Process morsels in parallel
     rayon::scope(|s| {
