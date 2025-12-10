@@ -83,24 +83,6 @@ const COLORS = {
 
 let charts: Map<string, any> = new Map();
 
-/**
- * Format timestamp for x-axis display.
- * If multiple runs on same day, show HH:MM; otherwise show date.
- */
-function formatTimestampForAxis(timestamp: string | undefined, date: string): string {
-  if (timestamp) {
-    // Parse ISO timestamp and extract time portion
-    const parsed = new Date(timestamp);
-    if (!isNaN(parsed.getTime())) {
-      const hours = parsed.getHours().toString().padStart(2, '0');
-      const minutes = parsed.getMinutes().toString().padStart(2, '0');
-      // Show date + time for clarity
-      return `${date.slice(5)} ${hours}:${minutes}`;  // MM-DD HH:MM
-    }
-  }
-  return date;
-}
-
 function createTimeSeriesChart(
   canvasId: string,
   data: TrendDataPoint[],
