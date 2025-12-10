@@ -209,7 +209,7 @@ If columnar execution is confirmed active:
 
 - **Binary**: `target/release/deps/tpch_profiling-4f912837ac988410`
 - **Command**: `QUERY_TIMEOUT_SECS=30 ./target/release/deps/tpch_profiling-4f912837ac988410 Q6`
-- **Features**: Requires `--features benchmark-comparison` for builds
+- **Features**: Requires `--features sqlite,in-memory-indexes` for builds
 - **Data**: SF 0.01 TPC-H dataset (small scale for quick testing)
 
 ### Test Reliability

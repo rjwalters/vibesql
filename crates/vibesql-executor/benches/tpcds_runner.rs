@@ -27,7 +27,7 @@
 //! automatically disabled when VALIDATE=1 is set (to ensure deterministic comparison).
 //!
 //! Validation Mode:
-//! When VALIDATE=1 is set (requires --features benchmark-comparison), the runner
+//! When VALIDATE=1 is set (requires --features sqlite), the runner
 //! compares VibeSQL results against DuckDB as ground truth. This validates that
 //! queries return the correct number of rows.
 //!
@@ -37,7 +37,7 @@
 //!   SKIP_SLOW=1 cargo run --release --bench tpcds_runner  # Skip known slow queries
 //!   BATCH_SIZE=5 cargo run --release --bench tpcds_runner  # Run 5 queries per batch
 //!   MEMORY_WARN_MB=4000 cargo run --release --bench tpcds_runner  # Warn at 4GB RSS
-//!   VALIDATE=1 cargo run --release --bench tpcds_runner --features benchmark-comparison  # Validation mode
+//!   VALIDATE=1 cargo run --release --bench tpcds_runner --features sqlite  # Validation mode
 //!   PARALLEL_BATCHES=1 cargo run --release --bench tpcds_runner  # Enable parallel execution
 //!   PARALLEL_WORKERS=4 cargo run --release --bench tpcds_runner  # Override worker count
 //!
@@ -66,9 +66,9 @@ use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::QueryBufferPool;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use tpcds::schema::load_duckdb;
 
 /// Queries known to be extremely slow or memory-intensive
@@ -194,7 +194,7 @@ fn execute_query(
 }
 
 /// Get expected row counts from DuckDB for validation
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn get_expected_row_counts(
     duckdb: &DuckDBConn,
     queries: &[(&str, &str)],
@@ -268,10 +268,10 @@ fn main() {
     let parallel_batches = std::env::var("PARALLEL_BATCHES").is_ok() && !validate_mode;
     let parallelism = if parallel_batches { compute_parallelism() } else { 1 };
 
-    #[cfg(not(feature = "duckdb-comparison"))]
+    #[cfg(not(feature = "duckdb"))]
     if validate_mode {
-        eprintln!("ERROR: VALIDATE=1 requires --features duckdb-comparison");
-        eprintln!("Usage: VALIDATE=1 cargo run --release --bench tpcds_runner --features duckdb-comparison");
+        eprintln!("ERROR: VALIDATE=1 requires --features duckdb");
+        eprintln!("Usage: VALIDATE=1 cargo run --release --bench tpcds_runner --features duckdb");
         std::process::exit(1);
     }
 
@@ -322,7 +322,7 @@ fn main() {
     println!("VibeSQL data loaded in {:?}", load_time);
 
     // Load DuckDB and get expected row counts in validation mode
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     let expected_rows: Arc<HashMap<String, usize>> = Arc::new(if validate_mode {
         println!("Loading DuckDB for validation...");
         let duckdb_start = Instant::now();
@@ -342,7 +342,7 @@ fn main() {
         HashMap::new()
     });
 
-    #[cfg(not(feature = "duckdb-comparison"))]
+    #[cfg(not(feature = "duckdb"))]
     let expected_rows: Arc<HashMap<String, usize>> = Arc::new(HashMap::new());
 
     // Report post-load memory

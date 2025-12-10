@@ -611,12 +611,12 @@ impl<'a> TPCCExecutor for VibesqlTransactionExecutor<'a> {
 }
 
 /// TPC-C transaction executor for SQLite
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 pub struct SqliteTransactionExecutor<'a> {
     pub conn: &'a rusqlite::Connection,
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 impl<'a> SqliteTransactionExecutor<'a> {
     pub fn new(conn: &'a rusqlite::Connection) -> Self {
         Self { conn }
@@ -819,7 +819,7 @@ impl<'a> SqliteTransactionExecutor<'a> {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 impl<'a> TPCCExecutor for SqliteTransactionExecutor<'a> {
     fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         self.new_order(input)
@@ -843,12 +843,12 @@ impl<'a> TPCCExecutor for SqliteTransactionExecutor<'a> {
 }
 
 /// TPC-C transaction executor for DuckDB
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 pub struct DuckdbTransactionExecutor<'a> {
     pub conn: &'a duckdb::Connection,
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 impl<'a> DuckdbTransactionExecutor<'a> {
     pub fn new(conn: &'a duckdb::Connection) -> Self {
         Self { conn }
@@ -1051,7 +1051,7 @@ impl<'a> DuckdbTransactionExecutor<'a> {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
     fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         self.new_order(input)
@@ -1078,12 +1078,12 @@ impl<'a> TPCCExecutor for DuckdbTransactionExecutor<'a> {
 ///
 /// Uses `RefCell` for interior mutability to allow the `TPCCExecutor` trait
 /// (which requires `&self`) to call MySQL methods that need `&mut self`.
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 pub struct MysqlTransactionExecutor<'a> {
     pub conn: std::cell::RefCell<&'a mut mysql::PooledConn>,
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 impl<'a> MysqlTransactionExecutor<'a> {
     pub fn new(conn: &'a mut mysql::PooledConn) -> Self {
         Self { conn: std::cell::RefCell::new(conn) }
@@ -1351,7 +1351,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 impl<'a> TPCCExecutor for MysqlTransactionExecutor<'a> {
     fn new_order(&self, input: &NewOrderInput) -> TransactionResult {
         self.new_order_impl(input)

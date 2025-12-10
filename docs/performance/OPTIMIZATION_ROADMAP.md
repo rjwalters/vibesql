@@ -471,7 +471,7 @@ Disk (Arrow IPC) → mmap → RecordBatch → SIMD
 
 ```bash
 # Run TPC-H Q6 benchmark
-cargo bench -p vibesql-executor --bench tpch_benchmark --features benchmark-comparison -- q6
+cargo bench -p vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes -- q6
 
 # Current results (Phase 1+2 complete):
 # VibeSQL: 35.2ms

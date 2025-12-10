@@ -50,13 +50,13 @@ Located two benchmark suites:
 
 1. **Criterion Benchmarks** (`crates/vibesql-executor/benches/tpch_benchmark.rs`)
    - Full statistical benchmarking with SQLite/DuckDB comparison
-   - Requires `--features benchmark-comparison`
+   - Requires `--features sqlite,in-memory-indexes`
    - Slow to compile due to external database dependencies
 
 2. **Profiling Benchmarks** (`crates/vibesql-executor/benches/tpch_profiling.rs`)
    - Quick performance testing
    - Script: `./scripts/bench-tpch.sh`
-   - Also requires `benchmark-comparison` feature
+   - Also requires `sqlite,in-memory-indexes` feature
 
 ## Latest Update - Issue #2430 (2025-11-22)
 
@@ -69,7 +69,7 @@ Located two benchmark suites:
 ### Challenges Encountered
 
 #### 1. Benchmark Compilation Time
-- Compiling with `--features benchmark-comparison` requires SQLite and DuckDB dependencies
+- Compiling with `--features sqlite,in-memory-indexes` requires SQLite and DuckDB dependencies
 - Full compilation from scratch takes 5+ minutes
 - Found existing compiled binary from earlier: `target/release/deps/tpch_benchmark-cf44bab9bb9c2842`
 
@@ -109,7 +109,7 @@ WHERE l_shipdate >= '1994-01-01'
 
 **Benchmark Infrastructure**:
 - Two benchmark suites exist: `tpch_benchmark.rs` (Criterion) and `tpch_profiling.rs`
-- Both require `benchmark-comparison` feature for SQLite/DuckDB comparisons
+- Both require `sqlite,in-memory-indexes` feature for SQLite/DuckDB comparisons
 - Helper script available: `./scripts/bench-tpch.sh`
 
 **Monomorphic Code** (unused warnings):
@@ -176,7 +176,7 @@ WHERE l_shipdate >= '1994-01-01'
    # Clean existing builds
    cargo clean -p vibesql-executor
    # Rebuild benchmark (time it)
-   time cargo build --release -p vibesql-executor --bench tpch_benchmark --features benchmark-comparison
+   time cargo build --release -p vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes
    ```
 
 3. **Try Alternative Benchmark Approach**

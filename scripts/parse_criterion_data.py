@@ -367,7 +367,7 @@ def main():
 
     if not criterion_dir.exists():
         print(f"Error: Criterion directory not found: {criterion_dir}")
-        print("Run benchmarks first: cargo bench --features benchmark-comparison")
+        print("Run benchmarks first: cargo bench --features sqlite,in-memory-indexes")
         return 1
 
     print(f"Parsing Criterion data from {criterion_dir}")

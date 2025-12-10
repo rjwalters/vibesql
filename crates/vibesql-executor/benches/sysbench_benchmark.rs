@@ -33,7 +33,7 @@
 //! ./target/release/deps/sysbench_benchmark-*
 //!
 //! # With comparisons (SQLite, DuckDB, MySQL)
-//! cargo bench --package vibesql-executor --bench sysbench_benchmark --features benchmark-comparison --no-run
+//! cargo bench --package vibesql-executor --bench sysbench_benchmark --features sqlite --no-run
 //! ./target/release/deps/sysbench_benchmark-*
 //!
 //! # With MySQL comparison
@@ -77,13 +77,13 @@ use vibesql_types::SqlValue;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::PooledConn;
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
 
 /// Default table size for sysbench tests
@@ -518,19 +518,19 @@ impl<'a> SysbenchExecutor for VibesqlExecutor<'a> {
 // SQLite Executor
 // =============================================================================
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 struct SqliteExecutor<'a> {
     conn: &'a SqliteConn,
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 impl<'a> SqliteExecutor<'a> {
     fn new(conn: &'a SqliteConn) -> Self {
         Self { conn }
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
         let mut stmt = self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
@@ -625,19 +625,19 @@ impl<'a> SysbenchExecutor for SqliteExecutor<'a> {
 // DuckDB Executor
 // =============================================================================
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 struct DuckdbExecutor<'a> {
     conn: &'a DuckDBConn,
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 impl<'a> DuckdbExecutor<'a> {
     fn new(conn: &'a DuckDBConn) -> Self {
         Self { conn }
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
         let mut stmt = self.conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
@@ -732,19 +732,19 @@ impl<'a> SysbenchExecutor for DuckdbExecutor<'a> {
 // MySQL Executor
 // =============================================================================
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 struct MysqlExecutor<'a> {
     conn: &'a mut PooledConn,
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 impl<'a> MysqlExecutor<'a> {
     fn new(conn: &'a mut PooledConn) -> Self {
         Self { conn }
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 impl<'a> SysbenchExecutor for MysqlExecutor<'a> {
     fn point_select(&mut self, id: i64) -> usize {
         let result: Vec<mysql::Row> =
@@ -1656,7 +1656,7 @@ fn main() {
     // ========================================
     // SQLite Comparison (if feature enabled)
     // ========================================
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         use sysbench::schema::load_sqlite;
 
@@ -1792,7 +1792,7 @@ fn main() {
     // ========================================
     // DuckDB Comparison (if feature enabled)
     // ========================================
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         use sysbench::schema::load_duckdb;
 
@@ -1929,7 +1929,7 @@ fn main() {
     // MySQL Comparison (if feature enabled)
     // ========================================
     // Note: MySQL runs single-client only (connection pooling would require different setup)
-    #[cfg(feature = "mysql-comparison")]
+    #[cfg(feature = "mysql")]
     {
         use sysbench::schema::load_mysql;
 

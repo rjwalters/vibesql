@@ -20,12 +20,12 @@ pub use schema::load_vibesql;
 
 // SQL constants for consistent column naming across engines
 pub use schema::INSERT_SQL;
-#[cfg(any(feature = "sqlite-comparison", feature = "duckdb-comparison"))]
+#[cfg(any(feature = "sqlite", feature = "duckdb"))]
 pub use schema::INSERT_SQL_NUMBERED;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 pub use schema::load_mysql;
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 pub use schema::load_sqlite;

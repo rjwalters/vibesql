@@ -15,13 +15,13 @@ use super::data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::Date;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::{Pool, PooledConn};
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
 
 use std::str::FromStr;
@@ -102,7 +102,7 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     db
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     let conn = SqliteConn::open_in_memory().unwrap();
     let mut data = TPCHData::new(scale_factor);
@@ -123,7 +123,7 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     conn
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
     let mut data = TPCHData::new(scale_factor);
@@ -147,7 +147,7 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 /// Load MySQL TPC-H database
 /// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpch)
 /// Returns None if MYSQL_URL is not set or connection fails
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     use mysql::prelude::Queryable;
 
@@ -767,7 +767,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
     eprintln!("{:?}", start.elapsed());
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn create_tpch_schema_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         r#"
@@ -862,7 +862,7 @@ fn create_tpch_schema_sqlite(conn: &SqliteConn) {
     .unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn create_tpch_schema_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         r#"
@@ -957,7 +957,7 @@ fn create_tpch_schema_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn create_tpch_schema_mysql(conn: &mut PooledConn) {
     // Drop tables if they exist (in reverse dependency order)
     let drop_tables = [
@@ -1120,7 +1120,7 @@ fn load_region_vibesql(db: &mut VibeDB) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_region_sqlite(conn: &SqliteConn) {
     for (i, &name) in REGIONS.iter().enumerate() {
         conn.execute(
@@ -1131,7 +1131,7 @@ fn load_region_sqlite(conn: &SqliteConn) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_region_duckdb(conn: &DuckDBConn) {
     for (i, &name) in REGIONS.iter().enumerate() {
         conn.execute(
@@ -1142,7 +1142,7 @@ fn load_region_duckdb(conn: &DuckDBConn) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_region_mysql(conn: &mut PooledConn) {
     for (i, &name) in REGIONS.iter().enumerate() {
         conn.exec_drop("INSERT INTO region VALUES (?, ?, ?)", (i as i64, name, "comment")).unwrap();
@@ -1168,7 +1168,7 @@ fn load_nation_vibesql(db: &mut VibeDB) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_nation_sqlite(conn: &SqliteConn) {
     for (i, &(name, region_key)) in NATIONS.iter().enumerate() {
         conn.execute(
@@ -1179,7 +1179,7 @@ fn load_nation_sqlite(conn: &SqliteConn) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_nation_duckdb(conn: &DuckDBConn) {
     for (i, &(name, region_key)) in NATIONS.iter().enumerate() {
         conn.execute(
@@ -1226,7 +1226,7 @@ fn load_customer_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
@@ -1247,7 +1247,7 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
@@ -1303,7 +1303,7 @@ fn load_supplier_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_supplier_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO supplier VALUES (?, ?, ?, ?, ?, ?, ?)").unwrap();
 
@@ -1323,7 +1323,7 @@ fn load_supplier_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_supplier_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO supplier VALUES (?, ?, ?, ?, ?, ?, ?)").unwrap();
 
@@ -1384,7 +1384,7 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_part_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     use super::data::{generate_part_type, COLORS, CONTAINERS};
 
@@ -1412,7 +1412,7 @@ fn load_part_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_part_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     use super::data::{generate_part_type, COLORS, CONTAINERS};
 
@@ -1477,7 +1477,7 @@ fn load_partsupp_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_partsupp_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO partsupp VALUES (?, ?, ?, ?, ?)").unwrap();
 
@@ -1500,7 +1500,7 @@ fn load_partsupp_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_partsupp_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO partsupp VALUES (?, ?, ?, ?, ?)").unwrap();
 
@@ -1562,7 +1562,7 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
@@ -1586,7 +1586,7 @@ fn load_orders_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_orders_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     let mut stmt = conn.prepare("INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").unwrap();
 
@@ -1692,7 +1692,7 @@ fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_lineitem_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     let mut stmt = conn
         .prepare("INSERT INTO lineitem VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -1744,7 +1744,7 @@ fn load_lineitem_sqlite(conn: &SqliteConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_lineitem_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
     let mut stmt = conn
         .prepare("INSERT INTO lineitem VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -1800,7 +1800,7 @@ fn load_lineitem_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 // MySQL Data Loading Functions
 // =============================================================================
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_nation_mysql(conn: &mut PooledConn) {
     for (i, &(name, region_key)) in NATIONS.iter().enumerate() {
         conn.exec_drop(
@@ -1811,7 +1811,7 @@ fn load_nation_mysql(conn: &mut PooledConn) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     for i in 0..data.customer_count {
         let nation_key = i % 25;
@@ -1833,7 +1833,7 @@ fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_supplier_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     for i in 0..data.supplier_count {
         let nation_key = i % 25;
@@ -1854,7 +1854,7 @@ fn load_supplier_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_part_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     use super::data::{generate_part_type, COLORS, CONTAINERS};
 
@@ -1883,7 +1883,7 @@ fn load_part_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_partsupp_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     for part_key in 1..=data.part_count {
         for j in 0..4 {
@@ -1906,7 +1906,7 @@ fn load_partsupp_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     for i in 0..data.orders_count {
         let cust_key = (i % data.customer_count) + 1;
@@ -1931,7 +1931,7 @@ fn load_orders_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_lineitem_mysql(conn: &mut PooledConn, data: &mut TPCHData) {
     use mysql::Value;
 

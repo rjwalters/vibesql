@@ -324,7 +324,7 @@ Extended iteration profiling for external tools:
 
 ```bash
 # Build
-cargo build --release -p vibesql-executor --bench tpch_deep_profiling --features benchmark-comparison
+cargo build --release -p vibesql-executor --bench tpch_deep_profiling --features sqlite,in-memory-indexes
 
 # Run with macOS sample
 ./target/release/deps/tpch_deep_profiling-* Q6 &
@@ -337,7 +337,7 @@ Statistical profiling with detailed metrics:
 
 ```bash
 # Build
-cargo build --release -p vibesql-executor --bench tpch_instrumented --features benchmark-comparison
+cargo build --release -p vibesql-executor --bench tpch_instrumented --features sqlite,in-memory-indexes
 
 # Run with 100 iterations
 PROFILING_ITERATIONS=100 ./target/release/deps/tpch_instrumented-* Q6

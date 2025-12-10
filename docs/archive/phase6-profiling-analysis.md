@@ -89,7 +89,7 @@ Based on results:
 
 ```bash
 cd crates/vibesql-executor
-cargo run --release --features "benchmark-comparison,profile-q6" --bench q6_profiling
+cargo run --release --features "sqlite,in-memory-indexes,profile-q6" --bench q6_profiling
 ```
 
 Output format:

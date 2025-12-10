@@ -7,11 +7,11 @@
 //!
 //! ```bash
 //! # Build and run (VibeSQL + SQLite)
-//! cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison --no-run
+//! cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite --no-run
 //! ./target/release/deps/tpch_benchmark-*
 //!
 //! # With DuckDB comparison
-//! cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison,duckdb-comparison --no-run
+//! cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,duckdb --no-run
 //! ./target/release/deps/tpch_benchmark-*
 //!
 //! # With MySQL comparison
@@ -66,19 +66,19 @@ use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::PooledConn;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use tpch::schema::load_duckdb;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use tpch::schema::load_mysql;
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 use tpch::schema::load_sqlite;
 
 /// All available TPC-H queries (standard SQL with EXTRACT)
@@ -108,7 +108,7 @@ const ALL_QUERIES: &[(&str, &str)] = &[
 ];
 
 /// SQLite-specific TPC-H queries (uses strftime instead of EXTRACT)
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 const ALL_QUERIES_SQLITE: &[(&str, &str)] = &[
     ("Q1", TPCH_Q1),
     ("Q2", TPCH_Q2),
@@ -170,7 +170,7 @@ fn get_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'stat
 }
 
 /// Get SQLite-specific queries to run based on filter
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 fn get_sqlite_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'static str)> {
     match filter {
         Some(queries) => ALL_QUERIES_SQLITE
@@ -205,7 +205,7 @@ fn run_vibesql_query(db: &VibeDB, sql: &str, timeout: Duration) -> BenchResult {
 }
 
 /// Run a query on SQLite and return the execution time
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 fn run_sqlite_query(conn: &SqliteConn, sql: &str) -> BenchResult {
     let start = Instant::now();
     match conn.prepare(sql) {
@@ -222,7 +222,7 @@ fn run_sqlite_query(conn: &SqliteConn, sql: &str) -> BenchResult {
 }
 
 /// Run a query on DuckDB and return the execution time
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn run_duckdb_query(conn: &DuckDBConn, sql: &str) -> BenchResult {
     let start = Instant::now();
     match conn.prepare(sql) {
@@ -239,7 +239,7 @@ fn run_duckdb_query(conn: &DuckDBConn, sql: &str) -> BenchResult {
 }
 
 /// Run a query on MySQL and return the execution time
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_mysql_query(conn: &mut PooledConn, sql: &str) -> BenchResult {
     let start = Instant::now();
     match conn.query_iter(sql) {
@@ -357,7 +357,7 @@ fn main() {
     // ========================================
     // SQLite Benchmark (if feature enabled and in filter)
     // ========================================
-    #[cfg(feature = "benchmark-comparison")]
+    #[cfg(feature = "sqlite")]
     if engine_filter.sqlite {
         eprintln!("\nLoading SQLite database...");
         let load_start = Instant::now();
@@ -382,7 +382,7 @@ fn main() {
     // ========================================
     // DuckDB Benchmark (if feature enabled and in filter)
     // ========================================
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     if engine_filter.duckdb {
         eprintln!("\nLoading DuckDB database...");
         let load_start = Instant::now();
@@ -405,7 +405,7 @@ fn main() {
     // ========================================
     // MySQL Benchmark (if feature enabled, in filter, and MYSQL_URL set)
     // ========================================
-    #[cfg(feature = "mysql-comparison")]
+    #[cfg(feature = "mysql")]
     if engine_filter.mysql {
         if let Some(mut conn) = load_mysql(scale_factor) {
             let mut mysql_results = Vec::new();

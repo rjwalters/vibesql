@@ -19,8 +19,8 @@
 //! This benchmark measures OLTP (Online Transaction Processing) latency performance
 //! using industry-standard sysbench-compatible workloads. It compares:
 //! - VibeSQL (native Rust API)
-//! - SQLite (via rusqlite) - requires 'sqlite-comparison' feature
-//! - DuckDB (via duckdb-rs) - requires 'duckdb-comparison' feature
+//! - SQLite (via rusqlite) - requires 'sqlite' feature
+//! - DuckDB (via duckdb-rs) - requires 'duckdb' feature
 //!
 //! All measurements are done in-memory with no Python/FFI overhead.
 //!
@@ -54,9 +54,9 @@
 //! cargo bench --bench sysbench_oltp
 //!
 //! # With comparison engines
-//! cargo bench --bench sysbench_oltp --features sqlite-comparison
-//! cargo bench --bench sysbench_oltp --features duckdb-comparison
-//! cargo bench --bench sysbench_oltp --features benchmark-comparison
+//! cargo bench --bench sysbench_oltp --features sqlite
+//! cargo bench --bench sysbench_oltp --features duckdb
+//! cargo bench --bench sysbench_oltp --features sqlite
 //!
 //! # Environment variables for configuration
 //! SYSBENCH_TABLE_SIZE=10000  # Number of rows (default: 10000)
@@ -89,13 +89,13 @@ use vibesql_executor::{PreparedStatement, PreparedStatementCache, Session, Sessi
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::SqlValue;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use sysbench::schema::load_duckdb;
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use sysbench::schema::load_sqlite;
 
 // =============================================================================
@@ -253,7 +253,7 @@ fn vibesql_distinct_range(
 // Helper Functions - SQLite
 // =============================================================================
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
     let mut rows = stmt.query([id]).unwrap();
@@ -264,31 +264,31 @@ fn sqlite_point_select(conn: &SqliteConn, id: i64) -> usize {
     count
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_insert(conn: &SqliteConn, id: i64, k: i64, c: &str, pad: &str) {
     let mut stmt = conn.prepare_cached(sysbench::INSERT_SQL_NUMBERED).unwrap();
     stmt.execute(rusqlite::params![id, k, c, pad]).unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_update_non_index(conn: &SqliteConn, id: i64, c: &str) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
     stmt.execute(rusqlite::params![c, id]).unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_update_index(conn: &SqliteConn, id: i64) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_delete(conn: &SqliteConn, id: i64) {
     let mut stmt = conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
     stmt.execute(rusqlite::params![id]).unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
@@ -299,7 +299,7 @@ fn sqlite_simple_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
@@ -311,7 +311,7 @@ fn sqlite_sum_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_order_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap();
@@ -323,7 +323,7 @@ fn sqlite_order_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_distinct_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
     let mut stmt = conn
         .prepare_cached("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
@@ -340,7 +340,7 @@ fn sqlite_distinct_range(conn: &SqliteConn, start: i64, end: i64) -> usize {
 // Helper Functions - DuckDB
 // =============================================================================
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id = ?1").unwrap();
     let mut rows = stmt.query([id]).unwrap();
@@ -351,31 +351,31 @@ fn duckdb_point_select(conn: &DuckDBConn, id: i64) -> usize {
     count
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_insert(conn: &DuckDBConn, id: i64, k: i64, c: &str, pad: &str) {
     let mut stmt = conn.prepare_cached(sysbench::INSERT_SQL_NUMBERED).unwrap();
     stmt.execute(duckdb::params![id, k, c, pad]).unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_update_non_index(conn: &DuckDBConn, id: i64, c: &str) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET c = ?1 WHERE id = ?2").unwrap();
     stmt.execute(duckdb::params![c, id]).unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_update_index(conn: &DuckDBConn, id: i64) {
     let mut stmt = conn.prepare_cached("UPDATE sbtest1 SET k = k + 1 WHERE id = ?1").unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_delete(conn: &DuckDBConn, id: i64) {
     let mut stmt = conn.prepare_cached("DELETE FROM sbtest1 WHERE id = ?1").unwrap();
     stmt.execute(duckdb::params![id]).unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt = conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
     let mut rows = stmt.query([start, end]).unwrap();
@@ -386,7 +386,7 @@ fn duckdb_simple_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?").unwrap();
@@ -398,7 +398,7 @@ fn duckdb_sum_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_order_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt =
         conn.prepare_cached("SELECT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c").unwrap();
@@ -410,7 +410,7 @@ fn duckdb_order_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     count
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn duckdb_distinct_range(conn: &DuckDBConn, start: i64, end: i64) -> usize {
     let mut stmt = conn
         .prepare_cached("SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN ? AND ? ORDER BY c")
@@ -482,7 +482,7 @@ fn run_point_select_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harnes
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let conn = load_sqlite(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -497,7 +497,7 @@ fn run_point_select_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harnes
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let conn = load_duckdb(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -545,7 +545,7 @@ fn run_insert_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::Ben
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let stats = harness.run_batched(
             "sqlite",
@@ -571,7 +571,7 @@ fn run_insert_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::Ben
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let stats = harness.run_batched(
             "duckdb",
@@ -636,7 +636,7 @@ fn run_delete_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::Ben
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let stats = harness.run_batched(
             "sqlite",
@@ -667,7 +667,7 @@ fn run_delete_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::Ben
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let stats = harness.run_batched(
             "duckdb",
@@ -720,7 +720,7 @@ fn run_update_index_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harnes
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let conn = load_sqlite(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -735,7 +735,7 @@ fn run_update_index_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harnes
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let conn = load_duckdb(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -773,7 +773,7 @@ fn run_update_non_index_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<ha
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let conn = load_sqlite(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -789,7 +789,7 @@ fn run_update_non_index_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<ha
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let conn = load_duckdb(tbl_size);
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -854,7 +854,7 @@ fn run_write_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness:
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let stats = harness.run_batched(
             "sqlite",
@@ -892,7 +892,7 @@ fn run_write_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness:
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let stats = harness.run_batched(
             "duckdb",
@@ -973,7 +973,7 @@ fn run_read_write_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness:
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let stats = harness.run_batched(
             "sqlite",
@@ -1003,7 +1003,7 @@ fn run_read_write_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness:
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let stats = harness.run_batched(
             "duckdb",
@@ -1078,7 +1078,7 @@ fn run_oltp_read_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harn
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let conn = load_sqlite(tbl_size);
         let mut data = SysbenchData::new(tbl_size);
@@ -1111,7 +1111,7 @@ fn run_oltp_read_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harn
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let conn = load_duckdb(tbl_size);
         let mut data = SysbenchData::new(tbl_size);
@@ -1170,7 +1170,7 @@ fn run_select_random_points_benchmarks(harness: &Harness, tbl_size: usize) -> Ve
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let conn = load_sqlite(tbl_size);
         let mut data = SysbenchData::new(tbl_size);
@@ -1189,7 +1189,7 @@ fn run_select_random_points_benchmarks(harness: &Harness, tbl_size: usize) -> Ve
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let conn = load_duckdb(tbl_size);
         let mut data = SysbenchData::new(tbl_size);
@@ -1230,7 +1230,7 @@ fn run_select_random_ranges_benchmarks(harness: &Harness, tbl_size: usize) -> Ve
     }
 
     // SQLite
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     {
         let conn = load_sqlite(tbl_size);
         let mut data = SysbenchData::new(tbl_size);
@@ -1245,7 +1245,7 @@ fn run_select_random_ranges_benchmarks(harness: &Harness, tbl_size: usize) -> Ve
     }
 
     // DuckDB
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         let conn = load_duckdb(tbl_size);
         let mut data = SysbenchData::new(tbl_size);

@@ -9,7 +9,7 @@ set -e
 echo "=== Testing Join Optimizations (Issue #2494) ==="
 echo ""
 echo "Building profiling benchmark..."
-cargo build --release --package vibesql-executor --bench tpch_profiling --features benchmark-comparison 2>&1 | tail -5
+cargo build --release --package vibesql-executor --bench tpch_profiling --features sqlite,in-memory-indexes 2>&1 | tail -5
 
 PROFILER=$(ls -t target/release/deps/tpch_profiling-* | head -1)
 echo "Using profiler: $PROFILER"

@@ -89,7 +89,7 @@ jobs:
           VALIDATE: "1"
         run: |
           # Build and run the TPC-DS runner with validation
-          cargo bench --bench tpcds_runner --features benchmark-comparison -- 2>&1 | tee tpcds_output.txt
+          cargo bench --bench tpcds_runner --features sqlite,in-memory-indexes -- 2>&1 | tee tpcds_output.txt
 
           # Check for validation failures
           if grep -q "VALIDATION FAILED" tpcds_output.txt; then

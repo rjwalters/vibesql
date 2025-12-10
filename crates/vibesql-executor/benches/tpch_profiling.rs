@@ -9,7 +9,7 @@
 //! Comprehensive profiling for all TPC-H queries
 //!
 //! Run with:
-//!   cargo bench --package vibesql-executor --bench tpch_profiling --features benchmark-comparison --no-run && ./target/release/deps/tpch_profiling-*
+//!   cargo bench --package vibesql-executor --bench tpch_profiling --features sqlite --no-run && ./target/release/deps/tpch_profiling-*
 //!
 //! Environment Variables:
 //!   QUERY_TIMEOUT_SECS    Timeout per query in seconds (default: 30)

@@ -59,13 +59,13 @@ use super::data::{
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::Date;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::{Pool, PooledConn};
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
 
 use std::str::FromStr;
@@ -263,7 +263,7 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     db
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     let conn = SqliteConn::open_in_memory().unwrap();
     let mut data = TPCDSData::new(scale_factor);
@@ -305,7 +305,7 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     conn
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
     let mut data = TPCDSData::new(scale_factor);
@@ -351,7 +351,7 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 /// Load MySQL TPC-DS database
 /// Requires MYSQL_URL environment variable (e.g., mysql://root:password@localhost:3306/tpcds)
 /// Returns None if MYSQL_URL is not set or connection fails
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
     use mysql::prelude::Queryable;
     use std::io::Write;
@@ -5113,7 +5113,7 @@ fn load_inventory_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 // SQLite Schema and Data Loading (for benchmark comparison)
 // =============================================================================
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn create_tpcds_schema_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         r#"
@@ -5632,7 +5632,7 @@ fn create_tpcds_schema_sqlite(conn: &SqliteConn) {
     .unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     let start_year = data.config.date_start_year;
@@ -5694,7 +5694,7 @@ fn load_date_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let seconds_per_row = data.config.time_granularity.seconds_per_row();
     let num_times = data.time_dim_count;
@@ -5735,7 +5735,7 @@ fn load_time_dim_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare(
         "INSERT INTO item VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -5779,7 +5779,7 @@ fn load_item_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_customer_address_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn
         .prepare("INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -5808,7 +5808,7 @@ fn load_customer_address_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
 
@@ -5850,7 +5850,7 @@ fn load_customer_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_store_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare(
         "INSERT INTO store VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -5895,7 +5895,7 @@ fn load_store_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_store_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -5958,7 +5958,7 @@ fn load_store_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 // DuckDB Schema and Data Loading (for benchmark comparison)
 // =============================================================================
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn create_tpcds_schema_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         r#"
@@ -6498,7 +6498,7 @@ fn days_in_month(year: i32, month: i32) -> i32 {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     let start_year = data.config.date_start_year;
@@ -6560,7 +6560,7 @@ fn load_date_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let seconds_per_row = data.config.time_granularity.seconds_per_row();
     let num_times = data.time_dim_count;
@@ -6601,7 +6601,7 @@ fn load_time_dim_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare(
         "INSERT INTO item VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -6645,7 +6645,7 @@ fn load_item_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_customer_address_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn
         .prepare("INSERT INTO customer_address VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -6674,7 +6674,7 @@ fn load_customer_address_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
 
@@ -6716,7 +6716,7 @@ fn load_customer_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_store_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare(
         "INSERT INTO store VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -6761,7 +6761,7 @@ fn load_store_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_store_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -6824,7 +6824,7 @@ fn load_store_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 // Additional SQLite Data Loaders (Phase 2-4 tables)
 // =============================================================================
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_promotion_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let channels = ["Y", "N"];
     let purposes = ["Unknown", "Direct", "Digital"];
@@ -6863,7 +6863,7 @@ fn load_promotion_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn
         .prepare("INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -6893,7 +6893,7 @@ fn load_warehouse_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_ship_mode_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let ship_types = ["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "ECONOMY"];
     let carriers = ["DHL", "FEDEX", "UPS", "USPS", "AIRBORNE"];
@@ -6917,7 +6917,7 @@ fn load_ship_mode_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_reason_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let reasons = [
         "Did not like the color",
@@ -6946,7 +6946,7 @@ fn load_reason_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_store_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7000,7 +7000,7 @@ fn load_store_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
     let page_types = ["Cover", "Regular", "Index", "Special"];
@@ -7028,7 +7028,7 @@ fn load_catalog_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_web_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
 
@@ -7060,7 +7060,7 @@ fn load_web_page_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_web_site_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare(
         "INSERT INTO web_site VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -7102,7 +7102,7 @@ fn load_web_site_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_catalog_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7175,7 +7175,7 @@ fn load_catalog_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_catalog_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7235,7 +7235,7 @@ fn load_catalog_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_web_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7308,7 +7308,7 @@ fn load_web_sales_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_web_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7365,7 +7365,7 @@ fn load_web_returns_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn
         .prepare("INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -7405,7 +7405,7 @@ fn load_customer_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt =
         conn.prepare("INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)").unwrap();
@@ -7434,7 +7434,7 @@ fn load_household_demographics_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_income_band_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare("INSERT INTO income_band VALUES (?, ?, ?)").unwrap();
 
@@ -7444,7 +7444,7 @@ fn load_income_band_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_call_center_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let classes = ["small", "medium", "large", "unknown"];
     let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
@@ -7496,7 +7496,7 @@ fn load_call_center_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_inventory_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
     let num_dates = 52.min(data.date_dim_count);
     let num_items = data.item_count;
@@ -7535,7 +7535,7 @@ fn load_inventory_sqlite(conn: &SqliteConn, data: &mut TPCDSData) {
 // Additional DuckDB Data Loaders (Phase 2-4 tables)
 // =============================================================================
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_promotion_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let channels = ["Y", "N"];
     let purposes = ["Unknown", "Direct", "Digital"];
@@ -7574,7 +7574,7 @@ fn load_promotion_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn
         .prepare("INSERT INTO warehouse VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -7604,7 +7604,7 @@ fn load_warehouse_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_ship_mode_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let ship_types = ["REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY", "ECONOMY"];
     let carriers = ["DHL", "FEDEX", "UPS", "USPS", "AIRBORNE"];
@@ -7628,7 +7628,7 @@ fn load_ship_mode_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_reason_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let reasons = [
         "Did not like the color",
@@ -7657,7 +7657,7 @@ fn load_reason_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_store_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7711,7 +7711,7 @@ fn load_store_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_catalog_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let departments = ["Men", "Women", "Children", "Electronics", "Home", "Garden"];
     let page_types = ["Cover", "Regular", "Index", "Special"];
@@ -7739,7 +7739,7 @@ fn load_catalog_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_web_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let page_types = ["Home", "Product", "Category", "Search", "Checkout", "Cart"];
 
@@ -7771,7 +7771,7 @@ fn load_web_page_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_web_site_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare(
         "INSERT INTO web_site VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -7813,7 +7813,7 @@ fn load_web_site_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_catalog_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7886,7 +7886,7 @@ fn load_catalog_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_catalog_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -7946,7 +7946,7 @@ fn load_catalog_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_web_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -8019,7 +8019,7 @@ fn load_web_sales_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_web_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 2191.min(data.date_dim_count);
 
@@ -8076,7 +8076,7 @@ fn load_web_returns_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_customer_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn
         .prepare("INSERT INTO customer_demographics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -8116,7 +8116,7 @@ fn load_customer_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_household_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt =
         conn.prepare("INSERT INTO household_demographics VALUES (?, ?, ?, ?, ?)").unwrap();
@@ -8145,7 +8145,7 @@ fn load_household_demographics_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_income_band_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let mut stmt = conn.prepare("INSERT INTO income_band VALUES (?, ?, ?)").unwrap();
 
@@ -8155,7 +8155,7 @@ fn load_income_band_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_call_center_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let classes = ["small", "medium", "large", "unknown"];
     let hours = ["8AM-4PM", "8AM-8PM", "8AM-12AM"];
@@ -8207,7 +8207,7 @@ fn load_call_center_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_inventory_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
     let num_dates = 52.min(data.date_dim_count);
     let num_items = data.item_count;
@@ -8246,7 +8246,7 @@ fn load_inventory_duckdb(conn: &DuckDBConn, data: &mut TPCDSData) {
 // MySQL Schema and Loading (for comparison)
 // =============================================================================
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn create_tpcds_schema_mysql(conn: &mut PooledConn) {
     // Drop tables in reverse dependency order
     let drop_tables = [
@@ -8911,7 +8911,7 @@ fn create_tpcds_schema_mysql(conn: &mut PooledConn) {
     .unwrap();
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_date_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
     use mysql::Value;
     let day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -8974,7 +8974,7 @@ fn load_date_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_time_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
     let seconds_per_row = data.config.time_granularity.seconds_per_row();
     let num_times = data.time_dim_count;
@@ -9019,7 +9019,7 @@ fn load_time_dim_mysql(conn: &mut PooledConn, data: &TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9061,7 +9061,7 @@ fn load_item_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_customer_address_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9093,7 +9093,7 @@ fn load_customer_address_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
     let salutations = ["Mr.", "Mrs.", "Ms.", "Dr.", ""];
@@ -9135,7 +9135,7 @@ fn load_customer_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_store_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9182,7 +9182,7 @@ fn load_store_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_store_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9243,7 +9243,7 @@ fn load_store_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_promotion_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9279,7 +9279,7 @@ fn load_promotion_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9312,7 +9312,7 @@ fn load_warehouse_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_ship_mode_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let ship_types = ["LIBRARY", "REGULAR", "EXPRESS", "OVERNIGHT", "TWO DAY"];
     let carriers = ["UPS", "FEDEX", "USPS", "DHL"];
@@ -9335,7 +9335,7 @@ fn load_ship_mode_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_reason_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let reasons = [
         "Package was damaged",
@@ -9359,7 +9359,7 @@ fn load_reason_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_store_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9415,7 +9415,7 @@ fn load_store_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_catalog_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     for i in 1..=data.catalog_page_count {
         let page_id = format!("AAAAAAAAA{:07}", i);
@@ -9438,7 +9438,7 @@ fn load_catalog_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_web_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9470,7 +9470,7 @@ fn load_web_page_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_web_site_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9514,7 +9514,7 @@ fn load_web_site_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_catalog_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9591,7 +9591,7 @@ fn load_catalog_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_catalog_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9656,7 +9656,7 @@ fn load_catalog_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_web_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9734,7 +9734,7 @@ fn load_web_sales_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_web_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9794,7 +9794,7 @@ fn load_web_returns_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_customer_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let mut sk = 0;
     'outer: for gender in GENDERS.iter() {
@@ -9833,7 +9833,7 @@ fn load_customer_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData)
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_household_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let mut sk = 0;
     'outer: for income_band_sk in 1..=data.income_band_count.min(INCOME_BANDS.len()) {
@@ -9862,7 +9862,7 @@ fn load_household_demographics_mysql(conn: &mut PooledConn, data: &mut TPCDSData
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_income_band_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let count = data.income_band_count.min(INCOME_BANDS.len());
     for (i, &(lower, upper)) in INCOME_BANDS.iter().enumerate().take(count) {
@@ -9871,7 +9871,7 @@ fn load_income_band_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_call_center_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     use mysql::Value;
 
@@ -9925,7 +9925,7 @@ fn load_call_center_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn load_inventory_mysql(conn: &mut PooledConn, data: &mut TPCDSData) {
     let num_dates = 52.min(data.date_dim_count);
     let num_items = data.item_count;

@@ -98,7 +98,7 @@ run_standard_mode() {
 
     # Build benchmark
     echo -e "${YELLOW}Building benchmark...${NC}"
-    cargo build --release -p vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison 2>&1 | grep -E "(Compiling|Finished)" || true
+    cargo build --release -p vibesql-executor --bench ${BENCH_NAME} --features sqlite,in-memory-indexes 2>&1 | grep -E "(Compiling|Finished)" || true
     strip_quarantine
     echo -e "${GREEN}✓ Build complete${NC}"
     echo ""
@@ -130,7 +130,7 @@ run_isolated_mode() {
 
     # Build benchmark binary
     echo -e "${YELLOW}Building benchmark...${NC}"
-    cargo build --release -p vibesql-executor --bench ${BENCH_NAME} --features benchmark-comparison 2>&1 | grep -E "(Compiling|Finished)" || true
+    cargo build --release -p vibesql-executor --bench ${BENCH_NAME} --features sqlite,in-memory-indexes 2>&1 | grep -E "(Compiling|Finished)" || true
     strip_quarantine
     BENCH_BIN=$(find target/release/deps -name "${BENCH_NAME}-*" -type f -perm +111 | head -1)
 
@@ -234,7 +234,7 @@ run_compare_mode() {
 
     if [ -z "$BENCH_BIN" ]; then
         echo -e "${YELLOW}Building benchmark...${NC}"
-        cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison --no-run
+        cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes --no-run
         strip_quarantine
         BENCH_BIN=$(find target/release/deps -name 'tpch_benchmark-*' -type f -executable | head -1)
     fi
@@ -259,7 +259,7 @@ run_compare_mode() {
     CARGO_TARGET_DIR=target cargo bench \
         --package vibesql-executor \
         --bench tpch_benchmark \
-        --features benchmark-comparison \
+        --features sqlite,in-memory-indexes \
         -- --quick \
         2>&1 | tee -a "$OUTPUT_FILE"
 
@@ -278,7 +278,7 @@ run_quick_compare_mode() {
     # Build if needed
     if [ ! -f target/release/deps/tpch_benchmark-* ]; then
         echo -e "${YELLOW}Building benchmark...${NC}"
-        cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison --no-run
+        cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes --no-run
         strip_quarantine
     fi
 

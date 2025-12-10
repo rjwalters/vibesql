@@ -62,9 +62,9 @@ def build_benchmark(include_duckdb: bool = False) -> bool:
     """Build the TPC-H benchmark binary."""
     print("Building TPC-H benchmark...")
 
-    features = "benchmark-comparison"
+    features = "sqlite,in-memory-indexes"
     if include_duckdb:
-        features += ",duckdb-comparison"
+        features += ",duckdb"
 
     cmd = [
         "cargo", "build",

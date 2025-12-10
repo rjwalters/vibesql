@@ -14,7 +14,7 @@
 //! ./target/release/deps/tpcds_benchmark-*
 //!
 //! # With DuckDB comparison
-//! cargo bench --package vibesql-executor --bench tpcds_benchmark --features duckdb-comparison --no-run
+//! cargo bench --package vibesql-executor --bench tpcds_benchmark --features duckdb --no-run
 //! ./target/release/deps/tpcds_benchmark-*
 //!
 //! # With query filter
@@ -49,13 +49,13 @@ use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::PooledConn;
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
 
 /// Default scale factor for TPC-DS benchmarks
@@ -71,7 +71,7 @@ const DEFAULT_SCALE_FACTOR: f64 = 0.005;
 const MIN_SCALE_FACTOR: f64 = 0.005;
 
 /// Queries that use SQL features SQLite doesn't support (ROLLUP, CUBE, STDDEV_SAMP, parenthesized UNION)
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_should_skip(query_name: &str) -> bool {
     matches!(
         query_name,
@@ -168,7 +168,7 @@ fn run_vibesql_query(db: &VibeDB, sql: &str, timeout: Duration) -> BenchResult {
 }
 
 /// Run a query on SQLite
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn run_sqlite_query(conn: &SqliteConn, sql: &str) -> BenchResult {
     let start = Instant::now();
     match conn.prepare(sql) {
@@ -184,7 +184,7 @@ fn run_sqlite_query(conn: &SqliteConn, sql: &str) -> BenchResult {
 }
 
 /// Run a query on DuckDB
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn run_duckdb_query(conn: &DuckDBConn, sql: &str) -> BenchResult {
     let start = Instant::now();
     match conn.prepare(sql) {
@@ -200,7 +200,7 @@ fn run_duckdb_query(conn: &DuckDBConn, sql: &str) -> BenchResult {
 }
 
 /// Run a query on MySQL
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_mysql_query(conn: &mut PooledConn, sql: &str) -> BenchResult {
     let start = Instant::now();
     match conn.query_iter(sql) {
@@ -382,7 +382,7 @@ fn main() {
     // ========================================
     // SQLite Benchmark (if feature enabled)
     // ========================================
-    #[cfg(feature = "sqlite-comparison")]
+    #[cfg(feature = "sqlite")]
     if engine_filter.sqlite {
         eprintln!("\nLoading SQLite database...");
         let load_start = Instant::now();
@@ -421,14 +421,14 @@ fn main() {
         all_results.push(("SQLite", sqlite_results));
         hint_memory_release();
     } else {
-        #[cfg(feature = "sqlite-comparison")]
+        #[cfg(feature = "sqlite")]
         eprintln!("\nSkipping SQLite (filtered out by ENGINE_FILTER)");
     }
 
     // ========================================
     // DuckDB Benchmark (if feature enabled)
     // ========================================
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     if engine_filter.duckdb {
         eprintln!("\nLoading DuckDB database...");
         let load_start = Instant::now();
@@ -452,7 +452,7 @@ fn main() {
         all_results.push(("DuckDB", duckdb_results));
         hint_memory_release();
     } else {
-        #[cfg(feature = "duckdb-comparison")]
+        #[cfg(feature = "duckdb")]
         eprintln!("\nSkipping DuckDB (filtered out by ENGINE_FILTER)");
     }
 
@@ -460,7 +460,7 @@ fn main() {
     // MySQL Benchmark (if feature enabled)
     // Note: MySQL is excluded by default (use ENGINE_FILTER=all or ENGINE_FILTER=...,mysql)
     // ========================================
-    #[cfg(feature = "mysql-comparison")]
+    #[cfg(feature = "mysql")]
     if engine_filter.mysql {
         if let Some(mut conn) = load_mysql(scale_factor) {
             let mut mysql_results = Vec::new();
@@ -482,7 +482,7 @@ fn main() {
             eprintln!("\nSkipping MySQL (MYSQL_URL not set)");
         }
     } else {
-        #[cfg(feature = "mysql-comparison")]
+        #[cfg(feature = "mysql")]
         eprintln!("\nSkipping MySQL (filtered out by ENGINE_FILTER)");
     }
 

@@ -12,9 +12,9 @@
 use super::data::TPCEData;
 use vibesql_storage::Database as VibeDB;
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
 
 // =============================================================================
@@ -92,7 +92,7 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     db
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     let conn = SqliteConn::open_in_memory().unwrap();
     let mut data = TPCEData::new(scale_factor);
@@ -107,7 +107,7 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     conn
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
     let mut data = TPCEData::new(scale_factor);
@@ -1236,12 +1236,12 @@ fn load_trade_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
 // SQLite Schema and Loading (for comparison)
 // =============================================================================
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn create_tpce_schema_sqlite(conn: &SqliteConn) {
     conn.execute_batch(include_str!("sqlite_schema.sql")).unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn create_tpce_indexes_sqlite(conn: &SqliteConn) {
     conn.execute_batch(
         "
@@ -1259,7 +1259,7 @@ fn create_tpce_indexes_sqlite(conn: &SqliteConn) {
     .unwrap();
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_fixed_tables_sqlite(conn: &SqliteConn, data: &mut TPCEData) {
     // Load exchanges
     for ex in data.gen_exchanges() {
@@ -1339,17 +1339,17 @@ fn load_fixed_tables_sqlite(conn: &SqliteConn, data: &mut TPCEData) {
     }
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_customer_tables_sqlite(_conn: &SqliteConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_market_tables_sqlite(_conn: &SqliteConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 fn load_trade_tables_sqlite(_conn: &SqliteConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }
@@ -1358,12 +1358,12 @@ fn load_trade_tables_sqlite(_conn: &SqliteConn, _data: &mut TPCEData) {
 // DuckDB Schema and Loading (for comparison)
 // =============================================================================
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn create_tpce_schema_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(include_str!("duckdb_schema.sql")).unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn create_tpce_indexes_duckdb(conn: &DuckDBConn) {
     conn.execute_batch(
         "
@@ -1381,22 +1381,22 @@ fn create_tpce_indexes_duckdb(conn: &DuckDBConn) {
     .unwrap();
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_fixed_tables_duckdb(_conn: &DuckDBConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_customer_tables_duckdb(_conn: &DuckDBConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_market_tables_duckdb(_conn: &DuckDBConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn load_trade_tables_duckdb(_conn: &DuckDBConn, _data: &mut TPCEData) {
     // Simplified - full implementation would mirror VibeSQL version
 }

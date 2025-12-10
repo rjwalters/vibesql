@@ -138,7 +138,7 @@ let exec_time = exec_start.elapsed();
 
 **Option C: Use flamegraph/profiler**
 ```bash
-cargo flamegraph --bench q6_profiling --features "benchmark-comparison,profile-q6"
+cargo flamegraph --bench q6_profiling --features "sqlite,in-memory-indexes,profile-q6"
 ```
 
 ### After Finding the 22ms

@@ -56,7 +56,7 @@ def build_benchmark(with_comparison: bool = True) -> bool:
 
     if with_comparison:
         cmd.append("--features")
-        cmd.append("benchmark-comparison")
+        cmd.append("sqlite,in-memory-indexes")
 
     result = subprocess.run(
         cmd,

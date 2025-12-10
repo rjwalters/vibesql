@@ -6,7 +6,7 @@ This is the authoritative documentation for all benchmarking in VibeSQL. It cove
 
 ```bash
 # Industry-standard SQL engine performance (recommended)
-cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison
+cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes
 
 # Or via make targets (includes result processing)
 make benchmark-tpch
@@ -86,10 +86,10 @@ VibeSQL uses **three complementary benchmarking systems** that measure different
 make benchmark-tpch
 
 # Or directly with Criterion
-cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison
+cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes
 
 # With specific queries
-cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison -- q1 q3 q6
+cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes -- q1 q3 q6
 ```
 
 **What it tests**:
@@ -226,7 +226,7 @@ make benchmark-tpch
 
 **I want to profile a specific query:**
 ```bash
-cargo bench --package vibesql-executor --bench tpch_benchmark --features benchmark-comparison -- q1
+cargo bench --package vibesql-executor --bench tpch_benchmark --features sqlite,in-memory-indexes -- q1
 ```
 
 **I want to compare VibeSQL vs SQLite vs DuckDB:**
@@ -256,19 +256,19 @@ make analyze-benchmarks  # Show all results and analysis
 ```bash
 # Build the benchmark
 cargo build --package vibesql-executor --bench tpch_benchmark \
-  --features benchmark-comparison --release
+  --features sqlite,in-memory-indexes --release
 
 # Run with default settings
 cargo bench --package vibesql-executor --bench tpch_benchmark \
-  --features benchmark-comparison -- --noplot
+  --features sqlite,in-memory-indexes -- --noplot
 
 # Run specific queries only
 cargo bench --package vibesql-executor --bench tpch_benchmark \
-  --features benchmark-comparison -- q1 q3 q6 --noplot
+  --features sqlite,in-memory-indexes -- q1 q3 q6 --noplot
 
 # Run with verbose output
 cargo bench --package vibesql-executor --bench tpch_benchmark \
-  --features benchmark-comparison -- --verbose
+  --features sqlite,in-memory-indexes -- --verbose
 
 # Via make (includes result processing)
 make benchmark-tpch
@@ -287,7 +287,7 @@ BENCHMARK_COMPARISON=true # Compare all engines
 ```bash
 # Build the benchmark
 cargo build --package vibesql-executor --bench tpcc_benchmark \
-  --features benchmark-comparison --release
+  --features sqlite,in-memory-indexes --release
 
 # Run with optional MySQL
 export MYSQL_URL="mysql://root:password@localhost:3306/tpcc"
@@ -296,7 +296,7 @@ export TPCC_WARMUP_SECS=10
 export TPCC_SCALE_FACTOR=1
 
 cargo bench --package vibesql-executor --bench tpcc_benchmark \
-  --features benchmark-comparison -- --noplot
+  --features sqlite,in-memory-indexes -- --noplot
 
 # Via make (includes Docker setup)
 make benchmark-tpcc
@@ -313,7 +313,7 @@ make benchmark-tpcds-all
 
 # Run specific queries
 cargo bench --package vibesql-executor --bench tpcds_benchmark \
-  --features benchmark-comparison -- ds_1 ds_3 ds_5 --noplot
+  --features sqlite,in-memory-indexes -- ds_1 ds_3 ds_5 --noplot
 ```
 
 #### Sysbench Benchmarks
@@ -444,7 +444,7 @@ criterion_main!(benches);
 [[bench]]
 name = "my_benchmark"
 harness = false
-required-features = ["benchmark-comparison"]
+required-features = ["sqlite,in-memory-indexes"]
 ```
 
 3. **Add Makefile target** (optional):
@@ -452,14 +452,14 @@ required-features = ["benchmark-comparison"]
 ```makefile
 benchmark-my-bench:
 	cargo bench --package vibesql-executor --bench my_benchmark \
-	  --features benchmark-comparison -- --noplot
+	  --features sqlite,in-memory-indexes -- --noplot
 ```
 
 4. **Run and verify**:
 
 ```bash
 cargo bench --package vibesql-executor --bench my_benchmark \
-  --features benchmark-comparison
+  --features sqlite,in-memory-indexes
 ```
 
 ### Adding a Python Benchmark
@@ -561,29 +561,29 @@ VibeSQL supports comparison benchmarks against DuckDB for OLAP workloads. DuckDB
 ```bash
 # TPC-H with SQLite comparison only (default, lighter weight)
 cargo bench --package vibesql-executor --bench tpch_profiling \
-  --features benchmark-comparison
+  --features sqlite,in-memory-indexes
 
 # TPC-H with DuckDB comparison (adds ~73MB to binary)
 cargo bench --package vibesql-executor --bench tpch_profiling \
-  --features benchmark-comparison,duckdb-comparison
+  --features sqlite,in-memory-indexes,duckdb
 
 # TPC-DS with DuckDB validation mode
 VALIDATE=1 cargo bench --bench tpcds_runner \
-  --features benchmark-comparison,duckdb-comparison
+  --features sqlite,in-memory-indexes,duckdb
 
 # Run with specific scale factor
 SCALE_FACTOR=0.1 cargo bench --package vibesql-executor --bench tpch_profiling \
-  --features benchmark-comparison,duckdb-comparison
+  --features sqlite,in-memory-indexes,duckdb
 ```
 
 ### Feature Flags
 
 | Feature | Description | Binary Size Impact |
 |---------|-------------|-------------------|
-| `benchmark-comparison` | Enable SQLite comparison + in-memory indexes | ~2MB |
-| `sqlite-comparison` | SQLite only (included in benchmark-comparison) | ~2MB |
-| `duckdb-comparison` | Add DuckDB comparison | ~73MB |
-| `mysql-comparison` | Add MySQL comparison (requires MYSQL_URL) | ~1MB |
+| `sqlite,in-memory-indexes` | Enable SQLite comparison + in-memory indexes | ~2MB |
+| `sqlite` | SQLite only (included in sqlite,in-memory-indexes) | ~2MB |
+| `duckdb` | Add DuckDB comparison | ~73MB |
+| `mysql` | Add MySQL comparison (requires MYSQL_URL) | ~1MB |
 
 ### CI vs Local Differences
 
@@ -604,8 +604,8 @@ The nightly benchmark workflow (`.github/workflows/nightly-benchmarks.yml`) runs
    - `tpcds-full`: TPC-DS with SQLite
 
 2. **DuckDB comparison jobs** (separate for binary size isolation):
-   - `tpch-duckdb-comparison`: TPC-H vs DuckDB
-   - `tpcds-duckdb-comparison`: TPC-DS vs DuckDB (with validation)
+   - `tpch-duckdb`: TPC-H vs DuckDB
+   - `tpcds-duckdb`: TPC-DS vs DuckDB (with validation)
 
 3. **Other benchmarks**:
    - `tpcc-extended`: TPC-C OLTP workload
@@ -618,7 +618,7 @@ Nightly runs produce JSON artifacts suitable for web-demo consumption:
 
 ```bash
 # Download artifacts from GitHub Actions
-gh run download <run-id> --name nightly-tpch-duckdb-comparison
+gh run download <run-id> --name nightly-tpch-duckdb
 
 # Artifacts include:
 # - tpch_duckdb_output.txt (raw benchmark output)
@@ -717,7 +717,7 @@ ORDER BY ABS(percent_change) DESC;
 ```bash
 # Correct way
 cargo bench --package vibesql-executor --bench tpch_benchmark \
-  --features benchmark-comparison --release
+  --features sqlite,in-memory-indexes --release
 
 # Make sure Criterion is in Cargo.toml
 cat crates/vibesql-executor/Cargo.toml | grep criterion

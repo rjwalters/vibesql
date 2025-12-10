@@ -38,7 +38,7 @@ arrow-array = "57.1"
 arrow-arith = "57.1"  # For SIMD-accelerated temporal operations
 arrow-select = "57.1"
 
-# Optional benchmark-comparison dependencies
+# Optional comparison engine dependencies
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 duckdb = { version = "1.1", features = ["bundled"], optional = true }
 mysql = { version = "26.0", optional = true }
@@ -76,39 +76,46 @@ default = ["parallel", "spatial", "native-columnar"]
 parallel = ["rayon", "crossbeam-deque"]
 # Spatial/geospatial query support (optional, reduces binary size)
 spatial = ["geo", "wkt", "rstar"]
-# Individual comparison features - use these for granular control
-# IMPORTANT: DuckDB linking causes significant binary bloat (73MB vs 15MB) which
-# affects CPU cache locality and slows down ALL benchmarks, even VibeSQL-only ones.
-# For fair OLTP comparisons (Sysbench, TPC-C), use sqlite-comparison only.
-sqlite-comparison = ["rusqlite"]
-duckdb-comparison = ["duckdb"]
-mysql-comparison = ["mysql"]
-# Enable this feature for benchmarks that compare against SQLite (lightweight, fair OLTP comparison)
-# Usage: cargo bench --features benchmark-comparison
-# For DuckDB comparisons (OLAP), use: cargo bench --features benchmark-comparison,duckdb-comparison
+
+# VibeSQL performance features (for benchmarks)
+# Native columnar execution (Phase 2b - zero row materialization)
+# Enabled by default. Set VIBESQL_DISABLE_COLUMNAR=1 to opt-out.
+native-columnar = []
+# Fast in-memory indexes for ephemeral benchmark data (avoids slow disk-backed index creation)
+in-memory-indexes = ["vibesql-storage/in-memory-indexes"]
+
+# Comparison engines (embedded)
+# Note: DuckDB linking causes significant binary bloat (73MB vs 15MB) which
+# affects CPU cache locality and can slow down benchmarks.
+sqlite = ["dep:rusqlite"]
+duckdb = ["dep:duckdb"]
+
+# Comparison engines (client-server)
 # MySQL requires MYSQL_URL env var (e.g., mysql://root:password@localhost:3306/tpch)
-# Note: This enables in-memory-indexes for vibesql-storage to avoid slow disk-backed index
-# creation for ephemeral benchmark data at large scale factors.
-benchmark-comparison = ["sqlite-comparison", "native-columnar", "vibesql-storage/in-memory-indexes"]
+mysql = ["dep:mysql"]
+# vibesql-server is a separate crate, not a feature here
+
+# Convenience groups
+all-embedded = ["sqlite", "duckdb"]
+all-servers = ["mysql"]
+all-engines = ["all-embedded", "all-servers"]
+
+# Recommended benchmark setup (VibeSQL optimized + all engines)
+# Usage: cargo bench --features benchmark
+benchmark = ["native-columnar", "in-memory-indexes", "all-engines"]
+
 # Enable detailed profiling output for Q6 query
 profile-q6 = []
 # Enable detailed profiling output for TPC-C transactions
 profile-tpcc = []
-# Enable native columnar execution (Phase 2b - zero row materialization)
-# Now enabled by default for eligible queries. Set VIBESQL_DISABLE_COLUMNAR=1 to opt-out.
-native-columnar = []
 # Enable JIT compilation support using Cranelift (research/experimental)
-# Usage: cargo bench --features jit,benchmark-comparison
+# Usage: cargo bench --features jit,benchmark
 jit = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-native"]
 # Enable experimental SIMD-accelerated group-by aggregation (research/experimental)
 simd = []
 # Use jemalloc allocator for better memory release characteristics
 # Usage: cargo bench --features jemalloc -- tpcds_runner
 jemalloc = ["tikv-jemallocator", "tikv-jemalloc-ctl"]
-# Enable fast in-memory indexes for large scale benchmarks (SF >= 0.1)
-# This avoids slow disk-backed index creation for ephemeral benchmark data.
-# Usage: cargo bench --features large-scale-benchmarks -- tpcds_runner
-large-scale-benchmarks = ["vibesql-storage/in-memory-indexes"]
 
 [[test]]
 name = "foreign_key_tests"
@@ -161,7 +168,7 @@ harness = false
 [[bench]]
 name = "tpch_benchmark"
 harness = false
-required-features = ["benchmark-comparison"]
+required-features = ["sqlite"]
 
 [[bench]]
 name = "hash_join_parallel"
@@ -174,7 +181,7 @@ harness = false
 [[bench]]
 name = "tpch_profiling"
 harness = false
-required-features = ["benchmark-comparison"]
+required-features = ["sqlite"]
 
 [[bench]]
 name = "columnar_execution"
@@ -191,12 +198,12 @@ harness = false
 [[bench]]
 name = "tpch_deep_profiling"
 harness = false
-required-features = ["benchmark-comparison"]
+required-features = ["sqlite"]
 
 [[bench]]
 name = "tpch_instrumented"
 harness = false
-required-features = ["benchmark-comparison"]
+required-features = ["sqlite"]
 
 [[bench]]
 name = "sysbench_oltp"
@@ -243,4 +250,4 @@ harness = false
 [[bench]]
 name = "morsel_scaling"
 harness = false
-required-features = ["large-scale-benchmarks"]
+required-features = ["in-memory-indexes"]

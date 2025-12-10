@@ -41,7 +41,7 @@ profile_tpch_query() {
     local query="$1"
 
     info "Building TPC-H profiling benchmark..."
-    cargo build --release --package vibesql-executor --bench tpch_profiling --features benchmark-comparison 2>/dev/null
+    cargo build --release --package vibesql-executor --bench tpch_profiling --features sqlite,in-memory-indexes 2>/dev/null
 
     local binary=$(find "$PROJECT_ROOT/target/release/deps" -maxdepth 1 -name "tpch_profiling-*" -type f ! -name "*.d" ! -name "*.o" | head -1)
 

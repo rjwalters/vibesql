@@ -42,32 +42,32 @@ Sysbench is the de facto standard for MySQL-compatible database benchmarking. Us
 
 ```bash
 # Run all benchmarks (VibeSQL, SQLite, DuckDB)
-cargo bench --bench sysbench_oltp --features benchmark-comparison
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes
 
 # Run VibeSQL only
 cargo bench --bench sysbench_oltp
 
 # Generate HTML reports
-cargo bench --bench sysbench_oltp --features benchmark-comparison -- --save-baseline main
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes -- --save-baseline main
 ```
 
 ### Run Specific Tests
 
 ```bash
 # Run only point select benchmarks
-cargo bench --bench sysbench_oltp --features benchmark-comparison -- point_select
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes -- point_select
 
 # Run only insert benchmarks
-cargo bench --bench sysbench_oltp --features benchmark-comparison -- insert
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes -- insert
 
 # Run only read/write mixed workload
-cargo bench --bench sysbench_oltp --features benchmark-comparison -- read_write
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes -- read_write
 
 # Run only VibeSQL benchmarks
-cargo bench --bench sysbench_oltp --features benchmark-comparison -- vibesql
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes -- vibesql
 
 # Run only SQLite benchmarks
-cargo bench --bench sysbench_oltp --features benchmark-comparison -- sqlite
+cargo bench --bench sysbench_oltp --features sqlite,in-memory-indexes -- sqlite
 ```
 
 ## Test Categories
@@ -200,12 +200,12 @@ fn vibesql_my_test(db: &VibeDB, ...) -> Result {
     // Implementation
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 fn sqlite_my_test(conn: &SqliteConn, ...) -> Result {
     // Implementation
 }
 
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 fn duckdb_my_test(conn: &DuckDBConn, ...) -> Result {
     // Implementation
 }
@@ -254,7 +254,7 @@ criterion_group!(
 
 **Error**: `cannot find type rusqlite in scope`
 ```bash
-cargo update && cargo clean && cargo check --benches --features benchmark-comparison
+cargo update && cargo clean && cargo check --benches --features sqlite,in-memory-indexes
 ```
 
 **Error**: `duckdb not found`

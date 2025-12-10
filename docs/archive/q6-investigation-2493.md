@@ -179,7 +179,7 @@ Potential issues:
 1. **✅ DONE**: Build benchmark with `profile-q6` feature
    ```bash
    cargo build --release -p vibesql-executor --bench tpch_profiling \
-     --features "benchmark-comparison,profile-q6"
+     --features "sqlite,in-memory-indexes,profile-q6"
    ```
 
 2. **TODO**: Run Q6 with debug logging to confirm execution path

@@ -3,7 +3,7 @@
 //! This benchmark runs queries multiple times in a loop to enable external profiling tools.
 //!
 //! Build:
-//!   cargo build --release -p vibesql-executor --bench tpch_deep_profiling --features benchmark-comparison
+//!   cargo build --release -p vibesql-executor --bench tpch_deep_profiling --features sqlite
 //!
 //! Run with sample (macOS):
 //!   ./target/release/deps/tpch_deep_profiling-* Q6 &

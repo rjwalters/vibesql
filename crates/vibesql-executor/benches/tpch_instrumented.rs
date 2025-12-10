@@ -4,7 +4,7 @@
 //! where execution time is spent in each query phase.
 //!
 //! Build:
-//!   cargo build --release -p vibesql-executor --bench tpch_instrumented --features benchmark-comparison
+//!   cargo build --release -p vibesql-executor --bench tpch_instrumented --features sqlite
 //!
 //! Run:
 //!   ./target/release/deps/tpch_instrumented-* Q6

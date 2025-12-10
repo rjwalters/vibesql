@@ -153,7 +153,7 @@ profile_tpch() {
         info "Profiling all TPC-H queries"
     fi
 
-    build_benchmark "tpch_profiling" "benchmark-comparison"
+    build_benchmark "tpch_profiling" "sqlite,in-memory-indexes"
     local binary=$(find_benchmark_binary "tpch_profiling")
 
     local env_vars="SCALE_FACTOR=0.01 PROFILING_ITERATIONS=3 QUERY_TIMEOUT_SECS=$TIMEOUT"

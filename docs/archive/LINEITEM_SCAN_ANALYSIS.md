@@ -170,7 +170,7 @@ DuckDB achieves sub-millisecond scans through:
 ```bash
 # Run lineitem scan profiling benchmark
 cd crates/vibesql-executor
-cargo bench --bench lineitem_scan_profiling --features benchmark-comparison
+cargo bench --bench lineitem_scan_profiling --features sqlite,in-memory-indexes
 
 # Results saved to: target/criterion/
 ```

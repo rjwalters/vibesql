@@ -9,7 +9,7 @@
 //!
 //! Usage:
 //!   cargo bench --bench lineitem_scan_profiling
-//!   cargo bench --bench lineitem_scan_profiling --features duckdb-comparison
+//!   cargo bench --bench lineitem_scan_profiling --features duckdb
 //!
 //! Environment variables:
 //!   WARMUP_ITERATIONS - Number of warmup runs (default: 3)
@@ -90,7 +90,7 @@ fn run_vibesql_benchmark(
 // DuckDB Benchmark Functions
 // =============================================================================
 
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn run_duckdb_benchmark(
     harness: &Harness,
     name: &str,
@@ -154,7 +154,7 @@ fn main() {
     }
 
     // Run DuckDB benchmarks if feature is enabled
-    #[cfg(feature = "duckdb-comparison")]
+    #[cfg(feature = "duckdb")]
     {
         eprintln!("\nLoading DuckDB TPC-H data...");
         let conn = load_duckdb(scale_factor);
@@ -171,7 +171,7 @@ fn main() {
         harness::print_comparison_table(&[("VibeSQL", vibesql_results), ("DuckDB", duckdb_results)]);
     }
 
-    #[cfg(not(feature = "duckdb-comparison"))]
+    #[cfg(not(feature = "duckdb"))]
     {
         harness::print_summary_table("VibeSQL", &vibesql_results);
     }

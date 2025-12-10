@@ -50,11 +50,11 @@ use tpch::schema::load_vibesql;
 use tokio_postgres::NoTls;
 
 // MySQL client (optional)
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::Pool;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use tpch::schema::load_mysql;
 
 /// Default port for vibesql-server (different from sysbench_server to avoid conflicts)
@@ -218,12 +218,12 @@ impl PostgresExecutor {
 // MySQL Executor
 // =============================================================================
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 struct MysqlExecutor {
     pool: Pool,
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 impl MysqlExecutor {
     fn connect(url: &str) -> Option<Self> {
         let pool = Pool::new(url).ok()?;
@@ -598,7 +598,7 @@ fn main() {
     #[allow(unused_mut)]
     let mut mysql_results: Vec<QueryResult> = Vec::new();
 
-    #[cfg(feature = "mysql-comparison")]
+    #[cfg(feature = "mysql")]
     {
         if let Ok(mysql_url) = env::var("MYSQL_URL") {
             eprintln!("\n\nLoading TPC-H data into MySQL...");

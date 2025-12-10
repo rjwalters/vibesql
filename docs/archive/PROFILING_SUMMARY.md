@@ -133,7 +133,7 @@ Based on profiling results:
 ```bash
 # Build with profiling enabled
 cd crates/vibesql-executor
-cargo build --release --bench q6_profiling --features "benchmark-comparison,profile-q6"
+cargo build --release --bench q6_profiling --features "sqlite,in-memory-indexes,profile-q6"
 
 # Run profiling benchmark
 ./target/release/q6_profiling-<hash>

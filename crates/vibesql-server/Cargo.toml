@@ -17,10 +17,10 @@ storage-memory = ["vibesql-storage/storage-memory"]
 # storage-all enables all storage backends and also enables the local feature flags
 # so that #[cfg(feature = "...")] checks work correctly in tests
 storage-all = ["vibesql-storage/storage-all", "opendal", "storage-memory"]
-# Benchmark comparison features (for server benchmarks)
-mysql-comparison = ["mysql"]
-duckdb-comparison = ["duckdb"]
-sqlite-comparison = []
+# Comparison engines (for server benchmarks)
+mysql = ["dep:mysql"]
+duckdb = ["dep:duckdb"]
+sqlite = []  # SQLite is always available via dev-dependencies
 
 [lib]
 name = "vibesql_server"

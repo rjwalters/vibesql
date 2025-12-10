@@ -437,11 +437,14 @@ def run_tpch_comparison(config: BenchConfig) -> int:
             config.engines = [e for e in config.engines if e != "mysql"]
 
     # Build the benchmark binary with appropriate features
-    features = ["benchmark-comparison"]
+    # Always include in-memory-indexes for VibeSQL optimization
+    features = ["in-memory-indexes"]
+    if "sqlite" in config.engines:
+        features.append("sqlite")
     if "duckdb" in config.engines:
-        features.append("duckdb-comparison")
+        features.append("duckdb")
     if "mysql" in config.engines:
-        features.append("mysql-comparison")
+        features.append("mysql")
     features_str = ",".join(features)
 
     print("\nBuilding benchmark...")
@@ -525,11 +528,14 @@ def run_tpcc(config: BenchConfig) -> int:
     print("=" * 60)
 
     # Build features based on selected engines
-    features = ["benchmark-comparison"]
+    # Always include in-memory-indexes for VibeSQL optimization
+    features = ["in-memory-indexes"]
+    if "sqlite" in config.engines:
+        features.append("sqlite")
     if "duckdb" in config.engines:
-        features.append("duckdb-comparison")
+        features.append("duckdb")
     if "mysql" in config.engines:
-        features.append("mysql-comparison")
+        features.append("mysql")
     features_str = ",".join(features)
 
     # Build benchmark
@@ -702,11 +708,14 @@ def run_sysbench(config: BenchConfig) -> int:
             config.engines = [e for e in config.engines if e != "mysql"]
 
     # Build features based on selected engines
-    features = ["benchmark-comparison"]
+    # Always include in-memory-indexes for VibeSQL optimization
+    features = ["in-memory-indexes"]
+    if "sqlite" in config.engines:
+        features.append("sqlite")
     if "duckdb" in config.engines:
-        features.append("duckdb-comparison")
+        features.append("duckdb")
     if "mysql" in config.engines:
-        features.append("mysql-comparison")
+        features.append("mysql")
     features_str = ",".join(features)
 
     # Build the benchmark binary
@@ -777,7 +786,7 @@ def run_sysbench_server(config: BenchConfig) -> int:
     # Build features based on selected engines
     features = []
     if "mysql" in config.engines:
-        features.append("mysql-comparison")
+        features.append("mysql")
     features_str = ",".join(features) if features else ""
 
     # Build benchmark
@@ -926,7 +935,7 @@ def run_tpch_server(config: BenchConfig) -> int:
     # Build features based on selected engines
     features = []
     if "mysql" in config.engines:
-        features.append("mysql-comparison")
+        features.append("mysql")
     features_str = ",".join(features) if features else ""
 
     # Build benchmark

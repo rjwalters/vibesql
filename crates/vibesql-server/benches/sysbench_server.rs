@@ -62,9 +62,9 @@ use tokio::sync::oneshot;
 use tokio_postgres::{Client, NoTls};
 
 // MySQL client (optional)
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::*;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 use mysql::{Pool, PooledConn};
 
 /// Default table size for sysbench tests
@@ -359,12 +359,12 @@ impl PostgresExecutor {
 // MySQL Executor
 // =============================================================================
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 struct MysqlExecutor {
     conn: PooledConn,
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 impl MysqlExecutor {
     fn connect(url: &str, table_size: usize) -> Option<Self> {
         let pool = Pool::new(url).ok()?;
@@ -877,7 +877,7 @@ async fn run_range_postgres(
 // Benchmark Runners - MySQL
 // =============================================================================
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_point_select_mysql(
     executor: &mut MysqlExecutor,
     table_size: usize,
@@ -923,7 +923,7 @@ fn run_point_select_mysql(
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_insert_mysql(
     executor: &mut MysqlExecutor,
     table_size: usize,
@@ -978,7 +978,7 @@ fn run_insert_mysql(
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_update_index_mysql(
     executor: &mut MysqlExecutor,
     table_size: usize,
@@ -1026,7 +1026,7 @@ fn run_update_index_mysql(
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_update_non_index_mysql(
     executor: &mut MysqlExecutor,
     table_size: usize,
@@ -1076,7 +1076,7 @@ fn run_update_non_index_mysql(
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_delete_mysql(
     executor: &mut MysqlExecutor,
     table_size: usize,
@@ -1127,7 +1127,7 @@ fn run_delete_mysql(
     }
 }
 
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_range_mysql(
     executor: &mut MysqlExecutor,
     table_size: usize,
@@ -1432,7 +1432,7 @@ fn main() {
     // MySQL Comparison (if feature enabled)
     // ========================================
 
-    #[cfg(feature = "mysql-comparison")]
+    #[cfg(feature = "mysql")]
     {
         if let Ok(mysql_url) = env::var("MYSQL_URL") {
             eprintln!("\n\nConnecting to MySQL...");
@@ -1547,9 +1547,9 @@ fn main() {
         }
     }
 
-    #[cfg(not(feature = "mysql-comparison"))]
+    #[cfg(not(feature = "mysql"))]
     {
-        eprintln!("\n\nMySQL comparison not available - compile with --features mysql-comparison");
+        eprintln!("\n\nMySQL comparison not available - compile with --features mysql");
     }
 
     // Print comparison summary

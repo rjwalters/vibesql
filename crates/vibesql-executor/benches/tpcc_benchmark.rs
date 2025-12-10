@@ -1,7 +1,7 @@
 //! TPC-C Benchmark Profiling
 //!
 //! Run with:
-//!   cargo bench --package vibesql-executor --bench tpcc_benchmark --features benchmark-comparison --no-run && ./target/release/deps/tpcc_benchmark-*
+//!   cargo bench --package vibesql-executor --bench tpcc_benchmark --features sqlite --no-run && ./target/release/deps/tpcc_benchmark-*
 //!
 //! Set environment variables:
 //!   TPCC_SCALE_FACTOR  - Number of warehouses (default: 1)
@@ -652,7 +652,7 @@ fn run_parallel_benchmark<E: TPCCExecutor + Sync>(
 }
 
 /// Run MySQL benchmark separately since it requires &mut self for queries
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_mysql_benchmark(
     conn: &mut mysql::PooledConn,
     transaction_type: TransactionType,
@@ -796,7 +796,7 @@ fn run_mysql_benchmark(
 
 /// Run SQLite benchmark with multiple parallel clients.
 /// Each client gets its own in-memory database with loaded data.
-#[cfg(feature = "benchmark-comparison")]
+#[cfg(feature = "sqlite")]
 fn run_sqlite_parallel_benchmark(
     scale_factor: f64,
     transaction_type: TransactionType,
@@ -961,7 +961,7 @@ fn run_sqlite_parallel_benchmark(
 
 /// Run DuckDB benchmark with multiple parallel clients.
 /// Each client gets its own in-memory database with loaded data.
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 fn run_duckdb_parallel_benchmark(
     scale_factor: f64,
     transaction_type: TransactionType,
@@ -1126,7 +1126,7 @@ fn run_duckdb_parallel_benchmark(
 
 /// Run MySQL benchmark with multiple parallel clients.
 /// Each client gets its own connection from the pool.
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 fn run_mysql_parallel_benchmark(
     pool: &mysql::Pool,
     transaction_type: TransactionType,
@@ -1434,7 +1434,7 @@ fn main() {
     }
 
     // Comparison benchmarks (if feature enabled)
-    #[cfg(feature = "benchmark-comparison")]
+    #[cfg(feature = "sqlite")]
     let sqlite_results: Option<TPCCBenchmarkResults> = if engine_filter.sqlite {
         use tpcc::schema::load_sqlite;
 
@@ -1476,11 +1476,11 @@ fn main() {
         eprintln!("\n\nSkipping SQLite (filtered out by ENGINE_FILTER)");
         None
     };
-    #[cfg(not(feature = "benchmark-comparison"))]
+    #[cfg(not(feature = "sqlite"))]
     let sqlite_results: Option<TPCCBenchmarkResults> = None;
 
-    // DuckDB benchmark (requires duckdb-comparison feature)
-    #[cfg(feature = "duckdb-comparison")]
+    // DuckDB benchmark (requires duckdb feature)
+    #[cfg(feature = "duckdb")]
     let duckdb_results: Option<TPCCBenchmarkResults> = if engine_filter.duckdb {
         use tpcc::schema::load_duckdb;
 
@@ -1521,12 +1521,12 @@ fn main() {
         eprintln!("\n\nSkipping DuckDB (filtered out by ENGINE_FILTER)");
         None
     };
-    #[cfg(not(feature = "duckdb-comparison"))]
+    #[cfg(not(feature = "duckdb"))]
     let duckdb_results: Option<TPCCBenchmarkResults> = None;
 
-    // MySQL benchmark (requires mysql-comparison feature and MYSQL_URL env var)
+    // MySQL benchmark (requires mysql feature and MYSQL_URL env var)
     // Note: MySQL is excluded by default (use ENGINE_FILTER=all or ENGINE_FILTER=...,mysql to include)
-    #[cfg(feature = "mysql-comparison")]
+    #[cfg(feature = "mysql")]
     let mysql_results: Option<TPCCBenchmarkResults> = if engine_filter.mysql {
         use tpcc::schema::load_mysql;
 
@@ -1585,7 +1585,7 @@ fn main() {
         eprintln!("\n\nSkipping MySQL (filtered out by ENGINE_FILTER)");
         None
     };
-    #[cfg(not(feature = "mysql-comparison"))]
+    #[cfg(not(feature = "mysql"))]
     let mysql_results: Option<TPCCBenchmarkResults> = None;
 
     // Summary comparison (skip if suppressed for batch runs)

@@ -25,9 +25,9 @@ pub use data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 pub use queries::*;
 pub use schema::load_vibesql;
 
-#[cfg(feature = "sqlite-comparison")]
+#[cfg(feature = "sqlite")]
 pub use schema::load_sqlite;
-#[cfg(feature = "duckdb-comparison")]
+#[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
-#[cfg(feature = "mysql-comparison")]
+#[cfg(feature = "mysql")]
 pub use schema::load_mysql;
