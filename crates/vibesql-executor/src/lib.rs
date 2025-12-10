@@ -49,6 +49,8 @@ mod type_ddl;
 mod update;
 mod view_ddl;
 
+pub mod readonly;
+
 // SIMD-accelerated operations for columnar execution
 #[cfg(feature = "simd")]
 pub mod simd;
@@ -99,6 +101,9 @@ pub use truncate_table::TruncateTableExecutor;
 pub use type_ddl::TypeExecutor;
 pub use update::UpdateExecutor;
 pub use view_ddl::ViewExecutor;
+
+// Read-only query support for concurrent access
+pub use readonly::{ReadOnlyError, ReadOnlyQuery};
 
 #[cfg(test)]
 mod tests;
