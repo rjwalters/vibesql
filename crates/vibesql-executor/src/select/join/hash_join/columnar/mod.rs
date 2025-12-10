@@ -37,7 +37,9 @@ use crate::errors::ExecutorError;
 use crate::select::columnar::ColumnarBatch;
 
 // Re-export public types
-pub use row_extract::{hash_join_indices_columnar, hash_join_indices_columnar_multi};
+pub use row_extract::{
+    hash_join_indices_columnar, hash_join_indices_columnar_multi, hash_join_indices_columnar_str,
+};
 
 /// Execute a columnar inner hash join
 ///
