@@ -508,14 +508,35 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Skip native columnar for GROUP BY with ORDER BY
+        // The columnar GROUP BY path doesn't preserve ordering
+        if has_group_by && stmt.order_by.is_some() {
+            log::debug!("Native columnar: skipping - GROUP BY with ORDER BY not supported");
+            return Ok(None);
+        }
+
         // Execute using native columnar pipeline
         #[cfg(feature = "profile-q6")]
         let exec_start = std::time::Instant::now();
 
         let result = if has_group_by {
             // GROUP BY path: Use hash-based grouping
-            let group_by_result =
-                self.execute_columnar_group_by(stmt, &batch, &predicates, &aggregates, &schema)?;
+            // Catch unsupported feature errors and fall back to row-oriented execution
+            let group_by_result = match self
+                .execute_columnar_group_by(stmt, &batch, &predicates, &aggregates, &schema)
+            {
+                Ok(rows) => rows,
+                Err(ExecutorError::Other(msg))
+                    if msg.contains("not supported in columnar path") =>
+                {
+                    log::debug!(
+                        "Native columnar: GROUP BY falling back to row-oriented: {}",
+                        msg
+                    );
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            };
 
             // Apply HAVING filter if present (Issue #4183)
             if let Some(having_expr) = &stmt.having {
@@ -534,13 +555,27 @@ impl SelectExecutor<'_> {
                     aggregates.len()
                 );
 
-                having::apply_having_filter(
+                // Catch unsupported feature errors in HAVING and fall back
+                match having::apply_having_filter(
                     group_by_result,
                     having_expr,
                     group_col_count,
                     &aggregates,
                     &schema,
-                )?
+                ) {
+                    Ok(rows) => rows,
+                    Err(ExecutorError::Other(msg))
+                        if msg.contains("not supported in columnar path")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!(
+                            "Native columnar: HAVING falling back to row-oriented: {}",
+                            msg
+                        );
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e),
+                }
             } else {
                 group_by_result
             }

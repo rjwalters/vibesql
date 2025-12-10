@@ -1476,12 +1476,13 @@ impl ConnectionHandler {
                     })
                     .collect();
 
-                self.send_row_description(fields).await?;
+                // Encode row description (no flush yet - batch with data rows)
+                BackendMessage::RowDescription { fields }.encode(&mut self.write_buf);
 
                 // Save row count before consuming
                 let row_count = rows.len();
 
-                // Send data rows
+                // Encode all data rows into the buffer without flushing
                 for row in rows {
                     let values: Vec<Option<Vec<u8>>> = row
                         .values
@@ -1489,11 +1490,15 @@ impl ConnectionHandler {
                         .map(|v: &vibesql_types::SqlValue| Some(v.to_string().as_bytes().to_vec()))
                         .collect();
 
-                    self.send_data_row(values).await?;
+                    BackendMessage::DataRow { values }.encode(&mut self.write_buf);
                 }
 
-                // Send command complete
-                self.send_command_complete(&format!("SELECT {}", row_count)).await?;
+                // Encode command complete
+                BackendMessage::CommandComplete { tag: format!("SELECT {}", row_count) }
+                    .encode(&mut self.write_buf);
+
+                // Single flush for the entire result set
+                self.flush_write_buffer().await?;
             }
 
             ExecutionResult::Insert { rows_affected } => {
@@ -1558,12 +1563,13 @@ impl ConnectionHandler {
                     })
                     .collect();
 
-                self.send_row_description(fields).await?;
+                // Encode row description (no flush yet - batch with data rows)
+                BackendMessage::RowDescription { fields }.encode(&mut self.write_buf);
 
                 // Save row count before consuming
                 let row_count = rows.len();
 
-                // Send data rows
+                // Encode all data rows into the buffer without flushing
                 for row in rows {
                     let values: Vec<Option<Vec<u8>>> = row
                         .values
@@ -1571,11 +1577,15 @@ impl ConnectionHandler {
                         .map(|v: &vibesql_types::SqlValue| Some(v.to_string().as_bytes().to_vec()))
                         .collect();
 
-                    self.send_data_row(values).await?;
+                    BackendMessage::DataRow { values }.encode(&mut self.write_buf);
                 }
 
-                // Send command complete
-                self.send_command_complete(&format!("FETCH {}", row_count)).await?;
+                // Encode command complete
+                BackendMessage::CommandComplete { tag: format!("FETCH {}", row_count) }
+                    .encode(&mut self.write_buf);
+
+                // Single flush for the entire result set
+                self.flush_write_buffer().await?;
             }
 
             ExecutionResult::CloseCursor { cursor_name } => {
