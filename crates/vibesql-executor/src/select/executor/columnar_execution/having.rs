@@ -218,27 +218,18 @@ fn evaluate_expr_on_result_row(
         Expression::Literal(lit) => Ok(lit.clone()),
 
         // Column references in HAVING (must be GROUP BY columns)
+        // Note: The result row has group columns first, then aggregate values.
+        // The group columns are stored in GROUP BY clause order, which may not match
+        // schema order. We fall back to row-based for this case as a temporary fix.
         Expression::ColumnRef { table, column } => {
-            // First check if this is a GROUP BY column
-            if let Some(idx) = schema.get_column_index(table.as_deref(), column.as_str()) {
-                // In the result row, group columns come first
-                // But we need to find the position within group columns
-                // For now, try to match by looking at the first few values
-                if idx < group_col_count {
-                    Ok(row.values[idx].clone())
-                } else {
-                    Err(ExecutorError::Other(format!(
-                        "Column {}.{} not found in GROUP BY columns",
-                        table.as_deref().unwrap_or(""),
-                        column
-                    )))
-                }
-            } else {
-                Err(ExecutorError::Other(format!(
-                    "Column {} not found in schema",
-                    column
-                )))
-            }
+            // Column references in HAVING with GROUP BY require knowing the mapping
+            // from GROUP BY expression order to result row positions. Since the columnar
+            // path currently doesn't have this mapping, fall back to row-based execution.
+            Err(ExecutorError::Other(format!(
+                "Column reference {}.{} in HAVING not supported in columnar path - falling back to row-based",
+                table.as_deref().unwrap_or(""),
+                column
+            )))
         }
 
         // Subquery variants - not supported in columnar path

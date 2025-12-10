@@ -123,6 +123,38 @@ fn collect_aggregates_recursive(expr: &Expression, aggregates: &mut Vec<Expressi
     }
 }
 
+/// Check if an expression contains aggregate functions (recursively)
+///
+/// This is used to detect expressions like `-AVG(col1)` which contain aggregates
+/// but aren't direct `AggregateFunction` nodes.
+fn contains_aggregate(expr: &Expression) -> bool {
+    match expr {
+        Expression::AggregateFunction { .. } => true,
+        Expression::BinaryOp { left, right, .. } => {
+            contains_aggregate(left) || contains_aggregate(right)
+        }
+        Expression::UnaryOp { expr: inner, .. } => contains_aggregate(inner),
+        Expression::Function { args, .. } => args.iter().any(contains_aggregate),
+        Expression::Case { operand, when_clauses, else_result, .. } => {
+            operand.as_ref().is_some_and(|e| contains_aggregate(e))
+                || when_clauses.iter().any(|clause| {
+                    clause.conditions.iter().any(contains_aggregate)
+                        || contains_aggregate(&clause.result)
+                })
+                || else_result.as_ref().is_some_and(|e| contains_aggregate(e))
+        }
+        Expression::InList { expr: inner, values, .. } => {
+            contains_aggregate(inner) || values.iter().any(contains_aggregate)
+        }
+        Expression::Between { expr: inner, low, high, .. } => {
+            contains_aggregate(inner) || contains_aggregate(low) || contains_aggregate(high)
+        }
+        Expression::Cast { expr: inner, .. } => contains_aggregate(inner),
+        Expression::IsNull { expr: inner, .. } => contains_aggregate(inner),
+        _ => false,
+    }
+}
+
 /// Check if an expression contains any subqueries
 fn contains_subquery(expr: &Expression) -> bool {
     match expr {
@@ -525,6 +557,29 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
+        // Skip native columnar for GROUP BY with complex SELECT expressions
+        // The columnar GROUP BY path produces [group_key..., agg...] rows directly,
+        // so it can't handle expressions that wrap aggregates (like -AVG(col1))
+        // or SELECT lists that don't match the [group_keys, aggregates] format.
+        // Issue #4XXX: Queries like "SELECT -AVG(col1), col1 FROM t GROUP BY col1"
+        // need row-oriented execution to apply the final projection.
+        if has_group_by {
+            for item in &stmt.select_list {
+                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                    // If expression contains aggregate but isn't a direct AggregateFunction,
+                    // we can't use columnar (e.g., -AVG(col), AVG(col) + 1)
+                    if contains_aggregate(expr)
+                        && !matches!(expr, Expression::AggregateFunction { .. })
+                    {
+                        log::debug!(
+                            "Native columnar: skipping - SELECT contains expression wrapping aggregate"
+                        );
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+
         // Execute using native columnar pipeline
         #[cfg(feature = "profile-q6")]
         let exec_start = std::time::Instant::now();
@@ -574,6 +629,18 @@ impl SelectExecutor<'_> {
                     &schema,
                 ) {
                     Ok(rows) => rows,
+                    // having.rs throws UnsupportedFeature for DISTINCT aggregates
+                    Err(ExecutorError::UnsupportedFeature(msg))
+                        if msg.contains("not supported in columnar")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!(
+                            "Native columnar: HAVING falling back to row-oriented: {}",
+                            msg
+                        );
+                        return Ok(None);
+                    }
+                    // group_by.rs throws Other for unsupported features
                     Err(ExecutorError::Other(msg))
                         if msg.contains("not supported in columnar path")
                             || msg.contains("not found in computed aggregates") =>
