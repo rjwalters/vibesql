@@ -100,31 +100,22 @@ pub(in crate::select::join) fn hash_join_inner(
 
         // Probe phase: Collect (build_idx, probe_idx) pairs without materializing rows
         // This defers the expensive row cloning until after we know all matches
-        // Uses parallel probing when row count exceeds threshold (read-only hash table is thread-safe)
+        // Uses morsel-driven parallel probing with work-stealing for dynamic load balancing
         #[cfg(feature = "parallel")]
         {
+            use crate::select::morsel::{morsel_parallel_probe_sqlvalue, MorselConfig};
+
             let config = ParallelConfig::global();
             if config.should_parallelize_join(probe_rows.len()) {
-                // Parallel probe - read-only hash table access is thread-safe
-                let pairs: Vec<(usize, usize)> = probe_rows
-                    .par_iter()
-                    .enumerate()
-                    .flat_map(|(probe_idx, probe_row)| {
-                        let key = &probe_row.values[probe_col_idx];
-                        if key == &vibesql_types::SqlValue::Null {
-                            return Vec::new();
-                        }
-                        hash_table
-                            .get(key)
-                            .map(|build_indices| {
-                                build_indices
-                                    .iter()
-                                    .map(|&build_idx| (build_idx, probe_idx))
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default()
-                    })
-                    .collect();
+                // Morsel-driven parallel probe with work-stealing
+                // Provides dynamic load balancing when probe costs vary (e.g., skewed key distributions)
+                let morsel_config = MorselConfig::optimal();
+                let pairs = morsel_parallel_probe_sqlvalue(
+                    probe_rows,
+                    probe_col_idx,
+                    &hash_table,
+                    &morsel_config,
+                );
                 return Ok(FromResult::from_rows(
                     combined_schema,
                     batch_combine_rows(build_rows, probe_rows, &pairs, left_is_build),
@@ -227,6 +218,8 @@ pub(in crate::select::join) fn hash_join_inner_multi(
 
         // Probe phase: Collect (build_idx, probe_idx) pairs
         // Uses parallel probing when row count exceeds threshold (read-only hash table is thread-safe)
+        // Note: Multi-column join uses par_iter() since morsel_parallel_probe_sqlvalue only supports
+        // single-column keys. A future optimization could add morsel_parallel_probe_composite.
         #[cfg(feature = "parallel")]
         {
             let config = ParallelConfig::global();
