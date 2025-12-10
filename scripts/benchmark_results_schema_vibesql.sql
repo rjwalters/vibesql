@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS sysbench_results (
 CREATE TABLE IF NOT EXISTS benchmark_results (
     result_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL,
+    database_engine TEXT NOT NULL,  -- 'vibesql', 'sqlite', 'duckdb', 'mysql'
     query_name TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('passed', 'failed', 'timeout', 'error', 'incomplete')),
     parse_time_ms REAL,
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
 CREATE INDEX IF NOT EXISTS idx_benchmark_results_run ON benchmark_results(run_id);
 CREATE INDEX IF NOT EXISTS idx_benchmark_results_query ON benchmark_results(query_name);
 CREATE INDEX IF NOT EXISTS idx_benchmark_results_status ON benchmark_results(status);
+CREATE INDEX IF NOT EXISTS idx_benchmark_results_engine ON benchmark_results(database_engine);
 CREATE INDEX IF NOT EXISTS idx_benchmark_runs_timestamp ON benchmark_runs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_benchmark_runs_suite ON benchmark_runs(benchmark_suite);
 

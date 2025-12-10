@@ -155,10 +155,121 @@ class TPCHParser(BenchmarkParser):
     @classmethod
     def can_parse(cls, content: str) -> bool:
         """Check for TPC-H specific markers."""
-        return '=== Q1 ===' in content or '=== Q2 ===' in content
+        return ('=== Q1 ===' in content or '=== Q2 ===' in content or
+                'TPC-H Benchmark' in content or '--- VibeSQL ---' in content)
 
     def parse(self, content: str) -> Tuple[List[Dict], Dict]:
-        """Parse TPC-H benchmark output."""
+        """Parse TPC-H benchmark output.
+
+        Supports two formats:
+        1. Profiling format (VibeSQL only with Parse/Executor/Execute breakdown)
+        2. Comparison format (multi-engine with "--- Engine ---" headers)
+        """
+        # Check if this is comparison format (has engine headers)
+        if '--- VibeSQL ---' in content or '--- SQLite ---' in content or '--- DuckDB ---' in content:
+            return self._parse_comparison_format(content)
+
+        # Otherwise use profiling format
+        return self._parse_profiling_format(content)
+
+    def _parse_comparison_format(self, content: str) -> Tuple[List[Dict], Dict]:
+        """Parse comparison format output with multiple engines.
+
+        Format:
+            --- VibeSQL ---
+              Q1                       3.26ms avg (    2.88ms -     3.71ms)
+              Q2                      87.47ms avg (   86.49ms -    89.29ms)
+            --- SQLite ---
+              Q1                      31.55ms avg (   30.62ms -    32.11ms)
+        """
+        results = []
+        current_engine = None
+        scale_factor = None
+
+        # Pattern for engine section headers: "--- VibeSQL ---"
+        engine_pattern = re.compile(r'^---\s+(\w+)\s+---$')
+
+        # Pattern for query results: "  Q1                       3.26ms avg (    2.88ms -     3.71ms)"
+        query_pattern = re.compile(
+            r'^\s+(Q\d+)\s+'
+            r'([\d.]+)(ms|s|µs|us)\s+avg\s+\(\s*([\d.]+)(ms|s|µs|us)\s+-\s+([\d.]+)(ms|s|µs|us)\s*\)'
+        )
+        # Pattern for timeout/error lines
+        error_pattern = re.compile(r'^\s+(Q\d+)\s+(TIMEOUT|ERROR|SKIP|FAILED).*')
+
+        # Extract scale factor
+        for line in content.split('\n'):
+            sf_match = re.match(r'.*Scale factor:\s*([\d.]+)', line)
+            if sf_match:
+                scale_factor = float(sf_match.group(1))
+                break
+
+        for line in content.split('\n'):
+            # Check for engine header
+            engine_match = engine_pattern.match(line)
+            if engine_match:
+                current_engine = engine_match.group(1).lower()
+                continue
+
+            if not current_engine:
+                continue
+
+            # Check for successful query result
+            query_match = query_pattern.match(line)
+            if query_match:
+                query_name = query_match.group(1)
+                mean_val = float(query_match.group(2))
+                mean_unit = query_match.group(3)
+
+                # Convert to milliseconds
+                mean_ms = convert_time_to_ms(mean_val, mean_unit)
+
+                results.append({
+                    'database_engine': current_engine,
+                    'query_name': query_name,
+                    'parse_time_ms': None,
+                    'executor_creation_time_ms': None,
+                    'execution_time_ms': mean_ms,
+                    'total_time_ms': mean_ms,
+                    'row_count': None,
+                    'status': 'passed',
+                    'error_message': None
+                })
+                continue
+
+            # Check for error/timeout results
+            error_match = error_pattern.match(line)
+            if error_match:
+                query_name = error_match.group(1)
+                error_type = error_match.group(2).lower()
+                status = 'timeout' if error_type == 'timeout' else 'failed'
+
+                results.append({
+                    'database_engine': current_engine,
+                    'query_name': query_name,
+                    'parse_time_ms': None,
+                    'executor_creation_time_ms': None,
+                    'execution_time_ms': None,
+                    'total_time_ms': None,
+                    'row_count': None,
+                    'status': status,
+                    'error_message': line.strip()
+                })
+
+        # Calculate summary (using vibesql results)
+        vibesql_results = [r for r in results if r.get('database_engine') == 'vibesql']
+        summary = {
+            'total_queries': len(vibesql_results),
+            'passed_queries': sum(1 for r in vibesql_results if r['status'] == 'passed'),
+            'failed_queries': sum(1 for r in vibesql_results if r['status'] in ('error', 'failed')),
+            'timeout_queries': sum(1 for r in vibesql_results if r['status'] == 'timeout'),
+            'scale_factor': scale_factor
+        }
+
+        return results, summary
+
+    def _parse_profiling_format(self, content: str) -> Tuple[List[Dict], Dict]:
+        """Parse profiling format output (VibeSQL only with detailed timing)."""
         results = []
         current_query = None
         scale_factor = None
@@ -282,12 +393,13 @@ class TPCHParser(BenchmarkParser):
 
         for result in results:
             execute_insert(cursor, "benchmark_results", [
-                "run_id", "query_name", "status",
+                "run_id", "database_engine", "query_name", "status",
                 "parse_time_ms", "executor_creation_time_ms",
                 "execution_time_ms", "total_time_ms",
                 "row_count", "error_message"
             ], [
                 run_id,
+                result.get('database_engine', 'vibesql'),
                 result['query_name'],
                 result['status'],
                 result['parse_time_ms'],
@@ -603,10 +715,11 @@ class TPCDSParser(BenchmarkParser):
 
         # Pattern for query results: "  Q1                       6.57ms avg (    6.05ms -     7.01ms)"
         # Also handles seconds: "  Q6                        3.63s avg (     3.59s -      3.65s)"
+        # Also handles microseconds: "  Q82                    316.61µs avg (  280.17µs -   392.29µs)"
         # And timeout/error lines: "  Q13                    TIMEOUT (30s)"
         query_pattern = re.compile(
             r'^\s+(Q\d+|sanity_\w+)\s+'
-            r'([\d.]+)(ms|s)\s+avg\s+\(\s*([\d.]+)(ms|s)\s+-\s+([\d.]+)(ms|s)\s*\)'
+            r'([\d.]+)(ms|s|µs)\s+avg\s+\(\s*([\d.]+)(ms|s|µs)\s+-\s+([\d.]+)(ms|s|µs)\s*\)'
         )
         error_pattern = re.compile(
             r'^\s+(Q\d+|sanity_\w+)\s+(TIMEOUT|ERROR|SKIP|FAILED).*'
@@ -630,7 +743,12 @@ class TPCDSParser(BenchmarkParser):
                 mean_unit = query_match.group(3)
 
                 # Convert to milliseconds
-                mean_ms = mean_val * 1000 if mean_unit == 's' else mean_val
+                if mean_unit == 's':
+                    mean_ms = mean_val * 1000
+                elif mean_unit == 'µs':
+                    mean_ms = mean_val / 1000
+                else:  # ms
+                    mean_ms = mean_val
 
                 results.append({
                     'database_engine': current_engine,
@@ -764,9 +882,10 @@ class TPCDSParser(BenchmarkParser):
         scale_factor = summary.get('scale_factor') or config.get('scale_factor', 0.01)
         notes = config.get('notes')
 
-        # Filter to vibesql results for main tracking
+        # Get vibesql results for run summary (total_queries count)
         vibesql_results = [r for r in results if r.get('database_engine') == 'vibesql']
         if not vibesql_results:
+            # If no engine specified, assume all results are vibesql
             vibesql_results = results
 
         execute_insert(cursor, "benchmark_runs", [
@@ -788,12 +907,14 @@ class TPCDSParser(BenchmarkParser):
 
         run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
 
-        for result in vibesql_results:
+        # Insert ALL results (vibesql, sqlite, duckdb, mysql) - not just vibesql
+        for result in results:
             execute_insert(cursor, "benchmark_results", [
-                "run_id", "query_name", "status",
+                "run_id", "database_engine", "query_name", "status",
                 "execution_time_ms", "total_time_ms", "row_count", "error_message"
             ], [
                 run_id,
+                result.get('database_engine', 'vibesql'),
                 result.get('query_name', 'unknown'),
                 result.get('status', 'passed'),
                 result.get('mean_time_ms'),
@@ -801,6 +922,14 @@ class TPCDSParser(BenchmarkParser):
                 result.get('row_count'),
                 result.get('error_message')
             ])
+
+        # Log comparison data counts
+        engines = {}
+        for r in results:
+            eng = r.get('database_engine', 'vibesql')
+            engines[eng] = engines.get(eng, 0) + 1
+        if len(engines) > 1:
+            print(f"   Stored results for engines: {engines}")
 
         save_connection(db)
         return run_id

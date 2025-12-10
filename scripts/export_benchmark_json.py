@@ -249,86 +249,99 @@ def export_sysbench_results(cursor: Any) -> Optional[Dict]:
 def export_tpcds_results(cursor: Any) -> Optional[Dict]:
     """Export TPC-DS results to JSON format.
 
-    Combines data from:
-    1. VibeSQL database (if available)
-    2. Criterion output directories for VibeSQL, SQLite, and DuckDB comparisons
+    Reads all engine data (vibesql, sqlite, duckdb, mysql) from the database.
+    The database now stores comparison data with the database_engine column.
     """
     benchmarks = []
     commit, timestamp = get_git_info()
     scale = "0.01"  # Default scale factor
 
-    # Try to get data from VibeSQL database first
+    # Get data from VibeSQL database
     run = get_latest_run(cursor, 'tpcds')
-    if run:
-        run_id, db_timestamp, db_commit, _, _, db_scale, _, total, passed = run[:9]
-        print(f"  Latest TPC-DS run from DB: {db_timestamp} ({db_commit}) - {passed}/{total} queries")
-        timestamp = db_timestamp
-        commit = db_commit
-        scale = db_scale
+    if not run:
+        print("  No TPC-DS runs found in database")
+        return None
 
-        # Get TPC-DS results using helper (Python-side filtering)
-        results = get_results_for_run(cursor, 'benchmark_results', run_id)
+    run_id, db_timestamp, db_commit, _, _, db_scale, _, total, passed = run[:9]
+    print(f"  Latest TPC-DS run from DB: {db_timestamp} ({db_commit}) - {passed}/{total} queries")
+    timestamp = db_timestamp
+    commit = db_commit
+    scale = db_scale
 
-        # Aggregate results by query name (handle multiple iterations per query)
-        query_data: Dict[str, List[tuple]] = {}
-        for row in results:
-            _, _, query, status, parse_ms, _, exec_ms, total_ms, rows, error = row
-            if query.startswith('sanity'):
-                continue
-            if query not in query_data:
-                query_data[query] = []
-            query_data[query].append((exec_ms, total_ms, rows, status))
+    # Get TPC-DS results using helper (Python-side filtering)
+    results = get_results_for_run(cursor, 'benchmark_results', run_id)
 
-        for query, iterations in sorted(query_data.items()):
-            exec_times = [it[0] for it in iterations if it[0] is not None]
-            total_times = [it[1] for it in iterations if it[1] is not None]
-            statuses = [it[3] for it in iterations]
-            status = max(set(statuses), key=statuses.count)
-            rows = iterations[0][2] if iterations else 0
-            mean_exec_s = (sum(exec_times) / len(exec_times) / 1000) if exec_times else 0
-            mean_total_s = (sum(total_times) / len(total_times) / 1000) if total_times else 0
+    # Get column names to find database_engine index
+    cursor.execute('SELECT * FROM benchmark_results LIMIT 1')
+    columns = [d[0].lower() for d in cursor.description]
 
-            benchmarks.append({
-                "name": f"tpcds_{query.lower()}_vibesql",
-                "stats": {
-                    "mean": mean_exec_s,
-                    "total": mean_total_s,
-                    "rows": rows or 0,
-                    "status": status,
-                    "iterations": len(iterations)
-                }
-            })
-        print(f"  Found {len(benchmarks)} VibeSQL results from database")
+    # Check if database_engine column exists (new schema)
+    has_engine_col = 'database_engine' in columns
+    if has_engine_col:
+        engine_idx = columns.index('database_engine')
+    else:
+        engine_idx = None
+        print("  Note: database_engine column not found, assuming all results are vibesql")
 
-    # If no database results, try Criterion directory for VibeSQL
+    # Aggregate results by (engine, query) to handle multiple iterations
+    # Results format: (result_id, run_id, [database_engine], query_name, status, ...)
+    query_data: Dict[tuple, List[tuple]] = {}
+    for row in results:
+        if has_engine_col:
+            # New schema: (result_id, run_id, database_engine, query_name, status, ...)
+            engine = row[engine_idx] if row[engine_idx] else 'vibesql'
+            query = row[engine_idx + 1]  # query_name is after database_engine
+            status = row[engine_idx + 2]  # status
+            exec_ms = row[engine_idx + 5] if len(row) > engine_idx + 5 else None  # execution_time_ms
+            total_ms = row[engine_idx + 6] if len(row) > engine_idx + 6 else None  # total_time_ms
+            rows = row[engine_idx + 7] if len(row) > engine_idx + 7 else None  # row_count
+        else:
+            # Old schema: (result_id, run_id, query_name, status, ...)
+            engine = 'vibesql'
+            query = row[2]
+            status = row[3]
+            exec_ms = row[6] if len(row) > 6 else None
+            total_ms = row[7] if len(row) > 7 else None
+            rows = row[8] if len(row) > 8 else None
+
+        if query.startswith('sanity'):
+            continue
+
+        key = (engine, query)
+        if key not in query_data:
+            query_data[key] = []
+        query_data[key].append((exec_ms, total_ms, rows, status))
+
+    for (engine, query), iterations in sorted(query_data.items()):
+        exec_times = [it[0] for it in iterations if it[0] is not None]
+        total_times = [it[1] for it in iterations if it[1] is not None]
+        statuses = [it[3] for it in iterations]
+        status = max(set(statuses), key=statuses.count) if statuses else 'unknown'
+        rows = iterations[0][2] if iterations else 0
+        mean_exec_s = (sum(exec_times) / len(exec_times) / 1000) if exec_times else 0
+        mean_total_s = (sum(total_times) / len(total_times) / 1000) if total_times else 0
+
+        benchmarks.append({
+            "name": f"tpcds_{query.lower()}_{engine}",
+            "stats": {
+                "mean": mean_exec_s,
+                "total": mean_total_s,
+                "rows": rows or 0,
+                "status": status,
+                "iterations": len(iterations)
+            }
+        })
+
     if not benchmarks:
-        print("  No database results, checking Criterion directories...")
-        vibesql_criterion = get_criterion_tpcds_data("vibesql")
-        if vibesql_criterion:
-            benchmarks.extend(vibesql_criterion)
-            print(f"  Found {len(vibesql_criterion)} VibeSQL results from Criterion")
-
-    # Add SQLite comparison data from Criterion
-    sqlite_criterion = get_criterion_tpcds_data("sqlite")
-    if sqlite_criterion:
-        benchmarks.extend(sqlite_criterion)
-        print(f"  Found {len(sqlite_criterion)} SQLite results from Criterion")
-
-    # Add DuckDB comparison data from Criterion
-    duckdb_criterion = get_criterion_tpcds_data("duckdb")
-    if duckdb_criterion:
-        benchmarks.extend(duckdb_criterion)
-        print(f"  Found {len(duckdb_criterion)} DuckDB results from Criterion")
-
-    if not benchmarks:
-        print("  No TPC-DS results found in database or Criterion directories")
+        print("  No TPC-DS results found in database")
         return None
 
     # Count by engine
     vibesql_count = sum(1 for b in benchmarks if b["name"].endswith("_vibesql"))
     sqlite_count = sum(1 for b in benchmarks if b["name"].endswith("_sqlite"))
     duckdb_count = sum(1 for b in benchmarks if b["name"].endswith("_duckdb"))
-    print(f"  Total: {len(benchmarks)} benchmarks (VibeSQL: {vibesql_count}, SQLite: {sqlite_count}, DuckDB: {duckdb_count})")
+    mysql_count = sum(1 for b in benchmarks if b["name"].endswith("_mysql"))
+    print(f"  Total: {len(benchmarks)} benchmarks (VibeSQL: {vibesql_count}, SQLite: {sqlite_count}, DuckDB: {duckdb_count}, MySQL: {mysql_count})")
     return {
         "benchmarks": benchmarks,
         "metadata": {
@@ -337,16 +350,21 @@ def export_tpcds_results(cursor: Any) -> Optional[Dict]:
             "git_commit": commit,
             "scale_factor": scale,
             "total_queries": vibesql_count,
-            "passed_queries": sum(1 for b in benchmarks if b["stats"].get("status") == "passed"),
+            "passed_queries": sum(1 for b in benchmarks if b["stats"].get("status") == "passed" and b["name"].endswith("_vibesql")),
             "vibesql_queries": vibesql_count,
             "sqlite_queries": sqlite_count,
-            "duckdb_queries": duckdb_count
+            "duckdb_queries": duckdb_count,
+            "mysql_queries": mysql_count
         }
     }
 
 
 def export_tpch_results(cursor: Any) -> Optional[Dict]:
-    """Export TPC-H results to JSON format."""
+    """Export TPC-H results to JSON format.
+
+    Reads all engine data (vibesql, sqlite, duckdb, mysql) from the database.
+    The database now stores comparison data with the database_engine column.
+    """
     # Get the latest TPC-H run
     run = get_latest_run(cursor, 'tpch')
     if not run:
@@ -361,24 +379,44 @@ def export_tpch_results(cursor: Any) -> Optional[Dict]:
     # Get TPC-H results using helper (Python-side filtering)
     results = get_results_for_run(cursor, 'benchmark_results', run_id)
 
+    # Get column names to find database_engine index
+    cursor.execute('SELECT * FROM benchmark_results LIMIT 1')
+    columns = [d[0].lower() for d in cursor.description]
+
+    # Check if database_engine column exists (new schema)
+    has_engine_col = 'database_engine' in columns
+    if has_engine_col:
+        engine_idx = columns.index('database_engine')
+    else:
+        engine_idx = None
+
     benchmarks = []
     for row in results:
-        # Columns: RESULT_ID, RUN_ID, QUERY_NAME, STATUS, PARSE_TIME_MS, EXECUTOR_CREATION_TIME_MS,
-        #          EXECUTION_TIME_MS, TOTAL_TIME_MS, ROW_COUNT, ERROR_MESSAGE
-        _, _, query, status, parse_ms, _, exec_ms, total_ms, rows, _ = row
+        if has_engine_col:
+            # New schema: (result_id, run_id, database_engine, query_name, status, ...)
+            engine = row[engine_idx] if row[engine_idx] else 'vibesql'
+            query = row[engine_idx + 1]  # query_name is after database_engine
+            status = row[engine_idx + 2]  # status
+            exec_ms = row[engine_idx + 5] if len(row) > engine_idx + 5 else None  # execution_time_ms
+        else:
+            # Old schema: (result_id, run_id, query_name, status, ...)
+            engine = 'vibesql'
+            query = row[2]
+            status = row[3]
+            exec_ms = row[6] if len(row) > 6 else None
 
         # Convert to seconds
         exec_s = (exec_ms / 1000) if exec_ms else 0
 
-        # Only VibeSQL data available from profiling runs
         benchmarks.append({
-            "name": f"tpch_{query.lower()}_vibesql",
+            "name": f"tpch_{query.lower()}_{engine}",
             "stats": {
                 "mean": exec_s,
                 "stddev": exec_s * 0.05,  # Approximate 5% variance
                 "min": exec_s * 0.95,
                 "max": exec_s * 1.05,
-                "rounds": 5
+                "rounds": 5,
+                "status": status
             }
         })
 
@@ -386,7 +424,13 @@ def export_tpch_results(cursor: Any) -> Optional[Dict]:
         print("  No TPC-H results found")
         return None
 
-    print(f"  Exported {len(benchmarks)} TPC-H queries (VibeSQL only - comparison data requires Criterion run)")
+    # Count by engine
+    vibesql_count = sum(1 for b in benchmarks if b["name"].endswith("_vibesql"))
+    sqlite_count = sum(1 for b in benchmarks if b["name"].endswith("_sqlite"))
+    duckdb_count = sum(1 for b in benchmarks if b["name"].endswith("_duckdb"))
+    mysql_count = sum(1 for b in benchmarks if b["name"].endswith("_mysql"))
+    print(f"  Total: {len(benchmarks)} benchmarks (VibeSQL: {vibesql_count}, SQLite: {sqlite_count}, DuckDB: {duckdb_count}, MySQL: {mysql_count})")
+
     return {
         "benchmarks": benchmarks,
         "metadata": {
@@ -394,9 +438,12 @@ def export_tpch_results(cursor: Any) -> Optional[Dict]:
             "timestamp": timestamp,
             "git_commit": commit,
             "scale_factor": scale,
-            "total_queries": total,
-            "passed_queries": passed,
-            "note": "VibeSQL profiling data only. For comparison benchmarks, run: python scripts/run_tpch_benchmarks.py"
+            "total_queries": vibesql_count,
+            "passed_queries": sum(1 for b in benchmarks if b["stats"].get("status") == "passed" and b["name"].endswith("_vibesql")),
+            "vibesql_queries": vibesql_count,
+            "sqlite_queries": sqlite_count,
+            "duckdb_queries": duckdb_count,
+            "mysql_queries": mysql_count
         }
     }
 
@@ -482,12 +529,10 @@ def main():
         print("Exporting TPC-H results...")
         data = export_tpch_results(cursor)
         if data:
-            # Note: We don't overwrite existing benchmark_results.json if it has comparison data
-            output_file = output_dir / "tpch_vibesql_only.json"
+            output_file = output_dir / "benchmark_results.json"
             with open(output_file, 'w') as f:
                 json.dump(data, f, indent=2)
             print(f"  Written to {output_file}")
-            print("  Note: For full comparison data, use: python scripts/run_tpch_benchmarks.py")
             exported += 1
 
     print(f"\nExported {exported} benchmark files to {output_dir}")

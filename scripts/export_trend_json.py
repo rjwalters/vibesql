@@ -111,13 +111,15 @@ def export_tpch_trends(cursor: Any) -> Optional[Dict]:
 
         results = get_results_for_run(cursor, 'benchmark_results', run_id)
 
-        # Collect execution times for passed queries
+        # Collect execution times for passed queries (VibeSQL only for trends)
         exec_times = []
         for row in results:
-            # RESULT_ID, RUN_ID, QUERY_NAME, STATUS, PARSE_TIME_MS, EXECUTOR_CREATION_TIME_MS,
-            # EXECUTION_TIME_MS, TOTAL_TIME_MS, ROW_COUNT, ERROR_MESSAGE
-            _, _, query, status, _, _, exec_ms, total_ms, rows, _ = row
-            if status == 'passed' and exec_ms is not None:
+            # New schema: RESULT_ID, RUN_ID, DATABASE_ENGINE, QUERY_NAME, STATUS,
+            #             PARSE_TIME_MS, EXECUTOR_CREATION_TIME_MS, EXECUTION_TIME_MS,
+            #             TOTAL_TIME_MS, ROW_COUNT, ERROR_MESSAGE
+            _, _, engine, query, status, _, _, exec_ms, total_ms, rows, _ = row
+            # Only include VibeSQL results for trend tracking
+            if engine == 'vibesql' and status == 'passed' and exec_ms is not None:
                 exec_times.append(exec_ms)
 
         if exec_times:
@@ -162,11 +164,13 @@ def export_tpcds_trends(cursor: Any) -> Optional[Dict]:
 
         results = get_results_for_run(cursor, 'benchmark_results', run_id)
 
-        # Collect execution times for passed queries
+        # Collect execution times for passed queries (VibeSQL only for trends)
         exec_times = []
         for row in results:
-            _, _, query, status, _, _, exec_ms, total_ms, rows, _ = row
-            if status == 'passed' and exec_ms is not None:
+            # New schema: RESULT_ID, RUN_ID, DATABASE_ENGINE, QUERY_NAME, STATUS, ...
+            _, _, engine, query, status, _, _, exec_ms, total_ms, rows, _ = row
+            # Only include VibeSQL results for trend tracking
+            if engine == 'vibesql' and status == 'passed' and exec_ms is not None:
                 exec_times.append(exec_ms)
 
         if exec_times:
