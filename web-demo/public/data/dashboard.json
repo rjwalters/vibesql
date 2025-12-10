@@ -1,28 +1,28 @@
 {
-  "generated_at": "2025-12-09T15:09:10.413121Z",
+  "generated_at": "2025-12-09T19:13:38.159699Z",
   "version": "2.0",
   "summary": {
     "conformance": {
       "pass_rate": 100.0,
       "tests_passing": 7420713,
       "tests_total": 7420713,
-      "files_passing": 622,
+      "files_passing": 1,
       "files_total": 622
     },
     "tpch": {
       "queries_passing": 22,
       "queries_total": 22,
-      "geo_mean_ms": 24.38,
+      "geo_mean_ms": 14.69,
       "trend_7d_pct": null
     },
     "tpcds": {
-      "queries_passing": 392,
-      "queries_total": 392,
-      "geo_mean_ms": 15.94
+      "queries_passing": 408,
+      "queries_total": 408,
+      "geo_mean_ms": 12.97
     },
     "tpcc": {
-      "vibesql_tps": 19730.42,
-      "scale_factor": 1
+      "vibesql_tps": 22353.53,
+      "scale_factor": "1.0"
     },
     "sysbench": {
       "tests_count": 6
@@ -33,1818 +33,206 @@
       "description": "TPC-H Decision Support - 22 analytical queries",
       "scale_factor": 0.01,
       "latest_run": {
-        "timestamp": "2025-12-09T11:04:58.240608",
-        "commit": "3fb33d43",
+        "timestamp": "2025-12-09T18:35:27.530038",
+        "commit": "50e75ffc",
         "branch": "main"
       },
       "queries_passing": 22,
       "queries_total": 22,
-      "geo_mean_ms": 24.38,
+      "geo_mean_ms": 14.69,
       "queries": {
         "Q1": {
           "latest": {
-            "vibesql_ms": 23.53,
+            "vibesql_ms": 2.98,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 23.53
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 26.78
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 9.19
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 9.97
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 8.41
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 6.65
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 5.07
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 10.52
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 12.8,
-            "avg_30d_ms": 12.52,
-            "best_ms": 5.07,
-            "trend": "improving",
-            "trend_pct": -12.14
-          }
-        },
-        "Q10": {
-          "latest": {
-            "vibesql_ms": 21.19,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 21.19
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 39.81
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 69.22
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 69.26
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 66.84
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 60.76
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 60.95
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 66.49
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 55.43,
-            "avg_30d_ms": 56.81,
-            "best_ms": 21.19,
-            "trend": "improving",
-            "trend_pct": -46.77
-          }
-        },
-        "Q11": {
-          "latest": {
-            "vibesql_ms": 4.52,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 4.52
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 4.76
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 6.24
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 5.7
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 5.83
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 5.66
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 5.18
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 6.01
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 5.41,
-            "avg_30d_ms": 5.49,
-            "best_ms": 4.52,
-            "trend": "stable",
-            "trend_pct": -5.04
-          }
-        },
-        "Q12": {
-          "latest": {
-            "vibesql_ms": 51.84,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 51.84
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 50.88
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 81.34
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 67.32
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 63.43
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 99.19
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 65.4
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 72.39
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 68.49,
-            "avg_30d_ms": 68.97,
-            "best_ms": 50.88,
-            "trend": "stable",
-            "trend_pct": 1.89
-          }
-        },
-        "Q13": {
-          "latest": {
-            "vibesql_ms": 71.73,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 71.73
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 77.43
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 76.61
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 65.2
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 63.12
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 84.57
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 68.59
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 70.89
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 72.46,
-            "avg_30d_ms": 72.27,
-            "best_ms": 63.12,
-            "trend": "stable",
-            "trend_pct": -7.36
-          }
-        },
-        "Q14": {
-          "latest": {
-            "vibesql_ms": 16.03,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 16.03
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 20.4
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 49.53
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 53.39
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 51.77
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 69.12
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 51.96
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 55.89
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 44.6,
-            "avg_30d_ms": 46.01,
-            "best_ms": 16.03,
-            "trend": "improving",
-            "trend_pct": -21.42
-          }
-        },
-        "Q15": {
-          "latest": {
-            "vibesql_ms": 2.35,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 2.35
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 2.25
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 2.47
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.24
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.29
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.35
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.24
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.14
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 2.31,
-            "avg_30d_ms": 2.29,
-            "best_ms": 2.14,
-            "trend": "stable",
-            "trend_pct": 4.44
-          }
-        },
-        "Q16": {
-          "latest": {
-            "vibesql_ms": 6.61,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 6.61
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 6.54
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 7.26
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 6.63
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 6.4
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 7.22
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 7.52
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 6.18
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 6.88,
-            "avg_30d_ms": 6.8,
-            "best_ms": 6.18,
-            "trend": "stable",
-            "trend_pct": 1.07
-          }
-        },
-        "Q17": {
-          "latest": {
-            "vibesql_ms": 82.32,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 82.32
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 75.81
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 36.72
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 37.6
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 33.24
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 84.36
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 49.6
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 43.84
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 57.09,
-            "avg_30d_ms": 55.44,
-            "best_ms": 33.24,
-            "trend": "stable",
-            "trend_pct": 8.59
-          }
-        },
-        "Q18": {
-          "latest": {
-            "vibesql_ms": 163.76,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 163.76
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 154.68
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 139.87
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 105.02
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 116.84
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 160.55
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 135.93
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 135.72
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 139.52,
-            "avg_30d_ms": 139.05,
-            "best_ms": 105.02,
-            "trend": "stable",
-            "trend_pct": 5.87
-          }
-        },
-        "Q19": {
-          "latest": {
-            "vibesql_ms": 24.48,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 24.48
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 22.13
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 147.43
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 173.17
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 118.48
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 164.7
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 155.27
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 157.09
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 115.09,
-            "avg_30d_ms": 120.34,
-            "best_ms": 22.13,
-            "trend": "regressing",
-            "trend_pct": 10.62
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q2": {
           "latest": {
-            "vibesql_ms": 1.75,
+            "vibesql_ms": 2.86,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 1.75
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 1.86
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 3.13
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.67
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.7
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.45
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.37
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 2.88
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 2.42,
-            "avg_30d_ms": 2.48,
-            "best_ms": 1.75,
-            "trend": "stable",
-            "trend_pct": -5.91
-          }
-        },
-        "Q20": {
-          "latest": {
-            "vibesql_ms": 49.66,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 49.66
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 42.14
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 34.6
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 11.44
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 25.94
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 69.5
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 28.8
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 40.16
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 37.44,
-            "avg_30d_ms": 37.78,
-            "best_ms": 11.44,
-            "trend": "regressing",
-            "trend_pct": 17.85
-          }
-        },
-        "Q21": {
-          "latest": {
-            "vibesql_ms": 111.31,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 111.31
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 108.63
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 154.07
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 106.77
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 197.52
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 133.76
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 164.24
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 164.04
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 139.47,
-            "avg_30d_ms": 142.54,
-            "best_ms": 106.77,
-            "trend": "stable",
-            "trend_pct": 2.47
-          }
-        },
-        "Q22": {
-          "latest": {
-            "vibesql_ms": 9.45,
-            "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 9.45
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 28.35
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 11.46
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 8.49
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 8.86
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 9.83
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 10.2
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 12.14
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 12.38,
-            "avg_30d_ms": 12.35,
-            "best_ms": 8.49,
-            "trend": "improving",
-            "trend_pct": -66.67
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q3": {
           "latest": {
-            "vibesql_ms": 45.85,
+            "vibesql_ms": 26.32,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 45.85
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 48.87
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 134.95
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 101.18
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 106.64
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 133.41
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 114.3
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 120.73
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 97.89,
-            "avg_30d_ms": 100.74,
-            "best_ms": 45.85,
-            "trend": "stable",
-            "trend_pct": -6.18
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q4": {
           "latest": {
-            "vibesql_ms": 20.77,
+            "vibesql_ms": 13.55,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 20.77
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 22.71
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 61.24
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 55.21
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 63.4
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 76.81
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 62.99
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 70.36
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 51.88,
-            "avg_30d_ms": 54.19,
-            "best_ms": 20.77,
-            "trend": "stable",
-            "trend_pct": -8.54
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q5": {
           "latest": {
-            "vibesql_ms": 86.91,
+            "vibesql_ms": 36.58,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 86.91
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 72.54
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 59.89
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 60.08
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 58.18
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 106.2
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 68.83
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 66.29
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 73.23,
-            "avg_30d_ms": 72.37,
-            "best_ms": 58.18,
-            "trend": "regressing",
-            "trend_pct": 19.81
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q6": {
           "latest": {
-            "vibesql_ms": 1.14,
+            "vibesql_ms": 0.7,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 1.14
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 1.67
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 1.61
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 0.94
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 1.66
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 3.32
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 0.95
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 1.09
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 1.61,
-            "avg_30d_ms": 1.55,
-            "best_ms": 0.94,
-            "trend": "improving",
-            "trend_pct": -31.74
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q7": {
           "latest": {
-            "vibesql_ms": 98.16,
+            "vibesql_ms": 45.21,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 98.16
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 102.59
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 116.89
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 87.32
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 97.96
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 138.52
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 111.16
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 113.45
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 107.51,
-            "avg_30d_ms": 108.26,
-            "best_ms": 87.32,
-            "trend": "stable",
-            "trend_pct": -4.32
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q8": {
           "latest": {
-            "vibesql_ms": 61.7,
+            "vibesql_ms": 28.46,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 61.7
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 57.82
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 60.6
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 41.34
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 50.9
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 76.3
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 46.42
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 49.6
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 56.44,
-            "avg_30d_ms": 55.59,
-            "best_ms": 41.34,
-            "trend": "stable",
-            "trend_pct": 6.71
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         },
         "Q9": {
           "latest": {
-            "vibesql_ms": 91.27,
+            "vibesql_ms": 49.48,
             "status": "passed",
-            "timestamp": "2025-12-09T11:04:58.240608"
-          },
-          "history": [
-            {
-              "date": "2025-12-09",
-              "ms": 91.27
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 99.27
-            },
-            {
-              "date": "2025-12-09",
-              "ms": 106.43
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 71.17
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 87.37
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 114.22
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 89.08
-            },
-            {
-              "date": "2025-12-08",
-              "ms": 94.35
-            }
-          ],
-          "stats": {
-            "avg_7d_ms": 94.12,
-            "avg_30d_ms": 94.14,
-            "best_ms": 71.17,
-            "trend": "stable",
-            "trend_pct": -8.06
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q10": {
+          "latest": {
+            "vibesql_ms": 18.01,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q11": {
+          "latest": {
+            "vibesql_ms": 6.03,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q12": {
+          "latest": {
+            "vibesql_ms": 11.45,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q13": {
+          "latest": {
+            "vibesql_ms": 48.97,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q14": {
+          "latest": {
+            "vibesql_ms": 8.03,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q15": {
+          "latest": {
+            "vibesql_ms": 1.63,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q16": {
+          "latest": {
+            "vibesql_ms": 10.27,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q17": {
+          "latest": {
+            "vibesql_ms": 22.37,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q18": {
+          "latest": {
+            "vibesql_ms": 83.25,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q19": {
+          "latest": {
+            "vibesql_ms": 16.84,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q20": {
+          "latest": {
+            "vibesql_ms": 38.56,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q21": {
+          "latest": {
+            "vibesql_ms": 71.25,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
+          }
+        },
+        "Q22": {
+          "latest": {
+            "vibesql_ms": 13.51,
+            "status": "passed",
+            "timestamp": "2025-12-09T18:35:27.530038"
           }
         }
       }
     },
     "tpcds": {
       "description": "TPC-DS Decision Support - 99 complex queries",
-      "queries_passing": 392,
-      "queries_total": 392,
-      "geo_mean_ms": 15.94,
-      "queries": {
-        "Q1": {
-          "latest": {
-            "vibesql_ms": 4.59,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q10": {
-          "latest": {
-            "vibesql_ms": 15.46,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q11": {
-          "latest": {
-            "vibesql_ms": 366.58,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q12": {
-          "latest": {
-            "vibesql_ms": 3.6,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q13": {
-          "latest": {
-            "vibesql_ms": 6.11,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q14": {
-          "latest": {
-            "vibesql_ms": 283.03,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q15": {
-          "latest": {
-            "vibesql_ms": 10.92,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q16": {
-          "latest": {
-            "vibesql_ms": 4.81,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q17": {
-          "latest": {
-            "vibesql_ms": 20.93,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q18": {
-          "latest": {
-            "vibesql_ms": 10.17,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q19": {
-          "latest": {
-            "vibesql_ms": 10.66,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q2": {
-          "latest": {
-            "vibesql_ms": 82.05,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q20": {
-          "latest": {
-            "vibesql_ms": 7.69,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q21": {
-          "latest": {
-            "vibesql_ms": 8.85,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q22": {
-          "latest": {
-            "vibesql_ms": 6.65,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q23": {
-          "latest": {
-            "vibesql_ms": 76.94,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q24": {
-          "latest": {
-            "vibesql_ms": 26.37,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q25": {
-          "latest": {
-            "vibesql_ms": 17.47,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q26": {
-          "latest": {
-            "vibesql_ms": 11.48,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q27": {
-          "latest": {
-            "vibesql_ms": 9.9,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q28": {
-          "latest": {
-            "vibesql_ms": 9.55,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q29": {
-          "latest": {
-            "vibesql_ms": 20.66,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q3": {
-          "latest": {
-            "vibesql_ms": 5.68,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q30": {
-          "latest": {
-            "vibesql_ms": 3.87,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q31": {
-          "latest": {
-            "vibesql_ms": 52.89,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q32": {
-          "latest": {
-            "vibesql_ms": 4.87,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q33": {
-          "latest": {
-            "vibesql_ms": 24.75,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q34": {
-          "latest": {
-            "vibesql_ms": 7.71,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q35": {
-          "latest": {
-            "vibesql_ms": 6.21,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q36": {
-          "latest": {
-            "vibesql_ms": 7.45,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q37": {
-          "latest": {
-            "vibesql_ms": 8.63,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q38": {
-          "latest": {
-            "vibesql_ms": 29.43,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q39": {
-          "latest": {
-            "vibesql_ms": 22.5,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q4": {
-          "latest": {
-            "vibesql_ms": 584.99,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q40": {
-          "latest": {
-            "vibesql_ms": 18.97,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q41": {
-          "latest": {
-            "vibesql_ms": 2.9,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q42": {
-          "latest": {
-            "vibesql_ms": 5.68,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q43": {
-          "latest": {
-            "vibesql_ms": 38.48,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q44": {
-          "latest": {
-            "vibesql_ms": 88.3,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q45": {
-          "latest": {
-            "vibesql_ms": 7.47,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q46": {
-          "latest": {
-            "vibesql_ms": 13.03,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q47": {
-          "latest": {
-            "vibesql_ms": 51.38,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q48": {
-          "latest": {
-            "vibesql_ms": 22.08,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q49": {
-          "latest": {
-            "vibesql_ms": 24.09,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q5": {
-          "latest": {
-            "vibesql_ms": 73.0,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q50": {
-          "latest": {
-            "vibesql_ms": 5.14,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q51": {
-          "latest": {
-            "vibesql_ms": 8.62,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q52": {
-          "latest": {
-            "vibesql_ms": 5.65,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q53": {
-          "latest": {
-            "vibesql_ms": 6.43,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q54": {
-          "latest": {
-            "vibesql_ms": 19.26,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q55": {
-          "latest": {
-            "vibesql_ms": 5.94,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q56": {
-          "latest": {
-            "vibesql_ms": 9.55,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q57": {
-          "latest": {
-            "vibesql_ms": 90.29,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q58": {
-          "latest": {
-            "vibesql_ms": 22.24,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q59": {
-          "latest": {
-            "vibesql_ms": 168.14,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q6": {
-          "latest": {
-            "vibesql_ms": 221.52,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q60": {
-          "latest": {
-            "vibesql_ms": 4.58,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q61": {
-          "latest": {
-            "vibesql_ms": 14.76,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q62": {
-          "latest": {
-            "vibesql_ms": 8.24,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q63": {
-          "latest": {
-            "vibesql_ms": 6.34,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q64": {
-          "latest": {
-            "vibesql_ms": 7.63,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q65": {
-          "latest": {
-            "vibesql_ms": 7.57,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q66": {
-          "latest": {
-            "vibesql_ms": 7.91,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q67": {
-          "latest": {
-            "vibesql_ms": 7.41,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q68": {
-          "latest": {
-            "vibesql_ms": 25.33,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q69": {
-          "latest": {
-            "vibesql_ms": 27.23,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q7": {
-          "latest": {
-            "vibesql_ms": 8.95,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q70": {
-          "latest": {
-            "vibesql_ms": 6.46,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q71": {
-          "latest": {
-            "vibesql_ms": 17.0,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q72": {
-          "latest": {
-            "vibesql_ms": 23.1,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q73": {
-          "latest": {
-            "vibesql_ms": 17.82,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q74": {
-          "latest": {
-            "vibesql_ms": 65.59,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q75": {
-          "latest": {
-            "vibesql_ms": 65.8,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q76": {
-          "latest": {
-            "vibesql_ms": 4.58,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q77": {
-          "latest": {
-            "vibesql_ms": 17.18,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q78": {
-          "latest": {
-            "vibesql_ms": 345.18,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q79": {
-          "latest": {
-            "vibesql_ms": 18.41,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q8": {
-          "latest": {
-            "vibesql_ms": 60.27,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q80": {
-          "latest": {
-            "vibesql_ms": 8.87,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q81": {
-          "latest": {
-            "vibesql_ms": 6.59,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q83": {
-          "latest": {
-            "vibesql_ms": 5.75,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q84": {
-          "latest": {
-            "vibesql_ms": 1.8,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q85": {
-          "latest": {
-            "vibesql_ms": 4.5,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q86": {
-          "latest": {
-            "vibesql_ms": 4.34,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q87": {
-          "latest": {
-            "vibesql_ms": 73.53,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q88": {
-          "latest": {
-            "vibesql_ms": 53.0,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q89": {
-          "latest": {
-            "vibesql_ms": 19.74,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q9": {
-          "latest": {
-            "vibesql_ms": 101.07,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q90": {
-          "latest": {
-            "vibesql_ms": 13.01,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q91": {
-          "latest": {
-            "vibesql_ms": 2.68,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q92": {
-          "latest": {
-            "vibesql_ms": 3.46,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q93": {
-          "latest": {
-            "vibesql_ms": 8.81,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q94": {
-          "latest": {
-            "vibesql_ms": 3.87,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q95": {
-          "latest": {
-            "vibesql_ms": 30.74,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q96": {
-          "latest": {
-            "vibesql_ms": 12.3,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q97": {
-          "latest": {
-            "vibesql_ms": 10.78,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q98": {
-          "latest": {
-            "vibesql_ms": 8.08,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "Q99": {
-          "latest": {
-            "vibesql_ms": 23.63,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "sanity_date": {
-          "latest": {
-            "vibesql_ms": 2.99,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "sanity_join": {
-          "latest": {
-            "vibesql_ms": 73.46,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
-          }
-        },
-        "sanity_sales": {
-          "latest": {
-            "vibesql_ms": 9.71,
-            "status": "passed",
-            "timestamp": "2025-12-09T12:58:50.115063"
+      "queries_passing": 408,
+      "queries_total": 408,
+      "geo_mean_ms": 12.97
+    },
+    "tpcc": {
+      "description": "TPC-C OLTP - Mixed read/write transactions",
+      "scale_factor": "1.0",
+      "latest": {
+        "timestamp": "2025-12-09T18:41:11.606413",
+        "commit": "50e75ffc",
+        "vibesql_tps": 22353.53,
+        "transactions": {
+          "mixed": {
+            "vibesql": {
+              "tps": 22353.53,
+              "latency_us": 67.02
+            },
+            "sqlite": {
+              "tps": 3491.45,
+              "latency_us": 1339.15
+            },
+            "duckdb": {
+              "tps": 346.84,
+              "latency_us": 2822.79
+            }
           }
         }
       }
     },
-    "tpcc": {
-      "description": "TPC-C OLTP - Mixed read/write transactions",
-      "scale_factor": 1,
-      "latest": {
-        "timestamp": "2025-12-09T12:53:13.677670",
-        "commit": "560d8e6b",
-        "vibesql_tps": 19730.42,
-        "transactions": {
-          "mixed": {
-            "vibesql": {
-              "tps": 19730.42,
-              "latency_us": 83.87
-            },
-            "sqlite": {
-              "tps": 2615.89,
-              "latency_us": 1824.09
-            },
-            "duckdb": {
-              "tps": 376.02,
-              "latency_us": 2414.06
-            }
-          }
-        }
-      },
-      "history": []
-    },
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2025-12-09T13:06:28.926258",
-        "commit": "560d8e6b"
+        "timestamp": "2025-12-09T18:54:26.093754",
+        "commit": "50e75ffc"
       },
       "tests": {
         "point_select_10000": {
@@ -1866,11 +254,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 4.6,
+              "mean_us": 4.47,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 8.14,
+              "mean_us": 8.02,
               "std_dev_us": null
             }
           }
@@ -1880,7 +268,7 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 3.17,
+              "mean_us": 3.27,
               "std_dev_us": null
             },
             "sqlite": {
@@ -1908,7 +296,7 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 1.9,
+              "mean_us": 2.47,
               "std_dev_us": null
             },
             "sqlite": {
@@ -1922,7 +310,7 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 21.15,
+              "mean_us": 19.86,
               "std_dev_us": null
             },
             "sqlite": {
@@ -1943,73 +331,26 @@
     },
     "files": {
       "total": 622,
-      "passing": 622,
+      "passing": 1,
       "pass_rate": 100.0
-    },
-    "categories": {
-      "select": {
-        "total": 5,
-        "passing": 5,
-        "pass_rate": 100.0
-      },
-      "evidence": {
-        "total": 12,
-        "passing": 12,
-        "pass_rate": 100.0
-      },
-      "index": {
-        "total": 214,
-        "passing": 214,
-        "pass_rate": 100.0
-      },
-      "random": {
-        "total": 391,
-        "passing": 391,
-        "pass_rate": 100.0
-      },
-      "ddl": {
-        "total": 1,
-        "passing": 1,
-        "pass_rate": 100.0
-      },
-      "other": {
-        "total": 5,
-        "passing": 5,
-        "pass_rate": 100.0
-      }
-    },
-    "history": [],
-    "dialect_stats": {
-      "mysql": {
-        "failed": 0,
-        "pass_rate": 100.0,
-        "passed": 3941,
-        "total": 3941
-      },
-      "sqlite": {
-        "failed": 0,
-        "pass_rate": 100.0,
-        "passed": 10013,
-        "total": 10013
-      }
     }
   },
   "changes": [],
+  "timeline": [
+    {
+      "date": "2025-12-09",
+      "commit": "1ece2cf3",
+      "conformance_pass_rate": 100.0,
+      "tpch_geo_mean_ms": 14.69,
+      "tpch_passing": 22,
+      "tpcc_tps": 22353.53,
+      "events": []
+    }
+  ],
   "machine_info": {
     "system": "Darwin 25.1.0",
     "cpu": "arm64",
     "memory": "Unknown",
     "notes": "Local development"
-  },
-  "timeline": [
-    {
-      "date": "2025-12-09",
-      "commit": "560d8e6b",
-      "conformance_pass_rate": 100.0,
-      "tpch_geo_mean_ms": 24.38,
-      "tpch_passing": 22,
-      "tpcc_tps": 19730.42,
-      "events": []
-    }
-  ]
+  }
 }
