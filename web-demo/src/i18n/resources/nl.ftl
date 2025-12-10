@@ -688,3 +688,22 @@ conformance-pgsql-tests-excluded = tests uitgesloten
 conformance-pgsql-pass-rate = Slaagpercentage
 conformance-pgsql-excluded-reason = Uitgesloten tests gebruiken PostgreSQL-specifieke functies die niet van toepassing zijn op VibeSQL
 conformance-pgsql-note = <strong>Opmerking:</strong> PostgreSQL regressietests valideren SQL-gedrag tegen de PostgreSQL referentie-implementatie. Uitgesloten tests betreffen PostgreSQL-specifieke functies zoals systeemcatalogi, procedurele talen of uitbreidingsmodules.
+
+# SQLite TCL Test Suite Sectie
+conformance-tcl-title = SQLite TCL Test Suite
+conformance-tcl-desc = Resultaten van de canonieke <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL test suite</a> van SQLite met { $fileCount } testbestanden. Deze suite is de gouden standaard voor SQLite-compatibiliteitstests.
+conformance-tcl-overall-rate = Algemeen Slaagpercentage
+conformance-tcl-tests-passing = { $passed } van { $total } tests geslaagd
+conformance-tcl-passed = Geslaagd
+conformance-tcl-failed = Mislukt
+conformance-tcl-skipped = Overgeslagen
+conformance-tcl-total = Totaal
+conformance-tcl-categories-title = Testcategorieën
+conformance-tcl-category = Categorie
+conformance-tcl-rate = Percentage
+conformance-tcl-progress = Voortgang
+conformance-tcl-tests = Tests
+conformance-tcl-common-failures = Veelvoorkomende Fouten
+conformance-tcl-failure-patterns = Top { $count } foutpatronen op basis van aantal voorkomens
+conformance-tcl-about-title = Over TCL Tests:
+conformance-tcl-about-text = De TCL test suite van SQLite is de canonieke conformiteitstest voor SQLite-compatibiliteit. Het test specifiek SQLite-gedrag, eigenaardigheden en randgevallen die mogelijk niet worden gedekt door standaard SQL test suites. Hoge slaagpercentages hier wijzen op sterke SQLite-compatibiliteit voor applicatiemigratiescenario's.

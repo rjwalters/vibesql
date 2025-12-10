@@ -678,3 +678,22 @@ conformance-pgsql-tests-excluded = tests excluded
 conformance-pgsql-pass-rate = Pass Rate
 conformance-pgsql-excluded-reason = Excluded tests use PostgreSQL-specific features not applicable to VibeSQL
 conformance-pgsql-note = <strong>Note:</strong> PostgreSQL regression tests validate SQL behavior against PostgreSQL's reference implementation. Excluded tests involve PostgreSQL-specific features like system catalogs, procedural languages, or extension modules.
+
+# Раздел тестового набора SQLite TCL
+conformance-tcl-title = Тестовый набор SQLite TCL
+conformance-tcl-desc = Результаты канонического <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">тестового набора TCL</a> SQLite, содержащего { $fileCount } тестовых файлов. Этот набор является золотым стандартом для тестирования совместимости с SQLite.
+conformance-tcl-overall-rate = Общий процент прохождения
+conformance-tcl-tests-passing = { $passed } из { $total } тестов пройдено
+conformance-tcl-passed = Пройдено
+conformance-tcl-failed = Провалено
+conformance-tcl-skipped = Пропущено
+conformance-tcl-total = Всего
+conformance-tcl-categories-title = Категории тестов
+conformance-tcl-category = Категория
+conformance-tcl-rate = Показатель
+conformance-tcl-progress = Прогресс
+conformance-tcl-tests = Тесты
+conformance-tcl-common-failures = Частые ошибки
+conformance-tcl-failure-patterns = Топ { $count } шаблонов ошибок по количеству появлений
+conformance-tcl-about-title = О тестах TCL:
+conformance-tcl-about-text = Тестовый набор TCL от SQLite является каноническим тестом соответствия для совместимости с SQLite. Он тестирует специфическое поведение SQLite, особенности и граничные случаи, которые могут не покрываться стандартными наборами SQL-тестов. Высокий процент прохождения здесь указывает на сильную совместимость с SQLite для сценариев миграции приложений.

@@ -667,3 +667,22 @@ conformance-pgsql-tests-excluded = bài kiểm tra loại trừ
 conformance-pgsql-pass-rate = Tỷ Lệ Đạt
 conformance-pgsql-excluded-reason = Các bài kiểm tra bị loại trừ sử dụng các tính năng riêng của PostgreSQL không áp dụng cho VibeSQL
 conformance-pgsql-note = <strong>Lưu ý:</strong> Các bài kiểm tra hồi quy PostgreSQL xác nhận hành vi SQL so với triển khai tham chiếu của PostgreSQL. Các bài kiểm tra bị loại trừ liên quan đến các tính năng riêng của PostgreSQL như danh mục hệ thống, ngôn ngữ thủ tục hoặc module mở rộng.
+
+# Phần Bộ Kiểm Tra TCL SQLite
+conformance-tcl-title = Bộ Kiểm Tra TCL SQLite
+conformance-tcl-desc = Kết quả từ <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">bộ kiểm tra TCL</a> chuẩn của SQLite chứa { $fileCount } tệp kiểm tra. Bộ kiểm tra này là tiêu chuẩn vàng cho việc kiểm tra tương thích SQLite.
+conformance-tcl-overall-rate = Tỷ Lệ Đạt Tổng Thể
+conformance-tcl-tests-passing = { $passed } trong { $total } bài kiểm tra đạt
+conformance-tcl-passed = Đạt
+conformance-tcl-failed = Không đạt
+conformance-tcl-skipped = Bỏ qua
+conformance-tcl-total = Tổng cộng
+conformance-tcl-categories-title = Danh Mục Kiểm Tra
+conformance-tcl-category = Danh mục
+conformance-tcl-rate = Tỷ lệ
+conformance-tcl-progress = Tiến độ
+conformance-tcl-tests = Kiểm tra
+conformance-tcl-common-failures = Lỗi Thường Gặp
+conformance-tcl-failure-patterns = { $count } mẫu lỗi hàng đầu theo số lần xuất hiện
+conformance-tcl-about-title = Về Kiểm Tra TCL:
+conformance-tcl-about-text = Bộ kiểm tra TCL của SQLite là bài kiểm tra tuân thủ chuẩn cho tương thích SQLite. Nó kiểm tra các hành vi SQLite cụ thể, đặc điểm riêng và các trường hợp biên có thể không được bao phủ bởi các bộ kiểm tra SQL tiêu chuẩn. Tỷ lệ đạt cao ở đây cho thấy khả năng tương thích SQLite mạnh mẽ cho các kịch bản di chuyển ứng dụng.

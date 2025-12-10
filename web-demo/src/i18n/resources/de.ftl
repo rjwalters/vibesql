@@ -680,6 +680,25 @@ conformance-pgsql-pass-rate = Erfolgsrate
 conformance-pgsql-excluded-reason = Ausgeschlossene Tests verwenden PostgreSQL-spezifische Funktionen, die nicht auf VibeSQL anwendbar sind
 conformance-pgsql-note = <strong>Hinweis:</strong> PostgreSQL-Regressionstests validieren das SQL-Verhalten gegen die PostgreSQL-Referenzimplementierung. Ausgeschlossene Tests betreffen PostgreSQL-spezifische Funktionen wie Systemkataloge, prozedurale Sprachen oder Erweiterungsmodule.
 
+# SQLite TCL-Testsuite-Abschnitt
+conformance-tcl-title = SQLite TCL-Testsuite
+conformance-tcl-desc = Ergebnisse der kanonischen <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL-Testsuite</a> von SQLite mit { $fileCount } Testdateien. Diese Suite ist der Goldstandard für SQLite-Kompatibilitätstests.
+conformance-tcl-overall-rate = Gesamterfolgsrate
+conformance-tcl-tests-passing = { $passed } von { $total } Tests bestanden
+conformance-tcl-passed = Bestanden
+conformance-tcl-failed = Fehlgeschlagen
+conformance-tcl-skipped = Übersprungen
+conformance-tcl-total = Gesamt
+conformance-tcl-categories-title = Testkategorien
+conformance-tcl-category = Kategorie
+conformance-tcl-rate = Rate
+conformance-tcl-progress = Fortschritt
+conformance-tcl-tests = Tests
+conformance-tcl-common-failures = Häufige Fehler
+conformance-tcl-failure-patterns = Top { $count } Fehlermuster nach Häufigkeit
+conformance-tcl-about-title = Über TCL-Tests:
+conformance-tcl-about-text = Die TCL-Testsuite von SQLite ist der kanonische Konformitätstest für SQLite-Kompatibilität. Sie testet spezifische SQLite-Verhaltensweisen, Eigenheiten und Grenzfälle, die von Standard-SQL-Testsuites möglicherweise nicht abgedeckt werden. Hohe Erfolgsraten hier zeigen starke SQLite-Kompatibilität für Anwendungsmigrationsszenarien an.
+
 # Metadaten
 conformance-generated = Generiert:
 conformance-commit = Commit:

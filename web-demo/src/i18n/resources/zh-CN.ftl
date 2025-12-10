@@ -671,6 +671,25 @@ conformance-pgsql-pass-rate = 通过率
 conformance-pgsql-excluded-reason = 排除的测试使用了不适用于 VibeSQL 的 PostgreSQL 特定功能
 conformance-pgsql-note = <strong>注意：</strong>PostgreSQL 回归测试根据 PostgreSQL 参考实现验证 SQL 行为。排除的测试涉及 PostgreSQL 特定功能，如系统目录、过程语言或扩展模块。
 
+# SQLite TCL 测试套件
+conformance-tcl-title = SQLite TCL 测试套件
+conformance-tcl-desc = SQLite 标准 <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL 测试套件</a>的结果，包含 { $fileCount } 个测试文件。该套件是 SQLite 兼容性测试的黄金标准。
+conformance-tcl-overall-rate = 总体通过率
+conformance-tcl-tests-passing = { $total } 项测试中 { $passed } 项通过
+conformance-tcl-passed = 通过
+conformance-tcl-failed = 失败
+conformance-tcl-skipped = 跳过
+conformance-tcl-total = 总计
+conformance-tcl-categories-title = 测试类别
+conformance-tcl-category = 类别
+conformance-tcl-rate = 比率
+conformance-tcl-progress = 进度
+conformance-tcl-tests = 测试
+conformance-tcl-common-failures = 常见失败
+conformance-tcl-failure-patterns = 按发生次数排列的前 { $count } 个失败模式
+conformance-tcl-about-title = 关于 TCL 测试：
+conformance-tcl-about-text = SQLite 的 TCL 测试套件是 SQLite 兼容性的标准符合性测试。它测试标准 SQL 测试套件可能未涵盖的特定 SQLite 行为、特性和边缘情况。较高的通过率表明在应用程序迁移场景中具有较强的 SQLite 兼容性。
+
 # 元数据
 conformance-generated = 生成时间：
 conformance-commit = 提交：

@@ -693,6 +693,25 @@ conformance-pgsql-pass-rate = Tasa de Aprobación
 conformance-pgsql-excluded-reason = Las pruebas excluidas utilizan características específicas de PostgreSQL no aplicables a VibeSQL
 conformance-pgsql-note = <strong>Nota:</strong> Las pruebas de regresión de PostgreSQL validan el comportamiento SQL contra la implementación de referencia de PostgreSQL. Las pruebas excluidas involucran características específicas de PostgreSQL como catálogos del sistema, lenguajes procedurales o módulos de extensión.
 
+# Sección Suite de Pruebas TCL de SQLite
+conformance-tcl-title = Suite de Pruebas TCL de SQLite
+conformance-tcl-desc = Resultados de la <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">suite de pruebas TCL</a> canónica de SQLite que contiene { $fileCount } archivos de prueba. Esta suite es el estándar de oro para pruebas de compatibilidad con SQLite.
+conformance-tcl-overall-rate = Tasa de Aprobación General
+conformance-tcl-tests-passing = { $passed } de { $total } pruebas aprobadas
+conformance-tcl-passed = Aprobadas
+conformance-tcl-failed = Fallidas
+conformance-tcl-skipped = Omitidas
+conformance-tcl-total = Total
+conformance-tcl-categories-title = Categorías de Pruebas
+conformance-tcl-category = Categoría
+conformance-tcl-rate = Tasa
+conformance-tcl-progress = Progreso
+conformance-tcl-tests = Pruebas
+conformance-tcl-common-failures = Fallos Comunes
+conformance-tcl-failure-patterns = Top { $count } patrones de fallo por cantidad de ocurrencias
+conformance-tcl-about-title = Sobre las Pruebas TCL:
+conformance-tcl-about-text = La suite de pruebas TCL de SQLite es la prueba de conformidad canónica para compatibilidad con SQLite. Prueba comportamientos específicos de SQLite, peculiaridades y casos límite que pueden no estar cubiertos por las suites de pruebas SQL estándar. Tasas de aprobación altas aquí indican fuerte compatibilidad con SQLite para escenarios de migración de aplicaciones.
+
 # Metadatos
 conformance-generated = Generado:
 conformance-commit = Commit:

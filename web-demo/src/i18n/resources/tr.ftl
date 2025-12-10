@@ -668,3 +668,22 @@ conformance-pgsql-tests-excluded = test hariç tutuldu
 conformance-pgsql-pass-rate = Geçme Oranı
 conformance-pgsql-excluded-reason = Hariç tutulan testler, VibeSQL için geçerli olmayan PostgreSQL'e özgü özellikler kullanır
 conformance-pgsql-note = <strong>Not:</strong> PostgreSQL regresyon testleri, SQL davranışını PostgreSQL referans uygulamasına göre doğrular. Hariç tutulan testler, sistem katalogları, prosedürel diller veya uzantı modülleri gibi PostgreSQL'e özgü özellikler içerir.
+
+# SQLite TCL Test Paketi Bölümü
+conformance-tcl-title = SQLite TCL Test Paketi
+conformance-tcl-desc = { $fileCount } test dosyası içeren SQLite'ın standart <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL test paketi</a> sonuçları. Bu paket, SQLite uyumluluk testleri için altın standarttır.
+conformance-tcl-overall-rate = Genel Geçme Oranı
+conformance-tcl-tests-passing = { $total } testten { $passed } tanesi geçti
+conformance-tcl-passed = Geçti
+conformance-tcl-failed = Başarısız
+conformance-tcl-skipped = Atlandı
+conformance-tcl-total = Toplam
+conformance-tcl-categories-title = Test Kategorileri
+conformance-tcl-category = Kategori
+conformance-tcl-rate = Oran
+conformance-tcl-progress = İlerleme
+conformance-tcl-tests = Testler
+conformance-tcl-common-failures = Yaygın Hatalar
+conformance-tcl-failure-patterns = Oluşum sayısına göre en sık { $count } hata kalıbı
+conformance-tcl-about-title = TCL Testleri Hakkında:
+conformance-tcl-about-text = SQLite'ın TCL test paketi, SQLite uyumluluğu için standart uygunluk testidir. Standart SQL test paketleri tarafından kapsanmayabilecek belirli SQLite davranışlarını, tuhaflıkları ve uç durumları test eder. Burada yüksek geçme oranları, uygulama taşıma senaryoları için güçlü SQLite uyumluluğunu gösterir.

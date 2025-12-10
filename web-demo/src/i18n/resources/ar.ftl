@@ -667,3 +667,22 @@ conformance-pgsql-tests-excluded = اختبارات مستبعدة
 conformance-pgsql-pass-rate = معدل النجاح
 conformance-pgsql-excluded-reason = الاختبارات المستبعدة تستخدم ميزات خاصة بـ PostgreSQL غير قابلة للتطبيق على VibeSQL
 conformance-pgsql-note = <strong>ملاحظة:</strong> تتحقق اختبارات الانحدار لـ PostgreSQL من سلوك SQL مقارنة بالتنفيذ المرجعي لـ PostgreSQL. تتضمن الاختبارات المستبعدة ميزات خاصة بـ PostgreSQL مثل كتالوجات النظام واللغات الإجرائية ووحدات الإضافات.
+
+# قسم مجموعة اختبارات SQLite TCL
+conformance-tcl-title = مجموعة اختبارات SQLite TCL
+conformance-tcl-desc = نتائج <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">مجموعة اختبارات TCL</a> القياسية من SQLite التي تحتوي على { $fileCount } ملف اختبار. هذه المجموعة هي المعيار الذهبي لاختبارات التوافق مع SQLite.
+conformance-tcl-overall-rate = معدل النجاح الإجمالي
+conformance-tcl-tests-passing = { $passed } من { $total } اختبار ناجح
+conformance-tcl-passed = ناجح
+conformance-tcl-failed = فاشل
+conformance-tcl-skipped = تم تخطيه
+conformance-tcl-total = الإجمالي
+conformance-tcl-categories-title = فئات الاختبارات
+conformance-tcl-category = الفئة
+conformance-tcl-rate = المعدل
+conformance-tcl-progress = التقدم
+conformance-tcl-tests = الاختبارات
+conformance-tcl-common-failures = الإخفاقات الشائعة
+conformance-tcl-failure-patterns = أعلى { $count } أنماط فشل حسب عدد الحدوث
+conformance-tcl-about-title = حول اختبارات TCL:
+conformance-tcl-about-text = مجموعة اختبارات TCL من SQLite هي اختبار المطابقة القياسي لتوافق SQLite. تختبر سلوكيات SQLite المحددة والخصائص والحالات الحدية التي قد لا تغطيها مجموعات اختبار SQL القياسية. تشير معدلات النجاح العالية هنا إلى توافق قوي مع SQLite لسيناريوهات ترحيل التطبيقات.

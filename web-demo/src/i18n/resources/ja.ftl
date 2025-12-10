@@ -684,6 +684,25 @@ conformance-pgsql-pass-rate = 合格率
 conformance-pgsql-excluded-reason = 除外されたテストはVibeSQL に適用できないPostgreSQL固有の機能を使用しています
 conformance-pgsql-note = <strong>注:</strong> PostgreSQLリグレッションテストは、PostgreSQLの参照実装に対してSQLの動作を検証します。除外されたテストは、システムカタログ、手続き型言語、または拡張モジュールなどのPostgreSQL固有の機能を含みます。
 
+# SQLite TCLテストスイートセクション
+conformance-tcl-title = SQLite TCLテストスイート
+conformance-tcl-desc = SQLiteの標準的な<a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCLテストスイート</a>の結果。{ $fileCount }のテストファイルを含みます。このスイートはSQLite互換性テストのゴールドスタンダードです。
+conformance-tcl-overall-rate = 全体合格率
+conformance-tcl-tests-passing = { $total }件中{ $passed }件のテストが合格
+conformance-tcl-passed = 合格
+conformance-tcl-failed = 失敗
+conformance-tcl-skipped = スキップ
+conformance-tcl-total = 合計
+conformance-tcl-categories-title = テストカテゴリ
+conformance-tcl-category = カテゴリ
+conformance-tcl-rate = 率
+conformance-tcl-progress = 進捗
+conformance-tcl-tests = テスト
+conformance-tcl-common-failures = よくある失敗
+conformance-tcl-failure-patterns = 発生回数による上位{ $count }件の失敗パターン
+conformance-tcl-about-title = TCLテストについて:
+conformance-tcl-about-text = SQLiteのTCLテストスイートは、SQLite互換性のための標準的な適合性テストです。標準的なSQLテストスイートではカバーされない可能性のある、SQLite固有の動作、癖、エッジケースをテストします。ここでの高い合格率は、アプリケーション移行シナリオに対する強力なSQLite互換性を示しています。
+
 # メタデータ
 conformance-generated = 生成日:
 conformance-commit = コミット:

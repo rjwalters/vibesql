@@ -667,3 +667,22 @@ conformance-pgsql-tests-excluded = tests excluded
 conformance-pgsql-pass-rate = Pass Rate
 conformance-pgsql-excluded-reason = Excluded tests use PostgreSQL-specific features not applicable to VibeSQL
 conformance-pgsql-note = <strong>Note:</strong> PostgreSQL regression tests validate SQL behavior against PostgreSQL's reference implementation. Excluded tests involve PostgreSQL-specific features like system catalogs, procedural languages, or extension modules.
+
+# ส่วนชุดทดสอบ SQLite TCL
+conformance-tcl-title = ชุดทดสอบ SQLite TCL
+conformance-tcl-desc = ผลลัพธ์จาก<a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">ชุดทดสอบ TCL</a> มาตรฐานของ SQLite ที่มี { $fileCount } ไฟล์ทดสอบ ชุดทดสอบนี้เป็นมาตรฐานทองคำสำหรับการทดสอบความเข้ากันได้กับ SQLite
+conformance-tcl-overall-rate = อัตราการผ่านโดยรวม
+conformance-tcl-tests-passing = { $passed } จาก { $total } การทดสอบผ่าน
+conformance-tcl-passed = ผ่าน
+conformance-tcl-failed = ไม่ผ่าน
+conformance-tcl-skipped = ข้าม
+conformance-tcl-total = ทั้งหมด
+conformance-tcl-categories-title = หมวดหมู่การทดสอบ
+conformance-tcl-category = หมวดหมู่
+conformance-tcl-rate = อัตรา
+conformance-tcl-progress = ความคืบหน้า
+conformance-tcl-tests = การทดสอบ
+conformance-tcl-common-failures = ความล้มเหลวที่พบบ่อย
+conformance-tcl-failure-patterns = { $count } รูปแบบความล้มเหลวอันดับต้นตามจำนวนครั้งที่เกิดขึ้น
+conformance-tcl-about-title = เกี่ยวกับการทดสอบ TCL:
+conformance-tcl-about-text = ชุดทดสอบ TCL ของ SQLite เป็นการทดสอบความสอดคล้องมาตรฐานสำหรับความเข้ากันได้กับ SQLite ทดสอบพฤติกรรมเฉพาะของ SQLite ลักษณะเฉพาะ และกรณีขอบที่อาจไม่ครอบคลุมโดยชุดทดสอบ SQL มาตรฐาน อัตราการผ่านสูงที่นี่บ่งบอกถึงความเข้ากันได้กับ SQLite ที่แข็งแกร่งสำหรับสถานการณ์การย้ายแอปพลิเคชัน

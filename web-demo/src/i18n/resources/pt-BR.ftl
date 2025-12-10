@@ -675,3 +675,22 @@ conformance-pgsql-tests-excluded = testes excluídos
 conformance-pgsql-pass-rate = Taxa de Aprovação
 conformance-pgsql-excluded-reason = Os testes excluídos usam recursos específicos do PostgreSQL não aplicáveis ao VibeSQL
 conformance-pgsql-note = <strong>Nota:</strong> Os testes de regressão do PostgreSQL validam o comportamento SQL contra a implementação de referência do PostgreSQL. Os testes excluídos envolvem recursos específicos do PostgreSQL como catálogos do sistema, linguagens procedurais ou módulos de extensão.
+
+# Seção da Suíte de Testes TCL do SQLite
+conformance-tcl-title = Suíte de Testes TCL do SQLite
+conformance-tcl-desc = Resultados da <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">suíte de testes TCL</a> canônica do SQLite contendo { $fileCount } arquivos de teste. Esta suíte é o padrão ouro para testes de compatibilidade com SQLite.
+conformance-tcl-overall-rate = Taxa de Aprovação Geral
+conformance-tcl-tests-passing = { $passed } de { $total } testes aprovados
+conformance-tcl-passed = Aprovados
+conformance-tcl-failed = Reprovados
+conformance-tcl-skipped = Ignorados
+conformance-tcl-total = Total
+conformance-tcl-categories-title = Categorias de Testes
+conformance-tcl-category = Categoria
+conformance-tcl-rate = Taxa
+conformance-tcl-progress = Progresso
+conformance-tcl-tests = Testes
+conformance-tcl-common-failures = Falhas Comuns
+conformance-tcl-failure-patterns = Top { $count } padrões de falha por contagem de ocorrências
+conformance-tcl-about-title = Sobre os Testes TCL:
+conformance-tcl-about-text = A suíte de testes TCL do SQLite é o teste de conformidade canônico para compatibilidade com SQLite. Ela testa comportamentos específicos do SQLite, peculiaridades e casos extremos que podem não ser cobertos por suítes de teste SQL padrão. Taxas de aprovação altas aqui indicam forte compatibilidade com SQLite para cenários de migração de aplicativos.

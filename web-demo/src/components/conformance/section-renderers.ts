@@ -624,21 +624,21 @@ export function renderTCLTestResults(tclData: TCLTestData): string {
     )
     .join('')
 
+  const failurePatternCount = Math.min(5, failure_patterns.length)
+
   return `
     <div id="tcl-tests" class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-8">
-      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">SQLite TCL Test Suite</h2>
+      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">${t('conformance-tcl-title')}</h2>
 
       <p class="text-gray-700 dark:text-gray-300 mb-6">
-        Results from SQLite's canonical
-        <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL test suite</a>
-        containing 1,174 test files. This suite is the gold standard for SQLite compatibility testing.
+        ${t('conformance-tcl-desc', { fileCount: '1,174' })}
       </p>
 
       <!-- Overall Results -->
       <div class="bg-gradient-to-br from-orange-500 to-orange-700 rounded-lg shadow-lg p-6 text-white mb-6">
-        <div class="text-sm font-semibold uppercase tracking-wider opacity-90 mb-2">Overall Pass Rate</div>
+        <div class="text-sm font-semibold uppercase tracking-wider opacity-90 mb-2">${t('conformance-tcl-overall-rate')}</div>
         <div class="text-4xl font-bold mb-2">${passRate}%</div>
-        <div class="text-sm opacity-75">${formatNumber(summary.passed)} of ${formatNumber(summary.total_tests)} tests passing</div>
+        <div class="text-sm opacity-75">${t('conformance-tcl-tests-passing', { passed: formatNumber(summary.passed), total: formatNumber(summary.total_tests) })}</div>
         <div class="mt-4 bg-white/20 rounded-full h-2 overflow-hidden">
           <div
             class="bg-white h-full rounded-full transition-all duration-500"
@@ -650,19 +650,19 @@ export function renderTCLTestResults(tclData: TCLTestData): string {
       <!-- Summary Cards -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Passed</div>
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">${t('conformance-tcl-passed')}</div>
           <div class="text-2xl font-bold text-green-600 dark:text-green-400">${formatNumber(summary.passed)}</div>
         </div>
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Failed</div>
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">${t('conformance-tcl-failed')}</div>
           <div class="text-2xl font-bold text-red-600 dark:text-red-400">${formatNumber(summary.failed)}</div>
         </div>
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Skipped</div>
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">${t('conformance-tcl-skipped')}</div>
           <div class="text-2xl font-bold text-gray-600 dark:text-gray-400">${formatNumber(summary.skipped)}</div>
         </div>
         <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">Total</div>
+          <div class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-2">${t('conformance-tcl-total')}</div>
           <div class="text-2xl font-bold text-gray-900 dark:text-white">${formatNumber(summary.total_tests)}</div>
         </div>
       </div>
@@ -671,15 +671,15 @@ export function renderTCLTestResults(tclData: TCLTestData): string {
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Category Breakdown -->
         <div>
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Test Categories</h3>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">${t('conformance-tcl-categories-title')}</h3>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-gray-200 dark:border-gray-700 text-left text-xs text-gray-600 dark:text-gray-400">
-                  <th class="py-2 px-3 font-medium">Category</th>
-                  <th class="py-2 px-3 font-medium">Rate</th>
-                  <th class="py-2 px-3 font-medium">Progress</th>
-                  <th class="py-2 px-3 font-medium text-right">Tests</th>
+                  <th class="py-2 px-3 font-medium">${t('conformance-tcl-category')}</th>
+                  <th class="py-2 px-3 font-medium">${t('conformance-tcl-rate')}</th>
+                  <th class="py-2 px-3 font-medium">${t('conformance-tcl-progress')}</th>
+                  <th class="py-2 px-3 font-medium text-right">${t('conformance-tcl-tests')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -694,12 +694,12 @@ export function renderTCLTestResults(tclData: TCLTestData): string {
           failure_patterns.length > 0
             ? `
         <div>
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Common Failures</h3>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">${t('conformance-tcl-common-failures')}</h3>
           <ul class="space-y-1">
             ${failurePatternsList}
           </ul>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-3">
-            Top ${Math.min(5, failure_patterns.length)} failure patterns by occurrence count
+            ${t('conformance-tcl-failure-patterns', { count: failurePatternCount })}
           </p>
         </div>
         `
@@ -710,9 +710,7 @@ export function renderTCLTestResults(tclData: TCLTestData): string {
       <!-- Info Box -->
       <div class="mt-6 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800 p-4">
         <p class="text-sm text-gray-700 dark:text-gray-300">
-          <strong>About TCL Tests:</strong> SQLite's TCL test suite is the canonical conformance test for SQLite compatibility.
-          It tests specific SQLite behaviors, quirks, and edge cases that may not be covered by standard SQL test suites.
-          High pass rates here indicate strong SQLite compatibility for application migration scenarios.
+          <strong>${t('conformance-tcl-about-title')}</strong> ${t('conformance-tcl-about-text')}
         </p>
       </div>
     </div>

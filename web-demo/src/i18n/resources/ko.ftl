@@ -666,3 +666,22 @@ conformance-pgsql-tests-excluded = tests excluded
 conformance-pgsql-pass-rate = Pass Rate
 conformance-pgsql-excluded-reason = Excluded tests use PostgreSQL-specific features not applicable to VibeSQL
 conformance-pgsql-note = <strong>Note:</strong> PostgreSQL regression tests validate SQL behavior against PostgreSQL's reference implementation. Excluded tests involve PostgreSQL-specific features like system catalogs, procedural languages, or extension modules.
+
+# SQLite TCL 테스트 스위트 섹션
+conformance-tcl-title = SQLite TCL 테스트 스위트
+conformance-tcl-desc = { $fileCount }개의 테스트 파일을 포함하는 SQLite의 표준 <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL 테스트 스위트</a> 결과입니다. 이 스위트는 SQLite 호환성 테스트의 표준입니다.
+conformance-tcl-overall-rate = 전체 통과율
+conformance-tcl-tests-passing = { $total }개 테스트 중 { $passed }개 통과
+conformance-tcl-passed = 통과
+conformance-tcl-failed = 실패
+conformance-tcl-skipped = 건너뜀
+conformance-tcl-total = 전체
+conformance-tcl-categories-title = 테스트 카테고리
+conformance-tcl-category = 카테고리
+conformance-tcl-rate = 비율
+conformance-tcl-progress = 진행률
+conformance-tcl-tests = 테스트
+conformance-tcl-common-failures = 자주 발생하는 실패
+conformance-tcl-failure-patterns = 발생 횟수별 상위 { $count }개 실패 패턴
+conformance-tcl-about-title = TCL 테스트 소개:
+conformance-tcl-about-text = SQLite의 TCL 테스트 스위트는 SQLite 호환성을 위한 표준 적합성 테스트입니다. 표준 SQL 테스트 스위트에서 다루지 않을 수 있는 특정 SQLite 동작, 특이점 및 엣지 케이스를 테스트합니다. 여기서 높은 통과율은 애플리케이션 마이그레이션 시나리오에 대한 강력한 SQLite 호환성을 나타냅니다.

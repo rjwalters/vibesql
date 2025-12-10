@@ -693,6 +693,25 @@ conformance-pgsql-pass-rate = Taux de Réussite
 conformance-pgsql-excluded-reason = Les tests exclus utilisent des fonctionnalités spécifiques à PostgreSQL non applicables à VibeSQL
 conformance-pgsql-note = <strong>Note :</strong> Les tests de régression PostgreSQL valident le comportement SQL par rapport à l'implémentation de référence PostgreSQL. Les tests exclus concernent des fonctionnalités spécifiques à PostgreSQL comme les catalogues système, les langages procéduraux ou les modules d'extension.
 
+# Section Suite de Tests TCL SQLite
+conformance-tcl-title = Suite de Tests TCL SQLite
+conformance-tcl-desc = Résultats de la <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">suite de tests TCL</a> canonique de SQLite contenant { $fileCount } fichiers de test. Cette suite est la référence absolue pour les tests de compatibilité SQLite.
+conformance-tcl-overall-rate = Taux de Réussite Global
+conformance-tcl-tests-passing = { $passed } sur { $total } tests réussis
+conformance-tcl-passed = Réussis
+conformance-tcl-failed = Échoués
+conformance-tcl-skipped = Ignorés
+conformance-tcl-total = Total
+conformance-tcl-categories-title = Catégories de Tests
+conformance-tcl-category = Catégorie
+conformance-tcl-rate = Taux
+conformance-tcl-progress = Progression
+conformance-tcl-tests = Tests
+conformance-tcl-common-failures = Échecs Courants
+conformance-tcl-failure-patterns = Top { $count } motifs d'échec par nombre d'occurrences
+conformance-tcl-about-title = À propos des Tests TCL :
+conformance-tcl-about-text = La suite de tests TCL de SQLite est le test de conformité canonique pour la compatibilité SQLite. Elle teste les comportements spécifiques de SQLite, les particularités et les cas limites qui peuvent ne pas être couverts par les suites de tests SQL standard. Des taux de réussite élevés indiquent une forte compatibilité SQLite pour les scénarios de migration d'applications.
+
 # Métadonnées
 conformance-generated = Généré :
 conformance-commit = Commit :

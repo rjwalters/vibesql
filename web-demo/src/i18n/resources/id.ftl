@@ -666,3 +666,22 @@ conformance-pgsql-tests-excluded = tes dikecualikan
 conformance-pgsql-pass-rate = Tingkat Kelulusan
 conformance-pgsql-excluded-reason = Tes yang dikecualikan menggunakan fitur khusus PostgreSQL yang tidak berlaku untuk VibeSQL
 conformance-pgsql-note = <strong>Catatan:</strong> Tes regresi PostgreSQL memvalidasi perilaku SQL terhadap implementasi referensi PostgreSQL. Tes yang dikecualikan melibatkan fitur khusus PostgreSQL seperti katalog sistem, bahasa prosedural, atau modul ekstensi.
+
+# Bagian Suite Tes TCL SQLite
+conformance-tcl-title = Suite Tes TCL SQLite
+conformance-tcl-desc = Hasil dari <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">suite tes TCL</a> kanonik SQLite yang berisi { $fileCount } file tes. Suite ini adalah standar emas untuk pengujian kompatibilitas SQLite.
+conformance-tcl-overall-rate = Tingkat Kelulusan Keseluruhan
+conformance-tcl-tests-passing = { $passed } dari { $total } tes lulus
+conformance-tcl-passed = Lulus
+conformance-tcl-failed = Gagal
+conformance-tcl-skipped = Dilewati
+conformance-tcl-total = Total
+conformance-tcl-categories-title = Kategori Tes
+conformance-tcl-category = Kategori
+conformance-tcl-rate = Tingkat
+conformance-tcl-progress = Kemajuan
+conformance-tcl-tests = Tes
+conformance-tcl-common-failures = Kegagalan Umum
+conformance-tcl-failure-patterns = { $count } pola kegagalan teratas berdasarkan jumlah kejadian
+conformance-tcl-about-title = Tentang Tes TCL:
+conformance-tcl-about-text = Suite tes TCL SQLite adalah tes kesesuaian kanonik untuk kompatibilitas SQLite. Ini menguji perilaku SQLite tertentu, keunikan, dan kasus tepi yang mungkin tidak tercakup oleh suite tes SQL standar. Tingkat kelulusan tinggi di sini menunjukkan kompatibilitas SQLite yang kuat untuk skenario migrasi aplikasi.

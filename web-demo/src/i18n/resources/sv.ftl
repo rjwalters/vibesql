@@ -675,3 +675,22 @@ conformance-pgsql-tests-excluded = tester exkluderade
 conformance-pgsql-pass-rate = Godkännandegrad
 conformance-pgsql-excluded-reason = Exkluderade tester använder PostgreSQL-specifika funktioner som inte är tillämpliga på VibeSQL
 conformance-pgsql-note = <strong>Obs:</strong> PostgreSQL regressionstester validerar SQL-beteende mot PostgreSQL:s referensimplementation. Exkluderade tester involverar PostgreSQL-specifika funktioner som systemkataloger, procedurspråk eller tilläggsmoduler.
+
+# SQLite TCL-testsvit sektion
+conformance-tcl-title = SQLite TCL-testsvit
+conformance-tcl-desc = Resultat från SQLites kanoniska <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL-testsvit</a> som innehåller { $fileCount } testfiler. Denna svit är guldstandarden för SQLite-kompatibilitetstestning.
+conformance-tcl-overall-rate = Övergripande Godkännandegrad
+conformance-tcl-tests-passing = { $passed } av { $total } tester godkända
+conformance-tcl-passed = Godkända
+conformance-tcl-failed = Misslyckade
+conformance-tcl-skipped = Överhoppade
+conformance-tcl-total = Totalt
+conformance-tcl-categories-title = Testkategorier
+conformance-tcl-category = Kategori
+conformance-tcl-rate = Andel
+conformance-tcl-progress = Framsteg
+conformance-tcl-tests = Tester
+conformance-tcl-common-failures = Vanliga Fel
+conformance-tcl-failure-patterns = Topp { $count } felmönster efter antal förekomster
+conformance-tcl-about-title = Om TCL-tester:
+conformance-tcl-about-text = SQLites TCL-testsvit är det kanoniska överensstämmelsetestet för SQLite-kompatibilitet. Den testar specifika SQLite-beteenden, egenheter och gränsfall som kanske inte täcks av standard SQL-testsviter. Höga godkännandegrader här indikerar stark SQLite-kompatibilitet för applikationsmigreringsscenarier.

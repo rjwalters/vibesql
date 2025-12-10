@@ -675,3 +675,22 @@ conformance-pgsql-tests-excluded = testów wykluczonych
 conformance-pgsql-pass-rate = Wskaźnik Zaliczenia
 conformance-pgsql-excluded-reason = Wykluczone testy używają funkcji specyficznych dla PostgreSQL, które nie mają zastosowania w VibeSQL
 conformance-pgsql-note = <strong>Uwaga:</strong> Testy regresyjne PostgreSQL walidują zachowanie SQL w porównaniu z referencyjną implementacją PostgreSQL. Wykluczone testy dotyczą funkcji specyficznych dla PostgreSQL, takich jak katalogi systemowe, języki proceduralne lub moduły rozszerzeń.
+
+# Sekcja zestawu testów SQLite TCL
+conformance-tcl-title = Zestaw testów SQLite TCL
+conformance-tcl-desc = Wyniki kanonicznego <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">zestawu testów TCL</a> SQLite zawierającego { $fileCount } plików testowych. Ten zestaw jest złotym standardem dla testów kompatybilności SQLite.
+conformance-tcl-overall-rate = Ogólny Wskaźnik Zaliczenia
+conformance-tcl-tests-passing = { $passed } z { $total } testów zaliczonych
+conformance-tcl-passed = Zaliczone
+conformance-tcl-failed = Niezaliczone
+conformance-tcl-skipped = Pominięte
+conformance-tcl-total = Razem
+conformance-tcl-categories-title = Kategorie Testów
+conformance-tcl-category = Kategoria
+conformance-tcl-rate = Wskaźnik
+conformance-tcl-progress = Postęp
+conformance-tcl-tests = Testy
+conformance-tcl-common-failures = Częste Błędy
+conformance-tcl-failure-patterns = Top { $count } wzorców błędów według liczby wystąpień
+conformance-tcl-about-title = O testach TCL:
+conformance-tcl-about-text = Zestaw testów TCL SQLite jest kanonicznym testem zgodności dla kompatybilności SQLite. Testuje specyficzne zachowania SQLite, osobliwości i przypadki graniczne, które mogą nie być objęte standardowymi zestawami testów SQL. Wysokie wskaźniki zaliczenia tutaj wskazują na silną kompatybilność SQLite dla scenariuszy migracji aplikacji.

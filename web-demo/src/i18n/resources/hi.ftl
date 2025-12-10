@@ -667,3 +667,22 @@ conformance-pgsql-tests-excluded = tests excluded
 conformance-pgsql-pass-rate = Pass Rate
 conformance-pgsql-excluded-reason = Excluded tests use PostgreSQL-specific features not applicable to VibeSQL
 conformance-pgsql-note = <strong>Note:</strong> PostgreSQL regression tests validate SQL behavior against PostgreSQL's reference implementation. Excluded tests involve PostgreSQL-specific features like system catalogs, procedural languages, or extension modules.
+
+# SQLite TCL टेस्ट सूट सेक्शन
+conformance-tcl-title = SQLite TCL टेस्ट सूट
+conformance-tcl-desc = SQLite की मानक <a href="https://www.sqlite.org/testing.html" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">TCL टेस्ट सूट</a> के परिणाम जिसमें { $fileCount } टेस्ट फाइलें हैं। यह सूट SQLite संगतता परीक्षण के लिए स्वर्ण मानक है।
+conformance-tcl-overall-rate = समग्र पास दर
+conformance-tcl-tests-passing = { $total } में से { $passed } टेस्ट पास
+conformance-tcl-passed = पास
+conformance-tcl-failed = फेल
+conformance-tcl-skipped = स्किप किया गया
+conformance-tcl-total = कुल
+conformance-tcl-categories-title = टेस्ट श्रेणियां
+conformance-tcl-category = श्रेणी
+conformance-tcl-rate = दर
+conformance-tcl-progress = प्रगति
+conformance-tcl-tests = टेस्ट
+conformance-tcl-common-failures = सामान्य विफलताएं
+conformance-tcl-failure-patterns = घटना गणना द्वारा शीर्ष { $count } विफलता पैटर्न
+conformance-tcl-about-title = TCL टेस्ट के बारे में:
+conformance-tcl-about-text = SQLite की TCL टेस्ट सूट SQLite संगतता के लिए मानक अनुरूपता परीक्षण है। यह विशिष्ट SQLite व्यवहार, विशेषताओं और एज केस का परीक्षण करता है जो मानक SQL टेस्ट सूट द्वारा कवर नहीं किए जा सकते हैं। यहां उच्च पास दर एप्लिकेशन माइग्रेशन परिदृश्यों के लिए मजबूत SQLite संगतता को इंगित करती है।
