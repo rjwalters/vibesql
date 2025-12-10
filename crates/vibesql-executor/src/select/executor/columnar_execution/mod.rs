@@ -52,6 +52,7 @@
 
 mod cse;
 mod group_by;
+mod having;
 mod join;
 mod join_helpers;
 
@@ -119,6 +120,43 @@ fn collect_aggregates_recursive(expr: &Expression, aggregates: &mut Vec<Expressi
             collect_aggregates_recursive(high, aggregates);
         }
         _ => {}
+    }
+}
+
+/// Check if an expression contains any subqueries
+fn contains_subquery(expr: &Expression) -> bool {
+    match expr {
+        // Subquery variants
+        Expression::ScalarSubquery(_) => true,
+        Expression::In { .. } => true,
+        Expression::Exists { .. } => true,
+        Expression::QuantifiedComparison { .. } => true,
+        // Recursive checks
+        Expression::BinaryOp { left, right, .. } => {
+            contains_subquery(left) || contains_subquery(right)
+        }
+        Expression::UnaryOp { expr: inner, .. } => contains_subquery(inner),
+        Expression::AggregateFunction { args, .. } => args.iter().any(contains_subquery),
+        Expression::Function { args, .. } => args.iter().any(contains_subquery),
+        Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+            exprs.iter().any(contains_subquery)
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|o| contains_subquery(o))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(contains_subquery) || contains_subquery(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| contains_subquery(e))
+        }
+        Expression::InList { expr: inner, values, .. } => {
+            contains_subquery(inner) || values.iter().any(contains_subquery)
+        }
+        Expression::Between { expr: inner, low, high, .. } => {
+            contains_subquery(inner) || contains_subquery(low) || contains_subquery(high)
+        }
+        Expression::IsNull { expr: inner, .. } => contains_subquery(inner),
+        Expression::Cast { expr: inner, .. } => contains_subquery(inner),
+        _ => false,
     }
 }
 
@@ -453,11 +491,12 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Skip native columnar for HAVING - requires row-based evaluation of HAVING condition
-        // TODO(#4168): Add columnar HAVING support by filtering grouped results
-        if stmt.having.is_some() {
-            log::debug!("Native columnar: skipping - HAVING clause requires row-based evaluation");
-            return Ok(None);
+        // Check for subqueries in HAVING - not supported in columnar path
+        if let Some(having_expr) = &stmt.having {
+            if contains_subquery(having_expr) {
+                log::debug!("Native columnar: skipping - HAVING contains subquery");
+                return Ok(None);
+            }
         }
 
         // Skip native columnar for complex GROUP BY (ROLLUP/CUBE/GROUPING SETS)
@@ -475,7 +514,36 @@ impl SelectExecutor<'_> {
 
         let result = if has_group_by {
             // GROUP BY path: Use hash-based grouping
-            self.execute_columnar_group_by(stmt, &batch, &predicates, &aggregates, &schema)?
+            let group_by_result =
+                self.execute_columnar_group_by(stmt, &batch, &predicates, &aggregates, &schema)?;
+
+            // Apply HAVING filter if present (Issue #4183)
+            if let Some(having_expr) = &stmt.having {
+                // Count GROUP BY columns to know where aggregates start in result rows
+                let group_col_count = stmt
+                    .group_by
+                    .as_ref()
+                    .and_then(|g| g.as_simple())
+                    .map(|exprs| exprs.len())
+                    .unwrap_or(0);
+
+                log::debug!(
+                    "Applying columnar HAVING filter: {} groups, {} group cols, {} aggregates",
+                    group_by_result.len(),
+                    group_col_count,
+                    aggregates.len()
+                );
+
+                having::apply_having_filter(
+                    group_by_result,
+                    having_expr,
+                    group_col_count,
+                    &aggregates,
+                    &schema,
+                )?
+            } else {
+                group_by_result
+            }
         } else {
             // Non-GROUP BY path: Simple aggregation
             columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?
@@ -488,10 +556,11 @@ impl SelectExecutor<'_> {
         }
 
         log::info!(
-            "Native columnar execution completed: {} predicates, {} aggregates, group_by={}",
+            "Native columnar execution completed: {} predicates, {} aggregates, group_by={}, having={}",
             predicates.len(),
             aggregates.len(),
-            has_group_by
+            has_group_by,
+            stmt.having.is_some()
         );
 
         Ok(Some(result))
