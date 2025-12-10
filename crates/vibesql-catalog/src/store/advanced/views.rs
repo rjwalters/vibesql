@@ -183,6 +183,8 @@ impl super::super::Catalog {
                     || self.does_from_clause_reference_table(right, table_name)
             }
             FromClause::Subquery { query, .. } => self.select_references_table(query, table_name),
+            // VALUES clauses don't reference any tables
+            FromClause::Values { .. } => false,
         }
     }
 }

@@ -69,6 +69,7 @@ fn extract_simple_table_select(select_stmt: &SelectStmt) -> Option<String> {
         FromClause::Table { name, .. } => name.clone(),
         FromClause::Join { .. } => return None, // No joins
         FromClause::Subquery { .. } => return None, // No subqueries
+        FromClause::Values { .. } => return None, // No VALUES clauses
     };
 
     // No WHERE, GROUP BY, HAVING, DISTINCT, LIMIT, OFFSET

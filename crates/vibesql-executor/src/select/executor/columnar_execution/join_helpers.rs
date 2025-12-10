@@ -16,7 +16,7 @@ use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType};
 /// - This enables columnar execution for implicit join syntax (e.g., TPC-H Q19)
 pub(super) fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } => true,
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => true,
         FromClause::Join { left, right, join_type, .. } => {
             matches!(join_type, JoinType::Inner | JoinType::Cross)
                 && is_inner_or_cross_join_only(left)
@@ -31,7 +31,7 @@ pub(super) fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
 /// We detect this case to fall back to regular execution which produces a proper error.
 pub(super) fn has_cross_join_with_on_condition(from: &FromClause) -> bool {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } => false,
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
         FromClause::Join { left, right, join_type, condition, .. } => {
             // CROSS JOIN with ON condition is invalid
             if matches!(join_type, JoinType::Cross) && condition.is_some() {
@@ -55,6 +55,9 @@ pub(super) fn flatten_join_tree_simple(from: &FromClause, tables: &mut Vec<Simpl
         FromClause::Subquery { alias, .. } => {
             tables.push((alias.clone(), Some(alias.clone()), true));
         }
+        FromClause::Values { alias, .. } => {
+            tables.push((alias.clone(), Some(alias.clone()), true));
+        }
         FromClause::Join { left, right, .. } => {
             flatten_join_tree_simple(left, tables);
             flatten_join_tree_simple(right, tables);
@@ -74,7 +77,7 @@ pub(super) struct EquiJoinCondition {
 /// Extract join conditions from a FROM clause (ON conditions)
 pub(super) fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<EquiJoinCondition>) {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } => {}
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {}
         FromClause::Join { left, right, condition, join_type, .. } => {
             // Only handle INNER and CROSS joins in columnar path
             // OUTER joins need special handling and are not supported
@@ -251,6 +254,7 @@ pub(super) fn extract_single_table_name(from_clause: &FromClause) -> Option<Stri
         FromClause::Table { name, .. } => Some(name.clone()),
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path
         FromClause::Subquery { .. } => None, // Subqueries not supported
+        FromClause::Values { .. } => None, // VALUES not supported
     }
 }
 
@@ -267,5 +271,6 @@ pub(super) fn extract_table_name_and_alias(from_clause: &FromClause) -> Option<(
         FromClause::Table { name, alias, .. } => Some((name.clone(), alias.clone())),
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path
         FromClause::Subquery { .. } => None, // Subqueries not supported
+        FromClause::Values { .. } => None, // VALUES not supported
     }
 }

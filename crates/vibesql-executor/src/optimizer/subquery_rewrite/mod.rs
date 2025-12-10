@@ -168,6 +168,9 @@ fn extract_table_names(from: &Option<vibesql_ast::FromClause>) -> Vec<String> {
             vibesql_ast::FromClause::Subquery { alias, .. } => {
                 tables.push(alias.clone());
             }
+            vibesql_ast::FromClause::Values { alias, .. } => {
+                tables.push(alias.clone());
+            }
         }
     }
 

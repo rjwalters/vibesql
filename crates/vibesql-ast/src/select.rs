@@ -258,6 +258,17 @@ pub enum FromClause {
         /// Optional column renaming for derived table columns
         column_aliases: Option<Vec<String>>,
     },
+    /// VALUES clause as table constructor (SQL:1999)
+    /// Example: FROM (VALUES(1,'a'), (2,'b')) AS t(x, y)
+    /// Example: WITH t AS (VALUES(1),(2),(3)) SELECT * FROM t
+    Values {
+        /// Each inner Vec is a row, each Expression is a column value
+        rows: Vec<Vec<Expression>>,
+        /// Alias for the VALUES table (required)
+        alias: String,
+        /// Optional column renaming
+        column_aliases: Option<Vec<String>>,
+    },
 }
 
 /// JOIN types

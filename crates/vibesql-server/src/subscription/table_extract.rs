@@ -44,6 +44,14 @@ impl TableExtractor {
                     walk_expression(self, cond);
                 }
             }
+            FromClause::Values { rows, .. } => {
+                // VALUES clause may contain subqueries in expressions
+                for row in rows {
+                    for expr in row {
+                        walk_expression(self, expr);
+                    }
+                }
+            }
         }
     }
 

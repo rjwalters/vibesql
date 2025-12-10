@@ -368,5 +368,20 @@ pub(super) fn rewrite_from_clause(
                 column_aliases: None,
             }
         }
+        vibesql_ast::FromClause::Values { rows, alias, column_aliases } => {
+            // Rewrite expressions in VALUES rows
+            vibesql_ast::FromClause::Values {
+                rows: rows
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|expr| rewrite_expression(expr, rewrite_subquery_fn))
+                            .collect()
+                    })
+                    .collect(),
+                alias: alias.clone(),
+                column_aliases: column_aliases.clone(),
+            }
+        }
     }
 }

@@ -317,8 +317,9 @@ fn flatten_from_clause(from: &FromClause, tables: &mut Vec<TableInfo>) {
             flatten_from_clause(left, tables);
             flatten_from_clause(right, tables);
         }
-        // Skip subqueries - they can't be eliminated
+        // Skip subqueries and VALUES - they can't be eliminated
         FromClause::Subquery { .. } => {}
+        FromClause::Values { .. } => {}
     }
 }
 
@@ -544,6 +545,9 @@ fn extract_join_on_tables(
         }
         FromClause::Subquery { .. } => {
             // Subqueries are opaque - don't examine their internals
+        }
+        FromClause::Values { .. } => {
+            // VALUES clauses are opaque - don't examine their internals
         }
     }
 }
@@ -1050,6 +1054,7 @@ fn collect_qualified_columns_from_from(
     match from {
         FromClause::Table { .. } => {}
         FromClause::Subquery { .. } => {}
+        FromClause::Values { .. } => {}
         FromClause::Join { left, right, condition, .. } => {
             collect_qualified_columns_from_from(left, table_columns);
             collect_qualified_columns_from_from(right, table_columns);

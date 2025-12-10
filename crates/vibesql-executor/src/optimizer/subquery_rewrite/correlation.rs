@@ -235,6 +235,11 @@ fn extract_table_prefixes(from: &vibesql_ast::FromClause) -> Vec<char> {
                     prefixes.push(c.to_ascii_lowercase());
                 }
             }
+            vibesql_ast::FromClause::Values { alias, .. } => {
+                if let Some(c) = alias.chars().next() {
+                    prefixes.push(c.to_ascii_lowercase());
+                }
+            }
         }
     }
     let mut prefixes = Vec::new();
@@ -264,5 +269,6 @@ fn from_clause_contains_table(from: &vibesql_ast::FromClause, table_name: &str) 
                 || from_clause_contains_table(right, table_name)
         }
         vibesql_ast::FromClause::Subquery { alias, .. } => alias == table_name,
+        vibesql_ast::FromClause::Values { alias, .. } => alias == table_name,
     }
 }

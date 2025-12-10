@@ -99,6 +99,7 @@ mod select_distinct;
 mod select_into_tests;
 mod select_joins;
 mod select_order_by;
+mod select_values;
 mod select_where;
 mod select_window_aggregate;
 mod select_without_from;

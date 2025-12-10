@@ -78,6 +78,9 @@ fn extract_from_from_clause(from: &vibesql_ast::FromClause, tables: &mut HashSet
             let subquery_tables = extract_tables_from_select(query);
             tables.extend(subquery_tables);
         }
+        vibesql_ast::FromClause::Values { .. } => {
+            // VALUES clauses don't reference any tables
+        }
     }
 }
 
