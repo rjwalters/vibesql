@@ -87,6 +87,18 @@ nav-trends = Performance Trends
 nav-github = GitHub Repository
 nav-home = Home
 
+# Trends page
+trends-title = Performance Trends - VibeSQL
+trends-heading = VibeSQL - Performance Trends
+trends-total-runs = Total Benchmark Runs
+trends-across-suites = across all suites
+trends-date-range = Date Range
+trends-first-to-last = first to last run
+trends-latest-commit = Latest Commit
+trends-most-recent = most recent benchmark
+trends-generated = Generated
+trends-last-export = last data export
+
 # Results
 results-success-zero = Query executed successfully (0 rows)
 results-null = NULL

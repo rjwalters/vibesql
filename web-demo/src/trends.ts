@@ -20,6 +20,7 @@ declare const Chart: any;
 
 interface TrendDataPoint {
   date: string;
+  timestamp?: string;
   commit: string;
   avg_ms?: number;
   min_ms?: number;
@@ -82,6 +83,24 @@ const COLORS = {
 
 let charts: Map<string, any> = new Map();
 
+/**
+ * Format timestamp for x-axis display.
+ * If multiple runs on same day, show HH:MM; otherwise show date.
+ */
+function formatTimestampForAxis(timestamp: string | undefined, date: string): string {
+  if (timestamp) {
+    // Parse ISO timestamp and extract time portion
+    const parsed = new Date(timestamp);
+    if (!isNaN(parsed.getTime())) {
+      const hours = parsed.getHours().toString().padStart(2, '0');
+      const minutes = parsed.getMinutes().toString().padStart(2, '0');
+      // Show date + time for clarity
+      return `${date.slice(5)} ${hours}:${minutes}`;  // MM-DD HH:MM
+    }
+  }
+  return date;
+}
+
 function createTimeSeriesChart(
   canvasId: string,
   data: TrendDataPoint[],
@@ -106,13 +125,23 @@ function createTimeSeriesChart(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
+  // Sort data by timestamp to ensure chronological order
+  const sortedData = [...data].sort((a, b) => {
+    const timeA = a.timestamp || a.date;
+    const timeB = b.timestamp || b.date;
+    return timeA.localeCompare(timeB);
+  });
+
+  // Create labels from timestamps
+  const labels = sortedData.map(point =>
+    formatTimestampForAxis(point.timestamp, point.date)
+  );
+
   // Prepare datasets
   const datasets = config.datasets.map(ds => ({
     label: ds.label,
-    data: data.map(point => ({
-      x: point.date,
-      y: point[ds.key] as number,
-    })).filter(p => p.y !== undefined && p.y !== null),
+    data: sortedData.map(point => point[ds.key] as number)
+      .map(v => (v !== undefined && v !== null) ? v : null),
     backgroundColor: ds.color.bg,
     borderColor: ds.color.border,
     borderWidth: 2,
@@ -120,6 +149,7 @@ function createTimeSeriesChart(
     tension: 0.1,
     pointRadius: 4,
     pointHoverRadius: 6,
+    spanGaps: false,
   }));
 
   // Get theme colors
@@ -129,7 +159,7 @@ function createTimeSeriesChart(
 
   const chart = new Chart(ctx, {
     type: 'line',
-    data: { datasets },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -142,12 +172,14 @@ function createTimeSeriesChart(
           type: 'category',
           title: {
             display: true,
-            text: 'Date',
+            text: 'Run Time',
             color: textColor,
           },
           ticks: {
             color: textColor,
             maxRotation: 45,
+            autoSkip: true,
+            maxTicksLimit: 15,
           },
           grid: {
             color: gridColor,
@@ -181,11 +213,15 @@ function createTimeSeriesChart(
             title: (items: any[]) => {
               if (items.length === 0) return '';
               const idx = items[0].dataIndex;
-              const point = data[idx];
-              return `${point.date} (${point.commit || 'unknown'})`;
+              const point = sortedData[idx];
+              const time = point.timestamp
+                ? new Date(point.timestamp).toLocaleString()
+                : point.date;
+              return `${time} (${point.commit || 'unknown'})`;
             },
             label: (context: any) => {
               const value = context.parsed.y;
+              if (value === null) return `${context.dataset.label}: N/A`;
               if (config.higherIsBetter) {
                 return `${context.dataset.label}: ${value.toFixed(2)} TPS`;
               }

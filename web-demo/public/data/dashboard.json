@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-09T23:59:45.352174Z",
+  "generated_at": "2025-12-10T00:08:08.848190Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -231,8 +231,8 @@
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2025-12-09T23:35:44.472149",
-        "commit": "3526dbe5"
+        "timestamp": "2025-12-10T00:01:38.161692",
+        "commit": "f6066bbf"
       },
       "tests": {
         "point_select_10000": {
@@ -240,15 +240,15 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 0.83,
+              "mean_us": 0.68,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 0.33,
+              "mean_us": 0.34,
               "std_dev_us": null
             },
             "duckdb": {
-              "mean_us": 136.2,
+              "mean_us": 137.74,
               "std_dev_us": null
             }
           }
@@ -258,15 +258,15 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 5.42,
+              "mean_us": 4.63,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 9.26,
+              "mean_us": 10.51,
               "std_dev_us": null
             },
             "duckdb": {
-              "mean_us": 223.76,
+              "mean_us": 204.84,
               "std_dev_us": null
             }
           }
@@ -276,15 +276,15 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 4.79,
+              "mean_us": 3.97,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 1.69,
+              "mean_us": 1.55,
               "std_dev_us": null
             },
             "duckdb": {
-              "mean_us": 195.61,
+              "mean_us": 240.13,
               "std_dev_us": null
             }
           }
@@ -294,15 +294,15 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 2.18,
+              "mean_us": 1.97,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 1.49,
+              "mean_us": 1.32,
               "std_dev_us": null
             },
             "duckdb": {
-              "mean_us": 219.6,
+              "mean_us": 222.84,
               "std_dev_us": null
             }
           }
@@ -312,15 +312,15 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 3.09,
+              "mean_us": 2.74,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 1.66,
+              "mean_us": 1.35,
               "std_dev_us": null
             },
             "duckdb": {
-              "mean_us": 243.42,
+              "mean_us": 184.73,
               "std_dev_us": null
             }
           }
@@ -330,15 +330,15 @@
           "table_size": 10000,
           "engines": {
             "vibesql": {
-              "mean_us": 24.18,
+              "mean_us": 20.19,
               "std_dev_us": null
             },
             "sqlite": {
-              "mean_us": 11.06,
+              "mean_us": 8.53,
               "std_dev_us": null
             },
             "duckdb": {
-              "mean_us": 389.29,
+              "mean_us": 369.75,
               "std_dev_us": null
             }
           }
@@ -362,8 +362,8 @@
   "changes": [],
   "timeline": [
     {
-      "date": "2025-12-09",
-      "commit": "f6066bbf",
+      "date": "2025-12-10",
+      "commit": "1849a81b",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 12.26,
       "tpch_passing": 22,

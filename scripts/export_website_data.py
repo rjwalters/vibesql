@@ -396,6 +396,7 @@ def export_trends(data: BenchmarkData) -> Dict:
             if exec_times:
                 tpch_data.append({
                     "date": timestamp[:10] if timestamp else "",
+                    "timestamp": timestamp or "",
                     "commit": commit or "",
                     "avg_ms": round(sum(exec_times) / len(exec_times), 2),
                     "min_ms": round(min(exec_times), 2),
@@ -436,6 +437,7 @@ def export_trends(data: BenchmarkData) -> Dict:
             if exec_times:
                 tpcds_data.append({
                     "date": timestamp[:10] if timestamp else "",
+                    "timestamp": timestamp or "",
                     "commit": commit or "",
                     "avg_ms": round(sum(exec_times) / len(exec_times), 2),
                     "min_ms": round(min(exec_times), 2),
@@ -464,6 +466,7 @@ def export_trends(data: BenchmarkData) -> Dict:
                 if engine == 'vibesql' and txn_type == 'mixed':
                     tpcc_data.append({
                         "date": timestamp[:10] if timestamp else "",
+                        "timestamp": timestamp or "",
                         "commit": commit or "",
                         "tps": round(tps, 2) if tps else 0,
                         "latency_us": round(latency, 2) if latency else None
@@ -495,6 +498,7 @@ def export_trends(data: BenchmarkData) -> Dict:
                 times = list(vibesql_times.values())
                 sysbench_data.append({
                     "date": timestamp[:10] if timestamp else "",
+                    "timestamp": timestamp or "",
                     "commit": commit or "",
                     "avg_ms": round(sum(times) / len(times), 4),
                     "min_ms": round(min(times), 4),
