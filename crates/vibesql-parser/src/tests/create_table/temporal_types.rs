@@ -435,3 +435,86 @@ fn test_parse_create_table_year_with_constraints() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+// ========================================================================
+// TYPE and SQL as Column Names (SQLite compatibility - Issue #4187)
+// ========================================================================
+
+#[test]
+fn test_type_as_column_name() {
+    // TYPE is not reserved in SQLite, allowing sqlite_master.type access without quoting
+    let result = Parser::parse_sql("CREATE TABLE test (type TEXT);");
+    assert!(result.is_ok(), "Should parse TYPE as column name: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns[0].name, "TYPE");
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_sql_as_column_name() {
+    // SQL is not reserved in SQLite, allowing sqlite_master.sql access without quoting
+    let result = Parser::parse_sql("CREATE TABLE test (sql TEXT);");
+    assert!(result.is_ok(), "Should parse SQL as column name: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns[0].name, "SQL");
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_type_and_sql_as_column_names_together() {
+    // Test both TYPE and SQL together - mimics sqlite_master schema
+    let result = Parser::parse_sql(
+        "CREATE TABLE sqlite_master_copy (
+            type TEXT,
+            name TEXT,
+            tbl_name TEXT,
+            rootpage INTEGER,
+            sql TEXT
+        );",
+    );
+    assert!(result.is_ok(), "Should parse TYPE and SQL as column names: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns.len(), 5);
+            assert_eq!(create.columns[0].name, "TYPE");
+            assert_eq!(create.columns[1].name, "NAME");
+            assert_eq!(create.columns[2].name, "TBL_NAME");
+            assert_eq!(create.columns[3].name, "ROOTPAGE");
+            assert_eq!(create.columns[4].name, "SQL");
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_type_column_with_constraints() {
+    // Note: DEFAULT must come before NOT NULL in the parser's expected order
+    let result = Parser::parse_sql(
+        "CREATE TABLE test (
+            id INTEGER PRIMARY KEY,
+            type TEXT DEFAULT 'table' NOT NULL
+        );",
+    );
+    assert!(result.is_ok(), "Should parse TYPE with constraints: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns[1].name, "TYPE");
+            assert!(!create.columns[1].nullable, "type column should be NOT NULL");
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}

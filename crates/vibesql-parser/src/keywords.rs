@@ -328,6 +328,11 @@ impl Keyword {
     ///
     /// This follows SQLite's behavior where temporal type keywords (TIMESTAMP, DATE, TIME, INTERVAL)
     /// and interval unit keywords (YEAR, MONTH, DAY, etc.) can be used as identifiers without quoting.
+    ///
+    /// TYPE and SQL are also unreserved to match SQLite compatibility (neither is in SQLite's
+    /// 147-keyword reserved list). They work safely because:
+    /// - TYPE: Parser uses peek_next_keyword() for CREATE TYPE dispatch
+    /// - SQL: Only consumed after explicit LANGUAGE keyword in routines
     pub fn can_be_identifier(&self) -> bool {
         matches!(
             self,
@@ -336,7 +341,10 @@ impl Keyword {
             // Interval unit keywords (used in EXTRACT, DATE_ADD, etc. but also valid as identifiers)
             Keyword::Year | Keyword::Quarter | Keyword::Month | Keyword::Week |
             Keyword::Day | Keyword::Hour | Keyword::Minute | Keyword::Second |
-            Keyword::Microsecond
+            Keyword::Microsecond |
+            // SQLite compatibility: TYPE and SQL are not reserved in SQLite
+            // (allows unquoted access to sqlite_master.type and sqlite_master.sql columns)
+            Keyword::Type | Keyword::Sql
         )
     }
 }
