@@ -1,7 +1,9 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey};
-use super::columnar::{hash_join_indices_columnar, hash_join_indices_columnar_multi};
+use super::columnar::{
+    hash_join_indices_columnar, hash_join_indices_columnar_multi, hash_join_indices_columnar_str,
+};
 use super::{batch_combine_rows, FromResult};
 use crate::{errors::ExecutorError, schema::CombinedSchema};
 
@@ -74,13 +76,19 @@ pub(in crate::select::join) fn hash_join_inner(
             (right_slice, left_slice, right_col_idx, left_col_idx, false)
         };
 
-    // Fast path: Try columnar hash join for integer keys
-    // This provides ~20-30% speedup for integer equi-joins by:
+    // Fast path: Try columnar hash join for integer or string keys
+    // This provides ~20-30% speedup for typed equi-joins by:
     // 1. Using FxHash-style hashing without SqlValue enum dispatch
-    // 2. Better cache locality with contiguous i64 arrays
+    // 2. Better cache locality with contiguous typed arrays
     let join_pairs: Vec<(usize, usize)> = if let Some(pairs) =
         hash_join_indices_columnar(build_rows, probe_rows, build_col_idx, probe_col_idx)
     {
+        // Integer fast path succeeded
+        pairs
+    } else if let Some(pairs) =
+        hash_join_indices_columnar_str(build_rows, probe_rows, build_col_idx, probe_col_idx)
+    {
+        // String fast path succeeded (for VARCHAR/TEXT/CHAR joins like customer_id)
         pairs
     } else {
         // Fallback: Generic hash join using SqlValue keys

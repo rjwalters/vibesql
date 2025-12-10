@@ -3,6 +3,8 @@
 //! This module provides functions to extract typed column arrays from row-based
 //! data, enabling columnar hash operations on row-based inputs.
 
+use std::sync::Arc;
+
 use super::hash_table::{ColumnarHashTable, CompositeIntHashTable};
 
 /// Extract a single column from rows as a typed array (for integer columns)
@@ -75,6 +77,63 @@ pub fn hash_join_indices_columnar(
 
     for (probe_idx, &probe_key) in probe_keys.iter().enumerate() {
         for build_idx in hash_table.probe_i64(probe_key, &build_keys) {
+            join_pairs.push((build_idx as usize, probe_idx));
+        }
+    }
+
+    Some(join_pairs)
+}
+
+/// Extract a single column from rows as a typed string array
+///
+/// This enables using columnar hash operations on row-based data.
+/// Returns None if the column contains non-string values or NULLs.
+pub fn extract_string_column(
+    rows: &[vibesql_storage::Row],
+    col_idx: usize,
+) -> Option<Vec<Arc<str>>> {
+    let mut values = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        match row.values.get(col_idx) {
+            Some(vibesql_types::SqlValue::Varchar(s))
+            | Some(vibesql_types::SqlValue::Character(s)) => {
+                values.push(Arc::from(s.as_str()));
+            }
+            _ => return None, // Non-string or NULL value
+        }
+    }
+
+    Some(values)
+}
+
+/// Hash join using columnar hash table on row-based string data
+///
+/// This function provides a fast path for string equi-joins by:
+/// 1. Extracting join columns as typed Arc<str> arrays
+/// 2. Using the columnar hash table for O(1) lookups without SqlValue dispatch
+/// 3. Returning index pairs for row combination
+///
+/// Returns None if the join columns are not string types.
+pub fn hash_join_indices_columnar_str(
+    build_rows: &[vibesql_storage::Row],
+    probe_rows: &[vibesql_storage::Row],
+    build_col_idx: usize,
+    probe_col_idx: usize,
+) -> Option<Vec<(usize, usize)>> {
+    // Extract join columns as typed arrays
+    let build_keys = extract_string_column(build_rows, build_col_idx)?;
+    let probe_keys = extract_string_column(probe_rows, probe_col_idx)?;
+
+    // Build hash table on build side
+    let hash_table = ColumnarHashTable::build_from_string(&build_keys);
+
+    // Probe and collect matching index pairs
+    let estimated_capacity = probe_keys.len().min(100_000);
+    let mut join_pairs = Vec::with_capacity(estimated_capacity);
+
+    for (probe_idx, probe_key) in probe_keys.iter().enumerate() {
+        for build_idx in hash_table.probe_string(probe_key, &build_keys) {
             join_pairs.push((build_idx as usize, probe_idx));
         }
     }
@@ -204,5 +263,71 @@ mod tests {
         assert_eq!(columns[0], vec![1i64, 2]);
         assert_eq!(columns[1], vec![100i64, 200]);
         assert_eq!(columns[2], vec![10i64, 20]);
+    }
+
+    #[test]
+    fn test_extract_string_column() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("alice")), SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("bob")), SqlValue::Integer(2)]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("charlie")), SqlValue::Integer(3)]),
+        ];
+
+        let strings = extract_string_column(&rows, 0).unwrap();
+        assert_eq!(strings.len(), 3);
+        assert_eq!(&*strings[0], "alice");
+        assert_eq!(&*strings[1], "bob");
+        assert_eq!(&*strings[2], "charlie");
+
+        // Integer column should return None for string extraction
+        let result = extract_string_column(&rows, 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_hash_join_indices_columnar_str() {
+        // Build rows: (customer_id, value) pairs
+        let build_rows = vec![
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(100)]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C002")), SqlValue::Integer(200)]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C003")), SqlValue::Integer(300)]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(400)]), // Duplicate key
+        ];
+
+        // Probe rows: (customer_id, amount) pairs
+        let probe_rows = vec![
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(50)]), // Matches build[0] and build[3]
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C002")), SqlValue::Integer(60)]), // Matches build[1]
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C999")), SqlValue::Integer(70)]), // No match
+        ];
+
+        let pairs = hash_join_indices_columnar_str(&build_rows, &probe_rows, 0, 0).unwrap();
+
+        // Should have 3 pairs: C001 matches twice, C002 matches once
+        assert_eq!(pairs.len(), 3);
+
+        // Probe row 0 (C001) matches build rows 0 and 3
+        let matches_for_probe_0: Vec<_> = pairs.iter().filter(|(_, p)| *p == 0).collect();
+        assert_eq!(matches_for_probe_0.len(), 2);
+
+        // Probe row 1 (C002) matches build row 1
+        let matches_for_probe_1: Vec<_> = pairs.iter().filter(|(_, p)| *p == 1).collect();
+        assert_eq!(matches_for_probe_1.len(), 1);
+        assert_eq!(matches_for_probe_1[0].0, 1);
+
+        // Probe row 2 (C999) has no matches
+        let matches_for_probe_2: Vec<_> = pairs.iter().filter(|(_, p)| *p == 2).collect();
+        assert_eq!(matches_for_probe_2.len(), 0);
+    }
+
+    #[test]
+    fn test_hash_join_indices_columnar_str_with_integer_column() {
+        // Build rows with integer key (should fall back to None for string join)
+        let build_rows = vec![Row::new(vec![SqlValue::Integer(1)])];
+        let probe_rows = vec![Row::new(vec![SqlValue::Integer(1)])];
+
+        // Should return None because columns are not strings
+        let result = hash_join_indices_columnar_str(&build_rows, &probe_rows, 0, 0);
+        assert!(result.is_none());
     }
 }

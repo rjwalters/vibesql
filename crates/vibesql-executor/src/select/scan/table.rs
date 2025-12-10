@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use super::predicates::apply_table_local_predicates;
+use super::predicates::{apply_table_local_predicates, filter_and_clone_rows};
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
@@ -120,17 +120,16 @@ pub(crate) fn execute_table_scan(
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            // Must clone rows for filtering (copy-on-write semantics)
+            // Issue #4199: Use filter-while-copy optimization for CTEs
+            // This avoids cloning ALL rows before filtering - only clone rows that pass the filter.
+            // Critical for queries like TPC-DS Q4 with 6-way self-join on CTEs.
             // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
-            // Issue #3562: Pass CTE context so IN subqueries can reference other CTEs
-            let rows = apply_table_local_predicates(
-                cte_rows.as_ref().clone(),
+            let rows = filter_and_clone_rows(
+                cte_rows.as_ref(),
                 schema.clone(),
                 &predicate_plan,
                 &effective_name,
                 database,
-                None, // No outer context for non-correlated predicate pushdown
-                None,
                 Some(cte_results), // CTE context for IN subqueries referencing CTEs
             )?;
             return Ok(super::FromResult::from_rows(schema, rows));

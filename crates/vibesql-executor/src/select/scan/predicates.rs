@@ -254,3 +254,100 @@ pub(crate) fn combine_predicates_with_and(
         result
     }
 }
+
+/// Filter-while-copy optimization for CTE scans
+///
+/// Unlike `apply_table_local_predicates` which takes ownership of rows,
+/// this function takes a borrowed slice and only clones rows that pass
+/// the filter. This is critical for CTE performance when a CTE is scanned
+/// multiple times with different filters (e.g., TPC-DS Q4 with 6-way self-join).
+///
+/// **Issue #4199**: Avoids cloning all CTE rows (O(n)) when only a small
+/// fraction pass the filter. For Q4, this reduces row clones from ~54,000
+/// to ~3,000.
+pub(crate) fn filter_and_clone_rows(
+    rows: &[vibesql_storage::Row],
+    schema: CombinedSchema,
+    predicate_plan: &PredicatePlan,
+    table_name: &str,
+    database: &vibesql_storage::Database,
+    cte_context: Option<&HashMap<String, CteResult>>,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+    // Get predicates ordered by selectivity (most selective first)
+    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, None);
+
+    // If there are no table-local predicates, clone all rows
+    if ordered_preds.is_empty() {
+        return Ok(rows.to_vec());
+    }
+
+    // Combine ordered predicates with AND
+    let combined_where = combine_predicates_with_and(ordered_preds);
+
+    // Fast path: Try columnar execution for larger datasets
+    // Columnar still requires building a bitmap, but avoids per-row evaluator overhead
+    if rows.len() >= 100 {
+        use crate::select::columnar::{create_filter_bitmap_tree, extract_predicate_tree};
+
+        if let Some(predicate_tree) = extract_predicate_tree(&combined_where, &schema) {
+            // Use columnar filtering with bitmap
+            let bitmap =
+                create_filter_bitmap_tree(rows.len(), &predicate_tree, |row_idx, col_idx| {
+                    rows.get(row_idx).and_then(|row| row.get(col_idx))
+                })?;
+
+            // Only clone rows that pass the filter
+            let filtered_rows: Vec<_> = rows
+                .iter()
+                .zip(&bitmap)
+                .filter_map(|(row, &passes)| if passes { Some(row.clone()) } else { None })
+                .collect();
+
+            return Ok(filtered_rows);
+        }
+    }
+
+    // Create evaluator for filtering
+    let evaluator = match cte_context {
+        Some(cte_ctx) => {
+            CombinedExpressionEvaluator::with_database_and_cte(&schema, database, cte_ctx)
+        }
+        None => CombinedExpressionEvaluator::with_database(&schema, database),
+    };
+
+    // Sequential path: evaluate each row and only clone if it passes
+    let mut filtered_rows = Vec::new();
+    for row in rows {
+        evaluator.clear_cse_cache();
+
+        let include_row = match evaluator.eval(&combined_where, row)? {
+            vibesql_types::SqlValue::Boolean(true) => true,
+            vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
+            // SQLLogicTest compatibility: treat integers as truthy/falsy (C-like behavior)
+            vibesql_types::SqlValue::Integer(0) => false,
+            vibesql_types::SqlValue::Integer(_) => true,
+            vibesql_types::SqlValue::Smallint(0) => false,
+            vibesql_types::SqlValue::Smallint(_) => true,
+            vibesql_types::SqlValue::Bigint(0) => false,
+            vibesql_types::SqlValue::Bigint(_) => true,
+            vibesql_types::SqlValue::Float(0.0) => false,
+            vibesql_types::SqlValue::Float(_) => true,
+            vibesql_types::SqlValue::Real(0.0) => false,
+            vibesql_types::SqlValue::Real(_) => true,
+            vibesql_types::SqlValue::Double(0.0) => false,
+            vibesql_types::SqlValue::Double(_) => true,
+            other => {
+                return Err(ExecutorError::InvalidWhereClause(format!(
+                    "WHERE clause must evaluate to boolean, got: {:?}",
+                    other
+                )))
+            }
+        };
+
+        if include_row {
+            filtered_rows.push(row.clone());
+        }
+    }
+
+    Ok(filtered_rows)
+}
