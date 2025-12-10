@@ -1063,7 +1063,7 @@ fn try_prefix_scan_semi_join(
         seen_keys.insert(join_key.clone());
 
         // Do prefix lookup: find all rows where the first index column = join_key
-        let row_indices = index.prefix_multi_lookup(&[join_key.clone()]);
+        let row_indices = index.prefix_multi_lookup(std::slice::from_ref(join_key));
 
         // Check if any of the matching rows pass the additional filter
         for row_idx in row_indices {

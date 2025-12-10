@@ -107,6 +107,7 @@ pub(crate) fn build_hash_table_composite_sequential(
 /// - Hash computation cost varies by data type
 /// - Memory allocation patterns differ across partitions
 #[cfg(feature = "parallel")]
+#[allow(clippy::type_complexity)]
 pub(crate) fn build_hash_table_composite_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_indices: &[usize],
@@ -240,6 +241,7 @@ pub(super) fn build_hash_table_sequential(
 /// Performance: Near-linear scaling to 16+ cores with dynamic load balancing
 /// Note: Falls back to sequential when parallel feature is disabled
 #[allow(dead_code)]
+#[allow(clippy::type_complexity)]
 pub(crate) fn build_hash_table_parallel(
     build_rows: &[vibesql_storage::Row],
     build_col_idx: usize,
