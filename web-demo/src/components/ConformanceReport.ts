@@ -11,6 +11,7 @@ import {
   renderExplanation,
   renderFailingTests,
   renderSQLLogicTestResults,
+  renderTCLTestResults,
   renderRunningTestsLocally,
 } from './conformance/section-renderers'
 import { initTimelineChart, updateChartTheme } from './conformance/timeline-chart'
@@ -32,6 +33,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
       data: null,
       sltData: null,
       dashboardData: null,
+      tclData: null,
       loading: true,
       error: null,
     })
@@ -70,15 +72,17 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
     try {
       // Try loading new dashboard format first
       const dashboardData = await this.dataProcessor.loadDashboardData()
+      // Always try to load TCL data (optional)
+      const tclData = await this.dataProcessor.loadTCLTestData()
 
       if (dashboardData) {
         // New format available - use it
-        this.setState({ dashboardData, loading: false })
+        this.setState({ dashboardData, tclData, loading: false })
       } else {
         // Fall back to legacy format
         const data = await this.dataProcessor.loadSqltestData()
         const sltData = await this.dataProcessor.loadSQLLogicTestData()
-        this.setState({ data, sltData, loading: false })
+        this.setState({ data, sltData, tclData, loading: false })
       }
     } catch (error) {
       this.setState({
@@ -132,6 +136,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
 
   private renderDashboardFormat(dashboardData: DashboardData): void {
     const conformance = dashboardData.conformance!
+    const { tclData } = this.state
     const hasHistory = conformance.history && conformance.history.length > 0
     const hasCategories = conformance.categories && Object.keys(conformance.categories).length > 0
     const hasMilestones = dashboardData.milestones && dashboardData.milestones.length > 0
@@ -140,6 +145,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
       <div class="space-y-8">
         ${renderConformanceOverview(conformance)}
         ${hasCategories ? renderCategoryBreakdown(conformance.categories) : ''}
+        ${tclData ? renderTCLTestResults(tclData) : ''}
         ${hasHistory ? renderConformanceTimeline() : ''}
         ${hasMilestones ? renderMilestones(dashboardData.milestones!) : ''}
         ${renderRunningTestsLocally()}
@@ -157,7 +163,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
   }
 
   private renderLegacyFormat(): void {
-    const { data, sltData } = this.state
+    const { data, sltData, tclData } = this.state
 
     if (!data) return
 
@@ -169,6 +175,7 @@ export class ConformanceReportComponent extends Component<ConformanceReportState
         ${renderMetadataCard(commit, timestamp, data.pass_rate || 0)}
         ${renderSqltestResults(data)}
         ${sltData ? renderSQLLogicTestResults(sltData) : ''}
+        ${tclData ? renderTCLTestResults(tclData) : ''}
         ${renderExplanation(data, sltData)}
         ${data.error_tests && data.error_tests.length > 0 ? renderFailingTests(data.error_tests) : ''}
         ${renderRunningTestsLocally()}

@@ -270,6 +270,34 @@ def export_tcl_results(output_dir: Optional[Path] = None, verbose: bool = False)
         print(f"  Pass rate: {export_data['summary']['pass_rate']}%")
         print(f"  Categories: {len(export_data['categories'])}")
 
+    # Write badge JSON for shields.io
+    badge_dir = get_repo_root() / "web-demo" / "public" / "badges"
+    badge_dir.mkdir(parents=True, exist_ok=True)
+
+    pass_rate = export_data['summary']['pass_rate']
+    if pass_rate >= 90:
+        color = "brightgreen"
+    elif pass_rate >= 70:
+        color = "green"
+    elif pass_rate >= 50:
+        color = "yellow"
+    else:
+        color = "red"
+
+    badge = {
+        "schemaVersion": 1,
+        "label": "TCL Tests",
+        "message": f"{pass_rate:.1f}%",
+        "color": color
+    }
+
+    badge_file = badge_dir / "tcl-tests.json"
+    with open(badge_file, 'w') as f:
+        json.dump(badge, f, indent=2)
+
+    if verbose:
+        print(f"Badge written to: {badge_file}")
+
     return export_data
 
 

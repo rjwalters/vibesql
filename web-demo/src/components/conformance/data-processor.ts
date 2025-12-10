@@ -1,4 +1,4 @@
-import type { ConformanceData, SQLLogicTestData, DashboardData } from './types'
+import type { ConformanceData, SQLLogicTestData, DashboardData, TCLTestData } from './types'
 
 /**
  * Handles loading and processing of conformance test data
@@ -140,6 +140,29 @@ export class DataProcessor {
     } catch (error) {
       // SQLLogicTest data is optional, continue without it
       console.warn('SQLLogicTest results not available:', error)
+    }
+    return null
+  }
+
+  /**
+   * Load TCL test suite results from conformance directory
+   */
+  async loadTCLTestData(): Promise<TCLTestData | null> {
+    try {
+      const url = `${this.baseUrl}conformance/tcl_results.json?v=${this.cacheBust}`
+      const response = await fetch(url)
+      const contentType = response.headers.get('content-type')
+
+      if (response.ok && contentType && contentType.includes('application/json')) {
+        const data = await response.json()
+        // Validate structure
+        if (data.summary && data.categories) {
+          return data as TCLTestData
+        }
+      }
+    } catch (error) {
+      // TCL data is optional, continue without it
+      console.warn('TCL test results not available:', error)
     }
     return null
   }
