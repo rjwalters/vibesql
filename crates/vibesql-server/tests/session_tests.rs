@@ -370,6 +370,79 @@ async fn test_concurrent_session_operations() {
     server.shutdown();
 }
 
+/// Test that concurrent SELECT queries can execute in parallel
+///
+/// This test verifies that multiple sessions can execute SELECT queries
+/// concurrently without blocking each other (using read locks).
+#[tokio::test]
+async fn test_concurrent_select_queries() {
+    let server = start_test_server().await;
+    let addr = server.addr();
+
+    // First, set up a shared table with data
+    {
+        let mut client = TestClient::connect(addr).await.expect("Failed to connect");
+        client.send_startup("setup", "testdb").await.expect("Failed to send startup");
+        let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+
+        client
+            .send_query("CREATE TABLE parallel_test (id INT, data VARCHAR(100))")
+            .await
+            .expect("Failed to CREATE");
+        let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+
+        // Insert some data
+        for i in 1..=100 {
+            client
+                .send_query(&format!("INSERT INTO parallel_test VALUES ({}, 'data_{}')", i, i))
+                .await
+                .expect("Failed to INSERT");
+            let _ = client.read_until_message_type(b'Z').await.expect("Failed to read response");
+        }
+
+        client.send_terminate().await.expect("Failed to terminate");
+    }
+
+    // Now run multiple SELECT queries concurrently
+    // With read locks, these should not block each other
+    let num_concurrent = 8;
+    let handles: Vec<_> = (0..num_concurrent)
+        .map(|i| {
+            tokio::spawn(async move {
+                let mut client = TestClient::connect(addr).await.expect("Failed to connect");
+                client
+                    .send_startup(&format!("reader{}", i), "testdb")
+                    .await
+                    .expect("Failed to startup");
+                let _ =
+                    client.read_until_message_type(b'Z').await.expect("Failed to read response");
+
+                // Each session runs multiple SELECT queries
+                for _ in 0..5 {
+                    client
+                        .send_query("SELECT * FROM parallel_test")
+                        .await
+                        .expect("Failed to SELECT");
+                    let data =
+                        client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                    let messages = parse_backend_messages(&data);
+                    let row_count = messages.iter().filter(|m| m.is_data_row()).count();
+                    assert_eq!(row_count, 100, "Session {} should read 100 rows", i);
+                }
+
+                client.send_terminate().await.expect("Failed to terminate");
+            })
+        })
+        .collect();
+
+    // All concurrent readers should complete without deadlock
+    for handle in handles {
+        handle.await.expect("Concurrent SELECT task failed");
+    }
+
+    server.shutdown();
+}
+
 /// Test that index creation is persistent within session
 #[tokio::test]
 async fn test_session_create_index() {

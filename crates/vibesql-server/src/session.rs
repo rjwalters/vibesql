@@ -257,16 +257,19 @@ impl Session {
     }
 
     /// Execute a parsed statement
+    ///
+    /// This method uses read locks for SELECT queries to enable concurrent execution,
+    /// and write locks for mutations (INSERT/UPDATE/DELETE/DDL) to ensure data integrity.
     async fn execute_statement(
         &mut self,
         statement: &vibesql_ast::Statement,
     ) -> Result<ExecutionResult> {
-        // Acquire write lock for most operations (read-only operations could use read lock,
-        // but for simplicity we use write lock for all to avoid potential deadlocks)
-        let mut db = self.db.write().await;
+        use vibesql_ast::Statement;
 
         match statement {
-            vibesql_ast::Statement::Select(select_stmt) => {
+            // Read-only operations use read lock for concurrent execution
+            Statement::Select(select_stmt) => {
+                let db = self.db.read().await;
                 let executor = vibesql_executor::SelectExecutor::new(&db);
                 let rows = executor.execute(select_stmt)?;
 
@@ -286,7 +289,9 @@ impl Session {
                 Ok(ExecutionResult::Select { rows: result_rows, columns })
             }
 
-            vibesql_ast::Statement::Insert(insert_stmt) => {
+            // Write operations require exclusive write lock
+            Statement::Insert(insert_stmt) => {
+                let mut db = self.db.write().await;
                 let affected =
                     vibesql_executor::InsertExecutor::execute(&mut db, insert_stmt)?;
                 // Invalidate cache for modified table
@@ -294,7 +299,8 @@ impl Session {
                 Ok(ExecutionResult::Insert { rows_affected: affected })
             }
 
-            vibesql_ast::Statement::Update(update_stmt) => {
+            Statement::Update(update_stmt) => {
+                let mut db = self.db.write().await;
                 let affected =
                     vibesql_executor::UpdateExecutor::execute(update_stmt, &mut db)?;
                 // Invalidate cache for modified table
@@ -302,7 +308,8 @@ impl Session {
                 Ok(ExecutionResult::Update { rows_affected: affected })
             }
 
-            vibesql_ast::Statement::Delete(delete_stmt) => {
+            Statement::Delete(delete_stmt) => {
+                let mut db = self.db.write().await;
                 let affected =
                     vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut db)?;
                 // Invalidate cache for modified table
@@ -310,39 +317,48 @@ impl Session {
                 Ok(ExecutionResult::Delete { rows_affected: affected })
             }
 
-            vibesql_ast::Statement::CreateTable(create_stmt) => {
+            // DDL operations require exclusive write lock
+            Statement::CreateTable(create_stmt) => {
+                let mut db = self.db.write().await;
                 vibesql_executor::CreateTableExecutor::execute(create_stmt, &mut db)?;
                 Ok(ExecutionResult::CreateTable)
             }
 
-            vibesql_ast::Statement::CreateIndex(index_stmt) => {
+            Statement::CreateIndex(index_stmt) => {
+                let mut db = self.db.write().await;
                 vibesql_executor::CreateIndexExecutor::execute(index_stmt, &mut db)?;
                 Ok(ExecutionResult::CreateIndex)
             }
 
-            vibesql_ast::Statement::CreateView(view_stmt) => {
+            Statement::CreateView(view_stmt) => {
+                let mut db = self.db.write().await;
                 vibesql_executor::advanced_objects::execute_create_view(view_stmt, &mut db)?;
                 Ok(ExecutionResult::CreateView)
             }
 
-            vibesql_ast::Statement::DropTable(drop_stmt) => {
+            Statement::DropTable(drop_stmt) => {
+                let mut db = self.db.write().await;
                 vibesql_executor::DropTableExecutor::execute(drop_stmt, &mut db)?;
                 // Invalidate cache for dropped table
                 self.stmt_cache.invalidate_table(&drop_stmt.table_name);
                 Ok(ExecutionResult::DropTable)
             }
 
-            vibesql_ast::Statement::DropIndex(drop_stmt) => {
+            Statement::DropIndex(drop_stmt) => {
+                let mut db = self.db.write().await;
                 vibesql_executor::DropIndexExecutor::execute(drop_stmt, &mut db)?;
                 Ok(ExecutionResult::DropIndex)
             }
 
-            vibesql_ast::Statement::DropView(drop_stmt) => {
+            Statement::DropView(drop_stmt) => {
+                let mut db = self.db.write().await;
                 vibesql_executor::advanced_objects::execute_drop_view(drop_stmt, &mut db)?;
                 Ok(ExecutionResult::DropView)
             }
 
-            vibesql_ast::Statement::Analyze(analyze_stmt) => {
+            // ANALYZE updates statistics, requires write lock
+            Statement::Analyze(analyze_stmt) => {
+                let mut db = self.db.write().await;
                 let message =
                     vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut db)?;
                 // Extract table count from message - the executor returns a message like
@@ -353,78 +369,63 @@ impl Session {
                 Ok(ExecutionResult::Analyze { tables_analyzed })
             }
 
-            vibesql_ast::Statement::Prepare(prepare_stmt) => {
-                // Release lock before calling helper (doesn't need db)
-                drop(db);
+            // Session-local operations (no db lock needed)
+            Statement::Prepare(prepare_stmt) => {
                 self.execute_prepare(prepare_stmt)
             }
 
-            vibesql_ast::Statement::Execute(execute_stmt) => {
-                // Release lock before calling helper (will reacquire if needed)
-                drop(db);
+            Statement::Execute(execute_stmt) => {
                 self.execute_execute(execute_stmt).await
             }
 
-            vibesql_ast::Statement::Deallocate(deallocate_stmt) => {
-                // Release lock before calling helper (doesn't need db)
-                drop(db);
+            Statement::Deallocate(deallocate_stmt) => {
                 self.execute_deallocate(deallocate_stmt)
             }
 
-            vibesql_ast::Statement::DeclareCursor(declare_stmt) => {
-                // Release lock - declare doesn't need db
-                drop(db);
+            Statement::DeclareCursor(declare_stmt) => {
                 self.execute_declare_cursor(declare_stmt)
             }
 
-            vibesql_ast::Statement::OpenCursor(open_stmt) => {
-                // Keep lock for open cursor (needs db)
+            Statement::OpenCursor(open_stmt) => {
+                // OpenCursor needs read access to execute the cursor's query
+                let db = self.db.read().await;
                 CursorExecutor::open(&mut self.cursors, open_stmt, &db)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
                 Ok(ExecutionResult::OpenCursor { cursor_name: open_stmt.cursor_name.clone() })
             }
 
-            vibesql_ast::Statement::Fetch(fetch_stmt) => {
-                // Release lock - fetch doesn't need db
-                drop(db);
+            Statement::Fetch(fetch_stmt) => {
                 self.execute_fetch(fetch_stmt)
             }
 
-            vibesql_ast::Statement::CloseCursor(close_stmt) => {
-                // Release lock - close doesn't need db
-                drop(db);
+            Statement::CloseCursor(close_stmt) => {
                 self.execute_close_cursor(close_stmt)
             }
 
-            vibesql_ast::Statement::BeginTransaction(_) => {
-                // Release lock - transaction management doesn't need db lock
-                drop(db);
+            // Transaction control
+            Statement::BeginTransaction(_) => {
                 self.begin_transaction().await
             }
 
-            vibesql_ast::Statement::Commit(_) => {
-                // Release lock first, commit() will reacquire if needed
-                drop(db);
+            Statement::Commit(_) => {
                 self.commit().await
             }
 
-            vibesql_ast::Statement::Rollback(_) => {
-                // Release lock - rollback discards buffered changes, no db write needed
-                drop(db);
+            Statement::Rollback(_) => {
                 self.rollback().await
             }
 
-            vibesql_ast::Statement::RollbackToSavepoint(_savepoint_stmt) => {
+            Statement::RollbackToSavepoint(_savepoint_stmt) => {
                 // TODO: Implement savepoints in SessionTransactionManager
                 Ok(ExecutionResult::Other { message: "ROLLBACK TO SAVEPOINT".to_string() })
             }
 
-            vibesql_ast::Statement::Savepoint(_savepoint_stmt) => {
+            Statement::Savepoint(_savepoint_stmt) => {
                 // TODO: Implement savepoints in SessionTransactionManager
                 Ok(ExecutionResult::Other { message: "SAVEPOINT".to_string() })
             }
 
-            vibesql_ast::Statement::ReleaseSavepoint(_release_stmt) => {
+            Statement::ReleaseSavepoint(_release_stmt) => {
                 // TODO: Implement savepoints in SessionTransactionManager
                 Ok(ExecutionResult::Other { message: "RELEASE SAVEPOINT".to_string() })
             }
