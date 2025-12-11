@@ -77,6 +77,113 @@ pub(crate) fn boolean_to_i64(value: &vibesql_types::SqlValue) -> Option<i64> {
     }
 }
 
+/// SQLite-compatible string-to-number coercion for arithmetic operations
+///
+/// SQLite rules for implicit string-to-number conversion:
+/// 1. Leading whitespace is ignored
+/// 2. Optional sign (+/-)
+/// 3. Numeric prefix is extracted: '123abc' → 123
+/// 4. Non-numeric strings convert to 0: 'abc' → 0
+/// 5. Empty string converts to 0
+/// 6. If the string contains a decimal point or exponent, it's treated as float
+///
+/// Returns (integer_value, float_value, is_float)
+pub(crate) fn string_to_number(s: &str) -> (i64, f64, bool) {
+    let trimmed = s.trim_start();
+
+    if trimmed.is_empty() {
+        return (0, 0.0, false);
+    }
+
+    // Check for sign
+    let (sign, rest) = match trimmed.chars().next() {
+        Some('-') => (-1i64, &trimmed[1..]),
+        Some('+') => (1i64, &trimmed[1..]),
+        _ => (1i64, trimmed),
+    };
+
+    // Find the numeric prefix
+    let mut has_decimal = false;
+    let mut has_exponent = false;
+    let mut end_idx = 0;
+
+    let chars: Vec<char> = rest.chars().collect();
+    let len = chars.len();
+
+    while end_idx < len {
+        let c = chars[end_idx];
+        if c.is_ascii_digit() {
+            end_idx += 1;
+        } else if c == '.' && !has_decimal && !has_exponent {
+            has_decimal = true;
+            end_idx += 1;
+        } else if (c == 'e' || c == 'E') && !has_exponent && end_idx > 0 {
+            // Check if exponent is followed by optional sign and digits
+            has_exponent = true;
+            end_idx += 1;
+            // Allow optional sign after exponent
+            if end_idx < len && (chars[end_idx] == '+' || chars[end_idx] == '-') {
+                end_idx += 1;
+            }
+            // Must have at least one digit after exponent
+            if end_idx < len && chars[end_idx].is_ascii_digit() {
+                while end_idx < len && chars[end_idx].is_ascii_digit() {
+                    end_idx += 1;
+                }
+            } else {
+                // Invalid exponent, backtrack
+                has_exponent = false;
+                end_idx -= if end_idx > 0
+                    && (chars[end_idx - 1] == '+' || chars[end_idx - 1] == '-')
+                {
+                    2
+                } else {
+                    1
+                };
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if end_idx == 0 {
+        // No numeric prefix found
+        return (0, 0.0, false);
+    }
+
+    let numeric_str: String = chars[..end_idx].iter().collect();
+
+    if has_decimal || has_exponent {
+        // Parse as float
+        match numeric_str.parse::<f64>() {
+            Ok(f) => {
+                let result = f * sign as f64;
+                (result as i64, result, true)
+            }
+            Err(_) => (0, 0.0, false),
+        }
+    } else {
+        // Parse as integer
+        match numeric_str.parse::<i64>() {
+            Ok(n) => {
+                let result = n * sign;
+                (result, result as f64, false)
+            }
+            Err(_) => {
+                // Try parsing as float (for very large numbers)
+                match numeric_str.parse::<f64>() {
+                    Ok(f) => {
+                        let result = f * sign as f64;
+                        (result as i64, result, true)
+                    }
+                    Err(_) => (0, 0.0, false),
+                }
+            }
+        }
+    }
+}
+
 /// Helper function to convert float to integer based on SQL mode
 /// MySQL mode: rounds to nearest integer
 /// SQLite mode: truncates toward zero
