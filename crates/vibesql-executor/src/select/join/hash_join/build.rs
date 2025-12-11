@@ -16,6 +16,11 @@ use crate::{
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
 
+/// Threshold for using parallel merge (number of partial tables)
+/// Below this, sequential merge is faster due to parallelization overhead
+#[cfg(feature = "parallel")]
+const PARALLEL_MERGE_THRESHOLD: usize = 4;
+
 /// Environment variable to enable morsel build debug logging
 #[cfg(feature = "parallel")]
 const MORSEL_BUILD_DEBUG_ENV: &str = "MORSEL_BUILD_DEBUG";
@@ -24,6 +29,139 @@ const MORSEL_BUILD_DEBUG_ENV: &str = "MORSEL_BUILD_DEBUG";
 #[cfg(feature = "parallel")]
 fn morsel_build_debug_enabled() -> bool {
     std::env::var(MORSEL_BUILD_DEBUG_ENV).is_ok()
+}
+
+/// Tree-based parallel merge for composite key hash tables
+///
+/// Uses rayon's `reduce()` which performs a tree-based merge:
+/// ```text
+/// Phase 1: Build (parallel)
+///   Thread 1 → Table A
+///   Thread 2 → Table B
+///   Thread 3 → Table C
+///   Thread 4 → Table D
+///
+/// Phase 2: Merge (parallel tree)
+///   (A + B) → AB    (parallel)
+///   (C + D) → CD    (parallel)
+///
+/// Phase 3: Final merge
+///   (AB + CD) → Final
+/// ```
+///
+/// This reduces merge depth from O(N) to O(log N) for N partial tables.
+#[cfg(feature = "parallel")]
+fn parallel_merge_composite(
+    partial_tables: Vec<AHashMap<CompositeKey, Vec<usize>>>,
+) -> AHashMap<CompositeKey, Vec<usize>> {
+    if partial_tables.is_empty() {
+        return AHashMap::new();
+    }
+
+    // Use sequential merge for small number of partial tables
+    if partial_tables.len() < PARALLEL_MERGE_THRESHOLD {
+        return partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
+            for (key, mut indices) in partial {
+                acc.entry(key).or_default().append(&mut indices);
+            }
+            acc
+        });
+    }
+
+    // Tree-based parallel merge using rayon's reduce
+    // Merges into the larger table to minimize reallocations
+    partial_tables
+        .into_par_iter()
+        .reduce(AHashMap::new, |mut acc, mut partial| {
+            // Merge smaller table into larger to minimize resizing
+            if partial.len() > acc.len() {
+                // Swap: merge acc into partial
+                for (key, mut indices) in acc {
+                    partial.entry(key).or_default().append(&mut indices);
+                }
+                partial
+            } else {
+                // Merge partial into acc
+                for (key, mut indices) in partial {
+                    acc.entry(key).or_default().append(&mut indices);
+                }
+                acc
+            }
+        })
+}
+
+/// Tree-based parallel merge for single-key hash tables
+#[cfg(feature = "parallel")]
+fn parallel_merge_single_key(
+    partial_tables: Vec<AHashMap<vibesql_types::SqlValue, Vec<usize>>>,
+) -> AHashMap<vibesql_types::SqlValue, Vec<usize>> {
+    if partial_tables.is_empty() {
+        return AHashMap::new();
+    }
+
+    // Use sequential merge for small number of partial tables
+    if partial_tables.len() < PARALLEL_MERGE_THRESHOLD {
+        return partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
+            for (key, mut indices) in partial {
+                acc.entry(key).or_default().append(&mut indices);
+            }
+            acc
+        });
+    }
+
+    // Tree-based parallel merge
+    partial_tables
+        .into_par_iter()
+        .reduce(AHashMap::new, |mut acc, mut partial| {
+            if partial.len() > acc.len() {
+                for (key, mut indices) in acc {
+                    partial.entry(key).or_default().append(&mut indices);
+                }
+                partial
+            } else {
+                for (key, mut indices) in partial {
+                    acc.entry(key).or_default().append(&mut indices);
+                }
+                acc
+            }
+        })
+}
+
+/// Tree-based parallel merge for existence hash tables
+#[cfg(feature = "parallel")]
+fn parallel_merge_existence(
+    partial_tables: Vec<AHashMap<vibesql_types::SqlValue, ()>>,
+) -> AHashMap<vibesql_types::SqlValue, ()> {
+    if partial_tables.is_empty() {
+        return AHashMap::new();
+    }
+
+    // Use sequential merge for small number of partial tables
+    if partial_tables.len() < PARALLEL_MERGE_THRESHOLD {
+        return partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
+            for (key, _) in partial {
+                acc.insert(key, ());
+            }
+            acc
+        });
+    }
+
+    // Tree-based parallel merge
+    partial_tables
+        .into_par_iter()
+        .reduce(AHashMap::new, |mut acc, mut partial| {
+            if partial.len() > acc.len() {
+                for (key, _) in acc {
+                    partial.insert(key, ());
+                }
+                partial
+            } else {
+                for (key, _) in partial {
+                    acc.insert(key, ());
+                }
+                acc
+            }
+        })
 }
 
 /// Create morsels from a row count (local helper for build phase)
@@ -194,13 +332,9 @@ pub(crate) fn build_hash_table_composite_parallel(
         );
     }
 
-    // Phase 2: Sequential merge of partial tables
-    partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
-        for (key, mut indices) in partial {
-            acc.entry(key).or_default().append(&mut indices);
-        }
-        acc
-    })
+    // Phase 2: Tree-based parallel merge of partial tables
+    // Uses rayon's reduce() for O(log N) merge depth instead of O(N)
+    parallel_merge_composite(partial_tables)
 }
 
 #[cfg(not(feature = "parallel"))]
@@ -331,13 +465,9 @@ pub(crate) fn build_hash_table_parallel(
             );
         }
 
-        // Phase 2: Sequential merge of partial tables
-        partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
-            for (key, mut indices) in partial {
-                acc.entry(key).or_default().append(&mut indices);
-            }
-            acc
-        })
+        // Phase 2: Tree-based parallel merge of partial tables
+        // Uses rayon's reduce() for O(log N) merge depth instead of O(N)
+        parallel_merge_single_key(partial_tables)
     }
 
     #[cfg(not(feature = "parallel"))]
@@ -384,7 +514,7 @@ pub(crate) fn build_existence_hash_table_sequential(
 /// Algorithm (when parallel feature enabled):
 /// 1. Divide build_rows into chunks (one per thread)
 /// 2. Each thread builds a local hash table from its chunk (no synchronization)
-/// 3. Merge partial hash tables sequentially (fast because we only store keys)
+/// 3. Tree-based parallel merge using rayon's reduce() - O(log N) depth
 ///
 /// Performance: 3-6x speedup on large joins (50k+ rows) with 4+ cores
 /// Note: Falls back to sequential when parallel feature is disabled
@@ -425,15 +555,9 @@ pub(crate) fn build_existence_hash_table_parallel(
         // Check timeout after parallel build
         timeout_ctx.check()?;
 
-        // Phase 2: Sequential merge of partial tables
-        // This is fast because we only need to insert keys, not append vectors
-        let result = partial_tables.into_iter().fold(AHashMap::new(), |mut acc, partial| {
-            for (key, _) in partial {
-                acc.insert(key, ());
-            }
-            acc
-        });
-        Ok(result)
+        // Phase 2: Tree-based parallel merge of partial tables
+        // Uses rayon's reduce() for O(log N) merge depth instead of O(N)
+        Ok(parallel_merge_existence(partial_tables))
     }
 
     #[cfg(not(feature = "parallel"))]
