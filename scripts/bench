@@ -852,78 +852,21 @@ def run_sysbench_server(config: BenchConfig) -> int:
     else:
         print("✓ Sysbench server benchmark completed")
 
-    # Process results - parse the output and add to sysbench_results.json
-    print("\nProcessing server results...")
-    _process_sysbench_server_results("/tmp/sysbench_server_results.txt")
+    # Process results into database using process_results.py
+    # This stores server benchmark results (vibesql_server, mysql) in the same
+    # database as embedded benchmarks, ensuring they're properly exported
+    print("\nProcessing results into database...")
+    result = subprocess.run(
+        ["./scripts/process_results.py", "--type=sysbench", "--input", "/tmp/sysbench_server_results.txt"],
+        cwd=Path(__file__).parent.parent
+    )
+
+    if result.returncode != 0:
+        print("⚠ Failed to process server results into database")
+    else:
+        print("✓ Server results stored in database")
 
     return 0
-
-
-def _process_sysbench_server_results(results_file: str) -> None:
-    """Parse sysbench server results and add to sysbench_results.json."""
-    import re
-
-    results_path = Path(results_file)
-    if not results_path.exists():
-        print(f"  Results file not found: {results_file}")
-        return
-
-    content = results_path.read_text()
-
-    # Parse results table:
-    # Workload               Operations     Avg Latency      Ops/sec
-    # -------------------- ------------ --------------- ------------
-    # Point Select                96296        51.38 us        19465
-    pattern = r"^(\w[\w\s]+?)\s+(\d+)\s+([\d.]+)\s+us\s+([\d.]+)$"
-
-    benchmarks = []
-    for match in re.finditer(pattern, content, re.MULTILINE):
-        workload = match.group(1).strip().lower().replace(" ", "_")
-        operations = int(match.group(2))
-        latency_us = float(match.group(3))
-
-        # Convert latency from microseconds to seconds
-        mean_s = latency_us / 1_000_000
-
-        benchmarks.append({
-            "name": f"sysbench_{workload}_vibesql_server",
-            "stats": {
-                "mean": mean_s,
-                "stddev": mean_s * 0.05,  # Approximate 5% variance
-                "min": mean_s * 0.95,
-                "max": mean_s * 1.05,
-                "rounds": operations
-            }
-        })
-
-    if not benchmarks:
-        print("  No server benchmark results parsed")
-        return
-
-    # Load existing sysbench_results.json and add server results
-    json_path = Path(__file__).parent.parent / "web-demo" / "public" / "benchmarks" / "sysbench_results.json"
-    if json_path.exists():
-        with open(json_path) as f:
-            data = json.load(f)
-    else:
-        data = {"benchmarks": [], "metadata": {}}
-
-    # Remove old server results
-    data["benchmarks"] = [b for b in data["benchmarks"] if not b["name"].endswith("_vibesql_server")]
-
-    # Add new server results
-    data["benchmarks"].extend(benchmarks)
-
-    # Update metadata
-    git_info = get_git_info()
-    data["metadata"]["timestamp"] = datetime.now().isoformat()
-    data["metadata"]["git_commit"] = git_info.get("commit", "unknown")
-
-    # Write back
-    with open(json_path, 'w') as f:
-        json.dump(data, f, indent=2)
-
-    print(f"  Added {len(benchmarks)} server benchmark results to {json_path.name}")
 
 
 def run_tpch_server(config: BenchConfig) -> int:

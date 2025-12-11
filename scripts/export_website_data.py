@@ -206,38 +206,63 @@ def export_tpcc_benchmarks(data: BenchmarkData) -> Optional[Dict]:
 
 
 def export_sysbench_benchmarks(data: BenchmarkData) -> Optional[Dict]:
-    """Export Sysbench results to JSON format."""
-    run = data.get_latest_run('sysbench')
-    if not run:
+    """Export Sysbench results to JSON format.
+
+    Combines results from recent sysbench runs to include both embedded engines
+    (vibesql, sqlite, duckdb) and server engines (vibesql_server, mysql).
+    Uses the most recent result for each engine/test combination.
+    """
+    # Get all recent sysbench runs (embedded and server benchmarks may be stored separately)
+    runs = data.get_runs_by_suite('sysbench')
+    if not runs:
         return None
 
-    run_id, timestamp, commit, _, _, scale = run[:6]
-    results = data.get_results_for_run('sysbench_results', run_id)
+    # Collect results from recent runs, using the most recent for each engine/test combo
+    # Key: (engine, test), Value: (timestamp, result_dict)
+    best_results: Dict[tuple, tuple] = {}
+    latest_timestamp = None
+    latest_commit = None
+    latest_scale = None
 
-    benchmarks = []
-    for row in results:
-        _, _, engine, test, _, mean_ns, std_ns, median_ns, iterations = row
-        mean_s = (mean_ns / 1e9) if mean_ns else 0
-        std_s = (std_ns / 1e9) if std_ns else 0
-        median_s = (median_ns / 1e9) if median_ns else 0
+    for run in runs:
+        run_id, timestamp, commit, _, _, scale = run[:6]
+        results = data.get_results_for_run('sysbench_results', run_id)
 
-        benchmarks.append({
-            "name": f"sysbench_{test}_{engine}",
-            "stats": {
-                "mean": mean_s,
-                "stddev": std_s,
-                "min": median_s * 0.9,
-                "max": median_s * 1.1,
-                "rounds": iterations or 0
-            }
-        })
+        # Track the most recent run's metadata
+        if latest_timestamp is None or timestamp > latest_timestamp:
+            latest_timestamp = timestamp
+            latest_commit = commit
+            latest_scale = scale
+
+        for row in results:
+            _, _, engine, test, _, mean_ns, std_ns, median_ns, iterations = row
+            key = (engine, test)
+
+            # Use this result if we don't have one yet or if it's newer
+            if key not in best_results or timestamp > best_results[key][0]:
+                mean_s = (mean_ns / 1e9) if mean_ns else 0
+                std_s = (std_ns / 1e9) if std_ns else 0
+                median_s = (median_ns / 1e9) if median_ns else 0
+
+                best_results[key] = (timestamp, {
+                    "name": f"sysbench_{test}_{engine}",
+                    "stats": {
+                        "mean": mean_s,
+                        "stddev": std_s,
+                        "min": median_s * 0.9,
+                        "max": median_s * 1.1,
+                        "rounds": iterations or 0
+                    }
+                })
+
+    benchmarks = [result for _, result in best_results.values()]
 
     if not benchmarks:
         return None
 
     return {
         "benchmarks": benchmarks,
-        "metadata": {"suite": "sysbench", "timestamp": timestamp, "git_commit": commit, "table_size": scale}
+        "metadata": {"suite": "sysbench", "timestamp": latest_timestamp, "git_commit": latest_commit, "table_size": latest_scale}
     }
 
 

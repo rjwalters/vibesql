@@ -957,11 +957,23 @@ class SysbenchParser(BenchmarkParser):
     def benchmark_suite(self) -> str:
         return 'sysbench'
 
+    # Map engine display names to database field names (for server mode)
+    ENGINE_NAME_MAP = {
+        'vibesql server': 'vibesql_server',
+        'mysql': 'mysql',
+        'vibesql': 'vibesql',
+        'sqlite': 'sqlite',
+        'duckdb': 'duckdb',
+    }
+
     @classmethod
     def can_parse(cls, content: str) -> bool:
         """Check for Sysbench specific markers."""
         # New custom harness format (post-Criterion migration)
         if '--- VibeSQL Results ---' in content and 'Workload' in content:
+            return True
+        # Server mode format (vibesql-server vs MySQL)
+        if '--- VibeSQL Server Results ---' in content and 'Workload' in content:
             return True
         # Legacy Criterion format (for backwards compatibility)
         return ('sysbench_' in content or
@@ -985,7 +997,7 @@ class SysbenchParser(BenchmarkParser):
     def _parse_custom_harness(self, content: str) -> Tuple[List[Dict], Dict]:
         """Parse new custom harness output format (post-Criterion migration).
 
-        Expected format:
+        Expected format (embedded mode):
             --- VibeSQL Results ---
             Workload               Client   Operations     Avg Latency      Ops/sec
             -------------------- -------- ------------ --------------- ------------
@@ -995,9 +1007,20 @@ class SysbenchParser(BenchmarkParser):
 
             --- SQLite Results ---
             ...
+
+        Expected format (server mode):
+            --- VibeSQL Server Results ---
+            Workload               Operations     Avg Latency      Ops/sec
+            -------------------- ------------ --------------- ------------
+            Point Select               644340        46.01 us        21732
+            ...
+
+            --- MySQL Results ---
+            ...
         """
         results = []
         current_engine = None
+        in_comparison_section = False
 
         # Extract table size from configuration section
         table_size = 10000  # Default
@@ -1005,14 +1028,16 @@ class SysbenchParser(BenchmarkParser):
         if config_match:
             table_size = int(config_match.group(1))
 
-        # Engine section header pattern: "--- VibeSQL Results ---" or "--- SQLite Results (4 clients) ---"
-        engine_pattern = re.compile(r'^---\s+(\w+)\s+Results.*---', re.MULTILINE)
+        # Engine section header pattern: "--- VibeSQL Results ---" or "--- VibeSQL Server Results ---"
+        # Captures multi-word engine names like "VibeSQL Server"
+        engine_pattern = re.compile(r'^---\s+([\w\s]+?)\s+Results.*---', re.MULTILINE)
 
-        # Result row pattern - matches lines like:
+        # Comparison summary section marker - stop parsing here
+        comparison_pattern = re.compile(r'^===\s+Comparison Summary\s+===', re.MULTILINE)
+
+        # Result row pattern for embedded mode (with client column):
         # "Point Select              all       500000         2.00 us       500000"
-        # "Update Non-Index          all       234567         6.78 us       147500"
-        # Note: Workload names can have spaces and hyphens
-        result_pattern = re.compile(
+        result_pattern_embedded = re.compile(
             r'^([\w\s-]+?)\s{2,}'        # Workload name (greedy until 2+ spaces)
             r'(?:all|\d+|TOTAL)\s+'      # Client column (all, number, or TOTAL)
             r'(\d+)\s+'                  # Operations
@@ -1021,11 +1046,35 @@ class SysbenchParser(BenchmarkParser):
             re.MULTILINE
         )
 
+        # Result row pattern for server mode (no client column):
+        # "Point Select               644340        46.01 us        21732"
+        result_pattern_server = re.compile(
+            r'^([\w\s-]+?)\s{2,}'        # Workload name (greedy until 2+ spaces)
+            r'(\d+)\s+'                  # Operations
+            r'([\d.]+)\s+(us|ms|ns)\s+'  # Avg Latency + unit
+            r'([\d.]+)',                 # Ops/sec
+            re.MULTILINE
+        )
+
+        # Detect if this is server mode (no client column in header)
+        is_server_mode = '--- VibeSQL Server Results ---' in content
+
         for line in content.split('\n'):
+            # Check for comparison summary section - stop parsing here
+            if comparison_pattern.match(line):
+                in_comparison_section = True
+                continue
+
+            # Skip everything after comparison summary
+            if in_comparison_section:
+                continue
+
             # Check for engine section header
             engine_match = engine_pattern.match(line)
             if engine_match:
-                current_engine = engine_match.group(1).lower()
+                engine_display = engine_match.group(1).strip().lower()
+                # Map display name to database field name
+                current_engine = self.ENGINE_NAME_MAP.get(engine_display, engine_display.replace(' ', '_'))
                 continue
 
             # Skip lines without an active engine context
@@ -1036,7 +1085,8 @@ class SysbenchParser(BenchmarkParser):
             if 'Workload' in line or line.startswith('---') or line.startswith('==='):
                 continue
 
-            # Try to match result row
+            # Try to match result row (use appropriate pattern based on mode)
+            result_pattern = result_pattern_server if is_server_mode else result_pattern_embedded
             result_match = result_pattern.match(line)
             if result_match:
                 workload_display = result_match.group(1).strip().lower()
@@ -1142,12 +1192,13 @@ class SysbenchParser(BenchmarkParser):
     def parse(self, content: str) -> Tuple[List[Dict], Dict]:
         """Parse Sysbench benchmark output from stdout.
 
-        Supports both:
-        1. New custom harness format (post-Criterion migration)
-        2. Legacy Criterion format (for backwards compatibility)
+        Supports:
+        1. New custom harness format - embedded mode (post-Criterion migration)
+        2. Server mode format (vibesql-server vs MySQL)
+        3. Legacy Criterion format (for backwards compatibility)
         """
-        # Check for new custom harness format first
-        if '--- VibeSQL Results ---' in content and 'Workload' in content:
+        # Check for new custom harness format first (embedded or server mode)
+        if ('--- VibeSQL Results ---' in content or '--- VibeSQL Server Results ---' in content) and 'Workload' in content:
             return self._parse_custom_harness(content)
 
         # Fall back to legacy Criterion format
