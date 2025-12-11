@@ -37,5 +37,4 @@ pub struct SelectResult {
     pub rows: Vec<vibesql_storage::Row>,
 }
 
-pub use executor::SelectExecutor;
-pub use executor::{is_simple_point_query, is_streaming_aggregate_query};
+pub use executor::{is_simple_point_query, is_streaming_aggregate_query, SelectExecutor};

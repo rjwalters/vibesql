@@ -29,10 +29,13 @@
 //! The `query()` method only accepts SELECT statements. Any other statement type
 //! (INSERT, UPDATE, DELETE, DDL) returns a `ReadOnlyError::NotReadOnly` error.
 
-use crate::errors::ExecutorError;
-use crate::select::{SelectExecutor, SelectResult};
 use vibesql_ast::Statement;
 use vibesql_storage::Database;
+
+use crate::{
+    errors::ExecutorError,
+    select::{SelectExecutor, SelectResult},
+};
 
 /// Error type for read-only query operations.
 #[derive(Debug)]
@@ -122,52 +125,50 @@ impl ReadOnlyQuery for Database {
         match &statement {
             Statement::Select(select_stmt) => {
                 let executor = SelectExecutor::new(self);
-                executor
-                    .execute_with_columns(select_stmt.as_ref())
-                    .map_err(ReadOnlyError::from)
+                executor.execute_with_columns(select_stmt.as_ref()).map_err(ReadOnlyError::from)
             }
-            Statement::Insert(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "INSERT".to_string(),
-            }),
-            Statement::Update(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "UPDATE".to_string(),
-            }),
-            Statement::Delete(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "DELETE".to_string(),
-            }),
-            Statement::CreateTable(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "CREATE TABLE".to_string(),
-            }),
-            Statement::DropTable(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "DROP TABLE".to_string(),
-            }),
-            Statement::CreateIndex(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "CREATE INDEX".to_string(),
-            }),
-            Statement::DropIndex(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "DROP INDEX".to_string(),
-            }),
-            Statement::CreateView(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "CREATE VIEW".to_string(),
-            }),
-            Statement::DropView(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "DROP VIEW".to_string(),
-            }),
-            Statement::AlterTable(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "ALTER TABLE".to_string(),
-            }),
-            Statement::TruncateTable(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "TRUNCATE".to_string(),
-            }),
-            Statement::BeginTransaction(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "BEGIN TRANSACTION".to_string(),
-            }),
-            Statement::Commit(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "COMMIT".to_string(),
-            }),
-            Statement::Rollback(_) => Err(ReadOnlyError::NotReadOnly {
-                statement_type: "ROLLBACK".to_string(),
-            }),
+            Statement::Insert(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "INSERT".to_string() })
+            }
+            Statement::Update(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "UPDATE".to_string() })
+            }
+            Statement::Delete(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "DELETE".to_string() })
+            }
+            Statement::CreateTable(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "CREATE TABLE".to_string() })
+            }
+            Statement::DropTable(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "DROP TABLE".to_string() })
+            }
+            Statement::CreateIndex(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "CREATE INDEX".to_string() })
+            }
+            Statement::DropIndex(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "DROP INDEX".to_string() })
+            }
+            Statement::CreateView(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "CREATE VIEW".to_string() })
+            }
+            Statement::DropView(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "DROP VIEW".to_string() })
+            }
+            Statement::AlterTable(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "ALTER TABLE".to_string() })
+            }
+            Statement::TruncateTable(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "TRUNCATE".to_string() })
+            }
+            Statement::BeginTransaction(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "BEGIN TRANSACTION".to_string() })
+            }
+            Statement::Commit(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "COMMIT".to_string() })
+            }
+            Statement::Rollback(_) => {
+                Err(ReadOnlyError::NotReadOnly { statement_type: "ROLLBACK".to_string() })
+            }
             _ => {
                 // Catch-all for other statement types
                 Err(ReadOnlyError::NotReadOnly {
@@ -180,10 +181,11 @@ impl ReadOnlyQuery for Database {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     fn create_test_db() -> Database {
         let mut db = Database::new();
@@ -203,14 +205,10 @@ mod tests {
         db.create_table(schema).unwrap();
 
         // Insert test data
-        let row1 = Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-        ]);
-        let row2 = Row::new(vec![
-            SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
-        ]);
+        let row1 =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row2 =
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
         let row3 = Row::new(vec![
             SqlValue::Integer(3),
             SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
@@ -239,10 +237,7 @@ mod tests {
         let result = db.query("SELECT * FROM users WHERE id = 1").unwrap();
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].values[0], SqlValue::Integer(1));
-        assert_eq!(
-            result.rows[0].values[1],
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
-        );
+        assert_eq!(result.rows[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
     }
 
     #[test]
@@ -253,10 +248,7 @@ mod tests {
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.columns.len(), 1);
         assert_eq!(result.columns[0].to_lowercase(), "name");
-        assert_eq!(
-            result.rows[0].values[0],
-            SqlValue::Varchar(arcstr::ArcStr::from("Bob"))
-        );
+        assert_eq!(result.rows[0].values[0], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     }
 
     #[test]
@@ -375,9 +367,7 @@ mod tests {
     fn test_query_with_aggregation() {
         let db = create_test_db();
 
-        let result = db
-            .query("SELECT COUNT(*), MAX(id), MIN(id) FROM users")
-            .unwrap();
+        let result = db.query("SELECT COUNT(*), MAX(id), MIN(id) FROM users").unwrap();
         assert_eq!(result.rows.len(), 1);
         // COUNT returns Integer in this implementation
         assert_eq!(result.rows[0].values[0], SqlValue::Integer(3)); // COUNT(*)

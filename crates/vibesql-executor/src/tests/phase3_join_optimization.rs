@@ -129,7 +129,10 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     assert_eq!(first_row.values[0], vibesql_types::SqlValue::Integer(1)); // t1.id
     assert_eq!(first_row.values[1], vibesql_types::SqlValue::Integer(10)); // t1.value
     assert_eq!(first_row.values[2], vibesql_types::SqlValue::Integer(1)); // t2.id
-    assert_eq!(first_row.values[3], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("name_1")));
+    assert_eq!(
+        first_row.values[3],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("name_1"))
+    );
     // t2.name
 }
 
@@ -693,7 +696,8 @@ fn test_multi_column_hash_join_composite_keys() {
         assert_eq!(row.values.len(), 6, "Expected 6 columns");
         // Verify the join keys match
         assert_eq!(row.values[0], row.values[3], "region_id should match"); // sales.region_id = inventory.region_id
-        assert_eq!(row.values[1], row.values[4], "product_id should match"); // sales.product_id = inventory.product_id
+        assert_eq!(row.values[1], row.values[4], "product_id should match"); // sales.product_id =
+                                                                             // inventory.product_id
     }
 }
 

@@ -2,9 +2,10 @@
 // Database Lifecycle Management
 // ============================================================================
 
+use std::collections::HashMap;
+
 use super::transactions::TransactionManager;
 use crate::Table;
-use std::collections::HashMap;
 
 /// Manages database lifecycle: creation, opening, closing, and state reset
 #[derive(Debug, Clone)]

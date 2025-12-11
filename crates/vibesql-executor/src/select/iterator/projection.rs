@@ -2,9 +2,8 @@
 
 #![allow(dead_code)]
 
-use crate::{errors::ExecutorError, schema::CombinedSchema};
-
 use super::RowIterator;
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Iterator that projects (transforms) rows using a projection function
 ///

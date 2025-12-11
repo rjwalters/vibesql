@@ -46,10 +46,7 @@ pub(super) fn has_aggregate_window_functions(select_list: &[SelectItem]) -> bool
 fn is_aggregate_window_function(expr: &Expression) -> bool {
     matches!(
         expr,
-        Expression::WindowFunction {
-            function: WindowFunctionSpec::Aggregate { .. },
-            ..
-        }
+        Expression::WindowFunction { function: WindowFunctionSpec::Aggregate { .. }, .. }
     )
 }
 
@@ -59,10 +56,11 @@ fn collect_aggregate_window_functions(select_list: &[SelectItem]) -> Vec<Aggrega
 
     for (idx, item) in select_list.iter().enumerate() {
         if let SelectItem::Expression {
-            expr: Expression::WindowFunction {
-                function: WindowFunctionSpec::Aggregate { name, .. },
-                over,
-            },
+            expr:
+                Expression::WindowFunction {
+                    function: WindowFunctionSpec::Aggregate { name, .. },
+                    over,
+                },
             ..
         } = item
         {
@@ -106,11 +104,10 @@ pub(super) fn apply_window_functions_to_aggregates(
 
         // For partition/order expressions, we need to map them to column indices
         // in the aggregate result schema. Create column reference expressions.
-        let partition_exprs: Option<Vec<Expression>> = win_func.window_spec.partition_by.as_ref().map(
-            |exprs| {
+        let partition_exprs: Option<Vec<Expression>> =
+            win_func.window_spec.partition_by.as_ref().map(|exprs| {
                 exprs.iter().map(|e| map_expr_to_result_column(e, select_list)).collect::<Vec<_>>()
-            },
-        );
+            });
 
         // Partition the rows
         let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
@@ -153,12 +150,8 @@ pub(super) fn apply_window_functions_to_aggregates(
 
             // Evaluate the window function for each row in the partition
             for row_idx in 0..partition.len() {
-                let frame = calculate_frame(
-                    partition,
-                    row_idx,
-                    &order_by_ref,
-                    &win_func.window_spec.frame,
-                );
+                let frame =
+                    calculate_frame(partition, row_idx, &order_by_ref, &win_func.window_spec.frame);
 
                 let eval_fn = |expr: &Expression, row: &Row| -> Result<SqlValue, String> {
                     evaluator.clear_cse_cache();
@@ -231,7 +224,10 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
             // Check if expressions match
             if expressions_match(expr, select_expr) {
                 let col_name = alias.clone().unwrap_or_else(|| format!("col{}", idx));
-                return Expression::ColumnRef { table: Some("result".to_string()), column: col_name };
+                return Expression::ColumnRef {
+                    table: Some("result".to_string()),
+                    column: col_name,
+                };
             }
 
             // Also check if expr matches an alias

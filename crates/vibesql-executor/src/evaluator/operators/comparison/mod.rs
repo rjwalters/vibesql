@@ -7,14 +7,16 @@
 pub mod equality;
 pub mod ordering;
 
+use std::str::FromStr;
+
+use vibesql_types::SqlValue;
+
 use crate::{
     errors::ExecutorError,
     evaluator::casting::{
         boolean_to_i64, is_approximate_numeric, is_exact_numeric, to_f64, to_i64,
     },
 };
-use std::str::FromStr;
-use vibesql_types::SqlValue;
 
 /// Public API for comparison operations
 pub(crate) struct ComparisonOps;

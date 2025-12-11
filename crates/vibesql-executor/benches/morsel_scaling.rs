@@ -5,14 +5,14 @@
 //!
 //! ## Benchmarks
 //!
-//! 1. **Thread Scaling**: Run TPC-H Q1, Q6 at varying thread counts (1, 2, 4, 8, 16)
-//!    and measure speedup and efficiency relative to single-threaded execution.
+//! 1. **Thread Scaling**: Run TPC-H Q1, Q6 at varying thread counts (1, 2, 4, 8, 16) and measure
+//!    speedup and efficiency relative to single-threaded execution.
 //!
-//! 2. **Load Balancing**: Test work-stealing on skewed data distributions where
-//!    some partitions have much more work than others.
+//! 2. **Load Balancing**: Test work-stealing on skewed data distributions where some partitions
+//!    have much more work than others.
 //!
-//! 3. **Morsel Size Sensitivity**: Test different morsel sizes to find optimal
-//!    configuration for different query types.
+//! 3. **Morsel Size Sensitivity**: Test different morsel sizes to find optimal configuration for
+//!    different query types.
 //!
 //! ## Usage
 //!
@@ -40,12 +40,17 @@
 mod harness;
 mod tpch;
 
+use std::{
+    env,
+    hint::black_box,
+    time::{Duration, Instant},
+};
+
 use harness::{print_group_header, BenchConfig, BenchResult, BenchStats, Harness};
-use std::env;
-use std::hint::black_box;
-use std::time::{Duration, Instant};
-use tpch::queries::{TPCH_Q1, TPCH_Q6};
-use tpch::schema::load_vibesql;
+use tpch::{
+    queries::{TPCH_Q1, TPCH_Q6},
+    schema::load_vibesql,
+};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
@@ -75,18 +80,12 @@ fn run_query(db: &VibeDB, sql: &str) -> BenchResult {
 
 /// Get scale factor from environment
 fn get_scale_factor() -> f64 {
-    env::var("SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.01)
+    env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01)
 }
 
 /// Get max threads to test from environment
 fn get_max_threads() -> usize {
-    env::var("MAX_THREADS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(16)
+    env::var("MAX_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(16)
 }
 
 /// Get benchmark filter from environment
@@ -108,11 +107,8 @@ fn bench_thread_scaling(db: &VibeDB, harness: &Harness) {
     print_group_header("Thread Scaling Benchmark");
 
     let max_threads = get_max_threads();
-    let thread_counts: Vec<usize> = [1, 2, 4, 8, 16, 32]
-        .iter()
-        .copied()
-        .filter(|&t| t <= max_threads)
-        .collect();
+    let thread_counts: Vec<usize> =
+        [1, 2, 4, 8, 16, 32].iter().copied().filter(|&t| t <= max_threads).collect();
 
     eprintln!("Testing thread counts: {:?}", thread_counts);
     eprintln!("(Set MAX_THREADS env var to adjust, default: 16)\n");
@@ -286,17 +282,18 @@ fn bench_morsel_size(db: &VibeDB, harness: &Harness) {
 
     // Different query types to test
     let queries = [
-        ("Q6_filter", TPCH_Q6),     // Filter-heavy
-        ("Q1_agg", TPCH_Q1),        // Aggregation-heavy
+        ("Q6_filter", TPCH_Q6), // Filter-heavy
+        ("Q1_agg", TPCH_Q1),    // Aggregation-heavy
     ];
 
     eprintln!("Testing morsel sizes: {:?}\n", morsel_sizes);
 
     // Results table
-    eprintln!("{:<15} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "Query", "10K", "25K", "50K", "100K", "200K");
-    eprintln!("{:-<15} {:->12} {:->12} {:->12} {:->12} {:->12}",
-        "", "", "", "", "", "");
+    eprintln!(
+        "{:<15} {:>12} {:>12} {:>12} {:>12} {:>12}",
+        "Query", "10K", "25K", "50K", "100K", "200K"
+    );
+    eprintln!("{:-<15} {:->12} {:->12} {:->12} {:->12} {:->12}", "", "", "", "", "", "");
 
     for (query_name, query_sql) in queries {
         let mut times: Vec<Duration> = Vec::new();
@@ -348,14 +345,8 @@ fn main() {
 
     // Create harness with fewer iterations for faster runs
     let config = BenchConfig::new(
-        env::var("WARMUP_ITERATIONS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2),
-        env::var("BENCHMARK_ITERATIONS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(5),
+        env::var("WARMUP_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(2),
+        env::var("BENCHMARK_ITERATIONS").ok().and_then(|s| s.parse().ok()).unwrap_or(5),
         60, // 60 second timeout
     );
     let harness = Harness::with_config(config);

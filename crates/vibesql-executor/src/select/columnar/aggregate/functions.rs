@@ -5,13 +5,17 @@
 
 #![allow(clippy::collapsible_else_if)]
 
-use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
 
-use super::super::batch::{ColumnArray, ColumnarBatch};
-use super::super::scan::ColumnarScan;
-use super::super::simd_ops;
-use super::AggregateOp;
+use super::{
+    super::{
+        batch::{ColumnArray, ColumnarBatch},
+        scan::ColumnarScan,
+        simd_ops,
+    },
+    AggregateOp,
+};
+use crate::errors::ExecutorError;
 
 // Re-export optimized SIMD operations from simd_ops module
 // See simd_ops.rs for documentation on why the 4-accumulator pattern is used

@@ -2,7 +2,8 @@
 
 use crate::{keywords::Keyword, parser::ParseError, token::Token};
 
-/// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY = <mode>] statement
+/// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY =
+/// <mode>] statement
 ///
 /// Syntax:
 /// - BEGIN [TRANSACTION] [WITH DURABILITY = DEFAULT | DURABLE | LAZY | VOLATILE]

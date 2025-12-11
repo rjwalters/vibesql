@@ -2,16 +2,16 @@
 //!
 //! Handles background execution of scheduled tasks and cron jobs with automatic retry.
 
-use crate::Session;
+use std::{sync::Arc, time::Duration as StdDuration};
+
 use anyhow::Result;
 use chrono::Utc;
-use std::sync::Arc;
-use std::time::Duration as StdDuration;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use vibesql_parser::Parser;
 
 use super::storage::{ExecutionHistoryRecord, ScheduleRecord, ScheduleStatus};
+use crate::Session;
 
 /// Configuration for schedule executor
 #[derive(Debug, Clone)]
@@ -216,7 +216,8 @@ mod tests {
         drop(session_guard);
 
         let mut verify_session = session.lock().await;
-        let verify = verify_session.execute("SELECT * FROM schedule_test WHERE id = 1").await.unwrap();
+        let verify =
+            verify_session.execute("SELECT * FROM schedule_test WHERE id = 1").await.unwrap();
         match verify {
             crate::session::ExecutionResult::Select { rows, .. } => {
                 assert_eq!(rows.len(), 1);
@@ -424,7 +425,8 @@ mod tests {
 
         // Verify table was created by inserting into it
         let mut session_guard = session.lock().await;
-        let insert_result = session_guard.execute("INSERT INTO scheduled_table VALUES (1, 'test')").await;
+        let insert_result =
+            session_guard.execute("INSERT INTO scheduled_table VALUES (1, 'test')").await;
         assert!(insert_result.is_ok());
     }
 }

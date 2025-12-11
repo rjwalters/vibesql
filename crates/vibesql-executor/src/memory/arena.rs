@@ -15,11 +15,13 @@
 //! All allocations are tied to the arena's lifetime via Rust's borrow checker.
 //! References returned cannot outlive the arena.
 
-use std::alloc::{Layout, alloc, dealloc};
-use std::cell::Cell;
-use std::marker::PhantomData;
-use std::mem::{self, MaybeUninit};
-use std::ptr;
+use std::{
+    alloc::{alloc, dealloc, Layout},
+    cell::Cell,
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+    ptr,
+};
 
 /// Arena allocator for query-scoped allocations
 ///
@@ -29,8 +31,9 @@ use std::ptr;
 /// # Example
 ///
 /// ```rust
-/// use vibesql_executor::memory::QueryArena;
 /// use std::mem::MaybeUninit;
+///
+/// use vibesql_executor::memory::QueryArena;
 ///
 /// let arena = QueryArena::with_capacity(1024);
 ///
@@ -84,18 +87,12 @@ impl QueryArena {
     /// ```
     pub fn with_capacity(bytes: usize) -> Self {
         // SAFETY: Allocate properly aligned memory
-        let layout = Layout::from_size_align(bytes, MAX_ALIGN)
-            .expect("invalid arena layout");
+        let layout = Layout::from_size_align(bytes, MAX_ALIGN).expect("invalid arena layout");
         let buffer = unsafe { alloc(layout) };
         if buffer.is_null() {
             panic!("arena allocation failed");
         }
-        Self {
-            buffer,
-            capacity: bytes,
-            offset: Cell::new(0),
-            _marker: PhantomData,
-        }
+        Self { buffer, capacity: bytes, offset: Cell::new(0), _marker: PhantomData }
     }
 
     /// Create a new arena with the default capacity (10MB)
@@ -141,11 +138,7 @@ impl QueryArena {
         let size = mem::size_of::<T>();
         let align = mem::align_of::<T>();
 
-        assert!(
-            align <= MAX_ALIGN,
-            "arena does not support alignment greater than {}",
-            MAX_ALIGN
-        );
+        assert!(align <= MAX_ALIGN, "arena does not support alignment greater than {}", MAX_ALIGN);
 
         // Align pointer to T's alignment requirement
         let aligned_offset = (offset + align - 1) & !(align - 1);
@@ -166,7 +159,8 @@ impl QueryArena {
         // Write value and return reference
         // SAFETY: We've verified:
         // - Buffer has enough space (checked above)
-        // - Pointer is properly aligned (buffer is MAX_ALIGN aligned, aligned_offset ensures T's alignment)
+        // - Pointer is properly aligned (buffer is MAX_ALIGN aligned, aligned_offset ensures T's
+        //   alignment)
         // - Lifetime is tied to arena via borrow checker
         unsafe {
             let ptr = self.buffer.add(aligned_offset) as *mut T;
@@ -194,8 +188,9 @@ impl QueryArena {
     /// # Example
     ///
     /// ```rust
-    /// use vibesql_executor::memory::QueryArena;
     /// use std::mem::MaybeUninit;
+    ///
+    /// use vibesql_executor::memory::QueryArena;
     ///
     /// let arena = QueryArena::new();
     /// let slice = arena.alloc_slice::<i32>(100);
@@ -206,12 +201,8 @@ impl QueryArena {
     /// }
     ///
     /// // SAFETY: All elements have been initialized above
-    /// let initialized_slice = unsafe {
-    ///     std::slice::from_raw_parts(
-    ///         slice.as_ptr() as *const i32,
-    ///         slice.len()
-    ///     )
-    /// };
+    /// let initialized_slice =
+    ///     unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const i32, slice.len()) };
     /// assert_eq!(initialized_slice[50], 50);
     /// ```
     #[inline(always)]
@@ -226,11 +217,7 @@ impl QueryArena {
         let size = mem::size_of::<T>().checked_mul(len).expect("slice size overflow");
         let align = mem::align_of::<T>();
 
-        assert!(
-            align <= MAX_ALIGN,
-            "arena does not support alignment greater than {}",
-            MAX_ALIGN
-        );
+        assert!(align <= MAX_ALIGN, "arena does not support alignment greater than {}", MAX_ALIGN);
 
         // Align pointer to T's alignment requirement
         let aligned_offset = (offset + align - 1) & !(align - 1);
@@ -251,7 +238,8 @@ impl QueryArena {
         // Return slice of MaybeUninit<T> (safe for uninitialized memory)
         // SAFETY: We've verified:
         // - Buffer has enough space (checked above)
-        // - Pointer is properly aligned (buffer is MAX_ALIGN aligned, aligned_offset ensures T's alignment)
+        // - Pointer is properly aligned (buffer is MAX_ALIGN aligned, aligned_offset ensures T's
+        //   alignment)
         // - Size doesn't overflow (checked above)
         // - Lifetime is tied to arena via borrow checker
         // - MaybeUninit<T> is safe to construct from uninitialized memory

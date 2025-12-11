@@ -99,10 +99,7 @@ async fn test_selective_eligible_count_increments_on_pk_detection() {
             // Note: The count may have increased by 1 if PK was detected successfully.
             // We just verify the infrastructure works - actual PK detection depends on
             // the query and table structure.
-            eprintln!(
-                "Selective eligible count: initial={}, final={}",
-                initial_count, final_count
-            );
+            eprintln!("Selective eligible count: initial={}, final={}", initial_count, final_count);
         }
         _ => {
             eprintln!("Note: HTTP server not responding. Expected in basic test environment.");
@@ -173,10 +170,7 @@ async fn test_partial_update_efficiency_records_column_savings() {
             client
                 .get(&http_url)
                 .header("X-Database-Name", "testdb")
-                .query(&[
-                    ("query", "SELECT * FROM efficiency_test"),
-                    ("selective_enabled", "true"),
-                ])
+                .query(&[("query", "SELECT * FROM efficiency_test"), ("selective_enabled", "true")])
                 .timeout(Duration::from_secs(3))
                 .send()
                 .await
@@ -237,22 +231,14 @@ async fn test_metrics_record_selective_update_columns() {
     test_server.metrics.record_selective_update_columns(2, 10);
 
     let efficiency = test_server.metrics.partial_update_efficiency();
-    assert!(
-        (efficiency - 0.8).abs() < 0.001,
-        "Expected efficiency ~0.8, got {}",
-        efficiency
-    );
+    assert!((efficiency - 0.8).abs() < 0.001, "Expected efficiency ~0.8, got {}", efficiency);
 
     // Record more: 4 columns sent out of 10 total
     // Cumulative: 6 sent out of 20 = 70% efficiency
     test_server.metrics.record_selective_update_columns(4, 10);
 
     let efficiency = test_server.metrics.partial_update_efficiency();
-    assert!(
-        (efficiency - 0.7).abs() < 0.001,
-        "Expected efficiency ~0.7, got {}",
-        efficiency
-    );
+    assert!((efficiency - 0.7).abs() < 0.001, "Expected efficiency ~0.7, got {}", efficiency);
 
     test_server.shutdown();
 }
@@ -311,11 +297,7 @@ async fn test_metrics_selective_eligible_increment_decrement() {
     let test_server = start_test_server_with_metrics(config).await;
 
     // Initial count should be 0
-    assert_eq!(
-        test_server.metrics.selective_eligible_count(),
-        0,
-        "Initial count should be 0"
-    );
+    assert_eq!(test_server.metrics.selective_eligible_count(), 0, "Initial count should be 0");
 
     // Increment
     test_server.metrics.increment_selective_eligible();
@@ -437,10 +419,7 @@ async fn test_http_sse_partial_update_triggers_metrics() {
                     }
                 }
 
-                eprintln!(
-                    "SSE events: initial={}, partial={}",
-                    found_initial, found_partial
-                );
+                eprintln!("SSE events: initial={}, partial={}", found_initial, found_partial);
 
                 // Verify initial event was received
                 assert!(found_initial, "Should receive initial SSE event");
@@ -448,10 +427,7 @@ async fn test_http_sse_partial_update_triggers_metrics() {
 
             // Check final efficiency
             let final_efficiency = test_server.metrics.partial_update_efficiency();
-            eprintln!(
-                "Efficiency: initial={}, final={}",
-                initial_efficiency, final_efficiency
-            );
+            eprintln!("Efficiency: initial={}, final={}", initial_efficiency, final_efficiency);
         }
         _ => {
             eprintln!("Note: HTTP server not responding. Expected in basic test environment.");

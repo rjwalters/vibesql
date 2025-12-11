@@ -1,8 +1,10 @@
 //! Full-text search evaluation for MATCH...AGAINST expressions
 
-use crate::errors::ExecutorError;
 use std::collections::HashSet;
+
 use vibesql_ast::FulltextMode;
+
+use crate::errors::ExecutorError;
 
 /// Common English stopwords to exclude from searches
 const STOPWORDS: &[&str] = &[

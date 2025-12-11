@@ -10,13 +10,11 @@
 
 mod sysbench;
 
+use std::{hint::black_box, sync::Arc, time::Instant};
+
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use std::hint::black_box;
-use std::sync::Arc;
-use std::time::Instant;
-use sysbench::schema::load_vibesql;
-use sysbench::SysbenchData;
+use sysbench::{schema::load_vibesql, SysbenchData};
 use vibesql_executor::{PreparedStatement, PreparedStatementCache, SessionMut};
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::SqlValue;
@@ -111,9 +109,7 @@ fn main() {
         for _ in 0..100 {
             // Delete a random row
             let delete_id = rng.random_range(1..=next_id - 1);
-            session
-                .execute_prepared_mut(&stmts.delete, &[SqlValue::Integer(delete_id)])
-                .ok();
+            session.execute_prepared_mut(&stmts.delete, &[SqlValue::Integer(delete_id)]).ok();
 
             // Insert a new row to maintain table size
             let k = data_gen.random_k();
@@ -149,7 +145,8 @@ fn main() {
         for i in 0..NUM_DELETE_OPS {
             // Delete a random existing row
             let delete_id = rng.random_range(1..=next_id - 1);
-            let result = session.execute_prepared_mut(&stmts.delete, &[SqlValue::Integer(delete_id)]);
+            let result =
+                session.execute_prepared_mut(&stmts.delete, &[SqlValue::Integer(delete_id)]);
             let _ = black_box(result);
 
             // Re-insert a row to maintain table size (so we can keep deleting)
@@ -184,14 +181,8 @@ fn main() {
     println!();
     println!("Results:");
     println!("  Total time: {:?}", profile_duration);
-    println!(
-        "  Per-operation: {:?}",
-        profile_duration / NUM_DELETE_OPS as u32
-    );
-    println!(
-        "  Operations/sec: {:.0}",
-        NUM_DELETE_OPS as f64 / profile_duration.as_secs_f64()
-    );
+    println!("  Per-operation: {:?}", profile_duration / NUM_DELETE_OPS as u32);
+    println!("  Operations/sec: {:.0}", NUM_DELETE_OPS as f64 / profile_duration.as_secs_f64());
     println!();
     println!("Note: This includes both DELETE and INSERT operations.");
     println!("For pure DELETE profiling, look at 'delete' functions in the flamegraph.");

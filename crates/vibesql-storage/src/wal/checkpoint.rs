@@ -24,14 +24,17 @@
 // The checkpoint file reuses the existing binary format (.vbsql) for table
 // data serialization, prefixed with a checkpoint-specific header.
 
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{self, File},
+    io::{BufReader, BufWriter, Read, Write},
+    path::{Path, PathBuf},
+};
 
-use crate::persistence::binary::io::{read_u32, read_u64, write_u32, write_u64};
-use crate::wal::entry::Lsn;
-use crate::wal::writer::verify_checksum;
-use crate::StorageError;
+use crate::{
+    persistence::binary::io::{read_u32, read_u64, write_u32, write_u64},
+    wal::{entry::Lsn, writer::verify_checksum},
+    StorageError,
+};
 
 /// Magic number for checkpoint files: "VCHK"
 pub const CHECKPOINT_MAGIC: &[u8; 4] = b"VCHK";
@@ -66,9 +69,9 @@ impl CheckpointHeader {
     /// Write the checkpoint header to a writer
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), StorageError> {
         // Magic number (4 bytes)
-        writer
-            .write_all(CHECKPOINT_MAGIC)
-            .map_err(|e| StorageError::IoError(format!("Failed to write checkpoint magic: {}", e)))?;
+        writer.write_all(CHECKPOINT_MAGIC).map_err(|e| {
+            StorageError::IoError(format!("Failed to write checkpoint magic: {}", e))
+        })?;
 
         // Version (4 bytes)
         write_u32(writer, self.version)?;
@@ -92,9 +95,9 @@ impl CheckpointHeader {
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, StorageError> {
         // Read magic number
         let mut magic = [0u8; 4];
-        reader
-            .read_exact(&mut magic)
-            .map_err(|e| StorageError::IoError(format!("Failed to read checkpoint magic: {}", e)))?;
+        reader.read_exact(&mut magic).map_err(|e| {
+            StorageError::IoError(format!("Failed to read checkpoint magic: {}", e))
+        })?;
 
         if &magic != CHECKPOINT_MAGIC {
             return Err(StorageError::IoError(format!(
@@ -157,8 +160,9 @@ impl CheckpointWriter {
         let checkpoint_dir = checkpoint_dir.as_ref().to_path_buf();
 
         // Create checkpoint directory if it doesn't exist
-        fs::create_dir_all(&checkpoint_dir)
-            .map_err(|e| StorageError::IoError(format!("Failed to create checkpoint dir: {}", e)))?;
+        fs::create_dir_all(&checkpoint_dir).map_err(|e| {
+            StorageError::IoError(format!("Failed to create checkpoint dir: {}", e))
+        })?;
 
         // Find the next checkpoint ID by scanning existing checkpoints
         let next_checkpoint_id = Self::find_next_checkpoint_id(&checkpoint_dir)?;
@@ -174,7 +178,9 @@ impl CheckpointWriter {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if let Some(id_str) = name.strip_prefix("checkpoint_").and_then(|s| s.strip_suffix(".vchk")) {
+                    if let Some(id_str) =
+                        name.strip_prefix("checkpoint_").and_then(|s| s.strip_suffix(".vchk"))
+                    {
                         if let Ok(id) = id_str.parse::<u64>() {
                             max_id = max_id.max(id);
                         }
@@ -208,8 +214,9 @@ impl CheckpointWriter {
 
         // Write to temp file
         {
-            let file = File::create(&temp_path)
-                .map_err(|e| StorageError::IoError(format!("Failed to create temp checkpoint: {}", e)))?;
+            let file = File::create(&temp_path).map_err(|e| {
+                StorageError::IoError(format!("Failed to create temp checkpoint: {}", e))
+            })?;
             let mut writer = BufWriter::new(file);
 
             // Write header
@@ -217,9 +224,9 @@ impl CheckpointWriter {
             header.write(&mut writer)?;
 
             // Write data
-            writer
-                .write_all(data)
-                .map_err(|e| StorageError::IoError(format!("Failed to write checkpoint data: {}", e)))?;
+            writer.write_all(data).map_err(|e| {
+                StorageError::IoError(format!("Failed to write checkpoint data: {}", e))
+            })?;
 
             writer
                 .flush()
@@ -383,8 +390,9 @@ fn current_timestamp_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_checkpoint_header_roundtrip() {

@@ -10,14 +10,15 @@
 //! critical for queries like TPC-H Q18 where the IN subquery contains GROUP BY/HAVING
 //! and must be evaluated many times against different outer rows.
 
-use super::super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator};
-use super::schema_utils::{
-    build_merged_outer_row, build_merged_outer_schema, compute_select_list_column_count,
+use std::{cell::RefCell, collections::HashSet};
+
+use super::{
+    super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator},
+    schema_utils::{
+        build_merged_outer_row, build_merged_outer_schema, compute_select_list_column_count,
+    },
 };
-use crate::errors::ExecutorError;
-use crate::evaluator::caching::compute_subquery_hash;
-use std::cell::RefCell;
-use std::collections::HashSet;
+use crate::{errors::ExecutorError, evaluator::caching::compute_subquery_hash};
 
 /// Cached HashSet entry for IN subquery optimization
 /// Built once from subquery rows, then reused for O(1) membership checks

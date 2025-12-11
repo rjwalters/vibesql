@@ -4,10 +4,12 @@
 //
 // Handles serialization of window functions, specs, frames, and bounds.
 
+use std::io::{Read, Write};
+
+use vibesql_ast::{FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec};
+
 use super::super::io::*;
 use crate::StorageError;
-use std::io::{Read, Write};
-use vibesql_ast::{FrameBound, FrameUnit, WindowFrame, WindowFunctionSpec, WindowSpec};
 
 pub(super) fn write_window_function_spec<W: Write>(
     writer: &mut W,

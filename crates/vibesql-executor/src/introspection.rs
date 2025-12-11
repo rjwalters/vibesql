@@ -11,8 +11,7 @@ use vibesql_catalog::{IndexType, ReferentialAction, SortOrder};
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::select::SelectResult;
+use crate::{errors::ExecutorError, select::SelectResult};
 
 /// Executor for database introspection commands
 pub struct IntrospectionExecutor<'a> {
@@ -244,19 +243,19 @@ impl<'a> IntrospectionExecutor<'a> {
             for (seq, col_name) in pk_cols.iter().enumerate() {
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from(stmt.table_name.clone())), // Table
-                    SqlValue::Integer(0),                       // Non_unique (0 = unique)
-                    SqlValue::Varchar("PRIMARY".into()),        // Key_name
-                    SqlValue::Integer((seq + 1) as i64),        // Seq_in_index
-                    SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),        // Column_name
-                    SqlValue::Varchar("A".into()),              // Collation (A = ascending)
-                    SqlValue::Null,                             // Cardinality
-                    SqlValue::Null,                             // Sub_part
-                    SqlValue::Null,                             // Packed
-                    SqlValue::Varchar("".into()),               // Null
-                    SqlValue::Varchar("BTREE".into()),          // Index_type
-                    SqlValue::Varchar("".into()),               // Comment
-                    SqlValue::Varchar("".into()),               // Index_comment
-                    SqlValue::Varchar("YES".into()),            // Visible
+                    SqlValue::Integer(0), // Non_unique (0 = unique)
+                    SqlValue::Varchar("PRIMARY".into()), // Key_name
+                    SqlValue::Integer((seq + 1) as i64), // Seq_in_index
+                    SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // Column_name
+                    SqlValue::Varchar("A".into()), // Collation (A = ascending)
+                    SqlValue::Null,       // Cardinality
+                    SqlValue::Null,       // Sub_part
+                    SqlValue::Null,       // Packed
+                    SqlValue::Varchar("".into()), // Null
+                    SqlValue::Varchar("BTREE".into()), // Index_type
+                    SqlValue::Varchar("".into()), // Comment
+                    SqlValue::Varchar("".into()), // Index_comment
+                    SqlValue::Varchar("YES".into()), // Visible
                 ]));
             }
         }
@@ -281,21 +280,21 @@ impl<'a> IntrospectionExecutor<'a> {
 
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from(stmt.table_name.clone())), // Table
-                    SqlValue::Integer(non_unique),              // Non_unique
+                    SqlValue::Integer(non_unique),                                    // Non_unique
                     SqlValue::Varchar(arcstr::ArcStr::from(index.name.clone())),      // Key_name
-                    SqlValue::Integer((seq + 1) as i64),        // Seq_in_index
+                    SqlValue::Integer((seq + 1) as i64), // Seq_in_index
                     SqlValue::Varchar(arcstr::ArcStr::from(col.column_name.clone())), // Column_name
-                    SqlValue::Varchar(collation.into()),        // Collation
-                    SqlValue::Null,                             // Cardinality
+                    SqlValue::Varchar(collation.into()), // Collation
+                    SqlValue::Null,                      // Cardinality
                     col.prefix_length
                         .map(|l| SqlValue::Integer(l as i64))
                         .unwrap_or(SqlValue::Null), // Sub_part
-                    SqlValue::Null,                             // Packed
-                    SqlValue::Varchar("".into()),               // Null
-                    SqlValue::Varchar(index_type.into()),       // Index_type
-                    SqlValue::Varchar("".into()),               // Comment
-                    SqlValue::Varchar("".into()),               // Index_comment
-                    SqlValue::Varchar("YES".into()),            // Visible
+                    SqlValue::Null,                      // Packed
+                    SqlValue::Varchar("".into()),        // Null
+                    SqlValue::Varchar(index_type.into()), // Index_type
+                    SqlValue::Varchar("".into()),        // Comment
+                    SqlValue::Varchar("".into()),        // Index_comment
+                    SqlValue::Varchar("YES".into()),     // Visible
                 ]));
             }
         }
@@ -389,8 +388,10 @@ impl<'a> IntrospectionExecutor<'a> {
         sql.push_str(&definitions.join(",\n"));
         sql.push_str("\n)");
 
-        let rows =
-            vec![Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(table.name.clone())), SqlValue::Varchar(arcstr::ArcStr::from(sql))])];
+        let rows = vec![Row::new(vec![
+            SqlValue::Varchar(arcstr::ArcStr::from(table.name.clone())),
+            SqlValue::Varchar(arcstr::ArcStr::from(sql)),
+        ])];
 
         Ok(SelectResult { columns: vec!["Table".to_string(), "Create Table".to_string()], rows })
     }
@@ -518,9 +519,10 @@ fn format_referential_action(action: &ReferentialAction) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn create_test_db() -> Database {
         let mut db = Database::new();

@@ -58,9 +58,8 @@ pub use table::ColumnarTable;
 mod tests {
     use vibesql_types::SqlValue;
 
-    use crate::Row;
-
     use super::*;
+    use crate::Row;
 
     #[test]
     fn test_empty_table() {

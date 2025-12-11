@@ -23,8 +23,7 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
-use std::sync::atomic::AtomicUsize;
+use std::{collections::HashSet, sync::atomic::AtomicUsize};
 
 use dashmap::DashMap;
 

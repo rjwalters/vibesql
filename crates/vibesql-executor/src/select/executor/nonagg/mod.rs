@@ -3,11 +3,12 @@
 //! This module implements execution strategies for non-aggregated SELECT queries.
 //! It provides different execution paths optimized for different query patterns:
 //!
-//! - **Iterator-based execution**: For simple queries without ORDER BY, DISTINCT, or window functions.
-//!   Uses lazy evaluation to minimize memory usage and enable early termination with LIMIT.
+//! - **Iterator-based execution**: For simple queries without ORDER BY, DISTINCT, or window
+//!   functions. Uses lazy evaluation to minimize memory usage and enable early termination with
+//!   LIMIT.
 //!
-//! - **Materialized execution**: For complex queries requiring ORDER BY, DISTINCT, or window functions.
-//!   Includes optimizations like SIMD filtering and spatial indexes.
+//! - **Materialized execution**: For complex queries requiring ORDER BY, DISTINCT, or window
+//!   functions. Includes optimizations like SIMD filtering and spatial indexes.
 //!
 //! - **SELECT without FROM**: Special case for evaluating constant expressions.
 //!

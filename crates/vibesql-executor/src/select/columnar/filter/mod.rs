@@ -9,15 +9,17 @@ mod comparison;
 mod evaluation;
 mod predicates;
 
-use crate::errors::ExecutorError;
-use crate::select::vectorized::{DEFAULT_BATCH_SIZE, SMALL_BATCH_SIZE};
-
 // Re-export public types and functions
 pub(super) use comparison::parse_date_string;
 pub use evaluation::{evaluate_column_compare, evaluate_predicate, evaluate_predicate_tree};
 pub use predicates::{
     collect_referenced_columns, extract_column_predicates, extract_predicate_tree,
     remap_predicates, ColumnPredicate, CompareOp, PredicateTree,
+};
+
+use crate::{
+    errors::ExecutorError,
+    select::vectorized::{DEFAULT_BATCH_SIZE, SMALL_BATCH_SIZE},
 };
 
 /// Apply a filter to row indices based on a predicate tree
@@ -279,9 +281,10 @@ pub fn filter_rows(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_simd_streaming_filter_large_dataset() {
@@ -433,9 +436,11 @@ mod tests {
             Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(15), SqlValue::Integer(5)]),
             // Row 1: col0=15, col1=25, col2=5 -> (15<10 OR 25>20) AND 5=5 -> TRUE AND TRUE -> TRUE
             Row::new(vec![SqlValue::Integer(15), SqlValue::Integer(25), SqlValue::Integer(5)]),
-            // Row 2: col0=15, col1=15, col2=5 -> (15<10 OR 15>20) AND 5=5 -> FALSE AND TRUE -> FALSE
+            // Row 2: col0=15, col1=15, col2=5 -> (15<10 OR 15>20) AND 5=5 -> FALSE AND TRUE ->
+            // FALSE
             Row::new(vec![SqlValue::Integer(15), SqlValue::Integer(15), SqlValue::Integer(5)]),
-            // Row 3: col0=5, col1=25, col2=10 -> (5<10 OR 25>20) AND 10=5 -> TRUE AND FALSE -> FALSE
+            // Row 3: col0=5, col1=25, col2=10 -> (5<10 OR 25>20) AND 10=5 -> TRUE AND FALSE ->
+            // FALSE
             Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(25), SqlValue::Integer(10)]),
         ];
 
@@ -449,10 +454,11 @@ mod tests {
 
     #[test]
     fn test_extract_predicate_tree_or() {
-        use crate::schema::CombinedSchema;
         use vibesql_ast::{BinaryOperator, Expression};
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
+        use crate::schema::CombinedSchema;
 
         let schema = TableSchema::new(
             "test".to_string(),

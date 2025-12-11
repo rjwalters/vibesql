@@ -21,9 +21,9 @@
 //! assert_eq!(name, "users");
 //! ```
 
-use bumpalo::collections::Vec as BumpVec;
-use bumpalo::Bump;
 use std::collections::HashMap;
+
+use bumpalo::{collections::Vec as BumpVec, Bump};
 
 /// A symbol representing an interned string.
 ///

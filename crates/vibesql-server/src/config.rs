@@ -1,11 +1,9 @@
+use std::{env, fs, path::PathBuf};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::fs;
-use std::path::PathBuf;
 
-use crate::observability::ObservabilityConfig;
-use crate::subscription::SubscriptionConfig;
+use crate::{observability::ObservabilityConfig, subscription::SubscriptionConfig};
 
 /// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,11 +312,8 @@ impl Config {
             }
         }
         if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_API_KEYS") {
-            let keys: Vec<String> = val
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let keys: Vec<String> =
+                val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             if !keys.is_empty() {
                 self.http.auth.api_keys.keys = keys;
             }
@@ -351,8 +346,9 @@ fn parse_bool(val: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Mutex;
+
+    use super::*;
 
     // Environment variable tests must be serialized to avoid interference
     static ENV_TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -380,7 +376,9 @@ mod tests {
         let config = Config::default();
         assert!(config.subscriptions.selective_updates.enabled);
         assert_eq!(config.subscriptions.selective_updates.min_changed_columns, 1);
-        assert!((config.subscriptions.selective_updates.max_changed_columns_ratio - 0.5).abs() < 0.001);
+        assert!(
+            (config.subscriptions.selective_updates.max_changed_columns_ratio - 0.5).abs() < 0.001
+        );
     }
 
     #[test]
@@ -406,7 +404,9 @@ max_changed_columns_ratio = 0.75
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(!config.subscriptions.selective_updates.enabled);
         assert_eq!(config.subscriptions.selective_updates.min_changed_columns, 2);
-        assert!((config.subscriptions.selective_updates.max_changed_columns_ratio - 0.75).abs() < 0.001);
+        assert!(
+            (config.subscriptions.selective_updates.max_changed_columns_ratio - 0.75).abs() < 0.001
+        );
     }
 
     #[test]
@@ -432,7 +432,9 @@ enabled = false
         assert!(!config.subscriptions.selective_updates.enabled);
         // Other fields should use defaults
         assert_eq!(config.subscriptions.selective_updates.min_changed_columns, 1);
-        assert!((config.subscriptions.selective_updates.max_changed_columns_ratio - 0.5).abs() < 0.001);
+        assert!(
+            (config.subscriptions.selective_updates.max_changed_columns_ratio - 0.5).abs() < 0.001
+        );
     }
 
     #[test]
@@ -451,7 +453,9 @@ enabled = false
         );
         assert!(
             (config.subscriptions.selective_updates.max_changed_columns_ratio
-                - deserialized.subscriptions.selective_updates.max_changed_columns_ratio).abs() < 0.001
+                - deserialized.subscriptions.selective_updates.max_changed_columns_ratio)
+                .abs()
+                < 0.001
         );
     }
 

@@ -1,13 +1,15 @@
-use vibesql::catalog::{ColumnSchema, TableSchema};
 /**
  * Batch Query Runner for Web Demo Examples
  *
  * Runs all 27 advanced example queries and generates expected results or SKIP comments.
  */
 use vibesql::executor::SelectExecutor;
-use vibesql::parser::Parser;
-use vibesql::storage::{Database, Row};
-use vibesql::types::{DataType, SqlValue, StringValue};
+use vibesql::{
+    catalog::{ColumnSchema, TableSchema},
+    parser::Parser,
+    storage::{Database, Row},
+    types::{DataType, SqlValue, StringValue},
+};
 
 fn create_northwind_db() -> Database {
     let mut db = Database::new();

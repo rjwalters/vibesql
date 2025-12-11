@@ -1,16 +1,16 @@
-use super::config::ObservabilityConfig;
-use super::metrics::ServerMetrics;
-use anyhow::{Context, Result};
-use opentelemetry::global;
-use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
-use opentelemetry_sdk::Resource;
 use std::time::Duration;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+
+use anyhow::{Context, Result};
+use opentelemetry::{global, trace::TracerProvider as _, KeyValue};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::{
+    metrics::SdkMeterProvider,
+    trace::{Sampler, SdkTracerProvider},
+    Resource,
+};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use super::{config::ObservabilityConfig, metrics::ServerMetrics};
 
 /// OpenTelemetry observability provider
 pub struct ObservabilityProvider {

@@ -4,10 +4,11 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{SchemaExecutor, SelectExecutor};
     use vibesql_parser::Parser;
     use vibesql_storage::Database;
     use vibesql_types::SqlMode;
+
+    use crate::{SchemaExecutor, SelectExecutor};
 
     /// Helper to execute a SET variable statement
     fn execute_set_variable(
@@ -38,7 +39,8 @@ mod tests {
     fn test_set_sql_mode_mysql() {
         let mut db = Database::new();
 
-        // Default is MySQL mode (for SQLLogicTest compatibility - dolthub corpus was regenerated against MySQL 8.x)
+        // Default is MySQL mode (for SQLLogicTest compatibility - dolthub corpus was regenerated
+        // against MySQL 8.x)
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
 
         // Set to sqlite

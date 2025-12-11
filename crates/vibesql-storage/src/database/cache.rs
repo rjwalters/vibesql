@@ -2,10 +2,10 @@
 // Database Columnar Cache Integration
 // ============================================================================
 
-use super::core::Database;
-use crate::columnar_cache::ColumnarCache;
-use crate::StorageError;
 use std::sync::Arc;
+
+use super::core::Database;
+use crate::{columnar_cache::ColumnarCache, StorageError};
 
 impl Database {
     // ============================================================================
@@ -154,10 +154,11 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::Row;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
+    use crate::Row;
 
     fn create_test_table_schema(name: &str) -> TableSchema {
         TableSchema::new(

@@ -48,12 +48,14 @@ use vibesql_ast::Statement;
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
-use crate::cache::{
-    ArenaParseError, ArenaPreparedStatement, CachedPlan, PkPointLookupPlan, PreparedStatement,
-    PreparedStatementCache, PreparedStatementError, ProjectionPlan, ResolvedProjection,
+use crate::{
+    cache::{
+        ArenaParseError, ArenaPreparedStatement, CachedPlan, PkPointLookupPlan, PreparedStatement,
+        PreparedStatementCache, PreparedStatementError, ProjectionPlan, ResolvedProjection,
+    },
+    errors::ExecutorError,
+    DeleteExecutor, InsertExecutor, SelectExecutor, SelectResult, UpdateExecutor,
 };
-use crate::errors::ExecutorError;
-use crate::{DeleteExecutor, InsertExecutor, SelectExecutor, SelectResult, UpdateExecutor};
 
 /// Execution result for prepared statements
 #[derive(Debug)]
@@ -335,9 +337,9 @@ impl<'a> Session<'a> {
         }
 
         // Get or resolve projection info (cached after first execution)
-        let resolved = match plan.get_or_resolve(|proj| {
-            self.resolve_projection(proj, &table.schema.columns)
-        }) {
+        let resolved = match plan
+            .get_or_resolve(|proj| self.resolve_projection(proj, &table.schema.columns))
+        {
             Some(r) => r,
             None => return Ok(None), // Resolution failed - fall back
         };
@@ -372,21 +374,15 @@ impl<'a> Session<'a> {
                     vec![r.clone()]
                 } else {
                     // Specific columns - only clone needed values
-                    let projected_values: Vec<SqlValue> = resolved
-                        .column_indices
-                        .iter()
-                        .map(|&i| r.values[i].clone())
-                        .collect();
+                    let projected_values: Vec<SqlValue> =
+                        resolved.column_indices.iter().map(|&i| r.values[i].clone()).collect();
                     vec![Row::new(projected_values)]
                 }
             }
             None => vec![],
         };
 
-        Ok(Some(PreparedExecutionResult::Select(SelectResult {
-            columns,
-            rows,
-        })))
+        Ok(Some(PreparedExecutionResult::Select(SelectResult { columns, rows })))
     }
 
     /// Resolve projection plan to column indices and names
@@ -401,14 +397,9 @@ impl<'a> Session<'a> {
             ProjectionPlan::Wildcard => {
                 // For wildcard, indices are empty (we clone entire row)
                 // but we cache the column names
-                let column_names: Arc<[String]> = schema_columns
-                    .iter()
-                    .map(|c| c.name.clone())
-                    .collect();
-                Some(ResolvedProjection {
-                    column_indices: vec![],
-                    column_names,
-                })
+                let column_names: Arc<[String]> =
+                    schema_columns.iter().map(|c| c.name.clone()).collect();
+                Some(ResolvedProjection { column_indices: vec![], column_names })
             }
             ProjectionPlan::Columns(projections) => {
                 let mut col_indices = Vec::with_capacity(projections.len());
@@ -420,11 +411,8 @@ impl<'a> Session<'a> {
                         .position(|c| c.name.eq_ignore_ascii_case(&proj.column_name))?;
 
                     col_indices.push(idx);
-                    column_names.push(
-                        proj.alias
-                            .clone()
-                            .unwrap_or_else(|| proj.column_name.clone()),
-                    );
+                    column_names
+                        .push(proj.alias.clone().unwrap_or_else(|| proj.column_name.clone()));
                 }
 
                 Some(ResolvedProjection {
@@ -568,11 +556,9 @@ impl<'a> SessionMut<'a> {
 
         // Execute the fast delete
         match self.db.delete_by_pk_fast(&plan.table_name, &pk_values) {
-            Ok(deleted) => Ok(Some(PreparedExecutionResult::RowsAffected(if deleted {
-                1
-            } else {
-                0
-            }))),
+            Ok(deleted) => {
+                Ok(Some(PreparedExecutionResult::RowsAffected(if deleted { 1 } else { 0 })))
+            }
             Err(_) => Ok(None), // Fall back to standard path on error
         }
     }
@@ -682,9 +668,10 @@ impl<'a> SessionMut<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn create_test_db() -> Database {
         let mut db = Database::new();
@@ -705,9 +692,14 @@ mod tests {
         db.create_table(schema).unwrap();
 
         // Insert test data
-        let row1 = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
-        let row2 = Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
-        let row3 = Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]);
+        let row1 =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row2 =
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
+        let row3 = Row::new(vec![
+            SqlValue::Integer(3),
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+        ]);
 
         db.insert_row("users", row1).unwrap();
         db.insert_row("users", row2).unwrap();
@@ -738,7 +730,10 @@ mod tests {
         if let PreparedExecutionResult::Select(select_result) = result {
             assert_eq!(select_result.rows.len(), 1);
             assert_eq!(select_result.rows[0].values[0], SqlValue::Integer(1));
-            assert_eq!(select_result.rows[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+            assert_eq!(
+                select_result.rows[0].values[1],
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+            );
         } else {
             panic!("Expected Select result");
         }
@@ -757,9 +752,18 @@ mod tests {
         let result3 = session.execute_prepared(&stmt, &[SqlValue::Integer(3)]).unwrap();
 
         // Verify each returned the correct row
-        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
-        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
-        assert_eq!(result3.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
+        assert_eq!(
+            result1.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+        );
+        assert_eq!(
+            result2.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob"))
+        );
+        assert_eq!(
+            result3.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))
+        );
 
         // Verify cache was used (should have 1 miss, then hits)
         let stats = session.cache().stats();
@@ -791,7 +795,10 @@ mod tests {
         let stmt = session.prepare("INSERT INTO users (id, name) VALUES (?, ?)").unwrap();
 
         let result = session
-            .execute_prepared_mut(&stmt, &[SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from("David"))])
+            .execute_prepared_mut(
+                &stmt,
+                &[SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from("David"))],
+            )
             .unwrap();
 
         assert_eq!(result.rows_affected(), Some(1));
@@ -802,7 +809,10 @@ mod tests {
             session.execute_prepared(&select_stmt, &[SqlValue::Integer(4)]).unwrap();
 
         assert_eq!(select_result.rows().unwrap().len(), 1);
-        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("David")));
+        assert_eq!(
+            select_result.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("David"))
+        );
     }
 
     #[test]
@@ -826,7 +836,10 @@ mod tests {
         let select_result =
             session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
 
-        assert_eq!(select_result.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alicia")));
+        assert_eq!(
+            select_result.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Alicia"))
+        );
     }
 
     #[test]
@@ -873,8 +886,14 @@ mod tests {
         let result1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
         let result2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
 
-        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
-        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
+        assert_eq!(
+            result1.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+        );
+        assert_eq!(
+            result2.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob"))
+        );
     }
 
     #[test]
@@ -1005,14 +1024,19 @@ mod tests {
         // After execution, fast path should be cached as valid (no triggers/FKs on users table)
         match stmt.cached_plan() {
             CachedPlan::PkDelete(plan) => {
-                assert_eq!(plan.is_fast_path_valid(), Some(true), "Fast path should be valid after execution");
+                assert_eq!(
+                    plan.is_fast_path_valid(),
+                    Some(true),
+                    "Fast path should be valid after execution"
+                );
             }
             _ => panic!("Plan should still be PkDelete"),
         }
 
         // Verify the row was deleted
         let select_stmt = session.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-        let select_result = session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
+        let select_result =
+            session.execute_prepared(&select_stmt, &[SqlValue::Integer(1)]).unwrap();
         assert_eq!(select_result.rows().unwrap().len(), 0);
     }
 
@@ -1043,9 +1067,18 @@ mod tests {
         let result3 = session3.execute_prepared(&stmt3, &[SqlValue::Integer(3)]).unwrap();
 
         // All results should be correct
-        assert_eq!(result1.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
-        assert_eq!(result2.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
-        assert_eq!(result3.rows().unwrap()[0].values[0], SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
+        assert_eq!(
+            result1.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+        );
+        assert_eq!(
+            result2.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob"))
+        );
+        assert_eq!(
+            result3.rows().unwrap()[0].values[0],
+            SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))
+        );
     }
 
     #[test]
@@ -1087,13 +1120,16 @@ mod tests {
 
         // Different query types
         let point_query = session1.prepare("SELECT * FROM users WHERE id = ?").unwrap();
-        let range_query = session2.prepare("SELECT * FROM users WHERE id >= ? AND id <= ?").unwrap();
+        let range_query =
+            session2.prepare("SELECT * FROM users WHERE id >= ? AND id <= ?").unwrap();
         let all_query = session1.prepare("SELECT * FROM users").unwrap();
         let projection_query = session2.prepare("SELECT name FROM users WHERE id = ?").unwrap();
 
         // Execute all queries
         let r1 = session1.execute_prepared(&point_query, &[SqlValue::Integer(1)]).unwrap();
-        let r2 = session2.execute_prepared(&range_query, &[SqlValue::Integer(1), SqlValue::Integer(2)]).unwrap();
+        let r2 = session2
+            .execute_prepared(&range_query, &[SqlValue::Integer(1), SqlValue::Integer(2)])
+            .unwrap();
         let r3 = session1.execute_prepared(&all_query, &[]).unwrap();
         let r4 = session2.execute_prepared(&projection_query, &[SqlValue::Integer(3)]).unwrap();
 
@@ -1205,7 +1241,10 @@ mod tests {
         let r1 = session1.execute_prepared(&stmt, &[SqlValue::Integer(1)]).unwrap();
         let r2 = session2.execute_prepared(&stmt, &[SqlValue::Integer(2)]).unwrap();
 
-        assert_eq!(r1.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+        assert_eq!(
+            r1.rows().unwrap()[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+        );
         assert_eq!(r2.rows().unwrap()[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     }
 }

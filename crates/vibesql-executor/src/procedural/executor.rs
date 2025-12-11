@@ -7,11 +7,14 @@
 //! - RETURN (return from function/procedure)
 //! - Control flow (delegated to control_flow module)
 
-use crate::errors::ExecutorError;
-use crate::procedural::{ControlFlow, ExecutionContext};
 use vibesql_ast::{ProceduralStatement, Statement};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
+
+use crate::{
+    errors::ExecutorError,
+    procedural::{ControlFlow, ExecutionContext},
+};
 
 /// Execute a procedural statement
 pub fn execute_procedural_statement(

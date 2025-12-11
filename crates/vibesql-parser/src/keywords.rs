@@ -327,8 +327,9 @@ impl Keyword {
     /// Returns true if this keyword can be used as an unquoted column or table name.
     /// These are "unreserved" keywords that are only treated as keywords in specific contexts.
     ///
-    /// This follows SQLite's behavior where temporal type keywords (TIMESTAMP, DATE, TIME, INTERVAL)
-    /// and interval unit keywords (YEAR, MONTH, DAY, etc.) can be used as identifiers without quoting.
+    /// This follows SQLite's behavior where temporal type keywords (TIMESTAMP, DATE, TIME,
+    /// INTERVAL) and interval unit keywords (YEAR, MONTH, DAY, etc.) can be used as identifiers
+    /// without quoting.
     ///
     /// TYPE and SQL are also unreserved to match SQLite compatibility (neither is in SQLite's
     /// 147-keyword reserved list). They work safely because:

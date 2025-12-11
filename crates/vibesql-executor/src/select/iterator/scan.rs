@@ -1,8 +1,7 @@
 //! Table scan iterator implementation
 
-use crate::{errors::ExecutorError, schema::CombinedSchema};
-
 use super::RowIterator;
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Iterator that scans rows from a materialized table
 ///

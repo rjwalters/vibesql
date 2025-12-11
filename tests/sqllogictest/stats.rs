@@ -1,7 +1,8 @@
 //! Test result statistics and failure information tracking.
 
-use sqllogictest::DialectStats;
 use std::collections::HashSet;
+
+use sqllogictest::DialectStats;
 
 /// Detailed failure information for a single test file
 #[allow(dead_code)]

@@ -1,11 +1,12 @@
 //! Predicate evaluation for combined expressions (BETWEEN, LIKE, IN, EXTRACT)
 
+use chrono::{Datelike, Timelike};
+
 use super::super::{
     core::{CombinedExpressionEvaluator, ExpressionEvaluator},
     pattern::like_match,
 };
 use crate::errors::ExecutorError;
-use chrono::{Datelike, Timelike};
 
 impl CombinedExpressionEvaluator<'_> {
     /// Evaluate BETWEEN predicate: expr BETWEEN low AND high
@@ -177,9 +178,7 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Extract the string value
         let s = match &string_val {
-            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                &**s
-            }
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => &**s,
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: string_val.clone(),
@@ -199,7 +198,9 @@ impl CombinedExpressionEvaluator<'_> {
             }
 
             match removal_val {
-                vibesql_types::SqlValue::Varchar(c) | vibesql_types::SqlValue::Character(c) => c.to_string(),
+                vibesql_types::SqlValue::Varchar(c) | vibesql_types::SqlValue::Character(c) => {
+                    c.to_string()
+                }
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
                         left: removal_val.clone(),
@@ -378,7 +379,8 @@ impl CombinedExpressionEvaluator<'_> {
     /// Evaluate IS [NOT] DISTINCT FROM (SQL:1999)
     /// NULL-safe comparison:
     /// - `a IS NOT DISTINCT FROM b`: TRUE when both NULL or both equal non-NULL
-    /// - `a IS DISTINCT FROM b`: TRUE when one is NULL and other isn't, or both non-NULL but unequal
+    /// - `a IS DISTINCT FROM b`: TRUE when one is NULL and other isn't, or both non-NULL but
+    ///   unequal
     pub(super) fn eval_is_distinct_from(
         &self,
         left: &vibesql_ast::Expression,

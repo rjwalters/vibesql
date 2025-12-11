@@ -2,6 +2,7 @@ use std::{
     fs,
     io::{self, Read},
 };
+
 use vibesql_l10n::vibe_msg;
 
 use crate::{
@@ -37,8 +38,12 @@ impl ScriptExecutor {
 
     /// Execute SQL from a file
     pub fn execute_file(&mut self, file_path: &str) -> anyhow::Result<()> {
-        let contents = fs::read_to_string(file_path)
-            .map_err(|e| anyhow::anyhow!("{}", vibe_msg!("file-read-error", path = file_path, error = e.to_string())))?;
+        let contents = fs::read_to_string(file_path).map_err(|e| {
+            anyhow::anyhow!(
+                "{}",
+                vibe_msg!("file-read-error", path = file_path, error = e.to_string())
+            )
+        })?;
 
         self.execute_script(&contents)
     }
@@ -46,9 +51,9 @@ impl ScriptExecutor {
     /// Execute SQL from stdin
     pub fn execute_stdin(&mut self) -> anyhow::Result<()> {
         let mut contents = String::new();
-        io::stdin()
-            .read_to_string(&mut contents)
-            .map_err(|e| anyhow::anyhow!("{}", vibe_msg!("stdin-read-error", error = e.to_string())))?;
+        io::stdin().read_to_string(&mut contents).map_err(|e| {
+            anyhow::anyhow!("{}", vibe_msg!("stdin-read-error", error = e.to_string()))
+        })?;
 
         self.execute_script(&contents)
     }
@@ -71,7 +76,14 @@ impl ScriptExecutor {
 
         for (idx, stmt) in statements.iter().enumerate() {
             if self.verbose {
-                println!("{}", vibe_msg!("script-executing", current = (idx + 1) as i64, total = statements.len() as i64));
+                println!(
+                    "{}",
+                    vibe_msg!(
+                        "script-executing",
+                        current = (idx + 1) as i64,
+                        total = statements.len() as i64
+                    )
+                );
             }
 
             // Check if this is a meta-command (dot or backslash command)
@@ -85,7 +97,14 @@ impl ScriptExecutor {
                         success_count += 1;
                     }
                     Err(e) => {
-                        eprintln!("{}", vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string()));
+                        eprintln!(
+                            "{}",
+                            vibe_msg!(
+                                "script-error",
+                                index = (idx + 1) as i64,
+                                error = e.to_string()
+                            )
+                        );
                         error_count += 1;
                     }
                 }
@@ -101,13 +120,19 @@ impl ScriptExecutor {
                     if let Some(ref path) = self.database_path {
                         if is_modification_statement(stmt) {
                             if let Err(e) = self.executor.save_database(path) {
-                                eprintln!("{}", vibe_msg!("warning-auto-save-failed", error = e.to_string()));
+                                eprintln!(
+                                    "{}",
+                                    vibe_msg!("warning-auto-save-failed", error = e.to_string())
+                                );
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}", vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string()));
+                    eprintln!(
+                        "{}",
+                        vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string())
+                    );
                     error_count += 1;
                     // Continue executing remaining statements
                 }
@@ -359,7 +384,8 @@ mod tests {
 
     #[test]
     fn test_parse_semicolon_in_string() {
-        // Issue #1804: Semicolons inside string literals should not be treated as statement delimiters
+        // Issue #1804: Semicolons inside string literals should not be treated as statement
+        // delimiters
         let script = "INSERT INTO test VALUES (1, 'Error at position 10; expected value');";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);

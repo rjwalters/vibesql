@@ -31,9 +31,11 @@
 // WASM builds don't have threads, so the engine uses a buffered
 // no-op implementation that stores entries in memory.
 
-use super::durability::{DurabilityConfig, DurabilityMode};
-use super::entry::{Lsn, WalEntry, WalOp};
-use super::writer::WalWriter;
+use super::{
+    durability::{DurabilityConfig, DurabilityMode},
+    entry::{Lsn, WalEntry, WalOp},
+    writer::WalWriter,
+};
 use crate::StorageError;
 
 /// Default channel capacity (number of entries)
@@ -155,13 +157,17 @@ pub enum WalMessage {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use std::fs::OpenOptions;
-    use std::io::{BufWriter, Seek, Write};
-    use std::path::Path;
-    use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
-    use std::sync::Arc;
-    use std::thread::{self, JoinHandle};
-    use std::time::{Duration, Instant};
+    use std::{
+        fs::OpenOptions,
+        io::{BufWriter, Seek, Write},
+        path::Path,
+        sync::{
+            mpsc::{self, RecvTimeoutError, SyncSender},
+            Arc,
+        },
+        thread::{self, JoinHandle},
+        time::{Duration, Instant},
+    };
 
     use parking_lot::Mutex;
 
@@ -181,7 +187,9 @@ mod native {
 
     impl FlushNotifier {
         pub fn new() -> Self {
-            Self { completed: Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new())) }
+            Self {
+                completed: Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new())),
+            }
         }
 
         /// Signal that the flush is complete
@@ -269,8 +277,7 @@ mod native {
             // Update running average
             self.total_flush_latency_us += latency_us;
             self.flush_latency_samples += 1;
-            self.avg_flush_latency_us =
-                self.total_flush_latency_us / self.flush_latency_samples;
+            self.avg_flush_latency_us = self.total_flush_latency_us / self.flush_latency_samples;
         }
     }
 
@@ -632,9 +639,9 @@ mod native {
 
             // Wait for thread to finish
             if let Some(handle) = self.handle.take() {
-                handle.join().map_err(|_| {
-                    StorageError::IoError("WAL writer thread panicked".to_string())
-                })?;
+                handle
+                    .join()
+                    .map_err(|_| StorageError::IoError("WAL writer thread panicked".to_string()))?;
             }
 
             Ok(())
@@ -662,7 +669,6 @@ mod native {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
-
 }
 
 // ============================================================================
@@ -886,14 +892,12 @@ mod wasm {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{FlushNotifier, PersistenceEngine, PersistenceStats};
-
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{FlushNotifier, PersistenceEngine, PersistenceStats};
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-    use std::time::Duration;
+    use std::{io::Cursor, time::Duration};
 
     use vibesql_types::SqlValue;
 
@@ -904,8 +908,7 @@ mod tests {
         let buf = Vec::new();
         let cursor = Cursor::new(buf);
 
-        let engine =
-            PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         assert_eq!(engine.next_lsn(), 1);
         assert!(!engine.is_shutdown());
@@ -916,15 +919,10 @@ mod tests {
         let buf = Vec::new();
         let cursor = Cursor::new(buf);
 
-        let engine =
-            PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         let lsn = engine
-            .send(WalOp::Insert {
-                table_id: 1,
-                row_id: 100,
-                values: vec![SqlValue::Integer(42)],
-            })
+            .send(WalOp::Insert { table_id: 1, row_id: 100, values: vec![SqlValue::Integer(42)] })
             .unwrap();
 
         assert_eq!(lsn, 1);
@@ -939,8 +937,7 @@ mod tests {
         let buf = Vec::new();
         let cursor = Cursor::new(buf);
 
-        let engine =
-            PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         for i in 1..=10 {
             let lsn = engine
@@ -1024,15 +1021,10 @@ mod tests {
         let buf = Vec::new();
         let cursor = Cursor::new(buf);
 
-        let engine =
-            PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
+        let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         engine
-            .send(WalOp::Insert {
-                table_id: 1,
-                row_id: 1,
-                values: vec![SqlValue::Integer(1)],
-            })
+            .send(WalOp::Insert { table_id: 1, row_id: 1, values: vec![SqlValue::Integer(1)] })
             .unwrap();
 
         // Flush should return immediately
@@ -1049,11 +1041,7 @@ mod tests {
             PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         engine
-            .send(WalOp::Insert {
-                table_id: 1,
-                row_id: 1,
-                values: vec![SqlValue::Integer(1)],
-            })
+            .send(WalOp::Insert { table_id: 1, row_id: 1, values: vec![SqlValue::Integer(1)] })
             .unwrap();
 
         // Should complete within timeout
@@ -1164,10 +1152,7 @@ mod tests {
         let stats = engine.stats();
 
         // Multiple flushes should have occurred
-        assert!(
-            stats.batches_written >= 1,
-            "At least one batch should have been written"
-        );
+        assert!(stats.batches_written >= 1, "At least one batch should have been written");
 
         // Latency metrics should be populated
         // Note: On very fast systems, latency could be 0 microseconds

@@ -136,7 +136,9 @@ fn test_datetime_with_timestamp_string() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("2024-03-15 14:30:45")))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-03-15 14:30:45",
+        )))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -173,7 +175,9 @@ fn test_datetime_with_iso_format() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("2024-03-15T14:30:45")))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-03-15T14:30:45",
+        )))],
     );
     let result = evaluator.eval(&expr, &row).unwrap();
 
@@ -253,7 +257,9 @@ fn test_datetime_invalid_string_error() {
 
     let expr = create_datetime_function(
         "DATETIME",
-        vec![create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("invalid-date")))],
+        vec![create_literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "invalid-date",
+        )))],
     );
     let result = evaluator.eval(&expr, &row);
 

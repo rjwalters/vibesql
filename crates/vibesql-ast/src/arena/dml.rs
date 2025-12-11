@@ -4,9 +4,7 @@
 
 use bumpalo::collections::Vec as BumpVec;
 
-use super::expression::Expression;
-use super::interner::Symbol;
-use super::select::SelectStmt;
+use super::{expression::Expression, interner::Symbol, select::SelectStmt};
 
 // ============================================================================
 // INSERT Statement

@@ -1,13 +1,11 @@
 //! Core truncate logic and execution
 
 use std::collections::HashSet;
+
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::privilege_checker::PrivilegeChecker;
-
-use super::constraints::get_fk_children;
-use super::triggers::validate_no_delete_triggers;
+use super::{constraints::get_fk_children, triggers::validate_no_delete_triggers};
+use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker};
 
 /// Reset AUTO_INCREMENT sequences for a table
 ///

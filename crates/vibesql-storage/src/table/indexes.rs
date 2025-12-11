@@ -387,7 +387,8 @@ mod tests {
         let mut index_mgr = IndexManager::new(&schema);
 
         // Insert a row
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         index_mgr.update_for_insert(&schema, &row, 0);
 
         // Verify primary key index has the entry
@@ -415,14 +416,18 @@ mod tests {
         let mut index_mgr = IndexManager::new(&schema);
 
         // Insert a row
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("SKU001"))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("SKU001"))]);
         index_mgr.update_for_insert(&schema, &row, 0);
 
         // Verify unique index has the entry
         assert_eq!(index_mgr.unique_indexes().len(), 1);
         let unique_index = &index_mgr.unique_indexes()[0];
         assert_eq!(unique_index.len(), 1);
-        assert_eq!(unique_index.get(&vec![SqlValue::Varchar(arcstr::ArcStr::from("SKU001"))]), Some(&0));
+        assert_eq!(
+            unique_index.get(&vec![SqlValue::Varchar(arcstr::ArcStr::from("SKU001"))]),
+            Some(&0)
+        );
     }
 
     #[test]
@@ -520,11 +525,13 @@ mod tests {
         let mut index_mgr = IndexManager::new(&schema);
 
         // Insert initial row
-        let old_row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let old_row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         index_mgr.update_for_insert(&schema, &old_row, 0);
 
         // Update primary key
-        let new_row = Row::new(vec![SqlValue::Integer(10), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let new_row =
+            Row::new(vec![SqlValue::Integer(10), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         index_mgr.update_for_update(&schema, &old_row, &new_row, 0);
 
         // Verify old key removed and new key added

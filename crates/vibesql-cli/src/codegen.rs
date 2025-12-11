@@ -3,8 +3,7 @@
 //! This module generates TypeScript type definitions from VibeSQL database schemas,
 //! enabling type-safe database interactions in TypeScript projects.
 
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 use anyhow::Result;
 use vibesql_catalog::TableSchema;
@@ -461,8 +460,9 @@ pub fn write_to_file(typescript: &str, path: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::ColumnSchema;
+
+    use super::*;
 
     fn create_test_schema() -> TableSchema {
         let columns = vec![

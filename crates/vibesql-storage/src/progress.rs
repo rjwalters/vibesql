@@ -8,8 +8,10 @@
 //! Progress output can be controlled via the `DDL_PROGRESS` environment variable.
 //! Set `DDL_PROGRESS=1` to enable progress indicators.
 
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{Duration, Instant};
+use std::{
+    sync::atomic::{AtomicU8, Ordering},
+    time::{Duration, Instant},
+};
 
 /// Default interval between progress reports (5 seconds)
 const DEFAULT_REPORT_INTERVAL: Duration = Duration::from_secs(5);
@@ -201,11 +203,8 @@ impl ProgressTracker {
         let elapsed_str = format_duration(elapsed);
 
         if let Some(total) = self.total {
-            let percentage = if total > 0 {
-                (self.current as f64 / total as f64 * 100.0) as u8
-            } else {
-                0
-            };
+            let percentage =
+                if total > 0 { (self.current as f64 / total as f64 * 100.0) as u8 } else { 0 };
 
             // Estimate remaining time
             let remaining_str = if self.current > 0 && elapsed.as_secs_f64() > 0.0 {

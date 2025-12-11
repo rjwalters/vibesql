@@ -1,17 +1,21 @@
 //! Arena-allocated expression parsing.
 
 use bumpalo::collections::Vec as BumpVec;
-use vibesql_ast::arena::{
-    CaseWhen, Expression, ExtendedExpr, OrderByItem, OrderDirection, Quantifier, Symbol,
-    WindowFunctionSpec, WindowSpec,
+use vibesql_ast::{
+    arena::{
+        CaseWhen, Expression, ExtendedExpr, OrderByItem, OrderDirection, Quantifier, Symbol,
+        WindowFunctionSpec, WindowSpec,
+    },
+    BinaryOperator, UnaryOperator,
 };
-use vibesql_ast::{BinaryOperator, UnaryOperator};
 use vibesql_types::SqlValue;
 
 use super::ArenaParser;
-use crate::keywords::Keyword;
-use crate::token::{MultiCharOperator, Token};
-use crate::ParseError;
+use crate::{
+    keywords::Keyword,
+    token::{MultiCharOperator, Token},
+    ParseError,
+};
 
 impl<'arena> ArenaParser<'arena> {
     /// Parse an expression (entry point).

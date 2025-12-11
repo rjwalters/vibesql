@@ -11,15 +11,23 @@
 //! This can reduce bulk load time from minutes to seconds for large datasets.
 
 use std::sync::Arc;
+
 use vibesql_types::DataType;
 
-use crate::page::{PageId, PageManager, PAGE_SIZE};
-use crate::StorageError;
-
-use super::super::super::serialize::{write_internal_node_no_sync, write_leaf_node_no_sync};
-use super::super::super::{calculate_degree, estimate_max_key_size};
-use super::super::structure::{InternalNode, Key, LeafNode};
-use super::BTreeIndex;
+use super::{
+    super::{
+        super::{
+            calculate_degree, estimate_max_key_size,
+            serialize::{write_internal_node_no_sync, write_leaf_node_no_sync},
+        },
+        structure::{InternalNode, Key, LeafNode},
+    },
+    BTreeIndex,
+};
+use crate::{
+    page::{PageId, PageManager, PAGE_SIZE},
+    StorageError,
+};
 
 impl BTreeIndex {
     /// Build B+ tree from pre-sorted data using bottom-up construction
@@ -28,8 +36,8 @@ impl BTreeIndex {
     /// because it avoids node splitting and builds optimally packed nodes.
     ///
     /// # Arguments
-    /// * `sorted_entries` - Pre-sorted key-value pairs (must be sorted by key)
-    ///   Duplicate keys are automatically grouped together.
+    /// * `sorted_entries` - Pre-sorted key-value pairs (must be sorted by key) Duplicate keys are
+    ///   automatically grouped together.
     /// * `key_schema` - Data types of key columns
     /// * `page_manager` - Page manager for disk I/O
     ///

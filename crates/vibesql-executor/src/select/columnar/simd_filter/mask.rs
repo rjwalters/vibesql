@@ -5,9 +5,10 @@
 
 use std::sync::Arc;
 
+use vibesql_types::SqlValue;
+
 use super::super::batch::{ColumnArray, ColumnarBatch};
 use crate::errors::ExecutorError;
-use vibesql_types::SqlValue;
 
 /// Apply a filter mask to a batch, keeping only rows where mask[i] == true
 pub fn apply_filter_mask(

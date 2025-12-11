@@ -2,14 +2,17 @@
 
 use std::collections::HashSet;
 
-use super::hash_join::build_existence_hash_table_parallel;
-use super::{combine_rows, FromResult};
-use crate::errors::ExecutorError;
-use crate::evaluator::CombinedExpressionEvaluator;
-use crate::optimizer::combine_with_and;
-use crate::optimizer::where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts};
-use crate::schema::CombinedSchema;
-use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
+use super::{combine_rows, hash_join::build_existence_hash_table_parallel, FromResult};
+use crate::{
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+    optimizer::{
+        combine_with_and,
+        where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts},
+    },
+    schema::CombinedSchema,
+    timeout::{TimeoutContext, CHECK_INTERVAL},
+};
 
 /// Hash semi-join implementation
 ///
@@ -18,7 +21,8 @@ use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 /// right rows match.
 ///
 /// Use cases:
-/// - EXISTS subqueries: SELECT * FROM orders WHERE EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey = o_orderkey)
+/// - EXISTS subqueries: SELECT * FROM orders WHERE EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey
+///   = o_orderkey)
 /// - IN subqueries: SELECT * FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem)
 ///
 /// Algorithm:
@@ -29,7 +33,8 @@ use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 ///
 /// Performance characteristics:
 /// - Time: O(n + m) vs O(n*m) for nested loop
-/// - Space: O(n) where n is the size of the right table (smaller than inner join because we don't store indices)
+/// - Space: O(n) where n is the size of the right table (smaller than inner join because we don't
+///   store indices)
 /// - Expected speedup: 100-10,000x for large semi-joins
 pub(super) fn hash_semi_join(
     left: FromResult,
@@ -81,7 +86,8 @@ pub(super) fn hash_semi_join(
 /// Hash semi-join with additional filter conditions
 ///
 /// This is an optimized version of hash_semi_join that supports additional filter predicates
-/// beyond the equi-join condition. This is essential for EXISTS subqueries with complex WHERE clauses.
+/// beyond the equi-join condition. This is essential for EXISTS subqueries with complex WHERE
+/// clauses.
 ///
 /// Example use case (TPC-H Q21):
 /// ```sql
@@ -94,9 +100,9 @@ pub(super) fn hash_semi_join(
 ///
 /// ## Optimization: Right-Side Predicate Pushdown
 ///
-/// When the filter contains predicates that reference only the right table (e.g., `s_quantity < 10`),
-/// these predicates are applied during the hash table build phase, reducing the hash table size
-/// and avoiding unnecessary probing. This is critical for IN subquery performance.
+/// When the filter contains predicates that reference only the right table (e.g., `s_quantity <
+/// 10`), these predicates are applied during the hash table build phase, reducing the hash table
+/// size and avoiding unnecessary probing. This is critical for IN subquery performance.
 ///
 /// Example (TPC-C Stock-Level):
 /// ```sql
@@ -107,10 +113,9 @@ pub(super) fn hash_semi_join(
 /// Algorithm:
 /// 1. **Predicate partitioning**: Split filter into right-only and cross-table predicates
 /// 2. **Build phase**: Hash the RIGHT table, applying right-only predicates as a pre-filter
-/// 3. **Probe phase**: For each LEFT row:
-///    a. Check if hash table contains matching key
-///    b. If yes, verify cross-table predicates against matching right rows
-///    c. If any right row passes, emit the left row (only once)
+/// 3. **Probe phase**: For each LEFT row: a. Check if hash table contains matching key b. If yes,
+///    verify cross-table predicates against matching right rows c. If any right row passes, emit
+///    the left row (only once)
 ///
 /// Performance: O(n + m) average case with reduced hash table size
 pub(super) fn hash_semi_join_with_filter(

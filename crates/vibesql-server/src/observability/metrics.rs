@@ -1,8 +1,15 @@
-use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
-use opentelemetry::KeyValue;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
+use opentelemetry::{
+    metrics::{Counter, Gauge, Histogram, Meter},
+    KeyValue,
+};
 
 /// Server metrics collection
 #[derive(Clone)]
@@ -149,7 +156,9 @@ impl ServerMetrics {
 
         let selective_update_changed_ratio = meter
             .f64_histogram("vibesql_selective_update_changed_ratio")
-            .with_description("Ratio of changed columns to total columns in selective updates (0.0-1.0)")
+            .with_description(
+                "Ratio of changed columns to total columns in selective updates (0.0-1.0)",
+            )
             .with_unit("1")
             .build();
 
@@ -176,13 +185,17 @@ impl ServerMetrics {
 
         let partial_update_bytes_saved = meter
             .u64_histogram("vibesql_partial_update_bytes_saved")
-            .with_description("Estimated bytes saved per partial update compared to full row update")
+            .with_description(
+                "Estimated bytes saved per partial update compared to full row update",
+            )
             .with_unit("By")
             .build();
 
         let selective_update_bytes_saved_total = meter
             .u64_counter("vibesql_selective_update_bytes_saved_total")
-            .with_description("Total bytes saved by using selective column updates instead of full row updates")
+            .with_description(
+                "Total bytes saved by using selective column updates instead of full row updates",
+            )
             .with_unit("By")
             .build();
 
@@ -337,7 +350,8 @@ impl ServerMetrics {
     /// Record a subscription update
     ///
     /// # Arguments
-    /// * `update_type` - The type of update: "full", "delta_insert", "delta_update", "delta_delete", or "selective"
+    /// * `update_type` - The type of update: "full", "delta_insert", "delta_update",
+    ///   "delta_delete", or "selective"
     /// * `row_count` - Number of rows in the update
     pub fn record_subscription_update(&self, update_type: &str, row_count: u64) {
         self.subscription_updates_total.add(
@@ -374,7 +388,8 @@ impl ServerMetrics {
     ///
     /// Called when a subscription is registered with successfully detected PK columns.
     pub fn increment_selective_eligible(&self) {
-        let new_value = self.subscriptions_selective_eligible_count.fetch_add(1, Ordering::Relaxed) + 1;
+        let new_value =
+            self.subscriptions_selective_eligible_count.fetch_add(1, Ordering::Relaxed) + 1;
         self.subscriptions_selective_eligible.record(new_value, &[]);
     }
 
@@ -382,7 +397,8 @@ impl ServerMetrics {
     ///
     /// Called when a selective-eligible subscription is unregistered.
     pub fn decrement_selective_eligible(&self) {
-        let new_value = self.subscriptions_selective_eligible_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        let new_value =
+            self.subscriptions_selective_eligible_count.fetch_sub(1, Ordering::Relaxed) - 1;
         self.subscriptions_selective_eligible.record(new_value, &[]);
     }
 
@@ -399,8 +415,7 @@ impl ServerMetrics {
     /// * `reason` - The reason for fallback: "threshold_exceeded", "disabled",
     ///   "row_count_mismatch", "pk_mismatch", "no_changes"
     pub fn record_partial_update_fallback(&self, reason: &str) {
-        self.partial_update_fallbacks_total
-            .add(1, &[KeyValue::new("reason", reason.to_string())]);
+        self.partial_update_fallbacks_total.add(1, &[KeyValue::new("reason", reason.to_string())]);
 
         // Also increment trackable counter for HTTP stats endpoint
         match reason {
@@ -525,7 +540,11 @@ impl ServerMetrics {
     /// # Arguments
     /// * `changed_columns` - Number of columns that changed
     /// * `total_columns` - Total number of columns in the row
-    pub fn record_selective_update_column_ratio(&self, changed_columns: usize, total_columns: usize) {
+    pub fn record_selective_update_column_ratio(
+        &self,
+        changed_columns: usize,
+        total_columns: usize,
+    ) {
         if total_columns > 0 {
             let ratio = changed_columns as f64 / total_columns as f64;
             self.selective_update_column_ratio.record(ratio, &[]);
@@ -555,8 +574,9 @@ impl ServerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use opentelemetry::global;
+
+    use super::*;
 
     fn create_test_metrics() -> ServerMetrics {
         let meter = global::meter("test_meter");

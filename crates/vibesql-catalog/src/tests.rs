@@ -425,9 +425,10 @@ mod catalog_tests {
 
     #[test]
     fn test_remove_column_handles_all_constraints() {
-        use crate::foreign_key::{ForeignKeyConstraint, ReferentialAction};
         use vibesql_ast::{BinaryOperator, Expression};
         use vibesql_types::SqlValue;
+
+        use crate::foreign_key::{ForeignKeyConstraint, ReferentialAction};
 
         let columns = vec![
             ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false),

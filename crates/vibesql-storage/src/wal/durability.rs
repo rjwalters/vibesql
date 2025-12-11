@@ -117,7 +117,7 @@ impl DurabilityMode {
         match self {
             DurabilityMode::Volatile => 0,
             DurabilityMode::Lazy => 50,
-            DurabilityMode::Durable => 0, // Sync immediately on commit
+            DurabilityMode::Durable => 0,  // Sync immediately on commit
             DurabilityMode::Paranoid => 0, // Sync on every op
         }
     }
@@ -127,7 +127,7 @@ impl DurabilityMode {
         match self {
             DurabilityMode::Volatile => usize::MAX,
             DurabilityMode::Lazy => 1000,
-            DurabilityMode::Durable => 1, // Flush every entry
+            DurabilityMode::Durable => 1,  // Flush every entry
             DurabilityMode::Paranoid => 1, // Flush every entry
         }
     }
@@ -258,10 +258,7 @@ impl DurabilityConfig {
             mode: DurabilityMode::Volatile,
             wal_flush_interval_ms: 0,
             wal_flush_batch_size: usize::MAX,
-            checkpoint: CheckpointConfig {
-                auto_checkpoint: false,
-                ..Default::default()
-            },
+            checkpoint: CheckpointConfig { auto_checkpoint: false, ..Default::default() },
         }
     }
 

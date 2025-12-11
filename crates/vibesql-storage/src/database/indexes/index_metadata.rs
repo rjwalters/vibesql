@@ -2,24 +2,17 @@
 // Index Metadata - Types and helpers for index definitions
 // ============================================================================
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
+use std::{collections::BTreeMap, sync::Arc};
 
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::Mutex;
-
-#[cfg(target_arch = "wasm32")]
-use std::sync::Mutex;
-
 use vibesql_ast::IndexColumn;
 use vibesql_types::SqlValue;
 
-use crate::btree::BTreeIndex;
-use crate::page::PageManager;
-use crate::StorageError;
-
-use super::hnsw::HnswIndex;
-use super::ivfflat::IVFFlatIndex;
+use super::{hnsw::HnswIndex, ivfflat::IVFFlatIndex};
+use crate::{btree::BTreeIndex, page::PageManager, StorageError};
 
 /// Normalize an index name to uppercase for case-insensitive comparison
 /// This follows SQL standard identifier rules

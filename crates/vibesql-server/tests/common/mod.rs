@@ -1,24 +1,27 @@
 //! Common test utilities for vibesql-server integration tests
 
+use std::{
+    net::SocketAddr,
+    sync::{atomic::AtomicUsize, Arc},
+};
+
 use bytes::{BufMut, BytesMut};
 use opentelemetry::global;
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, oneshot};
-
-use vibesql_server::auth::PasswordStore;
-use vibesql_server::config::{
-    AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig,
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::{broadcast, oneshot},
 };
-use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
-use vibesql_server::http::create_http_router;
-use vibesql_server::observability::{ObservabilityConfig, ObservabilityProvider, ServerMetrics};
-use vibesql_server::registry::DatabaseRegistry;
-use vibesql_server::subscription::SubscriptionConfig;
-use vibesql_server::SubscriptionManager;
+use vibesql_server::{
+    auth::PasswordStore,
+    config::{AuthConfig, Config, HttpAuthConfig, HttpConfig, LoggingConfig, ServerConfig},
+    connection::{ConnectionHandler, TableMutationNotification},
+    http::create_http_router,
+    observability::{ObservabilityConfig, ObservabilityProvider, ServerMetrics},
+    registry::DatabaseRegistry,
+    subscription::SubscriptionConfig,
+    SubscriptionManager,
+};
 use vibesql_storage::Database;
 
 /// Test server handle - holds the shutdown channel and address
@@ -134,7 +137,12 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
         let db_for_http = Arc::clone(&db);
         let metrics_for_http = observability.metrics().cloned();
         tokio::spawn(async move {
-            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http, metrics_for_http);
+            let app = create_http_router(
+                db_for_http,
+                registry_for_http,
+                subscription_manager_for_http,
+                metrics_for_http,
+            );
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });
 
@@ -330,7 +338,12 @@ pub async fn start_test_server_with_metrics(mut config: Config) -> TestServerWit
         let db_for_http = Arc::clone(&db);
         let metrics_for_http = Some(metrics.clone());
         tokio::spawn(async move {
-            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http, metrics_for_http);
+            let app = create_http_router(
+                db_for_http,
+                registry_for_http,
+                subscription_manager_for_http,
+                metrics_for_http,
+            );
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });
 
@@ -573,8 +586,11 @@ impl TestClient {
     pub async fn is_connected(&mut self) -> bool {
         let mut buf = [0u8; 1];
         match self.stream.try_read(&mut buf) {
-            Ok(0) => false,                                                   // Connection closed
-            Ok(_) => true, // Data available (shouldn't happen in this context)
+            Ok(0) => false, // Connection closed
+            Ok(_) => true,  /* Data available */
+            // (shouldn't
+            // happen in this
+            // context)
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => true, // Connection open
             Err(_) => false, // Other error, assume closed
         }

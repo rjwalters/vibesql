@@ -3,12 +3,15 @@
 //! A batch that holds source data and selection, materializing rows on demand.
 
 use std::sync::Arc;
+
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::SelectionVector;
-use crate::errors::ExecutorError;
-use crate::select::columnar::{ColumnArray, ColumnarBatch};
+use crate::{
+    errors::ExecutorError,
+    select::columnar::{ColumnArray, ColumnarBatch},
+};
 
 /// Source data format for lazy materialization
 #[derive(Debug, Clone)]

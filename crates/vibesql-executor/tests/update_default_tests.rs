@@ -11,7 +11,8 @@ fn test_update_with_default_value() {
     // CREATE TABLE users (id INT, name VARCHAR(50) DEFAULT 'Unknown')
     let mut name_column =
         ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false);
-    name_column.default_value = Some(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))));
+    name_column.default_value =
+        Some(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))));
 
     let schema = TableSchema::new(
         "users".to_string(),

@@ -10,9 +10,9 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::helpers::EqualityResult;
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
-use crate::select::executor::builder::SelectExecutor;
+use crate::{
+    errors::ExecutorError, schema::CombinedSchema, select::executor::builder::SelectExecutor,
+};
 
 impl SelectExecutor<'_> {
     /// Try ultra-fast primary key lookup path
@@ -121,7 +121,8 @@ impl SelectExecutor<'_> {
     ///
     /// This optimization handles queries like TPC-C Delivery:
     /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id LIMIT 1`
-    /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id DESC LIMIT 1`
+    /// `SELECT no_o_id FROM new_order WHERE no_w_id = 1 AND no_d_id = 5 ORDER BY no_o_id DESC LIMIT
+    /// 1`
     ///
     /// For tables with composite PK (no_w_id, no_d_id, no_o_id), this query:
     /// 1. Filters by prefix of PK (no_w_id, no_d_id)

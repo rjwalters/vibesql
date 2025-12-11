@@ -8,12 +8,11 @@
 use std::sync::Arc;
 
 use ahash::AHashSet;
-
-use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 use vibesql_types::{DataType, Date, SqlValue, Time, Timestamp};
 
 use super::types::{ColumnArray, ColumnarBatch};
+use crate::errors::ExecutorError;
 
 impl ColumnarBatch {
     /// Get the number of rows in this batch
@@ -104,9 +103,8 @@ impl ColumnarBatch {
 
         // Pre-allocate all row value vectors
         let num_cols = self.columns.len();
-        let mut row_values: Vec<Vec<SqlValue>> = (0..self.row_count)
-            .map(|_| Vec::with_capacity(num_cols))
-            .collect();
+        let mut row_values: Vec<Vec<SqlValue>> =
+            (0..self.row_count).map(|_| Vec::with_capacity(num_cols)).collect();
 
         // Process column-by-column (cache-friendly)
         for column in &self.columns {
@@ -238,14 +236,16 @@ impl ColumnArray {
                 Ok(Self::Float32(Arc::new(new_values), new_nulls))
             }
             Self::String(values, nulls) => {
-                let new_values: Vec<Arc<str>> = indices.iter().map(|&i| values[i].clone()).collect();
+                let new_values: Vec<Arc<str>> =
+                    indices.iter().map(|&i| values[i].clone()).collect();
                 let new_nulls = nulls
                     .as_ref()
                     .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
                 Ok(Self::String(Arc::new(new_values), new_nulls))
             }
             Self::FixedString(values, nulls) => {
-                let new_values: Vec<Arc<str>> = indices.iter().map(|&i| values[i].clone()).collect();
+                let new_values: Vec<Arc<str>> =
+                    indices.iter().map(|&i| values[i].clone()).collect();
                 let new_nulls = nulls
                     .as_ref()
                     .map(|n| Arc::new(indices.iter().map(|&i| n[i]).collect::<Vec<_>>()));
@@ -747,9 +747,9 @@ mod tests {
         let rows = vec![
             Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]),
             Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("B"))]),
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]), // duplicate
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("A"))]), /* duplicate */
             Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("C"))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("B"))]), // duplicate
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("B"))]), /* duplicate */
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
@@ -789,7 +789,7 @@ mod tests {
         let rows = vec![
             Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("A"))]),
             Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("B"))]),
-            Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("A"))]), // duplicate
+            Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("A"))]), /* duplicate */
         ];
 
         let batch = ColumnarBatch::from_rows(&rows).unwrap();

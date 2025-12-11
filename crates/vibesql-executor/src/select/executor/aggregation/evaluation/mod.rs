@@ -329,7 +329,8 @@ impl SelectExecutor<'_> {
             }
 
             // CASE expression - evaluate with grouping context
-            // Need to handle both simple CASE (CASE x WHEN v THEN ...) and searched CASE (CASE WHEN cond THEN ...)
+            // Need to handle both simple CASE (CASE x WHEN v THEN ...) and searched CASE (CASE WHEN
+            // cond THEN ...)
             vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
                 match operand {
                     // Simple CASE: CASE operand WHEN value THEN result ...
@@ -488,11 +489,13 @@ impl SelectExecutor<'_> {
                     evaluator,
                     grouping_context,
                 )?;
-                let is_distinct = !crate::evaluator::ExpressionEvaluator::values_are_equal(
-                    &left_val,
-                    &right_val,
-                );
-                Ok(vibesql_types::SqlValue::Boolean(if *negated { !is_distinct } else { is_distinct }))
+                let is_distinct =
+                    !crate::evaluator::ExpressionEvaluator::values_are_equal(&left_val, &right_val);
+                Ok(vibesql_types::SqlValue::Boolean(if *negated {
+                    !is_distinct
+                } else {
+                    is_distinct
+                }))
             }
 
             // For all other expressions, delegate to existing evaluation

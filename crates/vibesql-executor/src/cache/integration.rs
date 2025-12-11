@@ -2,9 +2,10 @@
 
 use std::{collections::HashSet, sync::Arc};
 
+use vibesql_storage::Row;
+
 use super::{QueryPlanCache, QueryResultCache, QuerySignature};
 use crate::schema::CombinedSchema;
-use vibesql_storage::Row;
 
 /// Simplified cache manager for common operations
 pub struct CacheManager {

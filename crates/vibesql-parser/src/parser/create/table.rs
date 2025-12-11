@@ -1,7 +1,8 @@
 //! CREATE TABLE parsing
 
-use super::super::*;
 use vibesql_types::DataType;
+
+use super::super::*;
 
 impl Parser {
     /// Parse CREATE TABLE statement
@@ -159,8 +160,8 @@ impl Parser {
     ///
     /// Returns true if the next token is:
     /// - A column separator: `,` or `)`
-    /// - A column constraint keyword: `NULL`, `NOT`, `PRIMARY`, `UNIQUE`, `CHECK`,
-    ///   `REFERENCES`, `AUTO_INCREMENT`, `AUTOINCREMENT`, `KEY`, `CONSTRAINT`
+    /// - A column constraint keyword: `NULL`, `NOT`, `PRIMARY`, `UNIQUE`, `CHECK`, `REFERENCES`,
+    ///   `AUTO_INCREMENT`, `AUTOINCREMENT`, `KEY`, `CONSTRAINT`
     /// - A column modifier: `DEFAULT`, `COMMENT`
     fn is_column_constraint_or_separator(&self) -> bool {
         match self.peek() {

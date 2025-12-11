@@ -33,13 +33,12 @@ mod output;
 mod probe;
 mod row_extract;
 
-use crate::errors::ExecutorError;
-use crate::select::columnar::ColumnarBatch;
-
 // Re-export public types
 pub use row_extract::{
     hash_join_indices_columnar, hash_join_indices_columnar_multi, hash_join_indices_columnar_str,
 };
+
+use crate::{errors::ExecutorError, select::columnar::ColumnarBatch};
 
 /// Execute a columnar inner hash join
 ///
@@ -174,9 +173,10 @@ pub fn columnar_hash_join_right_outer(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::select::columnar::ColumnArray;
-    use std::sync::Arc;
 
     #[test]
     fn test_columnar_hash_join() {
@@ -288,7 +288,7 @@ mod tests {
         // Create right batch: order_id, customer_id (customer 3 has no matching left row)
         let right_columns = vec![
             ColumnArray::Int64(Arc::new(vec![101, 102, 103, 104]), None),
-            ColumnArray::Int64(Arc::new(vec![1, 2, 3, 1]), None), // Order 103 has customer_id=3, not in left
+            ColumnArray::Int64(Arc::new(vec![1, 2, 3, 1]), None), /* Order 103 has customer_id=3, not in left */
         ];
         let right_batch = ColumnarBatch::from_columns(
             right_columns,

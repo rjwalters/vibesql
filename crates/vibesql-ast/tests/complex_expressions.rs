@@ -22,7 +22,9 @@ fn test_case_expression_simple() {
                 result: Expression::Literal(SqlValue::Varchar(StringValue::from("inactive"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("unknown"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from(
+            "unknown",
+        ))))),
     };
     match expr {
         Expression::Case { .. } => {} // Success
@@ -42,7 +44,9 @@ fn test_case_expression_searched() {
             }],
             result: Expression::Literal(SqlValue::Varchar(StringValue::from("adult"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("minor"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from(
+            "minor",
+        ))))),
     };
     match expr {
         Expression::Case { operand: None, .. } => {} // Success

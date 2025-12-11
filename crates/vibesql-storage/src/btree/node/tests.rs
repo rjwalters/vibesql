@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
+use vibesql_types::{DataType, SqlValue};
+
 use super::*;
 use crate::page::PageManager;
-use std::sync::Arc;
-use vibesql_types::{DataType, SqlValue};
 
 #[test]
 fn test_leaf_node_insert() {
@@ -1266,9 +1268,8 @@ fn test_delete_batch_multi_level() {
     let is_multi_level = index.height() > 1;
 
     // Batch delete entries from different parts of the tree
-    let entries_to_delete: Vec<_> = (0..50)
-        .map(|i| (vec![SqlValue::Integer(i * 200)], (i * 20) as usize))
-        .collect();
+    let entries_to_delete: Vec<_> =
+        (0..50).map(|i| (vec![SqlValue::Integer(i * 200)], (i * 20) as usize)).collect();
 
     let deleted = index.delete_batch(&entries_to_delete).unwrap();
     assert_eq!(deleted, 50, "Should delete 50 entries");

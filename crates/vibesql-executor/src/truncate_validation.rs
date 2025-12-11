@@ -4,8 +4,9 @@
 //! and DELETE executors to determine if the TRUNCATE optimization can be
 //! safely used.
 
-use crate::ExecutorError;
 use vibesql_storage::Database;
+
+use crate::ExecutorError;
 
 /// Check if TRUNCATE optimization can be used for a table
 ///

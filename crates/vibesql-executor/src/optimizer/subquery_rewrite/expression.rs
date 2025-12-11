@@ -5,9 +5,9 @@
 
 use vibesql_ast::{Expression, SelectItem, SelectStmt};
 
-use super::correlation::is_correlated;
-use super::transformations::{
-    add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists,
+use super::{
+    correlation::is_correlated,
+    transformations::{add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists},
 };
 
 /// Rewrite an expression to optimize IN subqueries

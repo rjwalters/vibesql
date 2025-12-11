@@ -63,7 +63,8 @@ fn extract_integers(result: &[Row]) -> Vec<i64> {
 fn test_left_join_anti_join_pattern() {
     let db = setup_test_db();
 
-    let sql = "SELECT t1.id FROM t1 LEFT JOIN t2 ON t1.id = t2.tid WHERE t2.tid IS NULL ORDER BY t1.id";
+    let sql =
+        "SELECT t1.id FROM t1 LEFT JOIN t2 ON t1.id = t2.tid WHERE t2.tid IS NULL ORDER BY t1.id";
     let select = parse_select(sql);
     let result = SelectExecutor::new(&db).execute(&select).unwrap();
 

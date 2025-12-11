@@ -37,9 +37,9 @@ fn test_select_into_single_row() {
     db.insert_row(
         "source",
         vibesql_storage::Row::from_vec(vec![
-                vibesql_types::SqlValue::Integer(1),
-                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-            ]),
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+        ]),
     )
     .unwrap();
 

@@ -1,5 +1,6 @@
-use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use super::*;
 
 /// Counter for generating unique derived table aliases when none is provided.
 /// SQLite allows derived tables without aliases, unlike SQL:1999 which requires them.
@@ -67,7 +68,9 @@ impl Parser {
 
     /// Parse VALUES clause rows: VALUES(1,2), (3,4), ...
     /// Returns Vec<Vec<Expression>> where each inner vec is a row
-    pub(crate) fn parse_values_rows(&mut self) -> Result<Vec<Vec<vibesql_ast::Expression>>, ParseError> {
+    pub(crate) fn parse_values_rows(
+        &mut self,
+    ) -> Result<Vec<Vec<vibesql_ast::Expression>>, ParseError> {
         self.expect_keyword(Keyword::Values)?;
         let mut rows = Vec::new();
         loop {
@@ -92,7 +95,8 @@ impl Parser {
                 // Parenthesized expression: could be a subquery, VALUES, or a JOIN expression
                 self.advance(); // Consume '('
 
-                // Check if this is a subquery (starts with SELECT), VALUES, or a table reference/JOIN
+                // Check if this is a subquery (starts with SELECT), VALUES, or a table
+                // reference/JOIN
                 let result = if self.peek_keyword(Keyword::Select) {
                     // Parse the SELECT statement (subquery)
                     let query = Box::new(self.parse_select_statement()?);

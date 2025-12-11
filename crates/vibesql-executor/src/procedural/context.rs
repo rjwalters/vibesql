@@ -8,6 +8,7 @@
 //! - Recursion depth limiting
 
 use std::collections::HashMap;
+
 use vibesql_types::SqlValue;
 
 /// Maximum recursion depth for function/procedure calls

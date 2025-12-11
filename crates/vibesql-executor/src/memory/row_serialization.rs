@@ -17,12 +17,13 @@
 //!
 //! # Design Decisions
 //!
-//! - **No length prefix for entire row**: We write rows sequentially and read them back
-//!   in chunks, so we don't need random access within a run.
+//! - **No length prefix for entire row**: We write rows sequentially and read them back in chunks,
+//!   so we don't need random access within a run.
 //! - **Compact type tags**: Single byte discriminant for common types
 //! - **Little-endian**: Matches most modern hardware for zero-copy potential
 
 use std::io::{self, Read, Write};
+
 use vibesql_types::{Interval, SqlValue};
 
 /// Type tags for serialized values
@@ -264,12 +265,9 @@ pub fn deserialize_value<R: Read>(reader: &mut R) -> io::Result<SqlValue> {
             reader.read_exact(&mut minute_buf)?;
             reader.read_exact(&mut second_buf)?;
             reader.read_exact(&mut nano_buf)?;
-            let date = vibesql_types::Date::new(
-                i32::from_le_bytes(year_buf),
-                month_buf[0],
-                day_buf[0],
-            )
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let date =
+                vibesql_types::Date::new(i32::from_le_bytes(year_buf), month_buf[0], day_buf[0])
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             let time = vibesql_types::Time::new(
                 hour_buf[0],
                 minute_buf[0],
@@ -305,10 +303,9 @@ pub fn deserialize_value<R: Read>(reader: &mut R) -> io::Result<SqlValue> {
             }
             Ok(SqlValue::Vector(v))
         }
-        _ => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unknown type tag: {}", tag[0]),
-        )),
+        _ => {
+            Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown type tag: {}", tag[0])))
+        }
     }
 }
 
@@ -424,8 +421,9 @@ fn estimate_value_size(value: &SqlValue) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     #[test]
     fn test_roundtrip_null() {
@@ -530,7 +528,7 @@ mod tests {
     #[test]
     fn test_size_estimation() {
         let row = vibesql_storage::Row::from_vec(vec![
-            SqlValue::Integer(42),    // 1 + 8 = 9
+            SqlValue::Integer(42),          // 1 + 8 = 9
             SqlValue::Varchar("hi".into()), // 1 + 4 + 2 = 7
         ]);
 

@@ -19,7 +19,8 @@ fn test_e2e_char_type() {
         Row::new(vec![
             SqlValue::Integer(1),
             SqlValue::Character(StringValue::from("ABC")), // Will be padded to "ABC  " (5 chars)
-            SqlValue::Character(StringValue::from("Hello")), // Will be padded to "Hello     " (10 chars)
+            SqlValue::Character(StringValue::from("Hello")), /* Will be padded to "Hello     " (10
+                                                            * chars) */
         ]),
     )
     .unwrap();
@@ -29,7 +30,8 @@ fn test_e2e_char_type() {
         Row::new(vec![
             SqlValue::Integer(2),
             SqlValue::Character(StringValue::from("12345")), // Exact length (5 chars)
-            SqlValue::Character(StringValue::from("World")), // Will be padded to "World     " (10 chars)
+            SqlValue::Character(StringValue::from("World")), /* Will be padded to "World     "
+                                                              * (10 chars) */
         ]),
     )
     .unwrap();
@@ -38,9 +40,10 @@ fn test_e2e_char_type() {
         "CODES",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Character(StringValue::from("TOOLONG")), // Will be truncated to "TOOLO" (5 chars)
+            SqlValue::Character(StringValue::from("TOOLONG")), /* Will be truncated to "TOOLO"
+                                                                * (5 chars) */
             SqlValue::Character(StringValue::from("VeryLongName")), /* Will be truncated to
-                                                         * "VeryLongNa" (10 chars) */
+                                                                     * "VeryLongNa" (10 chars) */
         ]),
     )
     .unwrap();

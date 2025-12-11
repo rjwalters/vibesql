@@ -3,8 +3,7 @@
 use std::sync::Arc;
 
 use tracing::{debug, trace, warn};
-use vibesql_storage::change_events::RecvError;
-use vibesql_storage::Database;
+use vibesql_storage::{change_events::RecvError, Database};
 
 use super::SubscriptionManager;
 use crate::subscription::SubscriptionId;

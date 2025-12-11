@@ -13,11 +13,12 @@
 //! These optimizations avoid O(n) AST traversal and Debug-format string allocation
 //! for every row when evaluating correlated scalar subqueries.
 
-use super::super::super::core::CombinedExpressionEvaluator;
-use super::correlation::extract_correlation_values;
-use super::schema_utils::{build_merged_outer_row, build_merged_outer_schema};
-use crate::errors::ExecutorError;
-use crate::evaluator::caching::compute_correlated_cache_key;
+use super::{
+    super::super::core::CombinedExpressionEvaluator,
+    correlation::extract_correlation_values,
+    schema_utils::{build_merged_outer_row, build_merged_outer_schema},
+};
+use crate::{errors::ExecutorError, evaluator::caching::compute_correlated_cache_key};
 
 impl CombinedExpressionEvaluator<'_> {
     /// Evaluate scalar subquery - must return exactly one row and one column
@@ -75,7 +76,8 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Compute cache key (different strategies for correlated vs uncorrelated)
         let cache_key = if is_uncorrelated {
-            // Uncorrelated: cache key is just the subquery hash (cached by AST pointer - issue #4142)
+            // Uncorrelated: cache key is just the subquery hash (cached by AST pointer - issue
+            // #4142)
             self.compute_subquery_hash_cached(subquery)
         } else if !self.schema.table_schemas.is_empty() {
             // Correlated: cache key includes correlation column values
@@ -148,7 +150,8 @@ impl CombinedExpressionEvaluator<'_> {
                     crate::select::SelectExecutor::new(database)
                 }
             } else {
-                // Correlated: execute with outer context (merged schema + merged row - fix for #2463)
+                // Correlated: execute with outer context (merged schema + merged row - fix for
+                // #2463)
                 let schema_ref = merged_schema.as_ref().unwrap();
                 let row_ref = merged_row.as_ref().unwrap();
                 if let Some(cte_ctx) = self.cte_context {

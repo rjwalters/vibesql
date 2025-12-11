@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
 
 use super::types::{ColumnArray, ColumnarBatch};
+use crate::errors::ExecutorError;
 
 impl ColumnarBatch {
     /// Convert from storage layer ColumnarTable to executor ColumnarBatch
@@ -70,81 +70,81 @@ impl ColumnarBatch {
                 ExecutorError::ColumnarColumnNotFoundByName { column_name: col_name.clone() }
             })?;
 
-            let column_array =
-                match storage_col {
-                    ColumnData::Int64 { values, nulls } => {
-                        // Zero-copy: Arc::clone is O(1) - just bumps reference count
-                        let null_bitmap =
-                            if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
-                        ColumnArray::Int64(Arc::clone(values), null_bitmap)
-                    }
-                    ColumnData::Float64 { values, nulls } => {
-                        // Zero-copy: Arc::clone is O(1)
-                        let null_bitmap =
-                            if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
-                        ColumnArray::Float64(Arc::clone(values), null_bitmap)
-                    }
-                    ColumnData::String { values, nulls } => {
-                        // Zero-copy: Arc::clone is O(1)
-                        let null_bitmap =
-                            if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
-                        ColumnArray::String(Arc::clone(values), null_bitmap)
-                    }
-                    ColumnData::Bool { values, nulls } => {
-                        // Convert bool to u8 for SIMD compatibility (requires iteration)
-                        let u8_values: Vec<u8> =
-                            values.iter().map(|&b| if b { 1 } else { 0 }).collect();
-                        let null_bitmap =
-                            if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
-                        ColumnArray::Boolean(Arc::new(u8_values), null_bitmap)
-                    }
-                    ColumnData::Date { values, nulls } => {
-                        // Convert Date to i32 (days since Unix epoch 1970-01-01)
-                        // Must use the same formula as simd_filter.rs:date_to_days_since_epoch
-                        // for predicate evaluation to work correctly
-                        let i32_values: Vec<i32> =
-                            values.iter().map(date_to_days_since_epoch).collect();
-                        let null_bitmap =
-                            if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
-                        ColumnArray::Date(Arc::new(i32_values), null_bitmap)
-                    }
-                    ColumnData::Timestamp { values, nulls } => {
-                        // Convert Timestamp to Mixed (fallback - no direct i64 conversion)
-                        let sql_values: Vec<SqlValue> = values
-                            .iter()
-                            .zip(nulls.iter())
-                            .map(
-                                |(t, &is_null)| {
-                                    if is_null {
-                                        SqlValue::Null
-                                    } else {
-                                        SqlValue::Timestamp(*t)
-                                    }
-                                },
-                            )
-                            .collect();
-                        ColumnArray::Mixed(Arc::new(sql_values))
-                    }
-                    ColumnData::Time { values, nulls } => {
-                        // Convert Time to Mixed (fallback - Time doesn't have direct i64 conversion)
-                        let sql_values: Vec<SqlValue> = values
-                            .iter()
-                            .zip(nulls.iter())
-                            .map(
-                                |(t, &is_null)| {
-                                    if is_null {
-                                        SqlValue::Null
-                                    } else {
-                                        SqlValue::Time(*t)
-                                    }
-                                },
-                            )
-                            .collect();
-                        ColumnArray::Mixed(Arc::new(sql_values))
-                    }
-                    ColumnData::Interval { values, nulls } => {
-                        // Convert Interval to Mixed (fallback)
-                        let sql_values: Vec<SqlValue> = values
+            let column_array = match storage_col {
+                ColumnData::Int64 { values, nulls } => {
+                    // Zero-copy: Arc::clone is O(1) - just bumps reference count
+                    let null_bitmap =
+                        if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
+                    ColumnArray::Int64(Arc::clone(values), null_bitmap)
+                }
+                ColumnData::Float64 { values, nulls } => {
+                    // Zero-copy: Arc::clone is O(1)
+                    let null_bitmap =
+                        if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
+                    ColumnArray::Float64(Arc::clone(values), null_bitmap)
+                }
+                ColumnData::String { values, nulls } => {
+                    // Zero-copy: Arc::clone is O(1)
+                    let null_bitmap =
+                        if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
+                    ColumnArray::String(Arc::clone(values), null_bitmap)
+                }
+                ColumnData::Bool { values, nulls } => {
+                    // Convert bool to u8 for SIMD compatibility (requires iteration)
+                    let u8_values: Vec<u8> =
+                        values.iter().map(|&b| if b { 1 } else { 0 }).collect();
+                    let null_bitmap =
+                        if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
+                    ColumnArray::Boolean(Arc::new(u8_values), null_bitmap)
+                }
+                ColumnData::Date { values, nulls } => {
+                    // Convert Date to i32 (days since Unix epoch 1970-01-01)
+                    // Must use the same formula as simd_filter.rs:date_to_days_since_epoch
+                    // for predicate evaluation to work correctly
+                    let i32_values: Vec<i32> =
+                        values.iter().map(date_to_days_since_epoch).collect();
+                    let null_bitmap =
+                        if nulls.iter().any(|&n| n) { Some(Arc::clone(nulls)) } else { None };
+                    ColumnArray::Date(Arc::new(i32_values), null_bitmap)
+                }
+                ColumnData::Timestamp { values, nulls } => {
+                    // Convert Timestamp to Mixed (fallback - no direct i64 conversion)
+                    let sql_values: Vec<SqlValue> = values
+                        .iter()
+                        .zip(nulls.iter())
+                        .map(
+                            |(t, &is_null)| {
+                                if is_null {
+                                    SqlValue::Null
+                                } else {
+                                    SqlValue::Timestamp(*t)
+                                }
+                            },
+                        )
+                        .collect();
+                    ColumnArray::Mixed(Arc::new(sql_values))
+                }
+                ColumnData::Time { values, nulls } => {
+                    // Convert Time to Mixed (fallback - Time doesn't have direct i64 conversion)
+                    let sql_values: Vec<SqlValue> = values
+                        .iter()
+                        .zip(nulls.iter())
+                        .map(
+                            |(t, &is_null)| {
+                                if is_null {
+                                    SqlValue::Null
+                                } else {
+                                    SqlValue::Time(*t)
+                                }
+                            },
+                        )
+                        .collect();
+                    ColumnArray::Mixed(Arc::new(sql_values))
+                }
+                ColumnData::Interval { values, nulls } => {
+                    // Convert Interval to Mixed (fallback)
+                    let sql_values: Vec<SqlValue> =
+                        values
                             .iter()
                             .zip(nulls.iter())
                             .map(|(i, &is_null)| {
@@ -155,25 +155,26 @@ impl ColumnarBatch {
                                 }
                             })
                             .collect();
-                        ColumnArray::Mixed(Arc::new(sql_values))
-                    }
-                    ColumnData::Vector { values, nulls } => {
-                        // Convert Vector to Mixed (fallback)
-                        let sql_values: Vec<SqlValue> =
-                            values
-                                .iter()
-                                .zip(nulls.iter())
-                                .map(|(v, &is_null)| {
-                                    if is_null {
-                                        SqlValue::Null
-                                    } else {
-                                        SqlValue::Vector(v.clone())
-                                    }
-                                })
-                                .collect();
-                        ColumnArray::Mixed(Arc::new(sql_values))
-                    }
-                };
+                    ColumnArray::Mixed(Arc::new(sql_values))
+                }
+                ColumnData::Vector { values, nulls } => {
+                    // Convert Vector to Mixed (fallback)
+                    let sql_values: Vec<SqlValue> = values
+                        .iter()
+                        .zip(nulls.iter())
+                        .map(
+                            |(v, &is_null)| {
+                                if is_null {
+                                    SqlValue::Null
+                                } else {
+                                    SqlValue::Vector(v.clone())
+                                }
+                            },
+                        )
+                        .collect();
+                    ColumnArray::Mixed(Arc::new(sql_values))
+                }
+            };
 
             columns.push(column_array);
         }
@@ -216,8 +217,9 @@ fn date_to_days_since_epoch(date: &vibesql_types::Date) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::Row;
+
+    use super::*;
 
     #[test]
     fn test_from_storage_columnar() {

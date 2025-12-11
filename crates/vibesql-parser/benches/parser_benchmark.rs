@@ -3,11 +3,14 @@
 //! Measures parse times for various SQL query types to establish baselines
 //! and track optimization improvements.
 
+use std::hint::black_box;
+
 use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::hint::black_box;
-use vibesql_parser::arena_parser::{parse_select_to_owned, ArenaParser};
-use vibesql_parser::{Lexer, Parser};
+use vibesql_parser::{
+    arena_parser::{parse_select_to_owned, ArenaParser},
+    Lexer, Parser,
+};
 
 /// Simple SELECT query - baseline for minimal parsing overhead
 const SIMPLE_SELECT: &str = "SELECT a FROM t";
@@ -445,8 +448,8 @@ fn bench_dml_comparison(c: &mut Criterion) {
 fn bench_mixed_dml_workload(c: &mut Criterion) {
     let mut group = c.benchmark_group("mixed_dml_workload");
 
-    // TPC-C style workload: 45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock Level
-    // For parser benchmarks, we focus on the DML operations:
+    // TPC-C style workload: 45% New Order, 43% Payment, 4% Order Status, 4% Delivery, 4% Stock
+    // Level For parser benchmarks, we focus on the DML operations:
     // - New Order: INSERT (order) + UPDATE (stock)
     // - Payment: UPDATE (customer, district, warehouse)
     // - Delivery: UPDATE (order, customer) + DELETE (new_order)

@@ -16,8 +16,7 @@
 //! The arena is pinned to prevent moves, and the statement pointer is valid
 //! as long as the arena exists.
 
-use std::collections::HashSet;
-use std::pin::Pin;
+use std::{collections::HashSet, pin::Pin};
 
 use bumpalo::Bump;
 use vibesql_ast::arena::{ArenaInterner, Expression, ExtendedExpr, SelectStmt};

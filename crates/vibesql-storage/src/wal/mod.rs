@@ -91,11 +91,11 @@ pub use engine::{
 pub use entry::{Lsn, WalEntry, WalOp, WalOpTag};
 pub use format::{WalHeader, WAL_HEADER_SIZE, WAL_MAGIC, WAL_VERSION};
 pub use reader::{find_recovery_point, ReadResult, RecoveryInfo, WalIterator, WalReader};
+pub use recovery::{needs_recovery, recover, RecoveryConfig, RecoveryManager, RecoveryStats};
 pub use scheduler::{
     CheckpointConfig, CheckpointScheduler, CheckpointStats, CheckpointTrigger,
     CheckpointTriggerState, DEFAULT_CHECKPOINT_INTERVAL_SECS, DEFAULT_KEEP_CHECKPOINTS,
     DEFAULT_WAL_SIZE_THRESHOLD,
 };
-pub use recovery::{needs_recovery, recover, RecoveryConfig, RecoveryManager, RecoveryStats};
 pub use truncate::{truncate_wal, TruncateResult};
 pub use writer::{verify_checksum, WalWriter};

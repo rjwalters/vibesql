@@ -3,19 +3,18 @@
 mod pattern;
 mod specialized;
 
-use crate::{
-    errors::ExecutorError,
-    evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
-};
+#[cfg(feature = "parallel")]
+use std::sync::Arc;
 
 use pattern::PredicatePattern;
 use specialized::create_evaluator;
 
 #[cfg(feature = "parallel")]
-use std::sync::Arc;
-
-#[cfg(feature = "parallel")]
 use super::parallel::ParallelConfig;
+use crate::{
+    errors::ExecutorError,
+    evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
+};
 
 /// Fast truthy evaluation optimized for hot path (Combined evaluator version)
 ///
@@ -262,8 +261,10 @@ pub(super) fn apply_where_filter_combined_parallel<'a>(
     evaluator: &CombinedExpressionEvaluator,
     _executor: &crate::SelectExecutor<'a>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-    use super::morsel::{morsel_parallel_filter, MorselConfig};
-    use super::vectorized::compiled_predicate::{CompiledOrClause, CompiledWhereClause};
+    use super::{
+        morsel::{morsel_parallel_filter, MorselConfig},
+        vectorized::compiled_predicate::{CompiledOrClause, CompiledWhereClause},
+    };
 
     if where_expr.is_none() {
         return Ok(rows);
@@ -372,7 +373,11 @@ pub(crate) fn apply_where_filter_combined_auto<'a>(
     executor: &crate::SelectExecutor<'a>,
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     if std::env::var("OR_COMPILE_DEBUG").is_ok() {
-        eprintln!("[FILTER_AUTO_ENTRY] Called with {} rows, where_expr: {}", rows.len(), where_expr.is_some());
+        eprintln!(
+            "[FILTER_AUTO_ENTRY] Called with {} rows, where_expr: {}",
+            rows.len(),
+            where_expr.is_some()
+        );
     }
     if where_expr.is_none() {
         return Ok(rows);

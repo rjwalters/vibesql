@@ -1,9 +1,12 @@
 //! Tests for trigger DDL operations (CREATE TRIGGER, DROP TRIGGER)
 
-use crate::CreateTableExecutor;
-use vibesql_ast::{CreateTriggerStmt, DropTriggerStmt};
-use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+use vibesql_ast::{
+    CreateTriggerStmt, DropTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity,
+    TriggerTiming,
+};
 use vibesql_storage::Database;
+
+use crate::CreateTableExecutor;
 
 #[test]
 fn test_create_trigger() {

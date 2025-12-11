@@ -230,9 +230,10 @@ impl SelectExecutor<'_> {
             }
         };
 
-        let table = self.database.get_table(table_name).ok_or_else(|| {
-            ExecutorError::TableNotFound(table_name.to_string())
-        })?;
+        let table = self
+            .database
+            .get_table(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
         let mut columns = Vec::with_capacity(stmt.select_list.len());
 
@@ -291,9 +292,10 @@ impl SelectExecutor<'_> {
             } else {
                 HashMap::new()
             };
-            // If we have access to outer query's CTEs (for subqueries/derived tables), merge them in
-            // Local CTEs take precedence over outer CTEs if there are name conflicts
-            // This is critical for queries like TPC-DS Q2 where CTEs are referenced from derived tables
+            // If we have access to outer query's CTEs (for subqueries/derived tables), merge them
+            // in Local CTEs take precedence over outer CTEs if there are name conflicts
+            // This is critical for queries like TPC-DS Q2 where CTEs are referenced from derived
+            // tables
             if let Some(outer_cte_ctx) = self.cte_context {
                 for (name, result) in outer_cte_ctx {
                     cte_results.entry(name.clone()).or_insert_with(|| result.clone());
@@ -412,7 +414,8 @@ impl SelectExecutor<'_> {
                 // StandardColumnar uses the pipeline-based execution path
                 // Note: We don't use try_native_columnar_execution here because row tables
                 // go through the pipeline which correctly handles all data types including dates.
-                // The native columnar zero-copy path has known limitations with certain date comparisons.
+                // The native columnar zero-copy path has known limitations with certain date
+                // comparisons.
                 match self.execute_via_pipeline(
                     stmt,
                     cte_results,
@@ -465,7 +468,8 @@ impl SelectExecutor<'_> {
             ExecutionStrategy::ExpressionOnly { .. } => {
                 // SELECT without FROM - special case that doesn't use pipelines
                 // May still have aggregates (e.g., SELECT COUNT(*), SELECT MAX(1))
-                // Note: Do NOT use early return here - we need to fall through to set operations handling
+                // Note: Do NOT use early return here - we need to fall through to set operations
+                // handling
                 self.execute_expression_only(stmt, cte_results)?
             }
         };
@@ -771,9 +775,10 @@ impl SelectExecutor<'_> {
             // from the FROM result. When predicate pushdown filtered rows early, the indices no
             // longer matched the original table, causing incorrect results.
             //
-            // Now that all index optimization has been moved to the scan level (execute_index_scan),
-            // it happens BEFORE predicate pushdown, avoiding the row-index mismatch problem.
-            // This allows predicate pushdown to work correctly for all queries, improving performance.
+            // Now that all index optimization has been moved to the scan level
+            // (execute_index_scan), it happens BEFORE predicate pushdown, avoiding the
+            // row-index mismatch problem. This allows predicate pushdown to work
+            // correctly for all queries, improving performance.
             //
             // Fixes issues #1807, #1895, #1896, and #1902.
 
@@ -868,8 +873,8 @@ impl SelectExecutor<'_> {
     /// Execute a FROM clause with WHERE, ORDER BY, and LIMIT for optimization
     ///
     /// The LIMIT parameter enables early termination optimization (#3253):
-    /// - When ORDER BY is satisfied by an index and no post-filter is needed,
-    ///   the index scan can stop after fetching LIMIT rows
+    /// - When ORDER BY is satisfied by an index and no post-filter is needed, the index scan can
+    ///   stop after fetching LIMIT rows
     ///
     /// Note: Table elimination (#3556) is now handled at the optimizer level
     /// via crate::optimizer::eliminate_unused_tables(), which runs before
@@ -881,7 +886,8 @@ impl SelectExecutor<'_> {
         where_clause: Option<&vibesql_ast::Expression>,
         order_by: Option<&[vibesql_ast::OrderByItem]>,
         limit: Option<usize>,
-        _select_list: Option<&[vibesql_ast::SelectItem]>, // No longer used - optimization moved to optimizer pass
+        _select_list: Option<&[vibesql_ast::SelectItem]>, /* No longer used - optimization moved
+                                                           * to optimizer pass */
     ) -> Result<FromResult, ExecutorError> {
         use crate::select::scan::execute_from_clause;
 

@@ -12,6 +12,7 @@
 //! interactions with derived tables from EXISTS/IN transformations.
 
 use std::collections::{HashMap, HashSet};
+
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
 /// Apply table elimination optimization to a SELECT statement
@@ -177,7 +178,8 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
                 matches_prefix
             } else {
                 // No prefix known for this table - conservatively assume it might be used
-                // unless it's a common pattern (table has qualified refs but no matching unqualified)
+                // unless it's a common pattern (table has qualified refs but no matching
+                // unqualified)
                 if verbose {
                     eprintln!(
                         "[TABLE_ELIM_OPT] Table '{}' has no known prefix, conservatively keeping",
@@ -203,8 +205,8 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         // Table can be eliminated if:
         // 1. Not in SELECT list
         // 2. Not in any equijoin condition
-        // 3. HAS a local predicate/filter (otherwise it's an intentional cross join
-        //    that multiplies rows, and we must preserve that row count)
+        // 3. HAS a local predicate/filter (otherwise it's an intentional cross join that multiplies
+        //    rows, and we must preserve that row count)
         let filter = local_predicates.get(&table_key).cloned();
         if !in_select && !in_equijoin && filter.is_some() {
             if verbose {
@@ -685,7 +687,8 @@ fn collect_local_predicates(
                 }
             }
 
-            // Skip if this looks like a join condition (qualified + unqualified on different tables)
+            // Skip if this looks like a join condition (qualified + unqualified on different
+            // tables)
             if is_potential_join_condition(expr) {
                 return;
             }
@@ -1255,9 +1258,10 @@ mod tests {
     }
 
     mod eliminate_unused_tables_tests {
-        use super::*;
         use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
         use vibesql_types::SqlValue;
+
+        use super::*;
 
         fn make_column_ref(table: Option<&str>, column: &str) -> Expression {
             Expression::ColumnRef {
@@ -1609,9 +1613,10 @@ mod tests {
     }
 
     mod helper_function_tests {
-        use super::*;
         use vibesql_ast::{BinaryOperator, Expression, SelectItem};
         use vibesql_types::SqlValue;
+
+        use super::*;
 
         #[test]
         fn flatten_and_chain_single() {

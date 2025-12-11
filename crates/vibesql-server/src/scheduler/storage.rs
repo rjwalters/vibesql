@@ -2,8 +2,9 @@
 //!
 //! These types represent the persistent state of scheduled executions.
 
-use chrono::{DateTime, Utc};
 use std::fmt;
+
+use chrono::{DateTime, Utc};
 
 /// Status of a scheduled task
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

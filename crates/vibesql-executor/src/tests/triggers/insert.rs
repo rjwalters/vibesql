@@ -1,11 +1,12 @@
 //! Tests for INSERT trigger firing behavior
 
-use super::{count_audit_rows, create_audit_table, create_users_table};
-use crate::InsertExecutor;
 use vibesql_ast::{
     CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
 };
 use vibesql_storage::Database;
+
+use super::{count_audit_rows, create_audit_table, create_users_table};
+use crate::InsertExecutor;
 
 #[test]
 fn test_after_insert_trigger_fires() {
@@ -34,7 +35,9 @@ fn test_after_insert_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -73,15 +76,21 @@ fn test_after_insert_trigger_fires_for_each_row() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("alice"),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bob"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("bob"),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("charlie"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("charlie"),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -120,7 +129,9 @@ fn test_before_insert_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

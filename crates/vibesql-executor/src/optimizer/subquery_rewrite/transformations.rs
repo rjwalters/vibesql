@@ -206,7 +206,8 @@ fn is_from_table(expr: &Expression, table: &str) -> bool {
 }
 
 /// Check if an expression references one of the outer tables
-/// Also handles unqualified column names that start with outer table prefix (e.g., o_orderkey for orders table)
+/// Also handles unqualified column names that start with outer table prefix (e.g., o_orderkey for
+/// orders table)
 fn is_from_outer_tables(expr: &Expression, outer_tables: &[String], inner_table: &str) -> bool {
     match expr {
         Expression::ColumnRef { table: Some(t), .. } => {

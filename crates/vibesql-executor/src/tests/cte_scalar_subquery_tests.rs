@@ -4,9 +4,10 @@
 //! and referenced both in the main FROM clause and in a scalar subquery.
 //! This pattern enables finding rows that match an aggregate computed from the CTE.
 
-use super::super::*;
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;
+
+use super::super::*;
 
 fn execute_sql(
     db: &mut vibesql_storage::Database,
@@ -70,7 +71,10 @@ fn test_cte_in_scalar_subquery_basic() {
 
     assert_eq!(result.len(), 1, "Should return exactly one supplier with max revenue");
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Supplier A")));
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Supplier A"))
+    );
 }
 
 /// Test tie-handling: multiple suppliers with the same maximum revenue
@@ -413,11 +417,8 @@ fn test_multi_column_left_outer_join_issue_3656() {
 
     // Create test tables with composite key relationship
     execute_sql(&mut db, "CREATE TABLE sales_3656(ticket_num INT, item_id INT, qty INT)").unwrap();
-    execute_sql(
-        &mut db,
-        "CREATE TABLE returns_3656(ret_ticket INT, ret_item INT, ret_qty INT)",
-    )
-    .unwrap();
+    execute_sql(&mut db, "CREATE TABLE returns_3656(ret_ticket INT, ret_item INT, ret_qty INT)")
+        .unwrap();
 
     // Insert sales - 4 rows
     execute_sql(&mut db, "INSERT INTO sales_3656 VALUES (1, 100, 10)").unwrap(); // Will have return
@@ -527,5 +528,8 @@ fn test_cte_in_not_exists_subquery() {
     // Only product 3 (Gizmo) has not been ordered
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(3));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Gizmo")));
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Gizmo"))
+    );
 }

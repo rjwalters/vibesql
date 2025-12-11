@@ -18,6 +18,11 @@
 //! let owned_stmt = converter.convert_select(&arena_stmt);
 //! ```
 
+use super::{
+    dml as arena_dml, expression as arena_expr,
+    interner::{ArenaInterner, Symbol},
+    select as arena_select,
+};
 use crate::{
     Assignment, BinaryOperator, CaseWhen, CharacterUnit, CommonTableExpr, ConflictClause,
     DeleteStmt, Expression, FrameBound, FrameUnit, FromClause, FulltextMode, GroupByClause,
@@ -26,9 +31,6 @@ use crate::{
     SelectStmt, SetOperation, SetOperator, TrimPosition, UpdateStmt, WhereClause, WindowFrame,
     WindowFunctionSpec, WindowSpec,
 };
-
-use super::interner::{ArenaInterner, Symbol};
-use super::{dml as arena_dml, expression as arena_expr, select as arena_select};
 
 /// Converter for arena-allocated AST to owned AST.
 ///
@@ -71,10 +73,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
         children: &[arena_expr::Expression<'arena>],
         op: BinaryOperator,
     ) -> Expression {
-        debug_assert!(
-            children.len() >= 2,
-            "Conjunction/Disjunction must have at least 2 children"
-        );
+        debug_assert!(children.len() >= 2, "Conjunction/Disjunction must have at least 2 children");
 
         let mut iter = children.iter();
 
@@ -719,9 +718,9 @@ impl From<arena_dml::ConflictClause> for ConflictClause {
 
 #[cfg(test)]
 mod tests {
+    use bumpalo::{collections::Vec as BumpVec, Bump};
+
     use super::*;
-    use bumpalo::Bump;
-    use bumpalo::collections::Vec as BumpVec;
 
     /// Helper to create a Conjunction in the arena
     fn make_conjunction<'arena>(
@@ -770,8 +769,14 @@ mod tests {
                 // left should be (1 AND 2)
                 match *left {
                     Expression::BinaryOp { op: BinaryOperator::And, left: ll, right: lr } => {
-                        assert!(matches!(*ll, Expression::Literal(vibesql_types::SqlValue::Integer(1))));
-                        assert!(matches!(*lr, Expression::Literal(vibesql_types::SqlValue::Integer(2))));
+                        assert!(matches!(
+                            *ll,
+                            Expression::Literal(vibesql_types::SqlValue::Integer(1))
+                        ));
+                        assert!(matches!(
+                            *lr,
+                            Expression::Literal(vibesql_types::SqlValue::Integer(2))
+                        ));
                     }
                     _ => panic!("Expected nested BinaryOp::And, got {:?}", left),
                 }
@@ -803,8 +808,14 @@ mod tests {
                 // left should be (1 OR 2)
                 match *left {
                     Expression::BinaryOp { op: BinaryOperator::Or, left: ll, right: lr } => {
-                        assert!(matches!(*ll, Expression::Literal(vibesql_types::SqlValue::Integer(1))));
-                        assert!(matches!(*lr, Expression::Literal(vibesql_types::SqlValue::Integer(2))));
+                        assert!(matches!(
+                            *ll,
+                            Expression::Literal(vibesql_types::SqlValue::Integer(1))
+                        ));
+                        assert!(matches!(
+                            *lr,
+                            Expression::Literal(vibesql_types::SqlValue::Integer(2))
+                        ));
                     }
                     _ => panic!("Expected nested BinaryOp::Or, got {:?}", left),
                 }

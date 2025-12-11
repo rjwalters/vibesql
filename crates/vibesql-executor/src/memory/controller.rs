@@ -24,15 +24,19 @@
 //! # Design Decisions
 //!
 //! 1. **Thread-safe**: Uses atomic operations for concurrent access
-//! 2. **Non-blocking reservations**: `try_reserve` never blocks, operators
-//!    decide whether to spill based on return value
+//! 2. **Non-blocking reservations**: `try_reserve` never blocks, operators decide whether to spill
+//!    based on return value
 //! 3. **Configurable via environment**: Memory limits can be overridden
 //! 4. **Platform-aware**: Different defaults for native vs WASM
 
-use std::env;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::{
+    env,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 /// Default memory budget: 1GB
 /// Conservative default that works on most systems
@@ -90,22 +94,14 @@ impl Default for MemoryConfig {
             .and_then(|s| parse_memory_size(&s))
             .unwrap_or(DEFAULT_TARGET_PARTITION_BYTES);
 
-        Self {
-            budget_bytes,
-            temp_directory,
-            spill_threshold,
-            target_partition_bytes,
-        }
+        Self { budget_bytes, temp_directory, spill_threshold, target_partition_bytes }
     }
 }
 
 impl MemoryConfig {
     /// Create a new configuration with the specified budget
     pub fn with_budget(budget_bytes: usize) -> Self {
-        Self {
-            budget_bytes,
-            ..Default::default()
-        }
+        Self { budget_bytes, ..Default::default() }
     }
 
     /// Create a configuration with a specific temp directory
@@ -330,10 +326,7 @@ impl MemoryController {
     /// When the reservation is dropped, its memory is released.
     pub fn create_reservation(self: &Arc<Self>) -> MemoryReservation {
         self.active_reservations.fetch_add(1, Ordering::Relaxed);
-        MemoryReservation {
-            controller: Arc::clone(self),
-            reserved: 0,
-        }
+        MemoryReservation { controller: Arc::clone(self), reserved: 0 }
     }
 
     /// Record that bytes were spilled to disk (for metrics)
@@ -558,8 +551,9 @@ unsafe impl Sync for MemoryController {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Arc;
+
+    use super::*;
 
     #[test]
     fn test_memory_size_parsing() {

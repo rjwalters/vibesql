@@ -1,7 +1,6 @@
 //! Test suite for WHERE clause predicate pushdown optimizer
 
-use super::table_refs::flatten_conjuncts;
-use super::*;
+use super::{table_refs::flatten_conjuncts, *};
 
 #[test]
 fn test_flatten_conjuncts_single() {
@@ -92,7 +91,8 @@ fn test_or_filter_extraction() {
     );
 
     // Build Q7-style OR predicate:
-    // (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
+    // (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name =
+    // 'FRANCE')
     let n1_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(Expression::ColumnRef {

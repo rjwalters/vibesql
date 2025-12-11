@@ -75,13 +75,25 @@ impl std::fmt::Display for CatalogError {
                 write!(f, "{}", vibe_msg!("catalog-table-already-exists", name = name.as_str()))
             }
             CatalogError::TableNotFound { table_name } => {
-                write!(f, "{}", vibe_msg!("catalog-table-not-found", table_name = table_name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("catalog-table-not-found", table_name = table_name.as_str())
+                )
             }
             CatalogError::ColumnAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("catalog-column-already-exists", name = name.as_str()))
             }
             CatalogError::ColumnNotFound { column_name, table_name } => {
-                write!(f, "{}", vibe_msg!("catalog-column-not-found", column_name = column_name.as_str(), table_name = table_name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-column-not-found",
+                        column_name = column_name.as_str(),
+                        table_name = table_name.as_str()
+                    )
+                )
             }
             CatalogError::SchemaAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("catalog-schema-already-exists", name = name.as_str()))
@@ -110,7 +122,16 @@ impl std::fmt::Display for CatalogError {
                     .map(|(t, c)| format!("{}.{}", t, c))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "{}", vibe_msg!("catalog-domain-in-use", domain_name = domain_name.as_str(), count = dependent_columns.len() as i64, columns = columns.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-domain-in-use",
+                        domain_name = domain_name.as_str(),
+                        count = dependent_columns.len() as i64,
+                        columns = columns.as_str()
+                    )
+                )
             }
             CatalogError::SequenceAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("catalog-sequence-already-exists", name = name.as_str()))
@@ -124,7 +145,16 @@ impl std::fmt::Display for CatalogError {
                     .map(|(t, c)| format!("{}.{}", t, c))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "{}", vibe_msg!("catalog-sequence-in-use", sequence_name = sequence_name.as_str(), count = dependent_columns.len() as i64, columns = columns.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-sequence-in-use",
+                        sequence_name = sequence_name.as_str(),
+                        count = dependent_columns.len() as i64,
+                        columns = columns.as_str()
+                    )
+                )
             }
             CatalogError::TypeAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("catalog-type-already-exists", name = name.as_str()))
@@ -142,13 +172,21 @@ impl std::fmt::Display for CatalogError {
                 write!(f, "{}", vibe_msg!("catalog-collation-not-found", name = name.as_str()))
             }
             CatalogError::CharacterSetAlreadyExists(name) => {
-                write!(f, "{}", vibe_msg!("catalog-character-set-already-exists", name = name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("catalog-character-set-already-exists", name = name.as_str())
+                )
             }
             CatalogError::CharacterSetNotFound(name) => {
                 write!(f, "{}", vibe_msg!("catalog-character-set-not-found", name = name.as_str()))
             }
             CatalogError::TranslationAlreadyExists(name) => {
-                write!(f, "{}", vibe_msg!("catalog-translation-already-exists", name = name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("catalog-translation-already-exists", name = name.as_str())
+                )
             }
             CatalogError::TranslationNotFound(name) => {
                 write!(f, "{}", vibe_msg!("catalog-translation-not-found", name = name.as_str()))
@@ -161,7 +199,16 @@ impl std::fmt::Display for CatalogError {
             }
             CatalogError::ViewInUse { view_name, dependent_views } => {
                 let views = dependent_views.join(", ");
-                write!(f, "{}", vibe_msg!("catalog-view-in-use", view_name = view_name.as_str(), count = dependent_views.len() as i64, views = views.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-view-in-use",
+                        view_name = view_name.as_str(),
+                        count = dependent_views.len() as i64,
+                        views = views.as_str()
+                    )
+                )
             }
             CatalogError::TriggerAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("catalog-trigger-already-exists", name = name.as_str()))
@@ -188,19 +235,47 @@ impl std::fmt::Display for CatalogError {
                 write!(f, "{}", vibe_msg!("catalog-procedure-not-found", name = name.as_str()))
             }
             CatalogError::ConstraintAlreadyExists(name) => {
-                write!(f, "{}", vibe_msg!("catalog-constraint-already-exists", name = name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("catalog-constraint-already-exists", name = name.as_str())
+                )
             }
             CatalogError::ConstraintNotFound(name) => {
                 write!(f, "{}", vibe_msg!("catalog-constraint-not-found", name = name.as_str()))
             }
             CatalogError::IndexAlreadyExists { index_name, table_name } => {
-                write!(f, "{}", vibe_msg!("catalog-index-already-exists", index_name = index_name.as_str(), table_name = table_name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-index-already-exists",
+                        index_name = index_name.as_str(),
+                        table_name = table_name.as_str()
+                    )
+                )
             }
             CatalogError::IndexNotFound { index_name, table_name } => {
-                write!(f, "{}", vibe_msg!("catalog-index-not-found", index_name = index_name.as_str(), table_name = table_name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-index-not-found",
+                        index_name = index_name.as_str(),
+                        table_name = table_name.as_str()
+                    )
+                )
             }
             CatalogError::CircularForeignKey { table_name, message } => {
-                write!(f, "{}", vibe_msg!("catalog-circular-foreign-key", table_name = table_name.as_str(), message = message.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "catalog-circular-foreign-key",
+                        table_name = table_name.as_str(),
+                        message = message.as_str()
+                    )
+                )
             }
         }
     }

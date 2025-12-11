@@ -25,9 +25,11 @@ impl Parser {
 
         match type_upper.as_str() {
             "INTEGER" | "INT" => Ok(vibesql_types::DataType::Integer),
-            "SIGNED" => Ok(vibesql_types::DataType::Integer), /* MySQL-specific: SIGNED is equivalent to */
+            "SIGNED" => Ok(vibesql_types::DataType::Integer), /* MySQL-specific: SIGNED is
+                                                                * equivalent to */
             // INTEGER (signed 32-bit integer)
-            "UNSIGNED" => Ok(vibesql_types::DataType::Unsigned), /* MySQL-specific: UNSIGNED is 64-bit */
+            "UNSIGNED" => Ok(vibesql_types::DataType::Unsigned), /* MySQL-specific: UNSIGNED is
+                                                                   * 64-bit */
             // unsigned integer
             "SMALLINT" => Ok(vibesql_types::DataType::Smallint),
             "BIGINT" | "LONG" => Ok(vibesql_types::DataType::Bigint),
@@ -605,7 +607,8 @@ impl Parser {
             }
             "VECTOR" => {
                 // Parse VECTOR(dimensions)
-                // Syntax: VECTOR(n) where n is the dimension count (e.g., VECTOR(1536) for OpenAI embeddings)
+                // Syntax: VECTOR(n) where n is the dimension count (e.g., VECTOR(1536) for OpenAI
+                // embeddings)
                 if !matches!(self.peek(), Token::LParen) {
                     return Err(ParseError {
                         message: "VECTOR type requires dimension specification: VECTOR(n)"

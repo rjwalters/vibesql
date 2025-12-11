@@ -1,5 +1,6 @@
-use rustyline::{error::ReadlineError, DefaultEditor};
 use std::time::SystemTime;
+
+use rustyline::{error::ReadlineError, DefaultEditor};
 use vibesql_l10n::vibe_msg;
 
 use crate::{
@@ -86,7 +87,10 @@ impl Repl {
                                         if let Err(e) = self.executor.save_database(path) {
                                             eprintln!(
                                                 "{}",
-                                                vibe_msg!("warning-auto-save-failed", error = e.to_string())
+                                                vibe_msg!(
+                                                    "warning-auto-save-failed",
+                                                    error = e.to_string()
+                                                )
                                             );
                                         }
                                     }
@@ -119,7 +123,10 @@ impl Repl {
         if self.has_modifications {
             if let Some(ref path) = self.database_path {
                 if let Err(e) = self.executor.save_database(path) {
-                    eprintln!("{}", vibe_msg!("warning-save-on-exit-failed", error = e.to_string()));
+                    eprintln!(
+                        "{}",
+                        vibe_msg!("warning-save-on-exit-failed", error = e.to_string())
+                    );
                 }
             }
         }

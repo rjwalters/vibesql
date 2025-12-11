@@ -35,9 +35,10 @@
 
 use std::time::Instant;
 
-use super::data::TPCERng;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
+
+use super::data::TPCERng;
 
 // =============================================================================
 // Transaction Inputs

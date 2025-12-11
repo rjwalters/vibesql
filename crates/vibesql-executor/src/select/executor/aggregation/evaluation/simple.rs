@@ -1,16 +1,15 @@
 //! Simple expression evaluation in aggregate context (literals, column refs, etc.)
 
+/// Re-import like_match for convenience
+use pattern::like_match;
+
 use super::super::super::builder::SelectExecutor;
+/// Import pattern matching function for LIKE evaluation
+use crate::evaluator::pattern;
 use crate::{
     errors::ExecutorError,
     evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
 };
-
-/// Import pattern matching function for LIKE evaluation
-use crate::evaluator::pattern;
-
-/// Re-import like_match for convenience
-use pattern::like_match;
 
 /// Evaluate expressions that may contain nested aggregates
 ///
@@ -298,7 +297,8 @@ pub(super) fn evaluate(
                 executor.evaluate_with_aggregates(value, group_rows, group_key, evaluator)?;
 
             // For now, delegate full interval evaluation to the standard evaluator
-            // This requires creating a new Interval expression with the evaluated value as a literal
+            // This requires creating a new Interval expression with the evaluated value as a
+            // literal
             let evaluated_expr = vibesql_ast::Expression::Interval {
                 value: Box::new(vibesql_ast::Expression::Literal(value_result)),
                 unit: match expr {
@@ -413,8 +413,9 @@ pub(super) fn evaluate_no_aggregates(
         // Literals can be evaluated without row context
         vibesql_ast::Expression::Literal(val) => Ok(val.clone()),
 
-        // All other simple expressions: use first row from group as context and delegate to evaluator
-        // This includes: ColumnRef, Wildcard, CurrentDate, CurrentTime, CurrentTimestamp, Default, etc.
+        // All other simple expressions: use first row from group as context and delegate to
+        // evaluator This includes: ColumnRef, Wildcard, CurrentDate, CurrentTime,
+        // CurrentTimestamp, Default, etc.
         _ => {
             if let Some(first_row) = group_rows.first() {
                 evaluator.eval(expr, first_row)

@@ -52,8 +52,8 @@ impl<'a> RowSelector<'a> {
 
     /// Analyze WHERE expression to see if it can use primary key index for fast lookup
     ///
-    /// Returns the primary key values if the expression is an equality (or conjunction of equalities)
-    /// on all primary key columns, otherwise returns None.
+    /// Returns the primary key values if the expression is an equality (or conjunction of
+    /// equalities) on all primary key columns, otherwise returns None.
     ///
     /// Supports:
     /// - Single-column PK: `WHERE pk = value`

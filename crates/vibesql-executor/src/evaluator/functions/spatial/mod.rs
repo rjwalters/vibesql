@@ -1,7 +1,8 @@
 //! Spatial/Geometric Query Functions
 //!
 //! Implements ST_* operations for working with spatial data types.
-//! Supports WKT (Well-Known Text) parsing, WKB (Well-Known Binary) format, SRID tracking, and spatial predicates.
+//! Supports WKT (Well-Known Text) parsing, WKB (Well-Known Binary) format, SRID tracking, and
+//! spatial predicates.
 //!
 //! Functions are organized as:
 //! - Constructor functions: Create geometry from text/binary
@@ -19,9 +20,10 @@ pub mod predicates;
 pub mod srid;
 pub(crate) mod wkb;
 
-use crate::errors::ExecutorError;
 use hex;
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// A geometry representation with SRID support (Phase 2+)
 /// Stores geometries internally for efficient processing

@@ -36,8 +36,7 @@ use vibesql_ast::arena::{
     Statement, Symbol, UpdateStmt,
 };
 
-use crate::keywords::Keyword;
-use crate::{Lexer, ParseError, Token};
+use crate::{keywords::Keyword, Lexer, ParseError, Token};
 
 /// Arena-based SQL parser.
 ///
@@ -750,9 +749,10 @@ pub fn parse_delete_to_owned(input: &str) -> Result<vibesql_ast::DeleteStmt, Par
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::arena::Expression;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_date_literal() {

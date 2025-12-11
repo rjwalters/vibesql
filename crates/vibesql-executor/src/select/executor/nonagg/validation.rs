@@ -9,8 +9,9 @@
 
 #![allow(clippy::needless_return, clippy::collapsible_if)]
 
-use crate::{errors::ExecutorError, schema::CombinedSchema, select::cte::CteResult};
 use std::collections::HashMap;
+
+use crate::{errors::ExecutorError, schema::CombinedSchema, select::cte::CteResult};
 
 /// Validate IN subqueries in WHERE clause before row iteration
 /// This ensures schema validation happens even when there are no rows to process

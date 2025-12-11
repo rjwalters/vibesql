@@ -5,8 +5,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-use crate::evaluator::compiled_case::CompiledCaseExpression;
-use crate::schema::CombinedSchema;
+use crate::{evaluator::compiled_case::CompiledCaseExpression, schema::CombinedSchema};
 
 fn create_test_schema() -> CombinedSchema {
     let table_schema = TableSchema::new(
@@ -86,7 +85,9 @@ fn test_compile_when_equals_then_literal() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Sunday",
+                )))),
             }],
             result: Expression::Literal(SqlValue::Integer(1)),
         }],
@@ -168,7 +169,9 @@ fn test_evaluate_literal_result() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Sunday",
+                )))),
             }],
             result: Expression::Literal(SqlValue::Integer(1)),
         }],
@@ -205,7 +208,9 @@ fn test_does_not_compile_simple_case_with_operand() {
             column: "day_name".to_string(),
         })),
         when_clauses: vec![CaseWhen {
-            conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))],
+            conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "Sunday",
+            )))],
             result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
         else_result: None,
@@ -230,7 +235,9 @@ fn test_does_not_compile_multiple_when_clauses() {
                         column: "day_name".to_string(),
                     }),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "Sunday",
+                    )))),
                 }],
                 result: Expression::Literal(SqlValue::Integer(1)),
             },
@@ -241,7 +248,9 @@ fn test_does_not_compile_multiple_when_clauses() {
                         column: "day_name".to_string(),
                     }),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Monday")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "Monday",
+                    )))),
                 }],
                 result: Expression::Literal(SqlValue::Integer(2)),
             },
@@ -267,7 +276,9 @@ fn test_does_not_compile_non_null_else() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Sunday",
+                )))),
             }],
             result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
@@ -317,7 +328,9 @@ fn test_does_not_compile_complex_result() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Sunday",
+                )))),
             }],
             result: Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
@@ -349,7 +362,9 @@ fn test_compiles_with_absent_else() {
                     column: "day_name".to_string(),
                 }),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Sunday",
+                )))),
             }],
             result: Expression::ColumnRef { table: None, column: "sales_price".to_string() },
         }],
@@ -369,7 +384,9 @@ fn test_literal_on_left_side_of_equality() {
         operand: None,
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
-                left: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sunday")))),
+                left: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Sunday",
+                )))),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::ColumnRef {
                     table: None,

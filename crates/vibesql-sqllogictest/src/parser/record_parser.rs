@@ -2,15 +2,16 @@
 
 #![allow(clippy::while_let_loop)]
 
-use std::fmt;
-use std::iter::Peekable;
+use std::{fmt, iter::Peekable};
 
 use itertools::Itertools;
 
-use crate::directive_parser::{ControlItem, ResultMode, SortMode};
-use crate::error_parser::ExpectedError;
-use crate::retry_parser::RetryConfig;
-use crate::{ColumnType, Location, ParseError, ParseErrorKind};
+use crate::{
+    directive_parser::{ControlItem, ResultMode, SortMode},
+    error_parser::ExpectedError,
+    retry_parser::RetryConfig,
+    ColumnType, Location, ParseError, ParseErrorKind,
+};
 
 const RESULTS_DELIMITER: &str = "----";
 

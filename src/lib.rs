@@ -17,7 +17,7 @@
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use vibesql::{storage::Database, parser::Parser, executor::SelectExecutor};
+//! use vibesql::{executor::SelectExecutor, parser::Parser, storage::Database};
 //!
 //! let mut db = Database::new();
 //!

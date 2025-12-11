@@ -208,7 +208,10 @@ fn test_binary_format_roundtrip() {
     // Verify specific data values
     let users_rows = users_table2.scan();
     assert_eq!(users_rows[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(users_rows[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+    assert_eq!(
+        users_rows[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+    );
     assert_eq!(users_rows[0].values[2], vibesql_types::SqlValue::Integer(30));
     assert_eq!(users_rows[0].values[3], vibesql_types::SqlValue::Boolean(true));
 
@@ -221,7 +224,10 @@ fn test_binary_format_roundtrip() {
     assert_eq!(products_table2.row_count(), 2);
 
     let products_rows = products_table2.scan();
-    assert_eq!(products_rows[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget")));
+    assert_eq!(
+        products_rows[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget"))
+    );
     assert_eq!(products_rows[0].values[2], vibesql_types::SqlValue::Double(19.99));
 
     // Step 6: Test auto-detection via Database::load()
@@ -703,7 +709,8 @@ fn test_index_data_populated_after_load() {
 
     // Verify index works before save
     let index_data_before = db.get_index_data("idx_customer").expect("Index should exist");
-    let alice_lookup_before = index_data_before.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+    let alice_lookup_before =
+        index_data_before.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
     assert!(
         alice_lookup_before.is_some() && !alice_lookup_before.unwrap().is_empty(),
         "Index should return results before save"
@@ -720,27 +727,29 @@ fn test_index_data_populated_after_load() {
 
     // Step 5: Verify index data is populated after load
     let index_data_after = db2.get_index_data("idx_customer").expect("Index data should exist");
-    let alice_lookup_after = index_data_after.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+    let alice_lookup_after =
+        index_data_after.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
     assert!(
         alice_lookup_after.is_some() && !alice_lookup_after.unwrap().is_empty(),
         "Index should return results after load (regression test for issue #3602)"
     );
 
     // Verify all entries are in the index
-    let bob_lookup = index_data_after.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
+    let bob_lookup =
+        index_data_after.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
     let charlie_lookup =
         index_data_after.get(&[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]);
-    assert!(
-        bob_lookup.is_some() && !bob_lookup.unwrap().is_empty(),
-        "Index should contain Bob"
-    );
+    assert!(bob_lookup.is_some() && !bob_lookup.unwrap().is_empty(), "Index should contain Bob");
     assert!(
         charlie_lookup.is_some() && !charlie_lookup.unwrap().is_empty(),
         "Index should contain Charlie"
     );
 
     // Step 6: Verify lookup_by_index works (high-level API)
-    let rows = db2.lookup_by_index("idx_customer", &[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+    let rows = db2.lookup_by_index(
+        "idx_customer",
+        &[vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+    );
     assert!(rows.is_ok(), "lookup_by_index should succeed");
     let rows = rows.unwrap();
     assert!(rows.is_some(), "lookup_by_index should find Alice");

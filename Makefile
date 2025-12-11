@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -139,6 +139,8 @@ help:
 	@echo "  make mysql-status       - Check MySQL Docker container status"
 	@echo ""
 	@echo "Utility targets:"
+	@echo "  make fmt                - Format code using nightly rustfmt"
+	@echo "  make fmt-check          - Check formatting without making changes"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make website            - Regenerate web dashboard data from benchmark database"
 	@echo "  make all                - Build and test (runs in BACKGROUND by default)"
@@ -475,6 +477,16 @@ analyze-benchmarks:
 #
 # Utility Targets
 #
+
+# Format code using nightly rustfmt (required for all config options)
+fmt:
+	@echo "Formatting code with nightly rustfmt..."
+	cargo +nightly fmt
+
+# Check formatting without making changes
+fmt-check:
+	@echo "Checking code formatting..."
+	cargo +nightly fmt --check
 
 # Clean build artifacts
 clean:

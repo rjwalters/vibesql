@@ -128,14 +128,8 @@ fn test_on_duplicate_key_update_invalidates_columnar_cache() {
         updated_stocks.contains(&150),
         "New stock 150 should exist after ON DUPLICATE KEY UPDATE"
     );
-    assert!(
-        updated_stocks.contains(&200),
-        "Unchanged stock 200 should still exist"
-    );
-    assert!(
-        updated_stocks.contains(&300),
-        "Unchanged stock 300 should still exist"
-    );
+    assert!(updated_stocks.contains(&200), "Unchanged stock 200 should still exist");
+    assert!(updated_stocks.contains(&300), "Unchanged stock 300 should still exist");
 
     // Verify cache was invalidated and re-converted
     let final_stats = db.columnar_cache_stats();
@@ -194,11 +188,15 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
         "users".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
             ColumnSchema::new("score".to_string(), DataType::Integer, true),
         ],
-        Some(vec!["id".to_string()]),                // Primary key
-        vec![vec!["name".to_string()]],              // Unique constraint on name
+        Some(vec!["id".to_string()]),   // Primary key
+        vec![vec!["name".to_string()]], // Unique constraint on name
     );
     db.create_table(schema).unwrap();
 
@@ -230,7 +228,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)), // Different id
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice"))), // Same name (conflict)
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice"))), /* Same name (conflict) */
             vibesql_ast::Expression::Literal(SqlValue::Integer(999)), // New score
         ]]),
         conflict_clause: None,

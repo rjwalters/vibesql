@@ -5,8 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use super::context::JoinOrderContext;
-use super::state::JoinCost;
+use super::{context::JoinOrderContext, state::JoinCost};
 
 impl JoinOrderContext {
     /// Find optimal order using greedy heuristic
@@ -15,9 +14,8 @@ impl JoinOrderContext {
     /// exhaustive search is impractical. It uses a greedy strategy:
     ///
     /// 1. Start with the smallest table (by row count)
-    /// 2. At each step, choose the next table that:
-    ///    a) Has a join condition with already-joined tables (if possible)
-    ///    b) Produces the smallest intermediate result
+    /// 2. At each step, choose the next table that: a) Has a join condition with already-joined
+    ///    tables (if possible) b) Produces the smallest intermediate result
     /// 3. If no joinable tables remain, pick the smallest unjoined table (Cartesian product)
     ///
     /// Time complexity: O(n²) where n = number of tables

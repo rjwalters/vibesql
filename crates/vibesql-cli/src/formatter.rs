@@ -45,7 +45,14 @@ impl ResultFormatter {
 
         // Print timing if available (not for raw format)
         if let Some(time_ms) = result.execution_time_ms {
-            println!("{}", vibe_msg!("rows-with-time", count = result.row_count as i64, time = format!("{:.3}", time_ms / 1000.0)));
+            println!(
+                "{}",
+                vibe_msg!(
+                    "rows-with-time",
+                    count = result.row_count as i64,
+                    time = format!("{:.3}", time_ms / 1000.0)
+                )
+            );
         } else {
             println!("{}", vibe_msg!("rows-count", count = result.row_count as i64));
         }

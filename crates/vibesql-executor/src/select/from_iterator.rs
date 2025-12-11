@@ -226,8 +226,9 @@ impl Iterator for FromIterator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn test_row(id: i32) -> Row {
         Row::new(vec![SqlValue::Integer(id as i64)])

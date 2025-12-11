@@ -115,10 +115,7 @@ async fn test_handle_change_notifies_subscribers() {
     // Simulate a change to users table
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: 0,
-            },
+            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
             &db,
         )
         .await;
@@ -148,10 +145,7 @@ async fn test_handle_change_ignores_unrelated_tables() {
     // Simulate a change to orders table (not subscribed)
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert {
-                table_name: "orders".to_string(),
-                row_index: 0,
-            },
+            vibesql_storage::ChangeEvent::Insert { table_name: "orders".to_string(), row_index: 0 },
             &db,
         )
         .await;
@@ -214,10 +208,7 @@ async fn test_results_changed_detection() {
     // Trigger change notification
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: 0,
-            },
+            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
             &db,
         )
         .await;
@@ -255,10 +246,7 @@ async fn test_no_notification_when_unchanged() {
     // Trigger change (but data didn't actually change since we didn't insert)
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: 0,
-            },
+            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
             &db,
         )
         .await;
@@ -322,10 +310,7 @@ async fn test_delta_update_on_insert() {
     // Trigger change notification
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: 1,
-            },
+            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 1 },
             &db,
         )
         .await;
@@ -386,10 +371,7 @@ async fn test_delta_update_on_delete() {
     // Trigger change notification
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Delete {
-                table_name: "users".to_string(),
-                row_index: 1,
-            },
+            vibesql_storage::ChangeEvent::Delete { table_name: "users".to_string(), row_index: 1 },
             &db,
         )
         .await;
@@ -432,10 +414,7 @@ fn test_global_limit_exceeded() {
 
     // Third subscription should fail with global limit exceeded
     let result = manager.subscribe("SELECT * FROM users WHERE id = 2".to_string(), tx3);
-    assert!(matches!(
-        result,
-        Err(SubscriptionError::GlobalLimitExceeded { current: 2, max: 2 })
-    ));
+    assert!(matches!(result, Err(SubscriptionError::GlobalLimitExceeded { current: 2, max: 2 })));
 
     // Metrics should reflect the limit exceeded event
     assert_eq!(manager.limit_exceeded_count(), 1);

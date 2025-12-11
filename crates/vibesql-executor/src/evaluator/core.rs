@@ -3,11 +3,9 @@
 //! This module provides shared evaluation logic used by both ExpressionEvaluator
 //! and CombinedExpressionEvaluator.
 
-use crate::errors::ExecutorError;
-
 // Re-export the evaluator types for backwards compatibility
-pub use super::combined_core::CombinedExpressionEvaluator;
-pub use super::single::ExpressionEvaluator;
+pub use super::{combined_core::CombinedExpressionEvaluator, single::ExpressionEvaluator};
+use crate::errors::ExecutorError;
 
 /// Static version of eval_binary_op for shared logic
 ///

@@ -1,20 +1,23 @@
 //! Core Runner struct and configuration.
 
-use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
-use std::process::Command;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+    process::Command,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use futures::executor::block_on;
 
-use crate::error_handling::AnyError;
-use crate::error_handling::TestError;
-use crate::output::{ColumnTypeValidator, DBOutput, Normalizer, RecordOutput, Validator};
-use crate::parser::*;
-use crate::substitution::Substitution;
-use crate::{ColumnType, Connections, MakeConnection};
+use crate::{
+    error_handling::{AnyError, TestError},
+    output::{ColumnTypeValidator, DBOutput, Normalizer, RecordOutput, Validator},
+    parser::*,
+    substitution::Substitution,
+    ColumnType, Connections, MakeConnection,
+};
 
 /// The async database to be tested.
 #[async_trait]

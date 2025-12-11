@@ -20,8 +20,7 @@ use vibesql_storage::Database;
 // Import TPC-H infrastructure
 #[path = "../benches/tpch/mod.rs"]
 mod tpch;
-use tpch::queries::*;
-use tpch::schema::load_vibesql;
+use tpch::{queries::*, schema::load_vibesql};
 
 /// Helper to execute a TPC-H query and return row count
 fn execute_tpch_query(db: &Database, sql: &str) -> Result<usize, String> {
@@ -183,8 +182,8 @@ fn test_q11_q13_batch() {
 fn test_q18_in_subquery_with_having() {
     // Q18: Large Volume Customer
     // Tests IN subquery with GROUP BY and HAVING clause
-    // Pattern: o_orderkey IN (SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300)
-    // Issue #2898: Query was crashing/returning 0 rows
+    // Pattern: o_orderkey IN (SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING
+    // SUM(l_quantity) > 300) Issue #2898: Query was crashing/returning 0 rows
 
     let db = load_vibesql(0.01);
 

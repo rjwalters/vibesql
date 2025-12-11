@@ -1,11 +1,12 @@
 //! Tests for multiple trigger coordination and execution ordering
 
-use super::{count_audit_rows, create_audit_table, create_users_table};
-use crate::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_ast::{
     CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
 };
 use vibesql_storage::Database;
+
+use super::{count_audit_rows, create_audit_table, create_users_table};
+use crate::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 
 #[test]
 fn test_multiple_triggers_fire_in_order() {
@@ -49,7 +50,9 @@ fn test_multiple_triggers_fire_in_order() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -88,7 +91,9 @@ fn test_trigger_with_multiple_statements() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -152,7 +157,9 @@ fn test_before_trigger_executes_first() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

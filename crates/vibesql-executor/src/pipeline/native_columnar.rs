@@ -7,13 +7,13 @@
 use vibesql_ast::{Expression, SelectItem};
 use vibesql_storage::Row;
 
-use crate::errors::ExecutorError;
-
 use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
-
-use crate::select::columnar::{
-    extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateOp, AggregateSource,
-    AggregateSpec, ColumnarBatch,
+use crate::{
+    errors::ExecutorError,
+    select::columnar::{
+        extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateOp,
+        AggregateSource, AggregateSpec, ColumnarBatch,
+    },
 };
 
 /// Native columnar execution pipeline.
@@ -285,8 +285,9 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             .count();
 
         // Issue #4233: columnar_group_by_batch returns [group_keys..., aggregates...] format.
-        // If the SELECT list doesn't include all GROUP BY columns (e.g., SELECT AVG(col) FROM t GROUP BY col),
-        // the result format won't match the SELECT list. Fall back to row-oriented execution.
+        // If the SELECT list doesn't include all GROUP BY columns (e.g., SELECT AVG(col) FROM t
+        // GROUP BY col), the result format won't match the SELECT list. Fall back to
+        // row-oriented execution.
         if has_group_by && select_non_agg_count != group_by_count {
             return Err(ExecutorError::UnsupportedFeature(format!(
                 "GROUP BY with SELECT list that doesn't include all group keys not supported in native columnar (SELECT has {} non-aggs, GROUP BY has {} keys)",
@@ -475,10 +476,11 @@ impl NativeColumnarPipeline {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema::CombinedSchema;
     use vibesql_catalog::TableSchema;
     use vibesql_types::SqlValue;
+
+    use super::*;
+    use crate::schema::CombinedSchema;
 
     fn create_test_setup() -> (vibesql_storage::Database, CombinedSchema) {
         let database = vibesql_storage::Database::new();

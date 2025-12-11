@@ -1,6 +1,9 @@
-use super::comparison::compare_values;
-use super::predicates::{ColumnPredicate, CompareOp, PredicateTree};
 use vibesql_types::SqlValue;
+
+use super::{
+    comparison::compare_values,
+    predicates::{ColumnPredicate, CompareOp, PredicateTree},
+};
 
 /// Evaluate a predicate tree on a row
 ///

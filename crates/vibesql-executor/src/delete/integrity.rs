@@ -1,8 +1,9 @@
 //! Foreign key integrity checking and enforcement for DELETE operations
 
-use crate::errors::ExecutorError;
 use vibesql_catalog::ReferentialAction;
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// Handle referential integrity for a row being deleted.
 ///

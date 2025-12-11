@@ -1,7 +1,8 @@
 //! Tests for subquery-to-join transformations
 
-use super::*;
 use vibesql_ast::{BinaryOperator, GroupByClause, JoinType, SelectItem};
+
+use super::*;
 
 fn simple_table_from(name: &str) -> FromClause {
     FromClause::Table { name: name.to_string(), alias: None, column_aliases: None }
@@ -91,7 +92,10 @@ fn test_complex_subquery_unchanged() {
     let transformed = transform_subqueries_to_joins(&stmt);
 
     // Should be unchanged because subquery has LIMIT
-    assert!(transformed.where_clause.is_some(), "Complex subquery with LIMIT should remain in WHERE");
+    assert!(
+        transformed.where_clause.is_some(),
+        "Complex subquery with LIMIT should remain in WHERE"
+    );
     match transformed.from {
         Some(FromClause::Table { .. }) => {} // Good, no join created
         _ => panic!("Complex subquery with LIMIT should not create JOIN"),
@@ -218,7 +222,8 @@ fn test_multiple_subqueries_to_joins() {
 fn test_nested_in_subquery_self_join_column_qualification() {
     // Test that nested IN subqueries in self-joins properly qualify the outer expression
     // This is the bug from issue #2630:
-    // SELECT pk FROM tab0 WHERE col3 IN (SELECT col0 FROM tab0 WHERE col0 IN (...) AND col4 >= 7680.91)
+    // SELECT pk FROM tab0 WHERE col3 IN (SELECT col0 FROM tab0 WHERE col0 IN (...) AND col4 >=
+    // 7680.91)
     //
     // When the outer IN is transformed to a SEMI JOIN, the nested IN's outer column (col0)
     // should be qualified with the subquery alias (__subquery_TAB0), not left unqualified.
@@ -315,8 +320,8 @@ fn qualified_column_ref(table: &str, column: &str) -> Expression {
 fn test_exists_self_join_column_qualification() {
     // Test EXISTS with self-join aliasing, similar to TPC-H Q21 pattern:
     // SELECT * FROM lineitem l1 WHERE EXISTS (
-    //   SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <> l1.l_suppkey
-    // )
+    //   SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <>
+    // l1.l_suppkey )
     //
     // The EXISTS subquery references the same table with a different alias.
     // After transformation to a SEMI join, the join condition should properly
@@ -341,7 +346,8 @@ fn test_exists_self_join_column_qualification() {
     };
 
     // Create correlated EXISTS subquery:
-    // EXISTS (SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <> l1.l_suppkey)
+    // EXISTS (SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <>
+    // l1.l_suppkey)
     let exists_subquery = SelectStmt {
         with_clause: None,
         distinct: false,
@@ -433,8 +439,8 @@ fn test_exists_self_join_column_qualification() {
 fn test_not_exists_self_join_column_qualification() {
     // Test NOT EXISTS with self-join aliasing, similar to TPC-H Q21 pattern:
     // SELECT * FROM lineitem l1 WHERE NOT EXISTS (
-    //   SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND l3.l_receiptdate > l3.l_commitdate
-    // )
+    //   SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND l3.l_receiptdate >
+    // l3.l_commitdate )
     //
     // NOT EXISTS should transform to an ANTI join with proper alias handling.
 
@@ -457,7 +463,8 @@ fn test_not_exists_self_join_column_qualification() {
     };
 
     // Create correlated NOT EXISTS subquery:
-    // NOT EXISTS (SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND l3.l_receiptdate > l3.l_commitdate)
+    // NOT EXISTS (SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND
+    // l3.l_receiptdate > l3.l_commitdate)
     let not_exists_subquery = SelectStmt {
         with_clause: None,
         distinct: false,
@@ -604,16 +611,12 @@ fn test_conjunction_exists_to_semi_join() {
     let predicate1 = Expression::BinaryOp {
         op: BinaryOperator::GreaterThanOrEqual,
         left: Box::new(column_ref("o_orderdate")),
-        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "1993-07-01".into(),
-        ))),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("1993-07-01".into()))),
     };
     let predicate2 = Expression::BinaryOp {
         op: BinaryOperator::LessThan,
         left: Box::new(column_ref("o_orderdate")),
-        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "1993-10-01".into(),
-        ))),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("1993-10-01".into()))),
     };
     let exists_expr = Expression::Exists { subquery: Box::new(exists_subquery), negated: false };
 
@@ -634,10 +637,7 @@ fn test_conjunction_exists_to_semi_join() {
     }
 
     // Remaining WHERE should be a Conjunction with the two predicates
-    assert!(
-        transformed.where_clause.is_some(),
-        "Other predicates should remain in WHERE clause"
-    );
+    assert!(transformed.where_clause.is_some(), "Other predicates should remain in WHERE clause");
     match &transformed.where_clause {
         Some(Expression::Conjunction(children)) => {
             assert_eq!(children.len(), 2, "Should have 2 remaining predicates");
@@ -719,10 +719,7 @@ fn test_conjunction_not_exists_to_anti_join() {
     }
 
     // Remaining WHERE should have the single predicate (not a Conjunction anymore)
-    assert!(
-        transformed.where_clause.is_some(),
-        "Other predicate should remain in WHERE clause"
-    );
+    assert!(transformed.where_clause.is_some(), "Other predicate should remain in WHERE clause");
 }
 
 #[test]
@@ -760,10 +757,7 @@ fn test_conjunction_in_to_semi_join() {
     }
 
     // Remaining WHERE should have just the predicate
-    assert!(
-        transformed.where_clause.is_some(),
-        "Other predicate should remain in WHERE clause"
-    );
+    assert!(transformed.where_clause.is_some(), "Other predicate should remain in WHERE clause");
 }
 
 #[test]
@@ -801,10 +795,7 @@ fn test_conjunction_not_in_to_anti_join() {
     }
 
     // Remaining WHERE should have just the predicate
-    assert!(
-        transformed.where_clause.is_some(),
-        "Other predicate should remain in WHERE clause"
-    );
+    assert!(transformed.where_clause.is_some(), "Other predicate should remain in WHERE clause");
 }
 
 #[test]
@@ -827,9 +818,7 @@ fn test_conjunction_preserves_all_other_predicates() {
     let pred3 = Expression::BinaryOp {
         op: BinaryOperator::LessThan,
         left: Box::new(column_ref("o_orderdate")),
-        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar(
-            "1995-01-01".into(),
-        ))),
+        right: Box::new(Expression::Literal(vibesql_types::SqlValue::Varchar("1995-01-01".into()))),
     };
     let in_expr = Expression::In {
         expr: Box::new(column_ref("o_orderkey")),
@@ -845,10 +834,7 @@ fn test_conjunction_preserves_all_other_predicates() {
     // Should have created a SEMI JOIN
     match &transformed.from {
         Some(FromClause::Join { join_type, .. }) => {
-            assert!(
-                matches!(join_type, JoinType::Semi),
-                "IN should transform to SEMI join"
-            );
+            assert!(matches!(join_type, JoinType::Semi), "IN should transform to SEMI join");
         }
         _ => panic!("Expected SEMI JOIN in FROM clause"),
     }
@@ -856,11 +842,7 @@ fn test_conjunction_preserves_all_other_predicates() {
     // Remaining WHERE should be a Conjunction with exactly 3 predicates
     match &transformed.where_clause {
         Some(Expression::Conjunction(children)) => {
-            assert_eq!(
-                children.len(),
-                3,
-                "Should have all 3 non-subquery predicates remaining"
-            );
+            assert_eq!(children.len(), 3, "Should have all 3 non-subquery predicates remaining");
         }
         _ => panic!("Expected Conjunction with 3 predicates in WHERE clause"),
     }
@@ -916,8 +898,5 @@ fn test_conjunction_multiple_subqueries_iterative() {
     }
 
     // Remaining WHERE should have just the one predicate
-    assert!(
-        transformed.where_clause.is_some(),
-        "Simple predicate should remain in WHERE clause"
-    );
+    assert!(transformed.where_clause.is_some(), "Simple predicate should remain in WHERE clause");
 }

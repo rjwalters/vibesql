@@ -34,15 +34,23 @@ fn test_simple_case_basic_match() {
         })),
         when_clauses: vec![
             vibesql_ast::CaseWhen {
-                conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))],
+                conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "active",
+                )))],
                 result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Active User"))),
             },
             vibesql_ast::CaseWhen {
-                conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("inactive")))],
-                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Inactive User"))),
+                conditions: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "inactive",
+                )))],
+                result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Inactive User",
+                ))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Unknown"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "Unknown",
+        ))))),
     };
 
     // Test with 'active' status
@@ -88,7 +96,9 @@ fn test_simple_case_null_handling() {
             conditions: vec![Expression::Literal(SqlValue::Null)],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Null Status"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Not Null"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "Not Null",
+        ))))),
     };
 
     // Test with NULL status
@@ -131,7 +141,9 @@ fn test_searched_case_basic() {
                 result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Medium"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("High"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "High",
+        ))))),
     };
 
     // Test value = 25 (should match first condition)
@@ -175,7 +187,9 @@ fn test_searched_case_null_condition() {
             conditions: vec![Expression::Literal(SqlValue::Null)],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("yes"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "no",
+        ))))),
     };
 
     let row = Row::new(vec![
@@ -238,7 +252,9 @@ fn test_case_lazy_evaluation() {
                 result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("second"))),
             },
         ],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("other"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "other",
+        ))))),
     };
 
     let row = Row::new(vec![
@@ -269,7 +285,9 @@ fn test_case_comma_separated_matching_first() {
             ],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("match"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "no",
+        ))))),
     };
 
     // Test with value = 2 (matches first condition in list)
@@ -298,7 +316,9 @@ fn test_case_comma_separated_matching_last() {
             ],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("match"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "no",
+        ))))),
     };
 
     // Test with value = 4 (matches last condition in list)
@@ -327,7 +347,9 @@ fn test_case_comma_separated_no_match() {
             ],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("match"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("no"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "no",
+        ))))),
     };
 
     // Test with value = 5 (no match, should return ELSE)
@@ -416,7 +438,9 @@ fn test_case_comma_separated_varchar() {
             ],
             result: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("open"))),
         }],
-        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("closed"))))),
+        else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "closed",
+        ))))),
     };
 
     // Test with status = 'pending' (matches second condition in list)

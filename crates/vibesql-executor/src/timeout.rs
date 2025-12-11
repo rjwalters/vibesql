@@ -31,8 +31,7 @@
 
 use instant::Instant;
 
-use crate::errors::ExecutorError;
-use crate::limits::MAX_QUERY_EXECUTION_SECONDS;
+use crate::{errors::ExecutorError, limits::MAX_QUERY_EXECUTION_SECONDS};
 
 /// Recommended interval for timeout checks in hot loops.
 /// Checking every 1000 iterations balances responsiveness with overhead.
@@ -106,9 +105,9 @@ impl Default for TimeoutContext {
 
 #[cfg(test)]
 mod tests {
+    use std::{thread::sleep, time::Duration};
+
     use super::*;
-    use std::thread::sleep;
-    use std::time::Duration;
 
     #[test]
     fn test_timeout_check_passes_within_limit() {

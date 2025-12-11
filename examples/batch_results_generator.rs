@@ -10,9 +10,11 @@ use regex::Regex;
  * Usage: cargo run --example batch_results_generator [--filter category]
  */
 use vibesql::catalog::{ColumnSchema, TableSchema};
-use vibesql::parser::Parser;
-use vibesql::storage::{Database, Row};
-use vibesql::types::{DataType, SqlValue, StringValue};
+use vibesql::{
+    parser::Parser,
+    storage::{Database, Row},
+    types::{DataType, SqlValue, StringValue},
+};
 
 // Import database creation functions from test file
 // (We'll inline them for now since we can't easily import from tests)

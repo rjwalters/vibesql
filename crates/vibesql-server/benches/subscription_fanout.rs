@@ -18,12 +18,10 @@
 //! | Fanout to 10K subs | < 10ms |
 //! | Concurrent ops (100 threads) | No deadlocks, linear scaling |
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::hint::black_box;
-use std::sync::Arc;
-use std::thread;
-use tokio::sync::mpsc;
+use std::{hint::black_box, sync::Arc, thread};
 
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use tokio::sync::mpsc;
 use vibesql_server::subscription::{SubscriptionId, SubscriptionManager, SubscriptionUpdate};
 
 /// Create a SubscriptionManager with N subscriptions all watching the same table
@@ -227,7 +225,10 @@ fn bench_channel_fanout(c: &mut Criterion) {
                 },
                 |(senders, receivers)| async move {
                     // Benchmark: send to all channels
-                    let update = SubscriptionUpdate::Full { subscription_id: SubscriptionId::new(), rows: vec![] };
+                    let update = SubscriptionUpdate::Full {
+                        subscription_id: SubscriptionId::new(),
+                        rows: vec![],
+                    };
                     for sender in &senders {
                         let _ = sender.try_send(update.clone());
                     }

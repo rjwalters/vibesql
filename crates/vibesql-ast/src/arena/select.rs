@@ -2,8 +2,10 @@
 
 use bumpalo::collections::Vec as BumpVec;
 
-use super::expression::{Expression, OrderByItem};
-use super::interner::Symbol;
+use super::{
+    expression::{Expression, OrderByItem},
+    interner::Symbol,
+};
 
 /// Common Table Expression (CTE) definition
 #[derive(Debug, Clone, PartialEq)]

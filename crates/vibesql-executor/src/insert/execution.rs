@@ -1,5 +1,6 @@
-use crate::{dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker};
 use vibesql_storage::statistics::CostEstimator;
+
+use crate::{dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker};
 
 /// Execute an INSERT statement
 /// Returns number of rows inserted
@@ -101,12 +102,12 @@ fn execute_insert_internal(
     // This helps with profiling and can inform future batch size decisions
     if std::env::var("DML_COST_DEBUG").is_ok() {
         if let Some(index_info) = db.get_table_index_info(&stmt.table_name) {
-            // Get table statistics for cost estimation (use cached if available, or fallback to estimate)
+            // Get table statistics for cost estimation (use cached if available, or fallback to
+            // estimate)
             if let Some(table) = db.get_table(&stmt.table_name) {
-                let table_stats = table
-                    .get_statistics()
-                    .cloned()
-                    .unwrap_or_else(|| vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count()));
+                let table_stats = table.get_statistics().cloned().unwrap_or_else(|| {
+                    vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count())
+                });
                 let cost_estimator = CostEstimator::default();
                 let estimated_cost =
                     cost_estimator.estimate_insert(rows_to_insert.len(), &table_stats, &index_info);
@@ -144,7 +145,8 @@ fn execute_insert_internal(
         let mut full_row_values = vec![vibesql_types::SqlValue::Null; schema.columns.len()];
 
         for (expr, (col_idx, data_type)) in value_exprs.iter().zip(target_column_info.iter()) {
-            // Evaluate expression (literals, DEFAULT, procedural variables, and trigger pseudo-variables)
+            // Evaluate expression (literals, DEFAULT, procedural variables, and trigger
+            // pseudo-variables)
             let value = super::defaults::evaluate_insert_expression_with_trigger_context(
                 expr,
                 &schema.columns[*col_idx],
@@ -170,7 +172,8 @@ fn execute_insert_internal(
         }
 
         // Validate all constraints in a single pass and extract index keys
-        // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause or ON DUPLICATE KEY UPDATE
+        // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause or ON DUPLICATE KEY
+        // UPDATE
         let skip_duplicate_checks =
             matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
                 || stmt.on_duplicate_key_update.is_some();
@@ -253,18 +256,18 @@ fn execute_insert_internal(
                 let rows: Vec<vibesql_storage::Row> =
                     chunk.iter().map(|v| vibesql_storage::Row::new(v.clone())).collect();
 
-                rows_inserted += db
-                    .insert_rows_batch(&stmt.table_name, rows)
-                    .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
+                rows_inserted += db.insert_rows_batch(&stmt.table_name, rows).map_err(|e| {
+                    ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
+                })?;
             }
         } else {
             // Single batch insert for low-cost tables
             let rows: Vec<vibesql_storage::Row> =
                 validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
 
-            rows_inserted = db
-                .insert_rows_batch(&stmt.table_name, rows)
-                .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
+            rows_inserted = db.insert_rows_batch(&stmt.table_name, rows).map_err(|e| {
+                ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
+            })?;
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
@@ -389,7 +392,8 @@ fn execute_insert_internal(
 
     // Check all assertions after INSERT completes (SQL:1999 Feature F671/F672)
     // This ensures database-wide integrity constraints are maintained
-    if let Err(assertion_error) = crate::advanced_objects::AssertionChecker::check_all_assertions(db)
+    if let Err(assertion_error) =
+        crate::advanced_objects::AssertionChecker::check_all_assertions(db)
     {
         // Rollback: Delete the rows we just inserted
         if let Some(start_index) = row_count_before_all {

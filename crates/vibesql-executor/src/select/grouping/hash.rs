@@ -1,17 +1,16 @@
-use ahash::AHashMap;
+#[cfg(feature = "parallel")]
+use std::sync::Arc;
 
+use ahash::AHashMap;
 #[cfg(feature = "parallel")]
 use crossbeam_deque::{Injector, Steal, Worker};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-#[cfg(feature = "parallel")]
-use std::sync::Arc;
-
-#[cfg(feature = "parallel")]
-use crate::timeout::TimeoutContext;
 
 #[cfg(feature = "parallel")]
 use crate::select::morsel::{global_config, Morsel};
+#[cfg(feature = "parallel")]
+use crate::timeout::TimeoutContext;
 
 /// Grouped rows: (group key values, rows in group)
 pub type GroupedRows = Vec<(Vec<vibesql_types::SqlValue>, Vec<vibesql_storage::Row>)>;
@@ -332,7 +331,10 @@ fn group_rows_parallel_simple<'a>(
     // Phase 1: Parallel map - each thread groups its chunk with a thread-local evaluator
     // Returns (chunk_start_index, local_groups with local indices) for each chunk
     let thread_results: Vec<
-        Result<(usize, AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>>), crate::errors::ExecutorError>,
+        Result<
+            (usize, AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>>),
+            crate::errors::ExecutorError,
+        >,
     > = rows
         .par_chunks(chunk_size.max(1))
         .enumerate()

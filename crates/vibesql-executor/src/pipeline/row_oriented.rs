@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use vibesql_ast::{Expression, SelectItem};
 use vibesql_storage::Row;
 
+use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 use crate::{
     errors::ExecutorError,
     select::{
@@ -17,8 +18,6 @@ use crate::{
     },
     SelectExecutor,
 };
-
-use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 
 /// Row-oriented execution pipeline.
 ///
@@ -238,10 +237,11 @@ impl ExecutionPipeline for RowOrientedPipeline<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema::CombinedSchema;
     use vibesql_catalog::TableSchema;
     use vibesql_types::SqlValue;
+
+    use super::*;
+    use crate::schema::CombinedSchema;
 
     fn create_test_setup() -> (vibesql_storage::Database, CombinedSchema) {
         let database = vibesql_storage::Database::new();

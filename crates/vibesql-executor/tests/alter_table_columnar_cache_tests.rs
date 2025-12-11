@@ -7,8 +7,8 @@
 //! Related: #3933
 
 use vibesql_ast::{
-    AddColumnStmt, AlterColumnStmt, AlterTableStmt, ChangeColumnStmt, ColumnDef,
-    DropColumnStmt, ModifyColumnStmt,
+    AddColumnStmt, AlterColumnStmt, AlterTableStmt, ChangeColumnStmt, ColumnDef, DropColumnStmt,
+    ModifyColumnStmt,
 };
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{AlterTableExecutor, InsertExecutor};
@@ -143,10 +143,7 @@ fn test_drop_column_invalidates_columnar_cache() {
 
     // Verify the column was dropped
     assert_eq!(updated_columnar.column_count(), 2, "Should have 2 columns after DROP COLUMN");
-    assert!(
-        updated_columnar.get_column("value").is_none(),
-        "value column should no longer exist"
-    );
+    assert!(updated_columnar.get_column("value").is_none(), "value column should no longer exist");
     assert!(updated_columnar.get_column("id").is_some(), "id column should still exist");
     assert!(updated_columnar.get_column("name").is_some(), "name column should still exist");
 
@@ -236,10 +233,7 @@ fn test_change_column_invalidates_columnar_cache() {
     // Warm the columnar cache
     let initial_columnar = db.get_columnar("test_table").unwrap().expect("Table should exist");
     assert!(initial_columnar.get_column("value").is_some(), "value column should exist");
-    assert!(
-        initial_columnar.get_column("amount").is_none(),
-        "amount column should not exist yet"
-    );
+    assert!(initial_columnar.get_column("amount").is_none(), "amount column should not exist yet");
 
     let initial_stats = db.columnar_cache_stats();
     assert_eq!(initial_stats.conversions, 1);
@@ -267,10 +261,7 @@ fn test_change_column_invalidates_columnar_cache() {
         updated_columnar.get_column("value").is_none(),
         "old 'value' column should no longer exist"
     );
-    assert!(
-        updated_columnar.get_column("amount").is_some(),
-        "new 'amount' column should exist"
-    );
+    assert!(updated_columnar.get_column("amount").is_some(), "new 'amount' column should exist");
 
     // Verify values are preserved
     let amount_col = updated_columnar.get_column("amount").expect("amount column should exist");
@@ -429,10 +420,7 @@ fn test_alter_column_drop_default_invalidates_cache() {
 
     let schema = TableSchema::with_primary_key(
         "test_table".to_string(),
-        vec![
-            ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            col_schema,
-        ],
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false), col_schema],
         vec!["id".to_string()],
     );
     db.create_table(schema).unwrap();
@@ -552,7 +540,8 @@ fn test_rename_table_invalidates_columnar_cache() {
     assert!(db.get_columnar("test_table").unwrap().is_none());
 
     // New table should have the data
-    let renamed_columnar = db.get_columnar("renamed_table").unwrap().expect("Renamed table should exist");
+    let renamed_columnar =
+        db.get_columnar("renamed_table").unwrap().expect("Renamed table should exist");
     assert_eq!(renamed_columnar.row_count(), 2);
     assert_eq!(renamed_columnar.column_count(), 3);
 
@@ -602,8 +591,5 @@ fn test_alter_invalidates_prewarmed_cache() {
     // Should get fresh data with new column
     let columnar = db.get_columnar("test_table").unwrap().expect("Table should exist");
     assert_eq!(columnar.column_count(), 4, "Should have 4 columns after ADD");
-    assert!(
-        columnar.get_column("new_col").is_some(),
-        "New column should be visible"
-    );
+    assert!(columnar.get_column("new_col").is_some(), "New column should be visible");
 }

@@ -1,8 +1,6 @@
 //! Quick integration test for MySQL spatial data types support
 
-use vibesql::executor::CreateTableExecutor;
-use vibesql::parser::Parser;
-use vibesql::storage::Database;
+use vibesql::{executor::CreateTableExecutor, parser::Parser, storage::Database};
 
 fn main() {
     let mut db = Database::new();

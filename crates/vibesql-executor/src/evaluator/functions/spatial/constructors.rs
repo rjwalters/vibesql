@@ -2,9 +2,10 @@
 //!
 //! Creates geometry from text (WKT) and binary (WKB) formats.
 
+use vibesql_types::SqlValue;
+
 use super::Geometry;
 use crate::errors::ExecutorError;
-use vibesql_types::SqlValue;
 
 /// Parse WKT (Well-Known Text) format
 /// Examples: POINT(1 2), LINESTRING(0 0, 1 1), POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))
@@ -259,7 +260,8 @@ fn parse_geometrycollection(wkt: &str) -> Result<Geometry, ExecutorError> {
 }
 
 /// Extract coordinates from WKT format
-/// paren_depth: 1 for POINT/LINESTRING, 2 for POLYGON/MULTIPOINT/MULTILINESTRING, 3 for MULTIPOLYGON
+/// paren_depth: 1 for POINT/LINESTRING, 2 for POLYGON/MULTIPOINT/MULTILINESTRING, 3 for
+/// MULTIPOLYGON
 fn extract_coordinates(
     wkt: &str,
     paren_depth: usize,

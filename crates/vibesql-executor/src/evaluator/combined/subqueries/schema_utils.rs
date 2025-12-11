@@ -3,9 +3,9 @@
 //! This module provides utilities to compute and validate the schema of
 //! subquery results, particularly for handling wildcards and column counts.
 
-use crate::errors::ExecutorError;
-use crate::select::cte::CteResult;
 use std::collections::HashMap;
+
+use crate::{errors::ExecutorError, select::cte::CteResult};
 
 /// Build a merged outer schema that includes all parent scopes
 ///

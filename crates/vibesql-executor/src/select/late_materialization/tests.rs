@@ -4,13 +4,16 @@
 //! for common query patterns.
 
 use std::sync::Arc;
+
+use gather::gather_join_output;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::{gather, lazy_batch, row_ref};
-use super::{gather_columns, LazyMaterializedBatch, RowReference, SelectionVector};
+use super::{
+    gather, gather_columns, lazy_batch, row_ref, LazyMaterializedBatch, RowReference,
+    SelectionVector,
+};
 use crate::select::columnar::{ColumnArray, ColumnarBatch};
-use gather::gather_join_output;
 
 /// Create a sample dataset simulating TPC-H lineitem style data
 fn create_tpch_lineitem_sample(row_count: usize) -> ColumnarBatch {
@@ -103,7 +106,12 @@ fn test_join_with_late_materialization() {
     let orders_columns = vec![
         ColumnArray::Int64(Arc::new((0..1000).collect()), None),
         ColumnArray::Int64(Arc::new((0..1000).map(|i| i % 100).collect()), None), // custkey
-        ColumnArray::String(Arc::new((0..1000).map(|i| std::sync::Arc::<str>::from(format!("order_{}", i))).collect()), None),
+        ColumnArray::String(
+            Arc::new(
+                (0..1000).map(|i| std::sync::Arc::<str>::from(format!("order_{}", i))).collect(),
+            ),
+            None,
+        ),
     ];
     let orders = ColumnarBatch::from_columns(
         orders_columns,
@@ -114,7 +122,12 @@ fn test_join_with_late_materialization() {
     // Right: customers table (100 rows)
     let customers_columns = vec![
         ColumnArray::Int64(Arc::new((0..100).collect()), None),
-        ColumnArray::String(Arc::new((0..100).map(|i| std::sync::Arc::<str>::from(format!("customer_{}", i))).collect()), None),
+        ColumnArray::String(
+            Arc::new(
+                (0..100).map(|i| std::sync::Arc::<str>::from(format!("customer_{}", i))).collect(),
+            ),
+            None,
+        ),
     ];
     let customers = ColumnarBatch::from_columns(
         customers_columns,
@@ -260,8 +273,8 @@ fn test_row_reference_based_join() {
     let join_pairs: Vec<(RowReference, RowReference)> = vec![
         (left_source.reference(0), right_source.reference(0)), // Alice - Order-A
         (left_source.reference(0), right_source.reference(1)), // Alice - Order-B
-        (left_source.reference(1), right_source.reference(2)), // Bob - Order-C
-                                                               // Carol has no orders
+        (left_source.reference(1), right_source.reference(2)), /* Bob - Order-C
+                                                                * Carol has no orders */
     ];
 
     // Only materialize at output

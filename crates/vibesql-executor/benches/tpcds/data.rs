@@ -5,15 +5,13 @@
 //! deterministic pseudo-random data based on scale factor.
 //!
 //! TPC-DS Schema includes:
-//! - 7 fact tables: store_sales, store_returns, catalog_sales, catalog_returns,
-//!   web_sales, web_returns, inventory
+//! - 7 fact tables: store_sales, store_returns, catalog_sales, catalog_returns, web_sales,
+//!   web_returns, inventory
 //! - 18 dimension tables: date_dim, time_dim, item, customer, customer_address,
-//!   customer_demographics, household_demographics, income_band, store,
-//!   catalog_page, web_page, web_site, warehouse, ship_mode, reason,
-//!   promotion, call_center
+//!   customer_demographics, household_demographics, income_band, store, catalog_page, web_page,
+//!   web_site, warehouse, ship_mode, reason, promotion, call_center
 
-use rand::Rng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 // Gender options

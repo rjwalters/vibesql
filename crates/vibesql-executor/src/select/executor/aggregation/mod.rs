@@ -144,8 +144,8 @@ impl SelectExecutor<'_> {
             self.expand_wildcards_for_aggregation(&stmt.select_list, &schema)?;
 
         // Detect and set up pivot aggregate optimization (#3136)
-        // This detects patterns like: SUM(CASE WHEN col='A' THEN val END), SUM(CASE WHEN col='B' THEN val END)...
-        // and batches them into a single pass over the data
+        // This detects patterns like: SUM(CASE WHEN col='A' THEN val END), SUM(CASE WHEN col='B'
+        // THEN val END)... and batches them into a single pass over the data
         if let Some(pivot_group) = PivotAggregateGroup::try_detect(&expanded_select_list, &schema) {
             self.set_pivot_group(pivot_group);
         }

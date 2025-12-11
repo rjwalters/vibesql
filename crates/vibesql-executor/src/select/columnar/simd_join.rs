@@ -18,12 +18,10 @@
 //!    - Combine columns from both sides
 //!    - Return columnar batch
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use super::simd_ops;
-use super::{ColumnArray, ColumnarBatch};
+use super::{simd_ops, ColumnArray, ColumnarBatch};
 use crate::errors::ExecutorError;
-use std::collections::HashMap;
 
 // Re-export comparison functions from simd_ops module for consistency
 
@@ -391,8 +389,9 @@ pub fn columnar_hash_join_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn make_int64_batch(key_values: Vec<i64>, data_values: Vec<i64>) -> ColumnarBatch {
         let row_count = key_values.len();

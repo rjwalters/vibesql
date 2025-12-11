@@ -11,8 +11,8 @@
 //! # How It Works
 //!
 //! During hash join:
-//! 1. **Build phase**: While building the hash table, also populate a Bloom filter
-//!    with the join keys
+//! 1. **Build phase**: While building the hash table, also populate a Bloom filter with the join
+//!    keys
 //! 2. **Probe phase**: Before probing the hash table, check the Bloom filter
 //!    - If Bloom filter says "definitely not present" → skip the row (no hash lookup)
 //!    - If Bloom filter says "maybe present" → do the actual hash lookup
@@ -20,8 +20,8 @@
 //! # Performance Benefits
 //!
 //! - Bloom filter check is O(1) with excellent cache behavior
-//! - For selective joins (where most probe rows don't match), this eliminates
-//!   most hash table lookups
+//! - For selective joins (where most probe rows don't match), this eliminates most hash table
+//!   lookups
 //! - Memory overhead is small (typically 10 bits per element for 1% false positive rate)
 //!
 //! # References

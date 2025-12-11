@@ -11,9 +11,9 @@
 //! Run with:
 //!   cargo bench --package vibesql-types --bench types_bench
 
+use std::{collections::HashMap, hint::black_box};
+
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::collections::HashMap;
-use std::hint::black_box;
 use vibesql_types::{Date, SqlValue, StringValue, Time, Timestamp};
 
 /// Helper to create StringValue from &str
@@ -344,16 +344,16 @@ fn bench_realistic_column_names(c: &mut Criterion) {
 
     // Common column names in databases (all within SSO threshold)
     let column_names = [
-        "id",       // 2 bytes
-        "name",     // 4 bytes
-        "status",   // 6 bytes
-        "email",    // 5 bytes
+        "id",         // 2 bytes
+        "name",       // 4 bytes
+        "status",     // 6 bytes
+        "email",      // 5 bytes
         "created_at", // 10 bytes
         "updated_at", // 10 bytes
-        "user_id",  // 7 bytes
-        "order_id", // 8 bytes
-        "price",    // 5 bytes
-        "quantity", // 8 bytes
+        "user_id",    // 7 bytes
+        "order_id",   // 8 bytes
+        "price",      // 5 bytes
+        "quantity",   // 8 bytes
     ];
 
     // Benchmark creating many SqlValues with typical column names
@@ -366,10 +366,8 @@ fn bench_realistic_column_names(c: &mut Criterion) {
     });
 
     // Benchmark cloning typical column values
-    let values: Vec<SqlValue> = column_names
-        .iter()
-        .map(|s| SqlValue::Varchar(string_value(s)))
-        .collect();
+    let values: Vec<SqlValue> =
+        column_names.iter().map(|s| SqlValue::Varchar(string_value(s))).collect();
 
     group.bench_function("clone_10_columns", |b| {
         b.iter(|| {
@@ -381,11 +379,11 @@ fn bench_realistic_column_names(c: &mut Criterion) {
 
     // Common short values (single char codes, status strings)
     let short_values = [
-        "A",        // 1 byte
-        "N",        // 1 byte
-        "active",   // 6 bytes
-        "pending",  // 7 bytes
-        "shipped",  // 7 bytes
+        "A",         // 1 byte
+        "N",         // 1 byte
+        "active",    // 6 bytes
+        "pending",   // 7 bytes
+        "shipped",   // 7 bytes
         "completed", // 9 bytes
     ];
 

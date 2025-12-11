@@ -4,20 +4,23 @@
 
 #![allow(clippy::doc_overindented_list_items)]
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use vibesql_types::{DataType, SqlValue};
 
-use super::index_manager::IndexManager;
-use super::index_metadata::{
-    acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata, DISK_BACKED_THRESHOLD,
+use super::{
+    index_manager::IndexManager,
+    index_metadata::{
+        acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata, DISK_BACKED_THRESHOLD,
+    },
+    ivfflat::IVFFlatIndex,
 };
-use super::ivfflat::IVFFlatIndex;
-use crate::btree::{BTreeIndex, Key};
-use crate::page::PageManager;
-use crate::progress::ProgressTracker;
-use crate::{Row, StorageError};
+use crate::{
+    btree::{BTreeIndex, Key},
+    page::PageManager,
+    progress::ProgressTracker,
+    Row, StorageError,
+};
 
 /// Apply prefix truncation to a SqlValue if prefix_length is specified
 ///
@@ -217,10 +220,7 @@ impl IndexManager {
             let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate
             let memory_bytes = self.estimate_index_memory(table_rows.len(), key_size);
 
-            let data = IndexData::InMemory {
-                data: index_data_map,
-                pending_deletions: Vec::new(),
-            };
+            let data = IndexData::InMemory { data: index_data_map, pending_deletions: Vec::new() };
 
             (data, memory_bytes, 0, crate::database::IndexBackend::InMemory)
         };
@@ -301,7 +301,8 @@ impl IndexManager {
                         IndexData::IVFFlat { index } => {
                             // IVFFlat indexes are maintained separately via rebuild
                             // Incremental inserts would require re-clustering which is expensive
-                            // For now, log a warning - users should rebuild the index after bulk inserts
+                            // For now, log a warning - users should rebuild the index after bulk
+                            // inserts
                             log::debug!(
                                 "IVFFlat index '{}' does not support incremental inserts. Consider rebuilding after bulk operations.",
                                 index_name
@@ -431,9 +432,9 @@ impl IndexManager {
     /// * `old_row` - Row data before the update
     /// * `new_row` - Row data after the update
     /// * `row_index` - Index of the row in the table
-    /// * `changed_columns` - Optional set of column indices that were modified.
-    ///   If provided, indexes that don't involve any changed columns will be skipped.
-    ///   If None, all indexes are processed (backward compatible).
+    /// * `changed_columns` - Optional set of column indices that were modified. If provided,
+    ///   indexes that don't involve any changed columns will be skipped. If None, all indexes are
+    ///   processed (backward compatible).
     pub fn update_indexes_for_update(
         &mut self,
         table_name: &str,
@@ -512,9 +513,11 @@ impl IndexManager {
                                 data.entry(new_key_values).or_insert_with(Vec::new).push(row_index);
                             }
                             IndexData::DiskBacked { btree, .. } => {
-                                // Safely acquire lock and update B+tree: delete old key, insert new key
-                                // Use delete_specific to only remove the specific row_index, not all rows
-                                // with this key (important for non-unique indexes with duplicate keys)
+                                // Safely acquire lock and update B+tree: delete old key, insert new
+                                // key Use delete_specific to only
+                                // remove the specific row_index, not all rows
+                                // with this key (important for non-unique indexes with duplicate
+                                // keys)
                                 match acquire_btree_lock(btree) {
                                     Ok(mut guard) => {
                                         let _ = guard.delete_specific(&old_key_values, row_index);
@@ -533,7 +536,8 @@ impl IndexManager {
                             }
                             IndexData::IVFFlat { index } => {
                                 // IVFFlat indexes are maintained separately via rebuild
-                                // Incremental updates would require re-clustering which is expensive
+                                // Incremental updates would require re-clustering which is
+                                // expensive
                                 log::debug!(
                                     "IVFFlat index '{}' does not support incremental updates. Consider rebuilding after bulk operations.",
                                     index_name
@@ -564,7 +568,12 @@ impl IndexManager {
         row: &Row,
         row_index: usize,
     ) {
-        self.update_indexes_for_delete_with_values(table_name, table_schema, &row.values, row_index);
+        self.update_indexes_for_delete_with_values(
+            table_name,
+            table_schema,
+            &row.values,
+            row_index,
+        );
     }
 
     /// Update user-defined indexes for delete operation using raw values slice
@@ -615,8 +624,9 @@ impl IndexManager {
                         }
                         IndexData::DiskBacked { btree, .. } => {
                             // Safely acquire lock and delete from B+tree
-                            // Use delete_specific to only remove the specific row_index, not all rows
-                            // with this key (important for non-unique indexes with duplicate keys)
+                            // Use delete_specific to only remove the specific row_index, not all
+                            // rows with this key (important for
+                            // non-unique indexes with duplicate keys)
                             match acquire_btree_lock(btree) {
                                 Ok(mut guard) => {
                                     let _ = guard.delete_specific(&key_values, row_index);
@@ -912,18 +922,21 @@ impl IndexManager {
                         // This is O(d) where d = number of deletes, instead of O(n) for table size
                         //
                         // Note: deleted_indices are raw indices that haven't been adjusted yet.
-                        // We need to adjust them based on existing pending_deletions before merging.
+                        // We need to adjust them based on existing pending_deletions before
+                        // merging.
                         let adjusted_deletions: Vec<usize> = deleted_indices
                             .iter()
                             .map(|&idx| {
-                                // The deleted index needs to be adjusted for previously pending deletions
-                                // that are less than it, since those deletions affect the raw row indices
+                                // The deleted index needs to be adjusted for previously pending
+                                // deletions that are less than it,
+                                // since those deletions affect the raw row indices
                                 let adjustment = pending_deletions.partition_point(|&d| d < idx);
                                 idx - adjustment
                             })
                             .collect();
 
-                        // Merge adjusted deletions into pending_deletions (maintaining sorted order)
+                        // Merge adjusted deletions into pending_deletions (maintaining sorted
+                        // order)
                         if pending_deletions.is_empty() {
                             *pending_deletions = adjusted_deletions;
                         } else {
@@ -1434,8 +1447,8 @@ impl IndexManager {
     /// # Arguments
     ///
     /// * `table_name` - The table name, which may be qualified (e.g., "public.users") or
-    ///                  unqualified (e.g., "users"). Matching is case-insensitive and handles
-    ///                  both qualified and unqualified names.
+    ///   unqualified (e.g., "users"). Matching is case-insensitive and handles both qualified and
+    ///   unqualified names.
     ///
     /// # Returns
     ///

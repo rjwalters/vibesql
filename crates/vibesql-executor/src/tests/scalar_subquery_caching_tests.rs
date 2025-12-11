@@ -3,9 +3,10 @@
 //! This module tests the performance optimization that caches uncorrelated
 //! scalar subqueries to avoid redundant execution, especially in HAVING clauses.
 
-use super::super::*;
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;
+
+use super::super::*;
 
 fn execute_sql(
     db: &mut vibesql_storage::Database,

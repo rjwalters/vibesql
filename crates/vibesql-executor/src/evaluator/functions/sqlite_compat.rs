@@ -4,8 +4,9 @@
 //! These functions follow SQLite's exact semantics as documented at:
 //! https://www.sqlite.org/lang_corefunc.html
 
-use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// TYPEOF(x) - Return the type name of the expression
 ///
@@ -154,11 +155,7 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Vector(floats) => {
             // Convert vector to bytes first
-            floats
-                .iter()
-                .flat_map(|f| f.to_le_bytes())
-                .map(|b| format!("{:02X}", b))
-                .collect()
+            floats.iter().flat_map(|f| f.to_le_bytes()).map(|b| format!("{:02X}", b)).collect()
         }
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
@@ -744,11 +741,8 @@ pub(super) fn quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
         SqlValue::Vector(floats) => {
             // Convert blob to X'...' hex format
-            let hex: String = floats
-                .iter()
-                .flat_map(|f| f.to_le_bytes())
-                .map(|b| format!("{:02X}", b))
-                .collect();
+            let hex: String =
+                floats.iter().flat_map(|f| f.to_le_bytes()).map(|b| format!("{:02X}", b)).collect();
             Ok(SqlValue::Varchar(format!("X'{}'", hex).into()))
         }
         SqlValue::Date(d) => Ok(SqlValue::Varchar(format!("'{}'", d).into())),
@@ -780,10 +774,7 @@ mod tests {
 
     #[test]
     fn test_typeof() {
-        assert_eq!(
-            typeof_func(&[SqlValue::Null]).unwrap(),
-            SqlValue::Varchar("null".into())
-        );
+        assert_eq!(typeof_func(&[SqlValue::Null]).unwrap(), SqlValue::Varchar("null".into()));
         assert_eq!(
             typeof_func(&[SqlValue::Integer(42)]).unwrap(),
             SqlValue::Varchar("integer".into())
@@ -897,14 +888,8 @@ mod tests {
 
     #[test]
     fn test_unicode() {
-        assert_eq!(
-            unicode(&[SqlValue::Varchar("A".into())]).unwrap(),
-            SqlValue::Integer(65)
-        );
-        assert_eq!(
-            unicode(&[SqlValue::Varchar("😀".into())]).unwrap(),
-            SqlValue::Integer(128512)
-        );
+        assert_eq!(unicode(&[SqlValue::Varchar("A".into())]).unwrap(), SqlValue::Integer(65));
+        assert_eq!(unicode(&[SqlValue::Varchar("😀".into())]).unwrap(), SqlValue::Integer(128512));
         assert_eq!(unicode(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Null);
         assert_eq!(unicode(&[SqlValue::Null]).unwrap(), SqlValue::Null);
     }
@@ -941,11 +926,8 @@ mod tests {
 
         // String
         assert_eq!(
-            printf(&[
-                SqlValue::Varchar("Hello, %s!".into()),
-                SqlValue::Varchar("World".into())
-            ])
-            .unwrap(),
+            printf(&[SqlValue::Varchar("Hello, %s!".into()), SqlValue::Varchar("World".into())])
+                .unwrap(),
             SqlValue::Varchar("Hello, World!".into())
         );
 
@@ -1094,11 +1076,7 @@ mod tests {
 
         // Single string (no separator used)
         assert_eq!(
-            concat_ws(&[
-                SqlValue::Varchar(",".into()),
-                SqlValue::Varchar("only".into())
-            ])
-            .unwrap(),
+            concat_ws(&[SqlValue::Varchar(",".into()), SqlValue::Varchar("only".into())]).unwrap(),
             SqlValue::Varchar("only".into())
         );
 
@@ -1127,10 +1105,7 @@ mod tests {
         assert_eq!(quote(&[SqlValue::Null]).unwrap(), SqlValue::Varchar("NULL".into()));
 
         // Integer
-        assert_eq!(
-            quote(&[SqlValue::Integer(123)]).unwrap(),
-            SqlValue::Varchar("123".into())
-        );
+        assert_eq!(quote(&[SqlValue::Integer(123)]).unwrap(), SqlValue::Varchar("123".into()));
 
         // String without quotes
         assert_eq!(
@@ -1145,41 +1120,23 @@ mod tests {
         );
 
         // Float
-        assert_eq!(
-            quote(&[SqlValue::Numeric(3.14)]).unwrap(),
-            SqlValue::Varchar("3.14".into())
-        );
+        assert_eq!(quote(&[SqlValue::Numeric(3.14)]).unwrap(), SqlValue::Varchar("3.14".into()));
 
         // Boolean
-        assert_eq!(
-            quote(&[SqlValue::Boolean(true)]).unwrap(),
-            SqlValue::Varchar("1".into())
-        );
-        assert_eq!(
-            quote(&[SqlValue::Boolean(false)]).unwrap(),
-            SqlValue::Varchar("0".into())
-        );
+        assert_eq!(quote(&[SqlValue::Boolean(true)]).unwrap(), SqlValue::Varchar("1".into()));
+        assert_eq!(quote(&[SqlValue::Boolean(false)]).unwrap(), SqlValue::Varchar("0".into()));
 
         // Empty string
-        assert_eq!(
-            quote(&[SqlValue::Varchar("".into())]).unwrap(),
-            SqlValue::Varchar("''".into())
-        );
+        assert_eq!(quote(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Varchar("''".into()));
     }
 
     #[test]
     fn test_intreal() {
         // Integer passes through
-        assert_eq!(
-            intreal(&[SqlValue::Integer(42)]).unwrap(),
-            SqlValue::Integer(42)
-        );
+        assert_eq!(intreal(&[SqlValue::Integer(42)]).unwrap(), SqlValue::Integer(42));
 
         // Real passes through
-        assert_eq!(
-            intreal(&[SqlValue::Numeric(3.14)]).unwrap(),
-            SqlValue::Numeric(3.14)
-        );
+        assert_eq!(intreal(&[SqlValue::Numeric(3.14)]).unwrap(), SqlValue::Numeric(3.14));
 
         // NULL passes through
         assert_eq!(intreal(&[SqlValue::Null]).unwrap(), SqlValue::Null);

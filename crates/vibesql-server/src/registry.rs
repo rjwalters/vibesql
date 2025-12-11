@@ -3,8 +3,8 @@
 //! This module provides a registry that maps database names to shared database
 //! instances, allowing multiple connections to the same database to share data.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
+
 use tokio::sync::RwLock;
 use vibesql_storage::Database;
 

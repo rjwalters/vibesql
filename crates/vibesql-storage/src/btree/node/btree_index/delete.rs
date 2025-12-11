@@ -12,10 +12,11 @@
 //! - Batching rebalancing operations per leaf
 //! - Single root collapse check at the end
 
+use super::{
+    super::structure::{Key, LeafNode, RowId},
+    BTreeIndex,
+};
 use crate::StorageError;
-
-use super::super::structure::{Key, LeafNode, RowId};
-use super::BTreeIndex;
 
 impl BTreeIndex {
     /// Delete all row IDs for a key from the B+ tree

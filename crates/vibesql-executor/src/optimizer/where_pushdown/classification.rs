@@ -5,10 +5,11 @@
 //! - Equijoin conditions (simple equality between two tables)
 //! - Complex predicates (everything else)
 
+use super::{
+    table_refs::{extract_referenced_tables_branch, try_extract_equijoin_branch},
+    PredicateDecomposition,
+};
 use crate::schema::CombinedSchema;
-
-use super::table_refs::{extract_referenced_tables_branch, try_extract_equijoin_branch};
-use super::PredicateDecomposition;
 
 /// Classify a single predicate (one of the AND-separated clauses) - branch version
 pub(crate) fn classify_predicate_branch(

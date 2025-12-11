@@ -183,9 +183,10 @@ fn extract_table_names(from: &Option<vibesql_ast::FromClause>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{BinaryOperator, Expression};
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     /// Helper to create a simple SELECT statement for testing
     fn simple_select(table: &str, column: &str) -> SelectStmt {
@@ -577,7 +578,8 @@ mod tests {
     #[test]
     fn test_exists_decorrelation_with_alias() {
         // Test EXISTS subquery decorrelation when inner table has alias
-        // This is the Q21 pattern: EXISTS (SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey)
+        // This is the Q21 pattern: EXISTS (SELECT * FROM lineitem l2 WHERE l2.l_orderkey =
+        // l1.l_orderkey)
         let mut subquery = simple_select_with_alias("lineitem", "l2", "l_orderkey");
         // Add correlation predicate: l2.l_orderkey = l1.l_orderkey
         subquery.where_clause = Some(Expression::BinaryOp {

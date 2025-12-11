@@ -12,16 +12,16 @@ use vibesql_ast::{Expression, OrderByItem, OrderDirection, SelectItem};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
-use crate::select::executor::builder::SelectExecutor;
+use crate::{
+    errors::ExecutorError, schema::CombinedSchema, select::executor::builder::SelectExecutor,
+};
 
 /// Result of extracting equality predicate values from WHERE clause
 ///
 /// Distinguishes between:
 /// - `Values(map)`: Successfully extracted equality values
-/// - `Contradiction`: Multiple equality predicates on same column with different values
-///   (e.g., col = 1 AND col = 2 is always false)
+/// - `Contradiction`: Multiple equality predicates on same column with different values (e.g., col
+///   = 1 AND col = 2 is always false)
 pub(crate) enum EqualityResult {
     Values(HashMap<String, SqlValue>),
     Contradiction,
@@ -69,8 +69,9 @@ impl SelectExecutor<'_> {
         rows: Vec<Row>,
         schema: &CombinedSchema,
     ) -> Result<Vec<Row>, ExecutorError> {
-        use crate::evaluator::CombinedExpressionEvaluator;
-        use crate::select::projection::project_row_combined;
+        use crate::{
+            evaluator::CombinedExpressionEvaluator, select::projection::project_row_combined,
+        };
 
         // Check if this is SELECT * - no projection needed
         if select_list.len() == 1 && matches!(&select_list[0], SelectItem::Wildcard { .. }) {
@@ -157,8 +158,9 @@ impl SelectExecutor<'_> {
         mut rows: Vec<Row>,
         schema: &CombinedSchema,
     ) -> Result<Vec<Row>, ExecutorError> {
-        use crate::select::grouping::compare_sql_values;
         use std::cmp::Ordering;
+
+        use crate::select::grouping::compare_sql_values;
 
         // Pre-compute column indices for ORDER BY columns
         let mut sort_indices: Vec<(usize, OrderDirection)> = Vec::with_capacity(order_by.len());
@@ -442,7 +444,11 @@ impl SelectExecutor<'_> {
     /// - Going through the full evaluator machinery
     ///
     /// For simple column projections, this is 10-100x faster than the full path.
-    pub(crate) fn project_by_indices_fast(&self, rows: Vec<Row>, col_indices: &[usize]) -> Vec<Row> {
+    pub(crate) fn project_by_indices_fast(
+        &self,
+        rows: Vec<Row>,
+        col_indices: &[usize],
+    ) -> Vec<Row> {
         rows.into_iter()
             .map(|row| {
                 let projected_values: Vec<SqlValue> =

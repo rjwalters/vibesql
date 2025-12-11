@@ -10,15 +10,15 @@ pub mod records;
 pub mod retry_parser;
 
 // Re-exports from submodules
-pub use self::directive_parser::{
-    Condition, Connection, Control, ControlItem, ResultMode, SortMode,
+pub use self::{
+    directive_parser::{Condition, Connection, Control, ControlItem, ResultMode, SortMode},
+    error_parser::ExpectedError,
+    location::Location,
+    parser_core::{parse, parse_file, parse_with_name},
+    record_parser::{QueryExpect, StatementExpect},
+    records::{Injected, Record},
+    retry_parser::RetryConfig,
 };
-pub use self::error_parser::ExpectedError;
-pub use self::location::Location;
-pub use self::parser_core::{parse, parse_file, parse_with_name};
-pub use self::record_parser::{QueryExpect, StatementExpect};
-pub use self::records::{Injected, Record};
-pub use self::retry_parser::RetryConfig;
 
 /// The error type for parsing sqllogictest.
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]

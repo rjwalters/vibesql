@@ -76,27 +76,23 @@
 mod harness;
 mod sysbench;
 
-use harness::{print_group_header, print_summary_table, BenchResult, Harness};
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
-use std::env;
-use std::hint::black_box;
-use std::sync::Arc;
-use std::time::Instant;
-use sysbench::schema::load_vibesql;
-use sysbench::SysbenchData;
-use vibesql_executor::{PreparedStatement, PreparedStatementCache, Session, SessionMut};
-use vibesql_storage::Database as VibeDB;
-use vibesql_types::SqlValue;
+use std::{env, hint::black_box, sync::Arc, time::Instant};
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
+use harness::{print_group_header, print_summary_table, BenchResult, Harness};
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
 #[cfg(feature = "duckdb")]
 use sysbench::schema::load_duckdb;
 #[cfg(feature = "sqlite")]
 use sysbench::schema::load_sqlite;
+use sysbench::{schema::load_vibesql, SysbenchData};
+use vibesql_executor::{PreparedStatement, PreparedStatementCache, Session, SessionMut};
+use vibesql_storage::Database as VibeDB;
+use vibesql_types::SqlValue;
 
 // =============================================================================
 // Configuration
@@ -104,10 +100,7 @@ use sysbench::schema::load_sqlite;
 
 /// Default table size for sysbench tests
 fn table_size() -> usize {
-    env::var("SYSBENCH_TABLE_SIZE")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10_000)
+    env::var("SYSBENCH_TABLE_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(10_000)
 }
 
 /// Range size for range queries (sysbench default is 100)
@@ -199,7 +192,10 @@ fn vibesql_insert(
 
 fn vibesql_update_non_index(session: &mut SessionMut, stmt: &PreparedStatement, id: i64, c: &str) {
     session
-        .execute_prepared_mut(stmt, &[SqlValue::Varchar(arcstr::ArcStr::from(c)), SqlValue::Integer(id)])
+        .execute_prepared_mut(
+            stmt,
+            &[SqlValue::Varchar(arcstr::ArcStr::from(c)), SqlValue::Integer(id)],
+        )
         .unwrap();
 }
 
@@ -947,7 +943,8 @@ fn run_read_write_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness:
             },
             |state, batch_iters| {
                 let (mut db, stmts, mut rng) = state;
-                let mut session_mut = SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
+                let mut session_mut =
+                    SessionMut::with_shared_cache(&mut db, Arc::clone(&stmts.cache));
 
                 let start = Instant::now();
                 for _ in 0..batch_iters {
@@ -1146,7 +1143,10 @@ fn run_oltp_read_only_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harn
     results
 }
 
-fn run_select_random_points_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+fn run_select_random_points_benchmarks(
+    harness: &Harness,
+    tbl_size: usize,
+) -> Vec<harness::BenchStats> {
     let mut results = Vec::new();
 
     // VibeSQL
@@ -1210,7 +1210,10 @@ fn run_select_random_points_benchmarks(harness: &Harness, tbl_size: usize) -> Ve
     results
 }
 
-fn run_select_random_ranges_benchmarks(harness: &Harness, tbl_size: usize) -> Vec<harness::BenchStats> {
+fn run_select_random_ranges_benchmarks(
+    harness: &Harness,
+    tbl_size: usize,
+) -> Vec<harness::BenchStats> {
     let mut results = Vec::new();
 
     // VibeSQL

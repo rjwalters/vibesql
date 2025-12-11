@@ -183,11 +183,8 @@ impl MetaCommand {
                 let file_path = parts[1].trim_matches('\'').trim_matches('"').to_string();
                 let table = parts[2].to_string();
 
-                let format = if file_path.ends_with(".json") {
-                    CopyFormat::Json
-                } else {
-                    CopyFormat::Csv
-                };
+                let format =
+                    if file_path.ends_with(".json") { CopyFormat::Json } else { CopyFormat::Csv };
 
                 Some(MetaCommand::Copy {
                     table,

@@ -16,7 +16,8 @@
 //! - `aggregate_distinct`: DISTINCT aggregation tests
 //! - `aggregate_without_from`: Aggregate functions without FROM clause (issue #937)
 //! - `aggregate_caching`: Aggregate result caching tests (Phase 2 of issue #1038)
-//! - `cte_scalar_subquery_tests`: CTE references in scalar subqueries (issue #2602, TPC-H Q15 pattern)
+//! - `cte_scalar_subquery_tests`: CTE references in scalar subqueries (issue #2602, TPC-H Q15
+//!   pattern)
 //! - `select_joins`: JOIN operation tests
 //! - `scalar_subquery_basic_tests`: Basic scalar subquery execution tests
 //! - `scalar_subquery_error_tests`: Scalar subquery error handling tests
@@ -34,16 +35,22 @@
 //! - `quantified_comparison_tests`: Quantified comparison tests (ALL, ANY, SOME with subqueries)
 //! - `create_table_tests`: CREATE TABLE executor tests (basic table creation, data types, spatial
 //!   types)
-//! - `fulltext_search`: Full-text search integration tests (MATCH...AGAINST natural language, boolean mode)
-//! - `triggers`: Organized trigger test suite (DDL, INSERT/UPDATE/DELETE firing, coordination, conditions, error handling, pseudo-variables)
+//! - `fulltext_search`: Full-text search integration tests (MATCH...AGAINST natural language,
+//!   boolean mode)
+//! - `triggers`: Organized trigger test suite (DDL, INSERT/UPDATE/DELETE firing, coordination,
+//!   conditions, error handling, pseudo-variables)
 //! - `truncate_cascade_tests`: TRUNCATE TABLE CASCADE/RESTRICT tests (issue #1393)
 //! - `truncate_table_tests`: TRUNCATE TABLE tests (single table, multiple tables, IF EXISTS)
 //! - `view_tests`: VIEW support tests (CREATE/DROP/SELECT, OR REPLACE, CASCADE)
 //! - `index_scan_tests`: Index scan optimization tests (Phase 5a of issue #1387)
-//! - `index_optimization`: Index optimization edge case tests (BETWEEN, IN, commute, numeric types - issue #1821)
-//! - `order_by_index_optimization_tests`: ORDER BY index optimization tests (Phase 5b of issue #1429)
-//! - `alter_table_constraints`: ALTER TABLE ADD/DROP PRIMARY KEY and FOREIGN KEY tests (Phase 6 of issue #1388)
-//! - `non_unique_disk_index_tests`: Non-unique disk-backed index integration tests (issue #1575, PR #1571)
+//! - `index_optimization`: Index optimization edge case tests (BETWEEN, IN, commute, numeric types
+//!   - issue #1821)
+//! - `order_by_index_optimization_tests`: ORDER BY index optimization tests (Phase 5b of issue
+//!   #1429)
+//! - `alter_table_constraints`: ALTER TABLE ADD/DROP PRIMARY KEY and FOREIGN KEY tests (Phase 6 of
+//!   issue #1388)
+//! - `non_unique_disk_index_tests`: Non-unique disk-backed index integration tests (issue #1575, PR
+//!   #1571)
 //! - `sql_mode_tests`: SET SQL_MODE tests for runtime dialect switching (issue #2658)
 
 mod aggregate_caching;
@@ -61,9 +68,9 @@ mod between_predicates;
 mod common;
 mod comparison_ops;
 mod count_star_fast_path;
+mod covering_index_tests;
 mod create_table_constraints;
 mod create_table_tests;
-mod covering_index_tests;
 mod cte_scalar_subquery_tests;
 mod error_display;
 mod expression_eval;

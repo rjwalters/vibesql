@@ -10,6 +10,11 @@ mod modulo;
 mod multiplication;
 mod subtraction;
 
+pub use addition::Addition;
+pub use division::Division;
+pub use modulo::Modulo;
+pub use multiplication::Multiplication;
+pub use subtraction::Subtraction;
 use vibesql_types::SqlValue;
 
 use crate::{
@@ -18,12 +23,6 @@ use crate::{
         boolean_to_i64, is_approximate_numeric, is_exact_numeric, to_f64, to_i64,
     },
 };
-
-pub use addition::Addition;
-pub use division::Division;
-pub use modulo::Modulo;
-pub use multiplication::Multiplication;
-pub use subtraction::Subtraction;
 
 /// Result of type coercion for arithmetic operations
 pub(super) enum CoercedValues {

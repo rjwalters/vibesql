@@ -19,9 +19,9 @@
 
 mod harness;
 
+use std::{hint::black_box, time::Instant};
+
 use harness::{print_group_header, BenchResult, Harness};
-use std::hint::black_box;
-use std::time::Instant;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;

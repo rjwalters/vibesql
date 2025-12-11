@@ -209,7 +209,8 @@ pub(super) fn rewrite_column_refs_with_alias(
         },
         // Scalar subquery: same as EXISTS, separate scope
         Expression::ScalarSubquery(subquery) => Expression::ScalarSubquery(subquery.clone()),
-        // For other expression types, just clone (they don't contain column refs that need rewriting)
+        // For other expression types, just clone (they don't contain column refs that need
+        // rewriting)
         _ => expr.clone(),
     }
 }

@@ -4,12 +4,17 @@
 //! on filtered ColumnarBatch data. It supports all aggregate operations and
 //! handles NULL values correctly.
 
-use super::super::aggregate::{AggregateOp, AggregateSource, AggregateSpec};
-use super::super::batch::{ColumnArray, ColumnarBatch};
-use super::super::simd_ops;
-use super::expression::compute_expression_aggregate_batch;
-use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
+
+use super::{
+    super::{
+        aggregate::{AggregateOp, AggregateSource, AggregateSpec},
+        batch::{ColumnArray, ColumnarBatch},
+        simd_ops,
+    },
+    expression::compute_expression_aggregate_batch,
+};
+use crate::errors::ExecutorError;
 
 // Re-export optimized SIMD operations from simd_ops module
 #[inline]

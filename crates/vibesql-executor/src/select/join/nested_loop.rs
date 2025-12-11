@@ -272,7 +272,7 @@ pub(super) fn nested_loop_inner_join(
     // that would create massive intermediate results
     let is_cartesian_like = match condition {
         None => true, // No condition = cartesian product
-        Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))) => true, // Always true = cartesian product
+        Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))) => true, /* Always true = cartesian product */
         _ => false, // Has a meaningful condition - let it proceed
     };
 

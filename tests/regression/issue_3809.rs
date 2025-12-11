@@ -110,10 +110,7 @@ fn test_window_function_in_is_null() {
     table.insert(Row::new(vec![SqlValue::Integer(2)])).unwrap();
 
     // Test: IS NULL with window function
-    let rows = select_rows(
-        &db,
-        "SELECT x, LAG(x) OVER (ORDER BY x) IS NULL as is_first FROM t",
-    );
+    let rows = select_rows(&db, "SELECT x, LAG(x) OVER (ORDER BY x) IS NULL as is_first FROM t");
     assert_eq!(rows.len(), 2);
     // First row: LAG is NULL, so IS NULL = true
     assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Boolean(true));
@@ -127,10 +124,8 @@ fn test_window_function_in_nested_function() {
     create_test_table(&mut db);
 
     // Test: COALESCE with window function
-    let rows = select_rows(
-        &db,
-        "SELECT x, COALESCE(LAG(x) OVER (ORDER BY x), 0) as prev_or_zero FROM t",
-    );
+    let rows =
+        select_rows(&db, "SELECT x, COALESCE(LAG(x) OVER (ORDER BY x), 0) as prev_or_zero FROM t");
     assert_eq!(rows.len(), 3);
     // First row: LAG is NULL, COALESCE returns 0
     assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Integer(0));

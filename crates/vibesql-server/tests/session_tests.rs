@@ -423,8 +423,10 @@ async fn test_concurrent_select_queries() {
                         .send_query("SELECT * FROM parallel_test")
                         .await
                         .expect("Failed to SELECT");
-                    let data =
-                        client.read_until_message_type(b'Z').await.expect("Failed to read response");
+                    let data = client
+                        .read_until_message_type(b'Z')
+                        .await
+                        .expect("Failed to read response");
                     let messages = parse_backend_messages(&data);
                     let row_count = messages.iter().filter(|m| m.is_data_row()).count();
                     assert_eq!(row_count, 100, "Session {} should read 100 rows", i);

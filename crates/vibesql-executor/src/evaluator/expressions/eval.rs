@@ -445,7 +445,8 @@ impl ExpressionEvaluator<'_> {
         }
 
         // Check procedural context first (variables/parameters take precedence over table columns)
-        // This is only checked when there's no table qualifier, as variables don't have table prefixes
+        // This is only checked when there's no table qualifier, as variables don't have table
+        // prefixes
         if table_qualifier.is_none() {
             if let Some(proc_ctx) = self.procedural_context {
                 // Try to get value from procedural context (checks variables then parameters)

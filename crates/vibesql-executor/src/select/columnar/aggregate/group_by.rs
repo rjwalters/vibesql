@@ -8,16 +8,21 @@
 //! - `columnar_group_by_batch`: Works on `ColumnarBatch` with SIMD aggregation (faster)
 
 use ahash::AHashMap;
-
-use crate::errors::ExecutorError;
-use crate::select::grouping::{GroupKey, GroupKeySpec};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::super::batch::{ColumnArray, ColumnarBatch};
-use super::super::scan::ColumnarScan;
-use super::functions::compute_columnar_aggregate_impl;
-use super::AggregateOp;
+use super::{
+    super::{
+        batch::{ColumnArray, ColumnarBatch},
+        scan::ColumnarScan,
+    },
+    functions::compute_columnar_aggregate_impl,
+    AggregateOp,
+};
+use crate::{
+    errors::ExecutorError,
+    select::grouping::{GroupKey, GroupKeySpec},
+};
 
 // ============================================================================
 // Index-based aggregation functions

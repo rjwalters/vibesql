@@ -1,7 +1,6 @@
 //! Subscription lifecycle management: subscribe and unsubscribe operations.
 
-use std::collections::HashSet;
-use std::sync::atomic::Ordering;
+use std::{collections::HashSet, sync::atomic::Ordering};
 
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -310,13 +309,12 @@ impl SubscriptionManager {
     ///
     /// A tuple of (total_removed, selective_eligible_removed)
     pub fn unsubscribe_all_for_connection(&self, connection_id: &str) -> (usize, usize) {
-        let subscription_ids: Vec<SubscriptionId> = if let Some((_, ids)) =
-            self.connection_index.remove(connection_id)
-        {
-            ids.into_iter().collect()
-        } else {
-            return (0, 0);
-        };
+        let subscription_ids: Vec<SubscriptionId> =
+            if let Some((_, ids)) = self.connection_index.remove(connection_id) {
+                ids.into_iter().collect()
+            } else {
+                return (0, 0);
+            };
 
         let count = subscription_ids.len();
         debug!(

@@ -5,8 +5,10 @@
 //! - expr op ANY (subquery)
 //! - expr op SOME (subquery)
 
-use super::super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator};
-use super::schema_utils::{build_merged_outer_row, build_merged_outer_schema};
+use super::{
+    super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator},
+    schema_utils::{build_merged_outer_row, build_merged_outer_schema},
+};
 use crate::errors::ExecutorError;
 
 impl CombinedExpressionEvaluator<'_> {
@@ -38,7 +40,8 @@ impl CombinedExpressionEvaluator<'_> {
         let left_val = self.eval(expr, row)?;
 
         // Execute the subquery with outer context and propagate depth
-        // Build merged schema and row outside if-else to ensure they live long enough (fix for #2463)
+        // Build merged schema and row outside if-else to ensure they live long enough (fix for
+        // #2463)
         let merged_schema = if !self.schema.table_schemas.is_empty() {
             Some(build_merged_outer_schema(self.schema, self.outer_schema))
         } else {

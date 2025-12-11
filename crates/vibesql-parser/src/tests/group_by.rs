@@ -1,5 +1,6 @@
-use super::*;
 use vibesql_ast::{GroupByClause, GroupingElement, MixedGroupingItem};
+
+use super::*;
 
 // ========================================================================
 // GROUP BY and HAVING Tests

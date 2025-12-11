@@ -15,11 +15,14 @@
 //! `OpfsStorage::new_async()` and uses internal async operations with synchronous
 //! wrappers via `wasm_bindgen_futures::spawn_local` for StorageBackend trait compatibility.
 
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
+    sync::mpsc::{channel, Receiver, Sender},
+};
+
 use js_sys::{Object, Reflect, Uint8Array};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemWritableFileStream};
@@ -516,8 +519,9 @@ mod tests {
 
     #[cfg(target_arch = "wasm32")]
     mod wasm_tests {
-        use super::*;
         use wasm_bindgen_test::*;
+
+        use super::*;
 
         wasm_bindgen_test_configure!(run_in_browser);
 

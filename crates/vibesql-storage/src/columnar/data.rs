@@ -11,6 +11,7 @@
 //! - Cache-friendly columnar data that can be shared across query executions
 
 use std::sync::Arc;
+
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
 /// Typed column data with NULL bitmap
@@ -163,7 +164,9 @@ impl ColumnData {
         match self {
             ColumnData::Int64 { values, .. } => SqlValue::Integer(values[index]),
             ColumnData::Float64 { values, .. } => SqlValue::Double(values[index]),
-            ColumnData::String { values, .. } => SqlValue::Varchar(arcstr::ArcStr::from(values[index].as_ref())),
+            ColumnData::String { values, .. } => {
+                SqlValue::Varchar(arcstr::ArcStr::from(values[index].as_ref()))
+            }
             ColumnData::Bool { values, .. } => SqlValue::Boolean(values[index]),
             ColumnData::Date { values, .. } => SqlValue::Date(values[index]),
             ColumnData::Time { values, .. } => SqlValue::Time(values[index]),

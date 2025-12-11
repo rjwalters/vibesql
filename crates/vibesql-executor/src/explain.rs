@@ -9,12 +9,14 @@
 //! - Estimated row counts (when statistics are available)
 
 use std::fmt::Write;
+
 use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::optimizer::index_planner::IndexPlanner;
-use crate::select::scan::index_scan::cost_based_index_selection;
+use crate::{
+    errors::ExecutorError, optimizer::index_planner::IndexPlanner,
+    select::scan::index_scan::cost_based_index_selection,
+};
 
 /// Represents a single node in the query execution plan
 #[derive(Debug, Clone)]

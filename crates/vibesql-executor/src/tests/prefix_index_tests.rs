@@ -227,8 +227,9 @@ fn test_composite_prefix_index() {
         "users",
         Row::new(vec![
             SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")), // email: "alice@exam" prefix
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),       // name: "Alice" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")), /* email: "alice@exam"
+                                                                           * prefix */
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")), // name: "Alice" prefix
         ]),
     )
     .expect("First insert should succeed");
@@ -238,8 +239,9 @@ fn test_composite_prefix_index() {
         "users",
         Row::new(vec![
             SqlValue::Integer(2),
-            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.org")), // Same "alice@exam" prefix
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice Jones")),       // Same "Alice" prefix
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.org")), /* Same "alice@exam"
+                                                                           * prefix */
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Jones")), // Same "Alice" prefix
         ]),
     );
 
@@ -251,8 +253,9 @@ fn test_composite_prefix_index() {
         "users",
         Row::new(vec![
             SqlValue::Integer(3),
-            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")), // Different "bob@exampl" prefix
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")),     // Same "Alice" prefix is OK
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")), /* Different "bob@
+                                                                         * exampl" prefix */
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice Smith")), // Same "Alice" prefix is OK
         ]),
     );
 

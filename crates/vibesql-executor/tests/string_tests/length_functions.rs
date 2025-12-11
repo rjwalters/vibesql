@@ -28,7 +28,9 @@ fn test_char_length_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(""),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -41,7 +43,9 @@ fn test_char_length_multibyte() {
     // "café" is 4 characters but 5 bytes
     let expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("café"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -53,7 +57,9 @@ fn test_char_length_using_characters() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("café"),
+        ))],
         character_unit: Some(vibesql_ast::CharacterUnit::Characters),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -66,7 +72,9 @@ fn test_char_length_using_octets() {
     // "café" is 5 bytes in UTF-8 (c=1, a=1, f=1, é=2)
     let expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("café"),
+        ))],
         character_unit: Some(vibesql_ast::CharacterUnit::Octets),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -90,7 +98,9 @@ fn test_octet_length_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(""),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -103,7 +113,9 @@ fn test_octet_length_multibyte() {
     // "café" is 5 bytes in UTF-8
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("café"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -117,14 +129,18 @@ fn test_octet_length_vs_char_length() {
     // ASCII: same count
     let ascii_expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("hello"),
+        ))],
         character_unit: None,
     };
     let char_result = evaluator.eval(&ascii_expr, &row).unwrap();
 
     let octet_expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("hello"),
+        ))],
         character_unit: None,
     };
     let octet_result = evaluator.eval(&octet_expr, &row).unwrap();
@@ -150,7 +166,9 @@ fn test_length_empty() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(""),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -162,7 +180,9 @@ fn test_length_basic() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("hello"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -175,7 +195,9 @@ fn test_length_multibyte() {
     // LENGTH returns byte count (unlike CHAR_LENGTH)
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("café"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -189,8 +211,12 @@ fn test_length_wrong_arg_count() {
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("extra"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("extra"),
+            )),
         ],
         character_unit: None,
     };
@@ -216,8 +242,12 @@ fn test_char_length_wrong_arg_count() {
     let expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("extra"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("extra"),
+            )),
         ],
         character_unit: None,
     };
@@ -243,8 +273,12 @@ fn test_octet_length_wrong_arg_count() {
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("extra"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("extra"),
+            )),
         ],
         character_unit: None,
     };
@@ -269,7 +303,9 @@ fn test_char_length_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "CHAR_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from("test")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+            arcstr::ArcStr::from("test"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -281,7 +317,9 @@ fn test_octet_length_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from("café")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+            arcstr::ArcStr::from("café"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -293,7 +331,9 @@ fn test_length_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from("test")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
+            arcstr::ArcStr::from("test"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();

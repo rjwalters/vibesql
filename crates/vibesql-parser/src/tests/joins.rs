@@ -21,7 +21,7 @@ fn test_parse_simple_join() {
 
                     // Left should be users table
                     match **left {
-                        vibesql_ast::FromClause::Table { ref name, .. } if name == "USERS" => {} // Success
+                        vibesql_ast::FromClause::Table { ref name, .. } if name == "USERS" => {} /* Success */
                         _ => panic!("Expected left table to be 'users'"),
                     }
 

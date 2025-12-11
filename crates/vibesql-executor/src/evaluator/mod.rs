@@ -27,9 +27,10 @@ pub mod window;
 mod tests;
 
 // Re-export public API
-pub use arena::ArenaExpressionEvaluator;
 pub use core::{CombinedExpressionEvaluator, ExpressionEvaluator};
-// Re-export eval_unary_op for use in other modules
-pub(crate) use expressions::operators::eval_unary_op;
+
+pub use arena::ArenaExpressionEvaluator;
 // Re-export cache clearing function for benchmarks
 pub use combined::clear_in_subquery_cache;
+// Re-export eval_unary_op for use in other modules
+pub(crate) use expressions::operators::eval_unary_op;

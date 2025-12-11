@@ -1,5 +1,6 @@
-use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
+
+use bytes::{BufMut, BytesMut};
 
 /// Read PostgreSQL error response fields from buffer
 fn read_error_fields(buf: &[u8]) -> HashMap<char, String> {

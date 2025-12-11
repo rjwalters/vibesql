@@ -5,7 +5,8 @@ impl Parser {
     pub(super) fn parse_identifier_expression(
         &mut self,
     ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
-        // Extract identifier string from token (handles regular identifiers and keywords-as-identifiers)
+        // Extract identifier string from token (handles regular identifiers and
+        // keywords-as-identifiers)
         let first = match self.peek() {
             Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
                 let name = id.clone();

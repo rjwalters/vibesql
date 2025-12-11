@@ -13,14 +13,16 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
-
 use vibesql_storage::Database;
 
-use super::graphql;
-use super::types::*;
-use crate::observability::ServerMetrics;
-use crate::registry::DatabaseRegistry;
-use crate::subscription::{detect_pk_columns_from_stmt, SelectiveColumnConfig, SubscriptionManager, SubscriptionUpdate};
+use super::{graphql, types::*};
+use crate::{
+    observability::ServerMetrics,
+    registry::DatabaseRegistry,
+    subscription::{
+        detect_pk_columns_from_stmt, SelectiveColumnConfig, SubscriptionManager, SubscriptionUpdate,
+    },
+};
 
 /// Pagination configuration
 #[derive(Debug, Clone)]
@@ -191,8 +193,11 @@ async fn graphql_handler(
     debug!("Generated SQL: {}", sql);
 
     // Create a session with the shared database
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "graphql_user".to_string(), shared_db.clone());
+    let mut session = crate::session::Session::new(
+        db_name.clone(),
+        "graphql_user".to_string(),
+        shared_db.clone(),
+    );
 
     // Execute the main query
     let result = if params.is_empty() {
@@ -382,8 +387,7 @@ async fn execute_nested_query(
 
     debug!("Executing nested query: {}", sql);
 
-    let result =
-        session.execute(&sql).await.map_err(|e| format!("Nested query failed: {}", e))?;
+    let result = session.execute(&sql).await.map_err(|e| format!("Nested query failed: {}", e))?;
 
     // Convert results to JSON objects
     let nested_rows: Vec<serde_json::Map<String, serde_json::Value>> = match result {
@@ -406,8 +410,7 @@ async fn execute_nested_query(
     let mut nested_rows_mut = nested_rows;
     for deeper_nested in &nested.nested {
         if let Err(e) =
-            Box::pin(execute_nested_query(session, &mut nested_rows_mut, deeper_nested, _ctx))
-                .await
+            Box::pin(execute_nested_query(session, &mut nested_rows_mut, deeper_nested, _ctx)).await
         {
             debug!("Warning: deeper nested query failed: {}", e);
         }
@@ -431,17 +434,12 @@ async fn health_check() -> impl IntoResponse {
 }
 
 /// Get subscription partial update efficiency statistics
-async fn get_efficiency_stats(
-    State(state): State<HttpState>,
-) -> impl IntoResponse {
+async fn get_efficiency_stats(State(state): State<HttpState>) -> impl IntoResponse {
     if let Some(metrics) = &state.metrics {
         let stats = metrics.get_efficiency_stats();
         (StatusCode::OK, Json(stats)).into_response()
     } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse::new("Metrics not available")),
-        )
+        (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse::new("Metrics not available")))
             .into_response()
     }
 }

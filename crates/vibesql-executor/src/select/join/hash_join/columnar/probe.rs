@@ -5,11 +5,11 @@
 //! - Left outer join probe
 //! - Right outer join probe
 
-use crate::errors::ExecutorError;
-use crate::select::columnar::ColumnArray;
-
-use super::hash_table::ColumnarHashTable;
-use super::output::{JoinIndices, LeftOuterJoinIndices, RightOuterJoinIndices};
+use super::{
+    hash_table::ColumnarHashTable,
+    output::{JoinIndices, LeftOuterJoinIndices, RightOuterJoinIndices},
+};
+use crate::{errors::ExecutorError, select::columnar::ColumnArray};
 
 /// Check if a value is NULL according to the null bitmap
 #[inline]

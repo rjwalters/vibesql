@@ -1,10 +1,11 @@
 //! Tests for aggregate patterns from random/aggregates SQLLogicTest suite
 //! These tests reproduce specific patterns that cause failures in the random aggregate tests
 
-use super::super::*;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
+
+use super::super::*;
 
 /// Helper to execute a SQL statement
 fn execute_sql(db: &mut Database, sql: &str) -> Result<Vec<vibesql_storage::Row>, String> {

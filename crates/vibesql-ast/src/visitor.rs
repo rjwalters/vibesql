@@ -1266,8 +1266,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     // Helper to create a simple expression for testing
     fn make_binary_expr() -> Expression {

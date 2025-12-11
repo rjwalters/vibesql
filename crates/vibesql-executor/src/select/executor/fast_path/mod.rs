@@ -23,12 +23,11 @@
 //!
 //! The fast path tries these lookup strategies in order:
 //!
-//! 1. **Primary Key Lookup** (`try_pk_lookup_fast`): Direct O(1) lookup when
-//!    WHERE clause has equality predicates for all PK columns.
+//! 1. **Primary Key Lookup** (`try_pk_lookup_fast`): Direct O(1) lookup when WHERE clause has
+//!    equality predicates for all PK columns.
 //!
-//! 2. **Secondary Index Lookup** (`try_secondary_index_lookup_fast`): O(log n)
-//!    lookup when WHERE clause has equality predicates for all columns of a
-//!    secondary index. Handles queries like:
+//! 2. **Secondary Index Lookup** (`try_secondary_index_lookup_fast`): O(log n) lookup when WHERE
+//!    clause has equality predicates for all columns of a secondary index. Handles queries like:
 //!    `SELECT * FROM customer WHERE c_w_id = 1 AND c_d_id = 2 AND c_last = 'SMITH'`
 //!
 //! 3. **Standard Scan**: Falls back to execute_from_clause for other queries.
@@ -36,8 +35,8 @@
 //! # ORDER BY Support
 //!
 //! The fast path supports ORDER BY with simple column references:
-//! - If an index exists that matches the ORDER BY column(s), results are
-//!   returned pre-sorted from the index scan (zero-cost sorting)
+//! - If an index exists that matches the ORDER BY column(s), results are returned pre-sorted from
+//!   the index scan (zero-cost sorting)
 //! - If no matching index exists, explicit sorting is applied after filtering
 //!
 //! # Performance Impact

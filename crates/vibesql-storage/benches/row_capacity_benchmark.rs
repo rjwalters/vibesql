@@ -14,9 +14,10 @@
 
 mod harness;
 
+use std::hint::black_box;
+
 use harness::{print_group_header, print_summary_table, Harness};
 use smallvec::SmallVec;
-use std::hint::black_box;
 use vibesql_types::SqlValue;
 
 /// Typical column counts for different query patterns

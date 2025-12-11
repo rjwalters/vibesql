@@ -63,7 +63,9 @@ fn test_select_literal_mixed_types() {
                 alias: Some("num".to_string()),
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
+                expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("hello"),
+                )),
                 alias: Some("text".to_string()),
             },
             vibesql_ast::SelectItem::Expression {
@@ -83,7 +85,10 @@ fn test_select_literal_mixed_types() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(42));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
+    );
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Boolean(true));
 }
 
@@ -154,7 +159,9 @@ fn test_select_function_call() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "UPPER".to_string(),
-                args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))],
+                args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("hello"),
+                ))],
                 character_unit: None,
             },
             alias: Some("upper".to_string()),
@@ -170,7 +177,10 @@ fn test_select_function_call() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HELLO")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HELLO"))
+    );
 }
 
 #[test]
@@ -481,7 +491,9 @@ fn test_hex_literal_in_subquery_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("012")))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("012"),
+                ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
@@ -535,7 +547,9 @@ fn test_hex_literal_simple() {
         set_operation: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
+            expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
             alias: Some("hex_value".to_string()),
         }],
         from: None,
@@ -549,7 +563,10 @@ fn test_hex_literal_simple() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))
+    );
 }
 
 #[test]
@@ -576,7 +593,9 @@ fn test_binary_literal_in_subquery_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("U")))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("U"),
+                ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,

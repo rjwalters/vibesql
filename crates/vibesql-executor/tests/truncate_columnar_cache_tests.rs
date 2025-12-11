@@ -18,11 +18,7 @@ fn setup_products_table(db: &mut Database) {
         "products".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new(
-                "name".to_string(),
-                DataType::Varchar { max_length: Some(50) },
-                true,
-            ),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, true),
             ColumnSchema::new("price".to_string(), DataType::Integer, true),
         ],
         vec!["id".to_string()], // id is PRIMARY KEY
@@ -257,7 +253,9 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))),
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "Electronics",
+            ))),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

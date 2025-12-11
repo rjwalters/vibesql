@@ -23,14 +23,13 @@ use std::collections::HashMap;
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
+use super::predicate::{
+    extract_prefix_equality_predicates, extract_prefix_with_trailing_range, PrefixWithRangeResult,
+};
 use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
     select::{cte::CteResult, scan::FromResult},
-};
-
-use super::predicate::{
-    extract_prefix_equality_predicates, extract_prefix_with_trailing_range, PrefixWithRangeResult,
 };
 
 /// Result of checking if an index covers all needed columns
@@ -201,8 +200,7 @@ pub(super) fn execute_covering_index_scan(
     }
 
     // Create schema with only the projected columns
-    let result_schema =
-        vibesql_catalog::TableSchema::new(effective_name.clone(), result_columns);
+    let result_schema = vibesql_catalog::TableSchema::new(effective_name.clone(), result_columns);
 
     let schema = CombinedSchema::from_table(effective_name, result_schema);
 

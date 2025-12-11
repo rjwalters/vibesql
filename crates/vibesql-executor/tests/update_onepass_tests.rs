@@ -204,11 +204,8 @@ fn test_onepass_not_null_constraint_enforced() {
     schema.primary_key = Some(vec!["id".to_string()]);
     db.create_table(schema).unwrap();
 
-    db.insert_row(
-        "required",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]),
-    )
-    .unwrap();
+    db.insert_row("required", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)]))
+        .unwrap();
 
     // Try to set NOT NULL column to NULL
     let stmt = UpdateStmt {
@@ -247,13 +244,19 @@ fn test_composite_pk_update_both_columns_specified() {
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "order_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "order_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "item_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "item_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
@@ -289,13 +292,19 @@ fn test_composite_pk_update_reversed_order() {
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "item_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "item_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "order_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "order_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
@@ -356,13 +365,19 @@ fn test_composite_pk_not_found_returns_zero() {
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "order_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "order_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(99))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "item_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "item_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(99))),
             }),
@@ -393,13 +408,19 @@ fn test_composite_pk_multiple_columns_updated() {
         ],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "order_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "order_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(2))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "item_id".to_string() }),
+                left: Box::new(Expression::ColumnRef {
+                    table: None,
+                    column: "item_id".to_string(),
+                }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),

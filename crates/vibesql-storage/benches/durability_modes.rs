@@ -15,14 +15,16 @@
 //! Or via Makefile:
 //!   make bench-durability
 
+use std::{hint::black_box, io::Cursor};
+
 use criterion::{
     criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode, Throughput,
 };
-use std::hint::black_box;
-use std::io::Cursor;
 use vibesql_catalog::{ColumnSchema, TableSchema};
-use vibesql_storage::wal::{PersistenceConfig, PersistenceEngine};
-use vibesql_storage::{Database, Row};
+use vibesql_storage::{
+    wal::{PersistenceConfig, PersistenceEngine},
+    Database, Row,
+};
 use vibesql_types::{DataType, SqlValue};
 
 // ============================================================================
@@ -126,11 +128,8 @@ fn create_database_with_mode(mode: DurabilityMode) -> Database {
             // O_SYNC or fsync after each write, which isn't exposed yet
             let buf = Vec::new();
             let cursor = Cursor::new(buf);
-            let config = PersistenceConfig {
-                flush_interval_ms: 1,
-                flush_count: 1,
-                ..Default::default()
-            };
+            let config =
+                PersistenceConfig { flush_interval_ms: 1, flush_count: 1, ..Default::default() };
             let engine = PersistenceEngine::with_writer(cursor, config).unwrap();
             db.enable_persistence(engine);
         }
@@ -206,10 +205,8 @@ fn bench_bulk_insert(c: &mut Criterion) {
                         if matches!(mode, DurabilityMode::Lazy) {
                             // Lazy mode: wait for async flush
                             db.sync_persistence().unwrap();
-                        } else if matches!(
-                            mode,
-                            DurabilityMode::Durable | DurabilityMode::Paranoid
-                        ) {
+                        } else if matches!(mode, DurabilityMode::Durable | DurabilityMode::Paranoid)
+                        {
                             db.sync_persistence().unwrap();
                         }
 

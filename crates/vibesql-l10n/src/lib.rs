@@ -24,16 +24,13 @@
 mod detection;
 mod loader;
 
-pub use detection::detect_locale;
-pub use loader::L10nError;
+use std::{cell::RefCell, sync::RwLock};
 
+pub use detection::detect_locale;
 // Re-export fluent for use by the vibe_msg! macro in downstream crates
 pub use fluent;
-
-use std::cell::RefCell;
-use std::sync::RwLock;
-
 use fluent::{FluentArgs, FluentBundle, FluentResource};
+pub use loader::L10nError;
 use once_cell::sync::Lazy;
 use rust_embed::RustEmbed;
 use unic_langid::LanguageIdentifier;
@@ -45,9 +42,7 @@ use unic_langid::LanguageIdentifier;
 struct Resources;
 
 /// Global locale setting (thread-safe string)
-static LOCALE: Lazy<RwLock<String>> = Lazy::new(|| {
-    RwLock::new(detection::detect_locale())
-});
+static LOCALE: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(detection::detect_locale()));
 
 // Thread-local FluentBundle (not Sync, so we use thread-local storage)
 thread_local! {
@@ -88,13 +83,13 @@ where
 
 /// List of FTL resource files to load for each locale.
 /// These files are loaded in order and merged into a single bundle.
-const RESOURCE_FILES: &[&str] = &["cli.ftl", "parser.ftl", "storage.ftl", "catalog.ftl", "executor.ftl"];
+const RESOURCE_FILES: &[&str] =
+    &["cli.ftl", "parser.ftl", "storage.ftl", "catalog.ftl", "executor.ftl"];
 
 /// Create a new FluentBundle for the given locale
 fn create_bundle(locale_str: &str) -> Result<FluentBundle<FluentResource>, L10nError> {
-    let locale: LanguageIdentifier = locale_str
-        .parse()
-        .map_err(|_| L10nError::InvalidLocale(locale_str.to_string()))?;
+    let locale: LanguageIdentifier =
+        locale_str.parse().map_err(|_| L10nError::InvalidLocale(locale_str.to_string()))?;
 
     let mut bundle = FluentBundle::new(vec![locale]);
     // Disable Unicode isolation characters (used for bidirectional text support)
@@ -163,9 +158,8 @@ pub fn init(locale: Option<&str>) -> Result<(), L10nError> {
     let locale_str = locale.map(String::from).unwrap_or_else(detection::detect_locale);
 
     // Validate the locale can be parsed
-    let _: LanguageIdentifier = locale_str
-        .parse()
-        .map_err(|_| L10nError::InvalidLocale(locale_str.clone()))?;
+    let _: LanguageIdentifier =
+        locale_str.parse().map_err(|_| L10nError::InvalidLocale(locale_str.clone()))?;
 
     // Create the bundle eagerly to avoid race conditions in parallel tests.
     // This ensures we use the locale passed to init() rather than reading
@@ -243,7 +237,8 @@ pub fn format(msg_id: &str, args: Option<&FluentArgs>) -> String {
 /// println!("Current locale: {}", locale);
 /// ```
 pub fn current_locale() -> LanguageIdentifier {
-    LOCALE.read()
+    LOCALE
+        .read()
         .map(|l| l.parse().unwrap_or_else(|_| "en-US".parse().unwrap()))
         .unwrap_or_else(|_| "en-US".parse().unwrap())
 }
@@ -388,7 +383,11 @@ mod tests {
     fn test_spanish_resources_embedded() {
         // Check that Spanish resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("es/")), "Spanish resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("es/")),
+            "Spanish resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "es/cli.ftl"), "es/cli.ftl not found");
         assert!(files.iter().any(|f| f == "es/parser.ftl"), "es/parser.ftl not found");
     }
@@ -423,7 +422,11 @@ mod tests {
     fn test_portuguese_resources_embedded() {
         // Check that Portuguese (Brazilian) resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("pt-BR/")), "Portuguese resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("pt-BR/")),
+            "Portuguese resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "pt-BR/cli.ftl"), "pt-BR/cli.ftl not found");
         assert!(files.iter().any(|f| f == "pt-BR/parser.ftl"), "pt-BR/parser.ftl not found");
         assert!(files.iter().any(|f| f == "pt-BR/executor.ftl"), "pt-BR/executor.ftl not found");
@@ -461,7 +464,11 @@ mod tests {
     fn test_chinese_resources_embedded() {
         // Check that Chinese resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("zh-CN/")), "Chinese resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("zh-CN/")),
+            "Chinese resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "zh-CN/cli.ftl"), "zh-CN/cli.ftl not found");
         assert!(files.iter().any(|f| f == "zh-CN/parser.ftl"), "zh-CN/parser.ftl not found");
         assert!(files.iter().any(|f| f == "zh-CN/executor.ftl"), "zh-CN/executor.ftl not found");
@@ -530,7 +537,11 @@ mod tests {
     fn test_japanese_resources_embedded() {
         // Check that Japanese resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("ja/")), "Japanese resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("ja/")),
+            "Japanese resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "ja/cli.ftl"), "ja/cli.ftl not found");
         assert!(files.iter().any(|f| f == "ja/parser.ftl"), "ja/parser.ftl not found");
         assert!(files.iter().any(|f| f == "ja/executor.ftl"), "ja/executor.ftl not found");
@@ -598,7 +609,11 @@ mod tests {
     fn test_french_resources_embedded() {
         // Check that French resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("fr/")), "French resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("fr/")),
+            "French resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "fr/cli.ftl"), "fr/cli.ftl not found");
         assert!(files.iter().any(|f| f == "fr/parser.ftl"), "fr/parser.ftl not found");
         assert!(files.iter().any(|f| f == "fr/executor.ftl"), "fr/executor.ftl not found");
@@ -706,7 +721,11 @@ mod tests {
     fn test_german_resources_embedded() {
         // Check that German resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("de/")), "German resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("de/")),
+            "German resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "de/cli.ftl"), "de/cli.ftl not found");
         assert!(files.iter().any(|f| f == "de/parser.ftl"), "de/parser.ftl not found");
         assert!(files.iter().any(|f| f == "de/executor.ftl"), "de/executor.ftl not found");
@@ -758,7 +777,11 @@ mod tests {
     fn test_korean_resources_embedded() {
         // Check that Korean resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("ko/")), "Korean resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("ko/")),
+            "Korean resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "ko/cli.ftl"), "ko/cli.ftl not found");
         assert!(files.iter().any(|f| f == "ko/parser.ftl"), "ko/parser.ftl not found");
         assert!(files.iter().any(|f| f == "ko/executor.ftl"), "ko/executor.ftl not found");
@@ -848,7 +871,11 @@ mod tests {
     fn test_indonesian_resources_embedded() {
         // Check that Indonesian resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("id/")), "Indonesian resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("id/")),
+            "Indonesian resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "id/cli.ftl"), "id/cli.ftl not found");
         assert!(files.iter().any(|f| f == "id/parser.ftl"), "id/parser.ftl not found");
         assert!(files.iter().any(|f| f == "id/executor.ftl"), "id/executor.ftl not found");
@@ -923,7 +950,11 @@ mod tests {
     fn test_swedish_resources_embedded() {
         // Check that Swedish resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("sv/")), "Swedish resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("sv/")),
+            "Swedish resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "sv/cli.ftl"), "sv/cli.ftl not found");
         assert!(files.iter().any(|f| f == "sv/parser.ftl"), "sv/parser.ftl not found");
         assert!(files.iter().any(|f| f == "sv/executor.ftl"), "sv/executor.ftl not found");
@@ -1013,7 +1044,11 @@ mod tests {
     fn test_thai_resources_embedded() {
         // Check that Thai resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("th/")), "Thai resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("th/")),
+            "Thai resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "th/cli.ftl"), "th/cli.ftl not found");
         assert!(files.iter().any(|f| f == "th/parser.ftl"), "th/parser.ftl not found");
         assert!(files.iter().any(|f| f == "th/executor.ftl"), "th/executor.ftl not found");
@@ -1103,7 +1138,11 @@ mod tests {
     fn test_vietnamese_resources_embedded() {
         // Check that Vietnamese resources are embedded
         let files: Vec<_> = Resources::iter().collect();
-        assert!(files.iter().any(|f| f.starts_with("vi/")), "Vietnamese resources not found in: {:?}", files);
+        assert!(
+            files.iter().any(|f| f.starts_with("vi/")),
+            "Vietnamese resources not found in: {:?}",
+            files
+        );
         assert!(files.iter().any(|f| f == "vi/cli.ftl"), "vi/cli.ftl not found");
         assert!(files.iter().any(|f| f == "vi/parser.ftl"), "vi/parser.ftl not found");
         assert!(files.iter().any(|f| f == "vi/executor.ftl"), "vi/executor.ftl not found");

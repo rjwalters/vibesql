@@ -115,22 +115,10 @@ fn test_replace_invalidates_columnar_cache() {
     // The replaced row should now have price 150 instead of 100
     // After REPLACE, the row ordering may change depending on implementation
     // What matters is that the price 100 is gone and 150 is present
-    assert!(
-        !updated_prices.contains(&100),
-        "Old price 100 should no longer exist after REPLACE"
-    );
-    assert!(
-        updated_prices.contains(&150),
-        "New price 150 should exist after REPLACE"
-    );
-    assert!(
-        updated_prices.contains(&200),
-        "Unchanged price 200 should still exist"
-    );
-    assert!(
-        updated_prices.contains(&300),
-        "Unchanged price 300 should still exist"
-    );
+    assert!(!updated_prices.contains(&100), "Old price 100 should no longer exist after REPLACE");
+    assert!(updated_prices.contains(&150), "New price 150 should exist after REPLACE");
+    assert!(updated_prices.contains(&200), "Unchanged price 200 should still exist");
+    assert!(updated_prices.contains(&300), "Unchanged price 300 should still exist");
 
     // Verify cache was invalidated and re-converted
     let final_stats = db.columnar_cache_stats();
@@ -189,11 +177,15 @@ fn test_replace_unique_constraint_invalidates_cache() {
         "users".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                false,
+            ),
             ColumnSchema::new("score".to_string(), DataType::Integer, true),
         ],
-        Some(vec!["id".to_string()]),                // Primary key
-        vec![vec!["name".to_string()]],              // Unique constraint on name
+        Some(vec!["id".to_string()]),   // Primary key
+        vec![vec!["name".to_string()]], // Unique constraint on name
     );
     db.create_table(schema).unwrap();
 
@@ -225,7 +217,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)), // Different id
-            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice"))), // Same name
+            vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice"))), /* Same name */
             vibesql_ast::Expression::Literal(SqlValue::Integer(999)), // New score
         ]]),
         conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
@@ -246,10 +238,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
     );
 
     let has_old_score = (0..2).any(|i| matches!(score_col.get(i), SqlValue::Integer(100)));
-    assert!(
-        !has_old_score,
-        "Alice's old score 100 should NOT be visible after REPLACE"
-    );
+    assert!(!has_old_score, "Alice's old score 100 should NOT be visible after REPLACE");
 }
 
 /// Test REPLACE with no conflict (just inserts) still works correctly with cache

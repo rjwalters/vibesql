@@ -87,25 +87,25 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
                 name: "AVG".to_string(),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::ColumnRef {
-                    table: Some("J".to_string()), // UPPERCASE alias
+                    table: Some("J".to_string()),          // UPPERCASE alias
                     column: "I_CURRENT_PRICE".to_string(), // UPPERCASE column - this was failing
                 }],
             },
             alias: None,
         }],
         from: Some(vibesql_ast::FromClause::Table {
-            name: "ITEM".to_string(), // UPPERCASE table
+            name: "ITEM".to_string(),     // UPPERCASE table
             alias: Some("J".to_string()), // UPPERCASE alias
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
-                table: Some("J".to_string()), // UPPERCASE alias
+                table: Some("J".to_string()),     // UPPERCASE alias
                 column: "I_CATEGORY".to_string(), // UPPERCASE column
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
-                table: Some("I".to_string()), // UPPERCASE outer alias
+                table: Some("I".to_string()),     // UPPERCASE outer alias
                 column: "I_CATEGORY".to_string(), // UPPERCASE column
             }),
         }),
@@ -116,7 +116,8 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
         offset: None,
     });
 
-    // Build main query: SELECT I_ITEM_SK FROM ITEM I WHERE I.I_CURRENT_PRICE > (correlated subquery)
+    // Build main query: SELECT I_ITEM_SK FROM ITEM I WHERE I.I_CURRENT_PRICE > (correlated
+    // subquery)
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
         into_variables: None,
@@ -347,6 +348,9 @@ fn test_correlated_subquery_basic() {
 
     // Check Diana
     let diana = &result[1];
-    assert_eq!(diana.get(0).unwrap(), &vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Diana")));
+    assert_eq!(
+        diana.get(0).unwrap(),
+        &vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Diana"))
+    );
     assert_eq!(diana.get(1).unwrap(), &vibesql_types::SqlValue::Integer(60000));
 }

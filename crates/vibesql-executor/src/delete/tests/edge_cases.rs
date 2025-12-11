@@ -1,11 +1,11 @@
 //! Edge cases and error handling tests for DELETE operations
 
-use super::common::setup_users_table_with_active as setup_test_table;
 use vibesql_ast::{BinaryOperator, DeleteStmt, Expression, WhereClause};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Database;
 use vibesql_types::{DataType, SqlValue};
 
+use super::common::setup_users_table_with_active as setup_test_table;
 use crate::{errors::ExecutorError, DeleteExecutor};
 
 #[test]

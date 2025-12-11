@@ -13,9 +13,12 @@
 //!     0 - All files valid
 //!     1 - One or more files have errors
 
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
+
 use fluent_syntax::parser::parse;
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 
 /// ANSI color codes for terminal output
 mod colors {
@@ -32,7 +35,6 @@ struct FileCheckResult {
     warnings: Vec<String>,
     message_count: usize,
 }
-
 
 /// Find the resources directory relative to the crate
 fn find_resources_dir() -> Option<PathBuf> {
@@ -92,12 +94,7 @@ fn check_ftl_file(path: &Path) -> FileCheckResult {
         Ok(c) => c,
         Err(e) => {
             errors.push(format!("Failed to read file: {}", e));
-            return FileCheckResult {
-                path: path.to_path_buf(),
-                errors,
-                warnings,
-                message_count,
-            };
+            return FileCheckResult { path: path.to_path_buf(), errors, warnings, message_count };
         }
     };
 
@@ -120,10 +117,7 @@ fn check_ftl_file(path: &Path) -> FileCheckResult {
 
                 // Check for empty message value
                 if msg.value.is_none() && msg.attributes.is_empty() {
-                    warnings.push(format!(
-                        "Message '{}' has no value or attributes",
-                        msg.id.name
-                    ));
+                    warnings.push(format!("Message '{}' has no value or attributes", msg.id.name));
                 }
 
                 // Check for select expressions without default
@@ -144,12 +138,7 @@ fn check_ftl_file(path: &Path) -> FileCheckResult {
         }
     }
 
-    FileCheckResult {
-        path: path.to_path_buf(),
-        errors,
-        warnings,
-        message_count,
-    }
+    FileCheckResult { path: path.to_path_buf(), errors, warnings, message_count }
 }
 
 /// Check a pattern for select expressions without default variants
@@ -197,11 +186,7 @@ fn main() -> ExitCode {
     let resources_dir = match find_resources_dir() {
         Some(dir) => dir,
         None => {
-            eprintln!(
-                "{}Error: Could not find resources directory{}",
-                colors::RED,
-                colors::RESET
-            );
+            eprintln!("{}Error: Could not find resources directory{}", colors::RED, colors::RESET);
             eprintln!("Run from workspace root or crate directory.");
             return ExitCode::FAILURE;
         }
@@ -212,11 +197,7 @@ fn main() -> ExitCode {
     // Get all locales
     let locales = get_locales(&resources_dir);
     if locales.is_empty() {
-        eprintln!(
-            "{}Error: No locale directories found{}",
-            colors::RED,
-            colors::RESET
-        );
+        eprintln!("{}Error: No locale directories found{}", colors::RED, colors::RESET);
         return ExitCode::FAILURE;
     }
 
@@ -293,12 +274,7 @@ fn main() -> ExitCode {
             }
 
             if !result.warnings.is_empty() {
-                println!(
-                    "{}Warnings in {}:{}",
-                    colors::YELLOW,
-                    file_name,
-                    colors::RESET
-                );
+                println!("{}Warnings in {}:{}", colors::YELLOW, file_name, colors::RESET);
                 for warning in &result.warnings {
                     println!("  - {}", warning);
                 }
@@ -315,39 +291,22 @@ fn main() -> ExitCode {
     println!("Total messages: {}", total_messages);
     println!(
         "Errors: {}{}{}",
-        if total_errors > 0 {
-            colors::RED
-        } else {
-            colors::GREEN
-        },
+        if total_errors > 0 { colors::RED } else { colors::GREEN },
         total_errors,
         colors::RESET
     );
     println!(
         "Warnings: {}{}{}",
-        if total_warnings > 0 {
-            colors::YELLOW
-        } else {
-            colors::GREEN
-        },
+        if total_warnings > 0 { colors::YELLOW } else { colors::GREEN },
         total_warnings,
         colors::RESET
     );
 
     if total_errors > 0 {
-        println!(
-            "\n{}FAILED: {} error(s) found{}",
-            colors::RED,
-            total_errors,
-            colors::RESET
-        );
+        println!("\n{}FAILED: {} error(s) found{}", colors::RED, total_errors, colors::RESET);
         ExitCode::FAILURE
     } else {
-        println!(
-            "\n{}PASSED: All files valid{}",
-            colors::GREEN,
-            colors::RESET
-        );
+        println!("\n{}PASSED: All files valid{}", colors::GREEN, colors::RESET);
         ExitCode::SUCCESS
     }
 }

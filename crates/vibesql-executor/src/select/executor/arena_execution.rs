@@ -25,8 +25,7 @@
 //!
 //! This is particularly beneficial for OLTP workloads with high query rates.
 
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use vibesql_ast::arena::{
     ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
@@ -36,10 +35,11 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::builder::SelectExecutor;
-use crate::errors::ExecutorError;
-use crate::evaluator::window::compare_values;
-use crate::evaluator::ArenaExpressionEvaluator;
-use crate::schema::CombinedSchema;
+use crate::{
+    errors::ExecutorError,
+    evaluator::{window::compare_values, ArenaExpressionEvaluator},
+    schema::CombinedSchema,
+};
 
 impl SelectExecutor<'_> {
     /// Execute an arena-allocated SELECT statement with inline placeholder resolution.

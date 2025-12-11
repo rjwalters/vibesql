@@ -2,8 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use super::optimizer::JoinOrderSearch;
-use super::state::JoinCost;
+use super::{optimizer::JoinOrderSearch, state::JoinCost};
 use crate::select::join::reorder::{JoinEdge, JoinOrderAnalyzer};
 
 #[test]

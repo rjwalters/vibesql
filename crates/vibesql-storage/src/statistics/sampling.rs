@@ -7,8 +7,7 @@
 //! - Reservoir sampling: Single-pass streaming sample
 //! - Adaptive sampling: Choose sample size based on table size
 
-use rand::prelude::IndexedRandom;
-use rand::Rng;
+use rand::{prelude::IndexedRandom, Rng};
 
 /// Configuration for statistical sampling
 #[derive(Debug, Clone)]
@@ -301,9 +300,9 @@ impl SampleMetadata {
 
 #[cfg(test)]
 mod tests {
+    use rand::{rngs::StdRng, SeedableRng};
+
     use super::*;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
 
     #[test]
     fn test_sample_size_adaptive() {

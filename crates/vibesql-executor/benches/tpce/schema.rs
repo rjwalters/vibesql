@@ -9,13 +9,13 @@
 //! - Market Tables (8): Securities and market data
 //! - Trade Tables (8): Grow during benchmark run
 
-use super::data::TPCEData;
-use vibesql_storage::Database as VibeDB;
-
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use vibesql_storage::Database as VibeDB;
+
+use super::data::TPCEData;
 
 // =============================================================================
 // Database Loaders
@@ -802,7 +802,10 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
     for sc in data.gen_sectors() {
         db.insert_row(
             "sector",
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(sc.sc_id)), SqlValue::Varchar(arcstr::ArcStr::from(sc.sc_name))]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from(sc.sc_id)),
+                SqlValue::Varchar(arcstr::ArcStr::from(sc.sc_name)),
+            ]),
         )
         .unwrap();
     }
@@ -824,7 +827,10 @@ fn load_fixed_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
     for st in data.gen_status_types() {
         db.insert_row(
             "status_type",
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from(st.st_id)), SqlValue::Varchar(arcstr::ArcStr::from(st.st_name))]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from(st.st_id)),
+                SqlValue::Varchar(arcstr::ArcStr::from(st.st_name)),
+            ]),
         )
         .unwrap();
     }
@@ -994,7 +1000,10 @@ fn load_customer_tables_vibesql(db: &mut VibeDB, data: &mut TPCEData) {
         for symbol in symbols.iter().take(num_items) {
             db.insert_row(
                 "watch_item",
-                Row::new(vec![SqlValue::Bigint(watch_list_id), SqlValue::Varchar(arcstr::ArcStr::from(symbol.clone()))]),
+                Row::new(vec![
+                    SqlValue::Bigint(watch_list_id),
+                    SqlValue::Varchar(arcstr::ArcStr::from(symbol.clone())),
+                ]),
             )
             .unwrap();
         }

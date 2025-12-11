@@ -11,12 +11,15 @@
 
 #![allow(clippy::useless_conversion)]
 
-use crate::errors::ExecutorError;
-use arrow::array::{Array, ArrayRef, Float64Array, Int64Array};
-use arrow::compute::kernels::numeric::{add, div, mul, sub};
-use arrow::record_batch::RecordBatch;
+use arrow::{
+    array::{Array, ArrayRef, Float64Array, Int64Array},
+    compute::kernels::numeric::{add, div, mul, sub},
+    record_batch::RecordBatch,
+};
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// Evaluate an arithmetic expression on a RecordBatch using SIMD operations
 ///
@@ -261,9 +264,12 @@ use std::sync::Arc;
 
 #[cfg(test)]
 mod tests {
+    use arrow::{
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+
     use super::*;
-    use arrow::datatypes::{DataType, Field, Schema};
-    use arrow::record_batch::RecordBatch;
 
     // ===== Basic functionality tests =====
 

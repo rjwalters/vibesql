@@ -59,10 +59,22 @@ impl std::fmt::Display for StorageError {
                 write!(f, "{}", vibe_msg!("storage-table-not-found", name = name.as_str()))
             }
             StorageError::ColumnCountMismatch { expected, actual } => {
-                write!(f, "{}", vibe_msg!("storage-column-count-mismatch", expected = *expected as i64, actual = *actual as i64))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "storage-column-count-mismatch",
+                        expected = *expected as i64,
+                        actual = *actual as i64
+                    )
+                )
             }
             StorageError::ColumnIndexOutOfBounds { index } => {
-                write!(f, "{}", vibe_msg!("storage-column-index-out-of-bounds", index = *index as i64))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("storage-column-index-out-of-bounds", index = *index as i64)
+                )
             }
             StorageError::CatalogError(msg) => {
                 write!(f, "{}", vibe_msg!("storage-catalog-error", message = msg.as_str()))
@@ -80,16 +92,41 @@ impl std::fmt::Display for StorageError {
                 write!(f, "{}", vibe_msg!("storage-index-not-found", name = name.as_str()))
             }
             StorageError::ColumnNotFound { column_name, table_name } => {
-                write!(f, "{}", vibe_msg!("storage-column-not-found", column_name = column_name.as_str(), table_name = table_name.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "storage-column-not-found",
+                        column_name = column_name.as_str(),
+                        table_name = table_name.as_str()
+                    )
+                )
             }
             StorageError::NullConstraintViolation { column } => {
-                write!(f, "{}", vibe_msg!("storage-null-constraint-violation", column = column.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("storage-null-constraint-violation", column = column.as_str())
+                )
             }
             StorageError::TypeMismatch { column, expected, actual } => {
-                write!(f, "{}", vibe_msg!("storage-type-mismatch", column = column.as_str(), expected = expected.as_str(), actual = actual.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "storage-type-mismatch",
+                        column = column.as_str(),
+                        expected = expected.as_str(),
+                        actual = actual.as_str()
+                    )
+                )
             }
             StorageError::UniqueConstraintViolation(msg) => {
-                write!(f, "{}", vibe_msg!("storage-unique-constraint-violation", message = msg.as_str()))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!("storage-unique-constraint-violation", message = msg.as_str())
+                )
             }
             StorageError::InvalidIndexColumn(msg) => {
                 write!(f, "{}", vibe_msg!("storage-invalid-index-column", message = msg.as_str()))
@@ -101,7 +138,15 @@ impl std::fmt::Display for StorageError {
                 write!(f, "{}", vibe_msg!("storage-io-error", message = msg.as_str()))
             }
             StorageError::InvalidPageSize { expected, actual } => {
-                write!(f, "{}", vibe_msg!("storage-invalid-page-size", expected = *expected as i64, actual = *actual as i64))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "storage-invalid-page-size",
+                        expected = *expected as i64,
+                        actual = *actual as i64
+                    )
+                )
             }
             StorageError::InvalidPageId(page_id) => {
                 write!(f, "{}", vibe_msg!("storage-invalid-page-id", page_id = *page_id as i64))
@@ -110,7 +155,15 @@ impl std::fmt::Display for StorageError {
                 write!(f, "{}", vibe_msg!("storage-lock-error", message = msg.as_str()))
             }
             StorageError::MemoryBudgetExceeded { used, budget } => {
-                write!(f, "{}", vibe_msg!("storage-memory-budget-exceeded", used = *used as i64, budget = *budget as i64))
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "storage-memory-budget-exceeded",
+                        used = *used as i64,
+                        budget = *budget as i64
+                    )
+                )
             }
             StorageError::NoIndexToEvict => {
                 write!(f, "{}", vibe_msg!("storage-no-index-to-evict"))

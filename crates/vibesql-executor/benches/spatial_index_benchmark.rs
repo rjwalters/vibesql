@@ -5,8 +5,9 @@
 //!
 //! Compares indexed spatial queries vs full table scans to demonstrate speedup.
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use vibesql_ast::Statement;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{CreateIndexExecutor, SelectExecutor};
@@ -165,8 +166,10 @@ fn create_test_db_with_10k_points() -> Database {
 
         let wkt = format!("POINT({} {})", x, y);
 
-        let row =
-            vibesql_storage::Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Varchar(arcstr::ArcStr::from(wkt))]);
+        let row = vibesql_storage::Row::new(vec![
+            SqlValue::Integer(i as i64),
+            SqlValue::Varchar(arcstr::ArcStr::from(wkt)),
+        ]);
         db.insert_row("POINTS_OF_INTEREST", row).unwrap();
     }
 

@@ -12,7 +12,8 @@
 //! # Module Organization
 //!
 //! The datetime functions are organized into logical modules:
-//! - `current` - Current date/time functions (CURRENT_DATE, CURRENT_TIME, CURRENT_TIMESTAMP, DATETIME)
+//! - `current` - Current date/time functions (CURRENT_DATE, CURRENT_TIME, CURRENT_TIMESTAMP,
+//!   DATETIME)
 //! - `extract` - Field extraction (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)
 //! - `arithmetic` - Date/time arithmetic (DATEDIFF, DATE_ADD, DATE_SUB, AGE, EXTRACT)
 
@@ -21,9 +22,8 @@ mod current;
 mod extract;
 
 // Re-export all public functions
+// Re-export helper for use by arithmetic operators
+pub(crate) use arithmetic::date_add_subtract;
 pub(super) use arithmetic::{age, date_add, date_sub, datediff, extract};
 pub(super) use current::{current_date, current_time, current_timestamp, datetime};
 pub(super) use extract::{day, hour, minute, month, second, year};
-
-// Re-export helper for use by arithmetic operators
-pub(crate) use arithmetic::date_add_subtract;

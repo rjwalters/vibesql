@@ -9,11 +9,13 @@ use std::io::{Read, Write};
 
 use vibesql_types::SqlValue;
 
-use crate::persistence::binary::{
-    io::{read_bool, read_u32, read_u64, write_bool, write_u32, write_u64},
-    value::{read_sql_value, write_sql_value},
+use crate::{
+    persistence::binary::{
+        io::{read_bool, read_u32, read_u64, write_bool, write_u32, write_u64},
+        value::{read_sql_value, write_sql_value},
+    },
+    StorageError,
 };
-use crate::StorageError;
 
 /// Log Sequence Number - monotonically increasing identifier for WAL entries
 pub type Lsn = u64;
@@ -34,24 +36,11 @@ pub struct WalEntry {
 pub enum WalOp {
     // DML Operations
     /// Insert a row into a table
-    Insert {
-        table_id: u32,
-        row_id: u64,
-        values: Vec<SqlValue>,
-    },
+    Insert { table_id: u32, row_id: u64, values: Vec<SqlValue> },
     /// Update a row in a table
-    Update {
-        table_id: u32,
-        row_id: u64,
-        old_values: Vec<SqlValue>,
-        new_values: Vec<SqlValue>,
-    },
+    Update { table_id: u32, row_id: u64, old_values: Vec<SqlValue>, new_values: Vec<SqlValue> },
     /// Delete a row from a table
-    Delete {
-        table_id: u32,
-        row_id: u64,
-        old_values: Vec<SqlValue>,
-    },
+    Delete { table_id: u32, row_id: u64, old_values: Vec<SqlValue> },
 
     // DDL Operations
     /// Create a new table
@@ -409,8 +398,14 @@ mod tests {
             WalOp::Update {
                 table_id: 42,
                 row_id: 100,
-                old_values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("old"))],
-                new_values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("new"))],
+                old_values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("old")),
+                ],
+                new_values: vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("new")),
+                ],
             },
         );
 

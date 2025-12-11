@@ -1,17 +1,20 @@
 #![allow(clippy::doc_lazy_continuation)]
 
-use super::build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey};
-use super::columnar::{
-    hash_join_indices_columnar, hash_join_indices_columnar_multi, hash_join_indices_columnar_str,
-};
-use super::{batch_combine_rows, FromResult};
-use crate::{errors::ExecutorError, schema::CombinedSchema};
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
-
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+
+use super::{
+    batch_combine_rows,
+    build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey},
+    columnar::{
+        hash_join_indices_columnar, hash_join_indices_columnar_multi,
+        hash_join_indices_columnar_str,
+    },
+    FromResult,
+};
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 // Note: Memory limit checking removed from hash join.
 // Hash join uses O(smaller_table) memory for the hash table, not O(result_size).
@@ -39,8 +42,8 @@ pub(in crate::select::join) fn hash_join_inner(
     left_col_idx: usize,
     right_col_idx: usize,
 ) -> Result<FromResult, ExecutorError> {
-    // Note: No memory limit check here. Hash join is already O(n+m) time and O(smaller_table) space,
-    // which is optimal for equijoins. We cannot predict output size accurately anyway.
+    // Note: No memory limit check here. Hash join is already O(n+m) time and O(smaller_table)
+    // space, which is optimal for equijoins. We cannot predict output size accurately anyway.
 
     // Extract right table name and schema for combining
     let right_table_name = right
@@ -108,7 +111,8 @@ pub(in crate::select::join) fn hash_join_inner(
             let config = ParallelConfig::global();
             if config.should_parallelize_join(probe_rows.len()) {
                 // Morsel-driven parallel probe with work-stealing
-                // Provides dynamic load balancing when probe costs vary (e.g., skewed key distributions)
+                // Provides dynamic load balancing when probe costs vary (e.g., skewed key
+                // distributions)
                 let morsel_config = MorselConfig::optimal();
                 let pairs = morsel_parallel_probe_sqlvalue(
                     probe_rows,
@@ -217,9 +221,10 @@ pub(in crate::select::join) fn hash_join_inner_multi(
         let hash_table = build_hash_table_composite_parallel(build_rows, build_col_indices);
 
         // Probe phase: Collect (build_idx, probe_idx) pairs
-        // Uses parallel probing when row count exceeds threshold (read-only hash table is thread-safe)
-        // Note: Multi-column join uses par_iter() since morsel_parallel_probe_sqlvalue only supports
-        // single-column keys. A future optimization could add morsel_parallel_probe_composite.
+        // Uses parallel probing when row count exceeds threshold (read-only hash table is
+        // thread-safe) Note: Multi-column join uses par_iter() since
+        // morsel_parallel_probe_sqlvalue only supports single-column keys. A future
+        // optimization could add morsel_parallel_probe_composite.
         #[cfg(feature = "parallel")]
         {
             let config = ParallelConfig::global();

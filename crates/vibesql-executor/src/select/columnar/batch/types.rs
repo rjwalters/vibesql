@@ -6,6 +6,7 @@
 //! - `ColumnType`: Internal type inference helper
 
 use std::sync::Arc;
+
 use vibesql_types::SqlValue;
 
 /// A columnar batch stores data in column-oriented format for efficient SIMD processing

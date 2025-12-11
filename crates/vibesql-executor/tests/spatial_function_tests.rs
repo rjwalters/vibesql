@@ -147,7 +147,7 @@ fn test_st_contains() {
     let mut db = Database::new();
 
     // Point inside polygon - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Contains(ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'), ST_GeomFromText('POINT(5 5)'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -164,7 +164,7 @@ fn test_st_within() {
     let mut db = Database::new();
 
     // Point inside polygon - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Within(ST_GeomFromText('POINT(5 5)'), ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -181,7 +181,7 @@ fn test_st_intersects() {
     let mut db = Database::new();
 
     // Lines crossing - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Intersects(ST_GeomFromText('LINESTRING(0 0, 10 10)'), ST_GeomFromText('LINESTRING(0 10, 10 0)'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -240,7 +240,7 @@ fn test_st_crosses() {
     let mut db = Database::new();
 
     // Lines crossing - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Crosses(ST_GeomFromText('LINESTRING(0 0, 10 10)'), ST_GeomFromText('LINESTRING(0 10, 10 0)'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -257,7 +257,7 @@ fn test_st_overlaps() {
     let mut db = Database::new();
 
     // Partially overlapping polygons - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Overlaps(ST_GeomFromText('POLYGON((0 0, 5 0, 5 5, 0 5, 0 0))'), ST_GeomFromText('POLYGON((3 3, 8 3, 8 8, 3 8, 3 3))'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -274,7 +274,7 @@ fn test_st_touches() {
     let mut db = Database::new();
 
     // Adjacent polygons sharing an edge - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Touches(ST_GeomFromText('POLYGON((0 0, 5 0, 5 5, 0 5, 0 0))'), ST_GeomFromText('POLYGON((5 0, 10 0, 10 5, 5 5, 5 0))'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -291,7 +291,7 @@ fn test_st_covers() {
     let mut db = Database::new();
 
     // Point inside polygon - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_Covers(ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'), ST_GeomFromText('POINT(5 5)'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -308,7 +308,7 @@ fn test_st_coveredby() {
     let mut db = Database::new();
 
     // Point inside polygon - should be TRUE
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_CoveredBy(ST_GeomFromText('POINT(5 5)'), ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'))"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());
@@ -328,7 +328,7 @@ fn test_st_dwithin() {
     // Using haversine distance (great-circle distance)
     // Small difference in coordinates results in large haversine distance,
     // so use a larger threshold. Distance from (0,0) to (0,0.01) ~1.1km
-    let result = execute_sql(&mut db, 
+    let result = execute_sql(&mut db,
         "SELECT ST_DWithin(ST_GeomFromText('POINT(0 0)'), ST_GeomFromText('POINT(0 0.01)'), 200000.0)"
     ).unwrap();
     assert!(get_boolean_value(&result).unwrap());

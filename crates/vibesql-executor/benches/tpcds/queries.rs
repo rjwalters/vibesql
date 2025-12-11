@@ -3373,38 +3373,26 @@ pub const TPCDS_SANITY_QUERIES: &[(&str, &str)] = &[
 ///
 /// SQLite lacks several SQL:1999/2003 OLAP features that TPC-DS requires:
 ///
-/// - **ROLLUP/CUBE**: Q5, Q14, Q18, Q22, Q36, Q67, Q70, Q77, Q80, Q86
-///   SQLite doesn't support `GROUP BY ROLLUP(...)` or `GROUP BY CUBE(...)`
-///   These would need to be rewritten as multiple UNION ALL queries.
+/// - **ROLLUP/CUBE**: Q5, Q14, Q18, Q22, Q36, Q67, Q70, Q77, Q80, Q86 SQLite doesn't support `GROUP
+///   BY ROLLUP(...)` or `GROUP BY CUBE(...)` These would need to be rewritten as multiple UNION ALL
+///   queries.
 ///
-/// - **GROUPING()**: Q36, Q70, Q86
-///   The `GROUPING()` function identifies super-aggregate rows in ROLLUP/CUBE.
+/// - **GROUPING()**: Q36, Q70, Q86 The `GROUPING()` function identifies super-aggregate rows in
+///   ROLLUP/CUBE.
 ///
-/// - **STDDEV_SAMP()**: Q17
-///   SQLite lacks built-in sample standard deviation. Could be computed manually
-///   but would require significant query rewriting.
+/// - **STDDEV_SAMP()**: Q17 SQLite lacks built-in sample standard deviation. Could be computed
+///   manually but would require significant query rewriting.
 ///
-/// - **Parenthesized UNION subqueries**: Q2
-///   SQLite doesn't allow parentheses around SELECT statements in UNION.
-///   Example: `SELECT ... UNION ALL (SELECT ...)` fails.
+/// - **Parenthesized UNION subqueries**: Q2 SQLite doesn't allow parentheses around SELECT
+///   statements in UNION. Example: `SELECT ... UNION ALL (SELECT ...)` fails.
 ///
 /// Total: 11 queries skipped (Q2, Q5, Q14, Q17, Q18, Q22, Q36, Q67, Q70, Q77, Q80, Q86)
 pub const SQLITE_SKIP_QUERIES: &[&str] = &[
     // UNION syntax incompatibility (parenthesized subquery)
-    "Q2",
-    // ROLLUP queries
-    "Q5",
-    "Q14",
-    "Q18",
-    "Q22",
-    "Q67",
-    "Q70",
-    "Q77",
-    "Q80",
+    "Q2", // ROLLUP queries
+    "Q5", "Q14", "Q18", "Q22", "Q67", "Q70", "Q77", "Q80",
     // GROUPING() function (also uses ROLLUP/CUBE)
-    "Q36",
-    "Q86",
-    // STDDEV_SAMP() function
+    "Q36", "Q86", // STDDEV_SAMP() function
     "Q17",
 ];
 

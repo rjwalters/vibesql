@@ -18,8 +18,8 @@ use crate::errors::ExecutorError;
 /// # Examples
 ///
 /// ```
-/// use vibesql_types::SqlValue;
 /// use vibesql_executor::evaluator::coercion::coerce_to_date;
+/// use vibesql_types::SqlValue;
 ///
 /// // String to date
 /// let result = coerce_to_date(&SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01")));
@@ -85,14 +85,16 @@ mod tests {
 
     #[test]
     fn test_coerce_varchar_to_date() {
-        let result = coerce_to_date(&SqlValue::Varchar(arcstr::ArcStr::from("2024-01-15"))).unwrap();
+        let result =
+            coerce_to_date(&SqlValue::Varchar(arcstr::ArcStr::from("2024-01-15"))).unwrap();
         let expected = vibesql_types::Date::new(2024, 1, 15).unwrap();
         assert_eq!(result, SqlValue::Date(expected));
     }
 
     #[test]
     fn test_coerce_character_to_date() {
-        let result = coerce_to_date(&SqlValue::Character(arcstr::ArcStr::from("2024-12-31"))).unwrap();
+        let result =
+            coerce_to_date(&SqlValue::Character(arcstr::ArcStr::from("2024-12-31"))).unwrap();
         let expected = vibesql_types::Date::new(2024, 12, 31).unwrap();
         assert_eq!(result, SqlValue::Date(expected));
     }
@@ -134,7 +136,8 @@ mod tests {
 
     #[test]
     fn test_coerce_leap_year_date() {
-        let result = coerce_to_date(&SqlValue::Varchar(arcstr::ArcStr::from("2024-02-29"))).unwrap();
+        let result =
+            coerce_to_date(&SqlValue::Varchar(arcstr::ArcStr::from("2024-02-29"))).unwrap();
         let expected = vibesql_types::Date::new(2024, 2, 29).unwrap();
         assert_eq!(result, SqlValue::Date(expected));
     }

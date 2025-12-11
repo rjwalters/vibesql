@@ -150,8 +150,9 @@ fn test_is_distinct_from_in_join_condition() {
 fn test_is_distinct_from_with_expressions() {
     let db = setup_test_db();
     // Test with arithmetic expressions
-    let results = execute_select(&db, "SELECT a FROM t1 WHERE (a + 1) IS NOT DISTINCT FROM (b + 1)")
-        .expect("Query should succeed");
+    let results =
+        execute_select(&db, "SELECT a FROM t1 WHERE (a + 1) IS NOT DISTINCT FROM (b + 1)")
+            .expect("Query should succeed");
     // (a+1) IS NOT DISTINCT FROM (b+1) when a=b (for row 1 where a=1,b=1)
     // For NULL values, NULL+1=NULL, and NULL IS NOT DISTINCT FROM NULL
     assert_eq!(results.len(), 2, "Should find 2 rows where (a+1) IS NOT DISTINCT FROM (b+1)");

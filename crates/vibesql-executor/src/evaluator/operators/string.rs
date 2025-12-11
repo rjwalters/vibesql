@@ -22,7 +22,9 @@ impl StringOps {
             (Varchar(a), Varchar(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
             (Varchar(a), Character(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
             (Character(a), Varchar(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
-            (Character(a), Character(b)) => Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b)))),
+            (Character(a), Character(b)) => {
+                Ok(Varchar(arcstr::ArcStr::from(format!("{}{}", a, b))))
+            }
             _ => Err(ExecutorError::TypeMismatch {
                 left: left.clone(),
                 op: "||".to_string(),
@@ -75,8 +77,10 @@ mod tests {
 
     #[test]
     fn test_type_error() {
-        let result =
-            StringOps::concat(&SqlValue::Integer(1), &SqlValue::Varchar(arcstr::ArcStr::from("test")));
+        let result = StringOps::concat(
+            &SqlValue::Integer(1),
+            &SqlValue::Varchar(arcstr::ArcStr::from("test")),
+        );
         assert!(result.is_err());
     }
 }

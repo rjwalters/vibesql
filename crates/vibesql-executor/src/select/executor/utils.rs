@@ -6,10 +6,11 @@ use super::builder::SelectExecutor;
 fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
     match expr {
         vibesql_ast::Expression::ColumnRef { .. } => true,
-        vibesql_ast::Expression::PseudoVariable { .. } => true, // Pseudo-variables reference columns (OLD.x, NEW.x)
-        vibesql_ast::Expression::Default => false,              // DEFAULT doesn't reference columns
-        vibesql_ast::Expression::DuplicateKeyValue { .. } => false, // DuplicateKeyValue doesn't reference columns
-
+        vibesql_ast::Expression::PseudoVariable { .. } => true, /* Pseudo-variables reference */
+        // columns (OLD.x, NEW.x)
+        vibesql_ast::Expression::Default => false, // DEFAULT doesn't reference columns
+        vibesql_ast::Expression::DuplicateKeyValue { .. } => false, /* DuplicateKeyValue doesn't */
+        // reference columns
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {
             expression_references_column(left) || expression_references_column(right)
         }

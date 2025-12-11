@@ -82,11 +82,12 @@ pub(crate) fn execute_values(
     // Handle empty VALUES - return empty result with appropriate schema
     if rows.is_empty() {
         let num_columns = column_aliases.map(|ca| ca.len()).unwrap_or(0);
-        let column_names: Vec<String> = column_aliases.cloned().unwrap_or_else(|| {
-            (0..num_columns).map(|i| format!("column{}", i + 1)).collect()
-        });
+        let column_names: Vec<String> = column_aliases
+            .cloned()
+            .unwrap_or_else(|| (0..num_columns).map(|i| format!("column{}", i + 1)).collect());
         let column_types = vec![vibesql_types::DataType::Null; num_columns];
-        let schema = CombinedSchema::from_derived_table(alias.to_string(), column_names, column_types);
+        let schema =
+            CombinedSchema::from_derived_table(alias.to_string(), column_names, column_types);
         return Ok(super::FromResult::from_rows(schema, vec![]));
     }
 

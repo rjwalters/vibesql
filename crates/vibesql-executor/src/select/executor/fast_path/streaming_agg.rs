@@ -8,9 +8,10 @@ use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::analysis::extract_simple_aggregate;
-use crate::errors::ExecutorError;
-use crate::select::executor::builder::SelectExecutor;
-use crate::select::grouping::AggregateAccumulator;
+use crate::{
+    errors::ExecutorError,
+    select::{executor::builder::SelectExecutor, grouping::AggregateAccumulator},
+};
 
 impl SelectExecutor<'_> {
     /// Execute a streaming aggregate query (#3815)
@@ -26,7 +27,10 @@ impl SelectExecutor<'_> {
     /// # Performance
     /// This achieves SQLite-like performance (~4μs) compared to ~30μs
     /// for the standard aggregation path.
-    pub fn execute_streaming_aggregate(&self, stmt: &SelectStmt) -> Result<Vec<Row>, ExecutorError> {
+    pub fn execute_streaming_aggregate(
+        &self,
+        stmt: &SelectStmt,
+    ) -> Result<Vec<Row>, ExecutorError> {
         // Extract table name from FROM clause
         let table_name = match &stmt.from {
             Some(vibesql_ast::FromClause::Table { name, .. }) => name.as_str(),
@@ -98,8 +102,8 @@ impl SelectExecutor<'_> {
         for item in &stmt.select_list {
             match item {
                 SelectItem::Expression { expr, .. } => {
-                    let (func_name, col_idx) =
-                        extract_simple_aggregate(expr, &table.schema).ok_or_else(|| {
+                    let (func_name, col_idx) = extract_simple_aggregate(expr, &table.schema)
+                        .ok_or_else(|| {
                             ExecutorError::Other(
                                 "Streaming aggregate: invalid aggregate expression".to_string(),
                             )

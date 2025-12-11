@@ -26,8 +26,9 @@
 //! With hash join: Scan ~5000 STOCK rows to build hash table, probe ~200 ORDER_LINE rows
 //! With INL: For each of ~170 distinct ol_i_id values, do one point lookup on STOCK
 
-use ahash::AHashSet;
 use std::collections::{HashMap, HashSet};
+
+use ahash::AHashSet;
 
 use crate::{
     errors::ExecutorError,
@@ -253,14 +254,16 @@ where
 /// Finds all common column names between the left and right schemas (case-insensitive)
 /// and creates an AND chain of equality conditions.
 ///
-/// Returns None if there are no common columns (which means NATURAL JOIN should behave like CROSS JOIN)
+/// Returns None if there are no common columns (which means NATURAL JOIN should behave like CROSS
+/// JOIN)
 fn generate_natural_join_condition(
     left_schema: &crate::schema::CombinedSchema,
     right_schema: &crate::schema::CombinedSchema,
 ) -> Result<Option<vibesql_ast::Expression>, ExecutorError> {
     use std::collections::HashMap;
 
-    // Get all column names from left schema (normalized to lowercase for case-insensitive comparison)
+    // Get all column names from left schema (normalized to lowercase for case-insensitive
+    // comparison)
     let mut left_columns: HashMap<String, Vec<(String, String)>> = HashMap::new(); // lowercase_name -> [(table, actual_name)]
     for (table_name, (_table_idx, table_schema)) in &left_schema.table_schemas {
         for col in &table_schema.columns {
@@ -499,8 +502,8 @@ fn predicate_references_only_tables(
             table_set.contains(t) || table_set.contains(&t_lower)
         }
         vibesql_ast::Expression::ColumnRef { table: None, .. } => {
-            // Unqualified column - can't determine which table, assume it might be from nullable side
-            // Return false to be conservative (keep the predicate)
+            // Unqualified column - can't determine which table, assume it might be from nullable
+            // side Return false to be conservative (keep the predicate)
             false
         }
         vibesql_ast::Expression::IsNull { expr: inner, .. } => {
@@ -1036,8 +1039,7 @@ fn try_prefix_scan_semi_join(
     if debug {
         eprintln!(
             "[PREFIX_SEMI] Using index {} for prefix scan on {}",
-            index_name,
-            right_table_name
+            index_name, right_table_name
         );
     }
 

@@ -14,8 +14,7 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-use crate::errors::ExecutorError;
-use crate::select::SelectResult;
+use crate::{errors::ExecutorError, select::SelectResult};
 
 /// Check if a table reference is an information_schema table
 pub fn is_information_schema_table(table_name: &str) -> bool {
@@ -503,16 +502,16 @@ fn execute_tables_query(catalog: &vibesql_catalog::Catalog) -> Result<SelectResu
             rows.push(Row::new(vec![
                 SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                 SqlValue::Varchar(arcstr::ArcStr::from(table_schema_name.clone())), // table_schema
-                SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                 SqlValue::Varchar(arcstr::ArcStr::from("BASE TABLE")), // table_type
-                SqlValue::Null,                           // self_referencing_column_name
-                SqlValue::Null,                           // reference_generation
-                SqlValue::Null,                           // user_defined_type_catalog
-                SqlValue::Null,                           // user_defined_type_schema
-                SqlValue::Null,                           // user_defined_type_name
+                SqlValue::Null,                                     // self_referencing_column_name
+                SqlValue::Null,                                     // reference_generation
+                SqlValue::Null,                                     // user_defined_type_catalog
+                SqlValue::Null,                                     // user_defined_type_schema
+                SqlValue::Null,                                     // user_defined_type_name
                 SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // is_insertable_into
                 SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_typed
-                SqlValue::Null,                           // commit_action
+                SqlValue::Null,                                     // commit_action
             ]));
         }
     }
@@ -522,16 +521,17 @@ fn execute_tables_query(catalog: &vibesql_catalog::Catalog) -> Result<SelectResu
         rows.push(Row::new(vec![
             SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
             SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-            SqlValue::Varchar(arcstr::ArcStr::from(view_name.clone())),     // table_name
+            SqlValue::Varchar(arcstr::ArcStr::from(view_name.clone())), // table_name
             SqlValue::Varchar(arcstr::ArcStr::from("VIEW")),    // table_type
-            SqlValue::Null,                           // self_referencing_column_name
-            SqlValue::Null,                           // reference_generation
-            SqlValue::Null,                           // user_defined_type_catalog
-            SqlValue::Null,                           // user_defined_type_schema
-            SqlValue::Null,                           // user_defined_type_name
-            SqlValue::Varchar(arcstr::ArcStr::from("NO")), // is_insertable_into (views typically not insertable)
+            SqlValue::Null,                                     // self_referencing_column_name
+            SqlValue::Null,                                     // reference_generation
+            SqlValue::Null,                                     // user_defined_type_catalog
+            SqlValue::Null,                                     // user_defined_type_schema
+            SqlValue::Null,                                     // user_defined_type_name
+            SqlValue::Varchar(arcstr::ArcStr::from("NO")),      /* is_insertable_into (views
+                                                                 * typically not insertable) */
             SqlValue::Varchar(arcstr::ArcStr::from("NO")), // is_typed
-            SqlValue::Null,                      // commit_action
+            SqlValue::Null,                                // commit_action
         ]));
     }
 
@@ -556,50 +556,54 @@ fn execute_columns_query(
                 let datetime_precision = get_datetime_precision(&column.data_type);
 
                 rows.push(Row::new(vec![
-                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")),    // table_catalog
-                    SqlValue::Varchar(arcstr::ArcStr::from("public")),     // table_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),       // table_name
-                    SqlValue::Varchar(arcstr::ArcStr::from(column.name.clone())),      // column_name
-                    SqlValue::Integer((ordinal + 1) as i64),     // ordinal_position
-                    format_default_value(&column.default_value), // column_default
-                    SqlValue::Varchar(arcstr::ArcStr::from(if column.nullable { "YES" } else { "NO" })), // is_nullable
+                    SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
+                    SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(column.name.clone())), // column_name
+                    SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
+                    format_default_value(&column.default_value),        // column_default
+                    SqlValue::Varchar(arcstr::ArcStr::from(if column.nullable {
+                        "YES"
+                    } else {
+                        "NO"
+                    })), // is_nullable
                     SqlValue::Varchar(arcstr::ArcStr::from(format_data_type(&column.data_type))), // data_type
-                    char_max_len,                             // character_maximum_length
-                    char_octet_len,                           // character_octet_length
-                    num_precision,                            // numeric_precision
-                    num_radix,                                // numeric_precision_radix
-                    num_scale,                                // numeric_scale
-                    datetime_precision,                       // datetime_precision
-                    SqlValue::Null,                           // interval_type
-                    SqlValue::Null,                           // interval_precision
-                    SqlValue::Null,                           // character_set_catalog
-                    SqlValue::Null,                           // character_set_schema
-                    SqlValue::Null,                           // character_set_name
-                    SqlValue::Null,                           // collation_catalog
-                    SqlValue::Null,                           // collation_schema
-                    SqlValue::Null,                           // collation_name
-                    SqlValue::Null,                           // domain_catalog
-                    SqlValue::Null,                           // domain_schema
-                    SqlValue::Null,                           // domain_name
+                    char_max_len,       // character_maximum_length
+                    char_octet_len,     // character_octet_length
+                    num_precision,      // numeric_precision
+                    num_radix,          // numeric_precision_radix
+                    num_scale,          // numeric_scale
+                    datetime_precision, // datetime_precision
+                    SqlValue::Null,     // interval_type
+                    SqlValue::Null,     // interval_precision
+                    SqlValue::Null,     // character_set_catalog
+                    SqlValue::Null,     // character_set_schema
+                    SqlValue::Null,     // character_set_name
+                    SqlValue::Null,     // collation_catalog
+                    SqlValue::Null,     // collation_schema
+                    SqlValue::Null,     // collation_name
+                    SqlValue::Null,     // domain_catalog
+                    SqlValue::Null,     // domain_schema
+                    SqlValue::Null,     // domain_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // udt_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("pg_catalog")), // udt_schema
                     SqlValue::Varchar(arcstr::ArcStr::from(format_udt_name(&column.data_type))), // udt_name
-                    SqlValue::Null,                           // scope_catalog
-                    SqlValue::Null,                           // scope_schema
-                    SqlValue::Null,                           // scope_name
-                    SqlValue::Null,                           // maximum_cardinality
+                    SqlValue::Null, // scope_catalog
+                    SqlValue::Null, // scope_schema
+                    SqlValue::Null, // scope_name
+                    SqlValue::Null, // maximum_cardinality
                     SqlValue::Varchar(arcstr::ArcStr::from(format!("{}", ordinal + 1))), // dtd_identifier
-                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_self_referencing
-                    SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_identity
-                    SqlValue::Null,                           // identity_generation
-                    SqlValue::Null,                           // identity_start
-                    SqlValue::Null,                           // identity_increment
-                    SqlValue::Null,                           // identity_maximum
-                    SqlValue::Null,                           // identity_minimum
-                    SqlValue::Null,                           // identity_cycle
-                    SqlValue::Varchar(arcstr::ArcStr::from("NEVER")),   // is_generated
-                    SqlValue::Null,                           // generation_expression
-                    SqlValue::Varchar(arcstr::ArcStr::from("YES")),     // is_updatable
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")), // is_self_referencing
+                    SqlValue::Varchar(arcstr::ArcStr::from("NO")), // is_identity
+                    SqlValue::Null,                                // identity_generation
+                    SqlValue::Null,                                // identity_start
+                    SqlValue::Null,                                // identity_increment
+                    SqlValue::Null,                                // identity_maximum
+                    SqlValue::Null,                                // identity_minimum
+                    SqlValue::Null,                                // identity_cycle
+                    SqlValue::Varchar(arcstr::ArcStr::from("NEVER")), // is_generated
+                    SqlValue::Null,                                // generation_expression
+                    SqlValue::Varchar(arcstr::ArcStr::from("YES")), // is_updatable
                 ]));
             }
         }
@@ -624,10 +628,10 @@ fn execute_table_constraints_query(
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)),       // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("PRIMARY KEY")), // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
@@ -641,10 +645,10 @@ fn execute_table_constraints_query(
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)),       // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("UNIQUE")),  // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
@@ -661,10 +665,10 @@ fn execute_table_constraints_query(
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)),       // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(constraint_name)), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("FOREIGN KEY")), // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
@@ -677,10 +681,10 @@ fn execute_table_constraints_query(
                 rows.push(Row::new(vec![
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // constraint_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // constraint_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(check_name.clone())),    // constraint_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(check_name.clone())), // constraint_name
                     SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                     SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
+                    SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
                     SqlValue::Varchar(arcstr::ArcStr::from("CHECK")),   // constraint_type
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // is_deferrable
                     SqlValue::Varchar(arcstr::ArcStr::from("NO")),      // initially_deferred
@@ -713,13 +717,13 @@ fn execute_key_column_usage_query(
                         SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                         SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),      // column_name
-                        SqlValue::Integer((ordinal + 1) as i64),  // ordinal_position
-                        SqlValue::Null,                           // position_in_unique_constraint
-                        SqlValue::Null,                           // referenced_table_schema
-                        SqlValue::Null,                           // referenced_table_name
-                        SqlValue::Null,                           // referenced_column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // column_name
+                        SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
+                        SqlValue::Null, // position_in_unique_constraint
+                        SqlValue::Null, // referenced_table_schema
+                        SqlValue::Null, // referenced_table_name
+                        SqlValue::Null, // referenced_column_name
                     ]));
                 }
             }
@@ -734,13 +738,13 @@ fn execute_key_column_usage_query(
                         SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                         SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),      // column_name
-                        SqlValue::Integer((ordinal + 1) as i64),  // ordinal_position
-                        SqlValue::Null,                           // position_in_unique_constraint
-                        SqlValue::Null,                           // referenced_table_schema
-                        SqlValue::Null,                           // referenced_table_name
-                        SqlValue::Null,                           // referenced_column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // column_name
+                        SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
+                        SqlValue::Null, // position_in_unique_constraint
+                        SqlValue::Null, // referenced_table_schema
+                        SqlValue::Null, // referenced_table_name
+                        SqlValue::Null, // referenced_column_name
                     ]));
                 }
             }
@@ -760,13 +764,13 @@ fn execute_key_column_usage_query(
                         SqlValue::Varchar(arcstr::ArcStr::from(constraint_name.clone())), // constraint_name
                         SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // table_catalog
                         SqlValue::Varchar(arcstr::ArcStr::from("public")),  // table_schema
-                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),    // table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())),      // column_name
-                        SqlValue::Integer((ordinal + 1) as i64),  // ordinal_position
-                        SqlValue::Integer((ordinal + 1) as i64),  // position_in_unique_constraint
-                        SqlValue::Varchar(arcstr::ArcStr::from("public")),  // referenced_table_schema
+                        SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())), // table_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(col_name.clone())), // column_name
+                        SqlValue::Integer((ordinal + 1) as i64),            // ordinal_position
+                        SqlValue::Integer((ordinal + 1) as i64), // position_in_unique_constraint
+                        SqlValue::Varchar(arcstr::ArcStr::from("public")), // referenced_table_schema
                         SqlValue::Varchar(arcstr::ArcStr::from(fk.parent_table.clone())), // referenced_table_name
-                        SqlValue::Varchar(arcstr::ArcStr::from(ref_col_name.clone())),  // referenced_column_name
+                        SqlValue::Varchar(arcstr::ArcStr::from(ref_col_name.clone())), // referenced_column_name
                     ]));
                 }
             }
@@ -787,12 +791,12 @@ fn execute_schemata_query(
     for schema_name in catalog.list_schemas() {
         rows.push(Row::new(vec![
             SqlValue::Varchar(arcstr::ArcStr::from("vibesql")), // catalog_name
-            SqlValue::Varchar(arcstr::ArcStr::from(schema_name.clone())),   // schema_name
-            SqlValue::Null,                           // schema_owner
-            SqlValue::Null,                           // default_character_set_catalog
-            SqlValue::Null,                           // default_character_set_schema
+            SqlValue::Varchar(arcstr::ArcStr::from(schema_name.clone())), // schema_name
+            SqlValue::Null,                                     // schema_owner
+            SqlValue::Null,                                     // default_character_set_catalog
+            SqlValue::Null,                                     // default_character_set_schema
             SqlValue::Varchar(arcstr::ArcStr::from("UTF8")),    // default_character_set_name
-            SqlValue::Null,                           // sql_path
+            SqlValue::Null,                                     // sql_path
         ]));
     }
 
@@ -941,7 +945,7 @@ fn get_numeric_precision(dt: &DataType) -> (SqlValue, SqlValue, SqlValue) {
 fn get_datetime_precision(dt: &DataType) -> SqlValue {
     match dt {
         DataType::Date => SqlValue::Integer(0),
-        DataType::Time { .. } | DataType::Timestamp { .. } => SqlValue::Integer(6), // Default precision
+        DataType::Time { .. } | DataType::Timestamp { .. } => SqlValue::Integer(6), /* Default precision */
         DataType::Interval { .. } => SqlValue::Integer(6),
         _ => SqlValue::Null,
     }
@@ -950,7 +954,7 @@ fn get_datetime_precision(dt: &DataType) -> SqlValue {
 /// Format default value for display
 fn format_default_value(default: &Option<vibesql_ast::Expression>) -> SqlValue {
     match default {
-        Some(expr) => SqlValue::Varchar(arcstr::ArcStr::from(format!("{:?}", expr))), // Simple debug representation
+        Some(expr) => SqlValue::Varchar(arcstr::ArcStr::from(format!("{:?}", expr))), /* Simple debug representation */
         None => SqlValue::Null,
     }
 }

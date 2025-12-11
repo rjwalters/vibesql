@@ -380,8 +380,8 @@ fn test_vector_distance_similarity_search() {
         "SELECT ID, COSINE_DISTANCE(EMBEDDING, VECTOR(CAST(1.0 AS REAL), CAST(0.0 AS REAL), CAST(0.0 AS REAL))) AS dist FROM DOCUMENTS ORDER BY dist",
     );
 
-    // Check that query parses (VECTOR constructor might not work, so we'll use a different approach)
-    // For now, just verify the function execution with literal vectors works
+    // Check that query parses (VECTOR constructor might not work, so we'll use a different
+    // approach) For now, just verify the function execution with literal vectors works
 }
 
 #[test]

@@ -3,9 +3,7 @@
 use vibesql_ast::arena::{DeleteStmt, WhereClause};
 
 use super::ArenaParser;
-use crate::keywords::Keyword;
-use crate::token::Token;
-use crate::ParseError;
+use crate::{keywords::Keyword, token::Token, ParseError};
 
 impl<'arena> ArenaParser<'arena> {
     /// Parse a DELETE statement.

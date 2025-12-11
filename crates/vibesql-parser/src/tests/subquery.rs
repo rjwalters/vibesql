@@ -256,14 +256,12 @@ fn test_parse_derived_table_with_explicit_alias() {
     let stmt = Parser::parse_sql(sql).unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select) => {
-            match &select.from {
-                Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
-                    assert_eq!(alias, "SUBQ");
-                }
-                _ => panic!("Expected Subquery in FROM clause"),
+        vibesql_ast::Statement::Select(select) => match &select.from {
+            Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
+                assert_eq!(alias, "SUBQ");
             }
-        }
+            _ => panic!("Expected Subquery in FROM clause"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }

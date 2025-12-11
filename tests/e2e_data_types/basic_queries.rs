@@ -85,7 +85,8 @@ fn test_e2e_group_by_count() {
     assert_eq!(results.len(), 2);
 
     // Find Apple row
-    let apple_row = results.iter().find(|r| r.values[0] == SqlValue::Varchar(StringValue::from("Apple")));
+    let apple_row =
+        results.iter().find(|r| r.values[0] == SqlValue::Varchar(StringValue::from("Apple")));
     assert!(apple_row.is_some());
     assert_eq!(apple_row.unwrap().values[1], SqlValue::Integer(2)); // COUNT(*) returns Integer
 

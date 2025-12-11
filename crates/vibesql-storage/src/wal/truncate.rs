@@ -21,14 +21,20 @@
 // 2. Writing those entries to a new WAL file
 // 3. Atomically replacing the old WAL with the new one
 
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
-use std::path::Path;
+use std::{
+    fs::{self, File},
+    io::{BufReader, BufWriter},
+    path::Path,
+};
 
-use crate::wal::entry::Lsn;
-use crate::wal::reader::{ReadResult, WalReader};
-use crate::wal::writer::WalWriter;
-use crate::StorageError;
+use crate::{
+    wal::{
+        entry::Lsn,
+        reader::{ReadResult, WalReader},
+        writer::WalWriter,
+    },
+    StorageError,
+};
 
 /// Default number of entries to keep after checkpoint LSN (safety buffer)
 pub const DEFAULT_SAFETY_BUFFER: u64 = 100;
@@ -232,11 +238,11 @@ pub fn preview_truncation(
 mod tests {
     use std::path::PathBuf;
 
+    use tempfile::TempDir;
     use vibesql_types::SqlValue;
 
     use super::*;
     use crate::wal::entry::{WalEntry, WalOp};
-    use tempfile::TempDir;
 
     fn create_test_wal(dir: &Path, num_entries: u64) -> PathBuf {
         let wal_path = dir.join("test.wal");
@@ -248,11 +254,7 @@ mod tests {
             let entry = WalEntry::new(
                 i,
                 1234567890 + i,
-                WalOp::Insert {
-                    table_id: 1,
-                    row_id: i,
-                    values: vec![SqlValue::Integer(i as i64)],
-                },
+                WalOp::Insert { table_id: 1, row_id: i, values: vec![SqlValue::Integer(i as i64)] },
             );
             wal_writer.append(&entry).unwrap();
         }

@@ -40,12 +40,11 @@ pub mod transactions;
 
 // Re-export commonly used items for convenience
 pub use data::TPCCData;
-pub use schema::load_vibesql;
-pub use transactions::*;
-
-#[cfg(feature = "sqlite")]
-pub use schema::load_sqlite;
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
 #[cfg(feature = "mysql")]
 pub use schema::load_mysql;
+#[cfg(feature = "sqlite")]
+pub use schema::load_sqlite;
+pub use schema::load_vibesql;
+pub use transactions::*;

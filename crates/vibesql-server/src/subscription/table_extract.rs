@@ -6,8 +6,10 @@
 
 use std::collections::HashSet;
 
-use vibesql_ast::visitor::{walk_expression, ExpressionVisitor, VisitResult};
-use vibesql_ast::{Expression, FromClause, SelectStmt, Statement};
+use vibesql_ast::{
+    visitor::{walk_expression, ExpressionVisitor, VisitResult},
+    Expression, FromClause, SelectStmt, Statement,
+};
 
 // ============================================================================
 // Table Extractor Visitor

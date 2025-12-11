@@ -262,7 +262,8 @@ pub fn optimize_expression(
                 ) {
                     Ok(result) => return Ok(Expression::Literal(result)),
                     Err(_) => {
-                        // If evaluation fails, keep the BETWEEN expression to fail at runtime with proper error
+                        // If evaluation fails, keep the BETWEEN expression to fail at runtime with
+                        // proper error
                     }
                 }
             }
@@ -287,7 +288,8 @@ pub fn optimize_expression(
                 match cast_value(val, data_type, &sql_mode) {
                     Ok(result) => Ok(Expression::Literal(result)),
                     Err(_) => {
-                        // If cast fails, keep the CAST expression to fail at runtime with proper error
+                        // If cast fails, keep the CAST expression to fail at runtime with proper
+                        // error
                         Ok(Expression::Cast {
                             expr: Box::new(expr_opt),
                             data_type: data_type.clone(),
@@ -369,10 +371,11 @@ pub fn optimize_expression(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::Expression;
     use vibesql_catalog::TableSchema;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     #[test]
     fn test_cast_folding_integer_to_varchar() {
@@ -813,7 +816,7 @@ mod tests {
         // NULL IS NOT NULL should fold to FALSE
         let expr = Expression::IsNull {
             expr: Box::new(Expression::Literal(SqlValue::Null)),
-            negated: true,  // IS NOT NULL
+            negated: true, // IS NOT NULL
         };
 
         let db = vibesql_storage::Database::new();
@@ -835,7 +838,7 @@ mod tests {
         // WHERE NULL IS NOT NULL should evaluate to AlwaysFalse
         let expr = Expression::IsNull {
             expr: Box::new(Expression::Literal(SqlValue::Null)),
-            negated: true,  // IS NOT NULL
+            negated: true, // IS NOT NULL
         };
 
         let db = vibesql_storage::Database::new();

@@ -7,8 +7,7 @@ use vibesql_ast::{Expression, OrderDirection, SelectStmt};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::select::executor::builder::SelectExecutor;
+use crate::{errors::ExecutorError, select::executor::builder::SelectExecutor};
 
 impl SelectExecutor<'_> {
     /// Try PK range scan with early projection (issue #3799)
@@ -74,10 +73,8 @@ impl SelectExecutor<'_> {
             };
             // Find the order column in the projected columns
             // First, map projected indices to column names
-            let projected_col_names: Vec<&str> = col_indices
-                .iter()
-                .map(|&idx| table.schema.columns[idx].name.as_str())
-                .collect();
+            let projected_col_names: Vec<&str> =
+                col_indices.iter().map(|&idx| table.schema.columns[idx].name.as_str()).collect();
             // Find the position in projected columns
             let order_idx = match projected_col_names
                 .iter()
@@ -148,10 +145,8 @@ impl SelectExecutor<'_> {
             // Multi-column projection: collect into SmallVec
             for idx in streaming_iter {
                 if let Some(row) = table.get_row(idx) {
-                    let projected_values: vibesql_storage::RowValues = col_indices
-                        .iter()
-                        .map(|&col_idx| row.values[col_idx].clone())
-                        .collect();
+                    let projected_values: vibesql_storage::RowValues =
+                        col_indices.iter().map(|&col_idx| row.values[col_idx].clone()).collect();
                     rows.push(Row::new(projected_values));
                 }
             }
@@ -160,8 +155,9 @@ impl SelectExecutor<'_> {
         // Apply DISTINCT if needed (deduplicate rows)
         // For DISTINCT + ORDER BY, sort first then deduplicate to preserve order
         if stmt.distinct {
-            use crate::select::grouping::compare_sql_values;
             use std::cmp::Ordering;
+
+            use crate::select::grouping::compare_sql_values;
 
             // Sort: use ORDER BY if specified, otherwise sort by all columns for dedup
             if let Some((order_idx, ref direction)) = order_by_info {

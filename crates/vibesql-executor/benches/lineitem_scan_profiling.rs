@@ -21,13 +21,12 @@
 mod harness;
 mod tpch;
 
+use std::{hint::black_box, time::Instant};
+
 use harness::{print_group_header, BenchResult, Harness};
-use std::hint::black_box;
-use std::time::Instant;
+use tpch::schema::*;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-
-use tpch::schema::*;
 
 // =============================================================================
 // Query Constants
@@ -117,10 +116,8 @@ fn run_duckdb_benchmark(
 fn main() {
     eprintln!("\n=== Lineitem Scan Profiling Benchmarks ===\n");
 
-    let scale_factor: f64 = std::env::var("SCALE_FACTOR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.01);
+    let scale_factor: f64 =
+        std::env::var("SCALE_FACTOR").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01);
 
     eprintln!("Scale factor: {}", scale_factor);
 
@@ -168,7 +165,10 @@ fn main() {
         }
 
         // Print comparison summary
-        harness::print_comparison_table(&[("VibeSQL", vibesql_results), ("DuckDB", duckdb_results)]);
+        harness::print_comparison_table(&[
+            ("VibeSQL", vibesql_results),
+            ("DuckDB", duckdb_results),
+        ]);
     }
 
     #[cfg(not(feature = "duckdb"))]

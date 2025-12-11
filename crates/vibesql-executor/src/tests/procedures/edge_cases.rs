@@ -647,8 +647,8 @@ fn test_procedural_select_into_error_column_count_mismatch() {
     // CREATE PROCEDURE get_user_info()
     // BEGIN
     //   DECLARE user_name VARCHAR(50);
-    //   SELECT id, name INTO user_name FROM users WHERE id = 1;  -- Should fail: 2 columns, 1 variable
-    // END;
+    //   SELECT id, name INTO user_name FROM users WHERE id = 1;  -- Should fail: 2 columns, 1
+    // variable END;
     let create_proc = create_simple_procedure(
         "get_user_info",
         vec![],

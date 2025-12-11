@@ -7,8 +7,9 @@
 //!
 //! Run with: `cargo bench --bench prepared_statement_benchmark`
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{SelectExecutor, Session};
 use vibesql_parser::Parser;
@@ -231,6 +232,7 @@ fn bench_shared_cache(c: &mut Criterion) {
     // Shared cache: multiple "sessions" share the same cache
     group.bench_function("shared_cache_sessions", |b| {
         use std::sync::Arc;
+
         use vibesql_executor::PreparedStatementCache;
 
         let shared_cache = Arc::new(PreparedStatementCache::default_cache());

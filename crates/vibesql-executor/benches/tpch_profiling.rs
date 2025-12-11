@@ -9,7 +9,8 @@
 //! Comprehensive profiling for all TPC-H queries
 //!
 //! Run with:
-//!   cargo bench --package vibesql-executor --bench tpch_profiling --features sqlite --no-run && ./target/release/deps/tpch_profiling-*
+//!   cargo bench --package vibesql-executor --bench tpch_profiling --features sqlite --no-run &&
+//! ./target/release/deps/tpch_profiling-*
 //!
 //! Environment Variables:
 //!   QUERY_TIMEOUT_SECS    Timeout per query in seconds (default: 30)
@@ -40,16 +41,17 @@
 mod memory_monitor;
 mod tpch;
 
-use std::collections::HashSet;
-use std::env;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tpch::queries::*;
-use tpch::schema::load_vibesql;
-use vibesql_executor::SelectExecutor;
-use vibesql_parser::Parser;
+use std::{
+    collections::HashSet,
+    env,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use memory_monitor::compute_parallelism;
+use tpch::{queries::*, schema::load_vibesql};
+use vibesql_executor::SelectExecutor;
+use vibesql_parser::Parser;
 
 fn run_query_detailed(db: &vibesql_storage::Database, name: &str, sql: &str, timeout: Duration) {
     eprintln!("\n=== {} ===", name);
@@ -298,9 +300,15 @@ fn main() {
                         output.push_str(&format!("  TOTAL:    {:>10.2?}\n", total));
                     }
                     Err(e) => {
-                        output.push_str(&format!("  Execute:  {:>10.2?} ERROR: {}\n", execute_time, e));
+                        output.push_str(&format!(
+                            "  Execute:  {:>10.2?} ERROR: {}\n",
+                            execute_time, e
+                        ));
                         if execute_time >= timeout {
-                            output.push_str(&format!("  TOTAL:    TIMEOUT (>{}s)\n", timeout.as_secs()));
+                            output.push_str(&format!(
+                                "  TOTAL:    TIMEOUT (>{}s)\n",
+                                timeout.as_secs()
+                            ));
                         }
                     }
                 }
@@ -327,7 +335,11 @@ fn main() {
     if queries_to_run.len() == 1 {
         eprintln!("\n=== Done - Single Query ===");
     } else {
-        eprintln!("\n=== Done - {} TPC-H Queries in {:?} ===", queries_to_run.len(), overall_elapsed);
+        eprintln!(
+            "\n=== Done - {} TPC-H Queries in {:?} ===",
+            queries_to_run.len(),
+            overall_elapsed
+        );
         if parallel_enabled {
             eprintln!("(Executed with {} parallel workers)", parallelism);
         }

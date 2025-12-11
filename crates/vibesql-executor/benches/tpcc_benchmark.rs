@@ -1,7 +1,8 @@
 //! TPC-C Benchmark Profiling
 //!
 //! Run with:
-//!   cargo bench --package vibesql-executor --bench tpcc_benchmark --features sqlite --no-run && ./target/release/deps/tpcc_benchmark-*
+//!   cargo bench --package vibesql-executor --bench tpcc_benchmark --features sqlite --no-run &&
+//! ./target/release/deps/tpcc_benchmark-*
 //!
 //! Set environment variables:
 //!   TPCC_SCALE_FACTOR  - Number of warehouses (default: 1)
@@ -29,17 +30,20 @@
 //! Engine selection (embedded databases only by default):
 //!   ENGINE_FILTER=vibesql ./target/release/deps/tpcc_benchmark-*
 //!   ENGINE_FILTER=vibesql,sqlite ./target/release/deps/tpcc_benchmark-*
-//!   ENGINE_FILTER=vibesql,sqlite,duckdb,mysql ./target/release/deps/tpcc_benchmark-*  # Include MySQL
+//!   ENGINE_FILTER=vibesql,sqlite,duckdb,mysql ./target/release/deps/tpcc_benchmark-*  # Include
+//! MySQL
 
 mod harness;
 mod tpcc;
 
+use std::{
+    env,
+    time::{Duration, Instant},
+};
+
 use harness::EngineFilter;
 use rayon::prelude::*;
-use std::env;
-use std::time::{Duration, Instant};
-use tpcc::schema::load_vibesql;
-use tpcc::transactions::*;
+use tpcc::{schema::load_vibesql, transactions::*};
 
 /// Transaction type enum
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -136,10 +140,7 @@ fn print_parallel_results(
 
     // Print per-client summary
     eprintln!("\n--- Per-Client Summary ---");
-    eprintln!(
-        "{:>8} {:>12} {:>12} {:>10}",
-        "Client", "Txns", "TPS", "Success%"
-    );
+    eprintln!("{:>8} {:>12} {:>12} {:>10}", "Client", "Txns", "TPS", "Success%");
     eprintln!("{:-<8} {:-<12} {:-<12} {:-<10}", "", "", "", "");
     for (i, result) in client_results.iter().enumerate() {
         let success_pct = if result.total_transactions > 0 {
@@ -212,9 +213,7 @@ fn print_parallel_results(
 /// and memory constraints.
 fn compute_parallelism(num_warehouses: i32) -> usize {
     // Get available CPU cores
-    let cpu_cores = std::thread::available_parallelism()
-        .map(|p| p.get())
-        .unwrap_or(1);
+    let cpu_cores = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
 
     // For TPC-C, each client should ideally operate on its own warehouse(s)
     // to minimize contention. We limit clients to the number of warehouses.
@@ -250,11 +249,8 @@ fn aggregate_results(client_results: &[TPCCBenchmarkResults]) -> TPCCBenchmarkRe
     }
 
     // Duration is the max across all clients (they run in parallel)
-    aggregate.total_duration_ms = client_results
-        .iter()
-        .map(|r| r.total_duration_ms)
-        .max()
-        .unwrap_or(0);
+    aggregate.total_duration_ms =
+        client_results.iter().map(|r| r.total_duration_ms).max().unwrap_or(0);
 
     // Calculate aggregate throughput
     if aggregate.total_duration_ms > 0 {
@@ -263,43 +259,33 @@ fn aggregate_results(client_results: &[TPCCBenchmarkResults]) -> TPCCBenchmarkRe
     }
 
     // Calculate weighted average latencies
-    let total_new_order_time: f64 = client_results
-        .iter()
-        .map(|r| r.new_order_avg_us * r.new_order_count as f64)
-        .sum();
+    let total_new_order_time: f64 =
+        client_results.iter().map(|r| r.new_order_avg_us * r.new_order_count as f64).sum();
     if aggregate.new_order_count > 0 {
         aggregate.new_order_avg_us = total_new_order_time / aggregate.new_order_count as f64;
     }
 
-    let total_payment_time: f64 = client_results
-        .iter()
-        .map(|r| r.payment_avg_us * r.payment_count as f64)
-        .sum();
+    let total_payment_time: f64 =
+        client_results.iter().map(|r| r.payment_avg_us * r.payment_count as f64).sum();
     if aggregate.payment_count > 0 {
         aggregate.payment_avg_us = total_payment_time / aggregate.payment_count as f64;
     }
 
-    let total_order_status_time: f64 = client_results
-        .iter()
-        .map(|r| r.order_status_avg_us * r.order_status_count as f64)
-        .sum();
+    let total_order_status_time: f64 =
+        client_results.iter().map(|r| r.order_status_avg_us * r.order_status_count as f64).sum();
     if aggregate.order_status_count > 0 {
         aggregate.order_status_avg_us =
             total_order_status_time / aggregate.order_status_count as f64;
     }
 
-    let total_delivery_time: f64 = client_results
-        .iter()
-        .map(|r| r.delivery_avg_us * r.delivery_count as f64)
-        .sum();
+    let total_delivery_time: f64 =
+        client_results.iter().map(|r| r.delivery_avg_us * r.delivery_count as f64).sum();
     if aggregate.delivery_count > 0 {
         aggregate.delivery_avg_us = total_delivery_time / aggregate.delivery_count as f64;
     }
 
-    let total_stock_level_time: f64 = client_results
-        .iter()
-        .map(|r| r.stock_level_avg_us * r.stock_level_count as f64)
-        .sum();
+    let total_stock_level_time: f64 =
+        client_results.iter().map(|r| r.stock_level_avg_us * r.stock_level_count as f64).sum();
     if aggregate.stock_level_count > 0 {
         aggregate.stock_level_avg_us = total_stock_level_time / aggregate.stock_level_count as f64;
     }
@@ -470,7 +456,8 @@ fn run_client_benchmark<E: TPCCExecutor + Sync>(
     // This minimizes contention while still allowing cross-warehouse transactions per TPC-C spec
     let warehouses_per_client = (num_warehouses as usize / num_clients).max(1);
     let start_warehouse = (client_id * warehouses_per_client) as i32 + 1;
-    let _end_warehouse = ((client_id + 1) * warehouses_per_client).min(num_warehouses as usize) as i32;
+    let _end_warehouse =
+        ((client_id + 1) * warehouses_per_client).min(num_warehouses as usize) as i32;
 
     // Create workload with client-specific seed
     // The workload will generate transactions primarily for the client's warehouse range
@@ -624,10 +611,7 @@ fn run_parallel_benchmark<E: TPCCExecutor + Sync>(
     }
 
     // Configure rayon thread pool
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_clients)
-        .build_global()
-        .ok(); // Ignore error if already initialized
+    rayon::ThreadPoolBuilder::new().num_threads(num_clients).build_global().ok(); // Ignore error if already initialized
 
     // Run all clients in parallel
     let client_results: Vec<TPCCBenchmarkResults> = (0..num_clients)
@@ -1315,7 +1299,10 @@ fn main() {
         eprintln!("  {} new-order                 # Run only New-Order", args[0]);
         eprintln!("  TPCC_SCALE_FACTOR=2 {}       # Run with 2 warehouses", args[0]);
         eprintln!("  TPCC_CLIENTS=4 {}            # Run with 4 parallel clients", args[0]);
-        eprintln!("  TPCC_CLIENTS=auto {}         # Auto-scale clients based on resources", args[0]);
+        eprintln!(
+            "  TPCC_CLIENTS=auto {}         # Auto-scale clients based on resources",
+            args[0]
+        );
         eprintln!("  ENGINE_FILTER=vibesql {}     # VibeSQL only", args[0]);
         eprintln!("  ENGINE_FILTER=all {}         # Include MySQL (all engines)", args[0]);
         std::process::exit(0);
@@ -1422,8 +1409,14 @@ fn main() {
             aggregate
         } else {
             // Single-client execution (original behavior)
-            let results =
-                run_benchmark(&vibesql_executor, transaction_type, num_warehouses, duration, warmup, true);
+            let results = run_benchmark(
+                &vibesql_executor,
+                transaction_type,
+                num_warehouses,
+                duration,
+                warmup,
+                true,
+            );
             print_results(&results, transaction_type);
             results
         });
@@ -1525,7 +1518,8 @@ fn main() {
     let duckdb_results: Option<TPCCBenchmarkResults> = None;
 
     // MySQL benchmark (requires mysql feature and MYSQL_URL env var)
-    // Note: MySQL is excluded by default (use ENGINE_FILTER=all or ENGINE_FILTER=...,mysql to include)
+    // Note: MySQL is excluded by default (use ENGINE_FILTER=all or ENGINE_FILTER=...,mysql to
+    // include)
     #[cfg(feature = "mysql")]
     let mysql_results: Option<TPCCBenchmarkResults> = if engine_filter.mysql {
         use tpcc::schema::load_mysql;
@@ -1550,7 +1544,9 @@ fn main() {
                     print_parallel_results(&client_results, &aggregate, transaction_type);
                     aggregate
                 } else {
-                    eprintln!("Warning: Failed to create MySQL connection pool for parallel execution");
+                    eprintln!(
+                        "Warning: Failed to create MySQL connection pool for parallel execution"
+                    );
                     eprintln!("Falling back to single-client execution");
                     let results = run_mysql_benchmark(
                         &mut mysql_conn,

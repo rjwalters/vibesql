@@ -9,9 +9,11 @@ use vibesql_ast::Expression;
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::spatial::{constructors::parse_wkt, Geometry};
-use crate::schema::CombinedSchema;
+use crate::{
+    errors::ExecutorError,
+    evaluator::functions::spatial::{constructors::parse_wkt, Geometry},
+    schema::CombinedSchema,
+};
 
 /// Spatial index usage information
 #[derive(Debug)]
@@ -343,7 +345,8 @@ fn apply_full_spatial_predicate(
         }
 
         // Convert query geometry to SqlValue for predicate functions
-        let query_geom_wkt = SqlValue::Varchar(arcstr::ArcStr::from(spatial_usage.query_geometry.to_wkt()));
+        let query_geom_wkt =
+            SqlValue::Varchar(arcstr::ArcStr::from(spatial_usage.query_geometry.to_wkt()));
 
         // Apply the appropriate spatial predicate
         let predicate_result = match &spatial_usage.predicate {

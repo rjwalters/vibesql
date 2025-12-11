@@ -16,8 +16,7 @@
 //! - Skip-scan optimization for non-prefix index usage
 
 use vibesql_ast::{Expression, OrderByItem};
-use vibesql_storage::statistics::CostEstimator;
-use vibesql_storage::Database;
+use vibesql_storage::{statistics::CostEstimator, Database};
 
 /// Centralized index planner for query optimization
 ///
@@ -221,11 +220,7 @@ impl<'a> IndexPlanner<'a> {
     /// - Regular index scan cannot be used (no filter on `region`)
     /// - Skip-scan iterates through distinct `region` values
     /// - For each region, seeks to that region's '2024-01-01' entries
-    pub fn plan_skip_scan(
-        &self,
-        table_name: &str,
-        where_clause: &Expression,
-    ) -> Option<IndexPlan> {
+    pub fn plan_skip_scan(&self, table_name: &str, where_clause: &Expression) -> Option<IndexPlan> {
         // Get table and statistics
         let table = self.database.get_table(table_name)?;
         let table_stats = table.get_statistics()?;
@@ -264,7 +259,9 @@ impl<'a> IndexPlanner<'a> {
                 }
 
                 // Check if WHERE clause filters on any non-first column
-                for (filter_col_idx, filter_col) in index_metadata.columns.iter().enumerate().skip(1) {
+                for (filter_col_idx, filter_col) in
+                    index_metadata.columns.iter().enumerate().skip(1)
+                {
                     let filters_this_col =
                         crate::select::scan::index_scan::selection::expression_filters_column(
                             where_clause,
@@ -390,9 +387,8 @@ impl<'a> IndexPlanner<'a> {
         // Return the best skip-scan plan if found
         best_skip_scan.map(|(index_name, skip_info, _)| {
             // Estimate overall selectivity
-            let estimated_selectivity = skip_info.prefix_cardinality as f64
-                / table_stats.row_count.max(1) as f64
-                * 0.33; // Rough estimate
+            let estimated_selectivity =
+                skip_info.prefix_cardinality as f64 / table_stats.row_count.max(1) as f64 * 0.33; // Rough estimate
 
             IndexPlan {
                 index_name,

@@ -17,9 +17,10 @@
 //! - Both evaluators delegate to shared implementation
 //! - Maintain identical SQL semantics across both evaluators
 
-use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// Evaluate scalar subquery result - must return exactly one row and one column
 ///

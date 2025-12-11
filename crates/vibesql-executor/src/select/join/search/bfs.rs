@@ -4,14 +4,18 @@
 //! It explores all candidate orderings at each depth level using parallel iteration,
 //! with intelligent pruning to manage memory usage.
 
-use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::BTreeSet,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use super::context::JoinOrderContext;
-use super::state::{JoinCost, SearchState};
+use super::{
+    context::JoinOrderContext,
+    state::{JoinCost, SearchState},
+};
 
 impl JoinOrderContext {
     /// Find optimal order using parallel BFS with time-bounded search

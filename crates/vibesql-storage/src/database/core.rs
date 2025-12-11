@@ -2,20 +2,21 @@
 // Database - Coordinates between focused modules
 // ============================================================================
 
-use super::lifecycle::Lifecycle;
-use super::metadata::Metadata;
-use super::operations::Operations;
-use super::transactions::TransactionChange;
-use crate::change_events::{ChangeEvent, ChangeEventReceiver, ChangeEventSender};
-use crate::columnar_cache::ColumnarCache;
-use crate::wal::{DurabilityMode, PersistenceEngine, TransactionDurability, WalOp};
-use crate::{QueryBufferPool, Row, StorageError, Table};
 use std::collections::HashMap;
-
 #[allow(unused_imports)]
 use std::sync::Arc;
 
 pub use super::operations::SpatialIndexMetadata as ExportedSpatialIndexMetadata;
+use super::{
+    lifecycle::Lifecycle, metadata::Metadata, operations::Operations,
+    transactions::TransactionChange,
+};
+use crate::{
+    change_events::{ChangeEvent, ChangeEventReceiver, ChangeEventSender},
+    columnar_cache::ColumnarCache,
+    wal::{DurabilityMode, PersistenceEngine, TransactionDurability, WalOp},
+    QueryBufferPool, Row, StorageError, Table,
+};
 
 /// In-memory database - manages catalog and tables through focused modules
 #[derive(Debug)]
@@ -70,9 +71,11 @@ impl Database {
         durability: TransactionDurability,
     ) -> Result<(), StorageError> {
         let catalog = &self.catalog.clone();
-        self.lifecycle
-            .transaction_manager_mut()
-            .begin_transaction_with_durability(catalog, &self.tables, durability)?;
+        self.lifecycle.transaction_manager_mut().begin_transaction_with_durability(
+            catalog,
+            &self.tables,
+            durability,
+        )?;
 
         // Emit WAL entry for persistence
         if let Some(txn_id) = self.transaction_id() {
@@ -352,7 +355,10 @@ impl Database {
         let row_index =
             self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
 
-        self.record_change(TransactionChange::Insert { table_name: table_name.to_string(), row: row.clone() });
+        self.record_change(TransactionChange::Insert {
+            table_name: table_name.to_string(),
+            row: row.clone(),
+        });
 
         // Emit WAL entry for persistence
         self.emit_wal_op(WalOp::Insert {
@@ -668,8 +674,8 @@ impl Database {
     }
 
     // NOTE: Columnar cache methods (get_columnar, invalidate_columnar_cache, clear_columnar_cache,
-    // columnar_cache_stats, etc.) are defined in cache.rs to keep cache concerns separated from core
-    // database logic.
+    // columnar_cache_stats, etc.) are defined in cache.rs to keep cache concerns separated from
+    // core database logic.
 
     // ============================================================================
     // Direct Point Lookup API (Performance Optimization)
@@ -1100,14 +1106,16 @@ fn serialize_table_schema(schema: &vibesql_catalog::TableSchema) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::{MySqlModeFlags, SqlMode, SqlValue};
+
+    use super::*;
 
     #[test]
     fn test_set_sql_mode_changes_mode() {
         let mut db = Database::new();
 
-        // Default is MySQL (for SQLLogicTest compatibility - dolthub corpus was regenerated against MySQL 8.x)
+        // Default is MySQL (for SQLLogicTest compatibility - dolthub corpus was regenerated against
+        // MySQL 8.x)
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
 
         // Change to SQLite
@@ -1239,8 +1247,10 @@ mod tests {
         db.create_table(schema).unwrap();
 
         // Insert a row
-        let row =
-            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row = crate::Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+        ]);
         db.insert_row("users", row).unwrap();
 
         // Verify change event was emitted
@@ -1280,9 +1290,18 @@ mod tests {
 
         // Insert batch of rows
         let rows = vec![
-            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Product A"))]),
-            crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Product B"))]),
-            crate::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Product C"))]),
+            crate::Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from("Product A")),
+            ]),
+            crate::Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("Product B")),
+            ]),
+            crate::Row::new(vec![
+                SqlValue::Integer(3),
+                SqlValue::Varchar(arcstr::ArcStr::from("Product C")),
+            ]),
         ];
         db.insert_rows_batch("products", rows).unwrap();
 
@@ -1317,8 +1336,10 @@ mod tests {
         db.create_table(schema).unwrap();
 
         // Insert a row
-        let row =
-            crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row = crate::Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+        ]);
         db.insert_row("users", row).unwrap();
 
         // Now enable change events and update
@@ -1434,6 +1455,7 @@ mod tests {
     #[test]
     fn test_enable_persistence() {
         use std::io::Cursor;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine};
 
         let mut db = Database::new();
@@ -1452,8 +1474,10 @@ mod tests {
     #[test]
     fn test_persistence_emits_insert_entries() {
         use std::io::Cursor;
+
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine};
 
         let mut db = Database::new();
@@ -1469,14 +1493,24 @@ mod tests {
             "users".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
             ],
         );
         db.create_table(schema).unwrap();
 
         // Insert rows
-        let row1 = crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
-        let row2 = crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
+        let row1 = crate::Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+        ]);
+        let row2 = crate::Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+        ]);
         db.insert_row("users", row1).unwrap();
         db.insert_row("users", row2).unwrap();
 
@@ -1489,8 +1523,10 @@ mod tests {
     #[test]
     fn test_persistence_emits_transaction_entries() {
         use std::io::Cursor;
+
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine};
 
         let mut db = Database::new();
@@ -1533,6 +1569,7 @@ mod tests {
     #[test]
     fn test_emit_wal_delete() {
         use std::io::Cursor;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine};
 
         let mut db = Database::new();
@@ -1555,6 +1592,7 @@ mod tests {
     #[test]
     fn test_emit_wal_create_index() {
         use std::io::Cursor;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine};
 
         let mut db = Database::new();
@@ -1576,6 +1614,7 @@ mod tests {
     #[test]
     fn test_emit_wal_drop_index() {
         use std::io::Cursor;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine};
 
         let mut db = Database::new();
@@ -1712,8 +1751,10 @@ mod tests {
     #[test]
     fn test_force_durable_triggers_sync() {
         use std::io::Cursor;
+
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine, TransactionDurability};
 
         let mut db = Database::new();
@@ -1743,14 +1784,19 @@ mod tests {
 
         // Check stats - explicit_flushes should have been triggered by sync
         let stats = db.persistence_stats().unwrap();
-        assert!(stats.explicit_flushes >= 1, "ForceDurable should trigger an explicit flush on commit");
+        assert!(
+            stats.explicit_flushes >= 1,
+            "ForceDurable should trigger an explicit flush on commit"
+        );
     }
 
     #[test]
     fn test_default_durability_respects_lazy_mode() {
         use std::io::Cursor;
+
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine, TransactionDurability};
 
         let mut db = Database::new();
@@ -1785,8 +1831,7 @@ mod tests {
         // Check stats - no new explicit_flushes should have been triggered
         let final_stats = db.persistence_stats().unwrap();
         assert_eq!(
-            final_stats.explicit_flushes,
-            initial_explicit_flushes,
+            final_stats.explicit_flushes, initial_explicit_flushes,
             "Default durability in lazy mode should not trigger explicit flush on commit"
         );
     }
@@ -1811,8 +1856,10 @@ mod tests {
     #[test]
     fn test_allow_lazy_downgrades_durable_mode() {
         use std::io::Cursor;
+
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
         use crate::wal::{PersistenceConfig, PersistenceEngine, TransactionDurability};
 
         let mut db = Database::new();
@@ -1847,8 +1894,7 @@ mod tests {
         // Check stats - no new explicit_flushes should have been triggered
         let final_stats = db.persistence_stats().unwrap();
         assert_eq!(
-            final_stats.explicit_flushes,
-            initial_explicit_flushes,
+            final_stats.explicit_flushes, initial_explicit_flushes,
             "AllowLazy should downgrade durable mode and not trigger explicit flush on commit"
         );
     }

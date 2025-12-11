@@ -114,7 +114,10 @@ mod adaptive_backend_tests {
 
         // Insert a small number of rows (should stay in memory)
         for i in 0..100 {
-            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("user{}", i)))]);
+            let row = Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("user{}", i))),
+            ]);
             db.insert_row("small_table", row).unwrap();
         }
 

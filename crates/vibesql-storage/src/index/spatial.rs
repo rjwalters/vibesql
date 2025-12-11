@@ -407,7 +407,8 @@ mod tests {
 
     #[test]
     fn test_extract_mbr_with_srid() {
-        let sql_value = SqlValue::Varchar(arcstr::ArcStr::from("__GEOMETRY__|4326|SRID=4326;POINT(10 20)"));
+        let sql_value =
+            SqlValue::Varchar(arcstr::ArcStr::from("__GEOMETRY__|4326|SRID=4326;POINT(10 20)"));
         let mbr = extract_mbr_from_sql_value(&sql_value);
 
         assert!(mbr.is_some());

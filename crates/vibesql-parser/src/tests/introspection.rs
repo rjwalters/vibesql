@@ -1,7 +1,8 @@
 //! Tests for database introspection statements (SHOW, DESCRIBE)
 
-use crate::parser::Parser;
 use vibesql_ast::*;
+
+use crate::parser::Parser;
 
 #[test]
 fn test_show_tables() {
@@ -398,8 +399,9 @@ fn test_explain_query_plan_with_where() {
 #[test]
 fn test_explain_query_plan_with_join() {
     let stmt = Parser::parse_sql(
-        "EXPLAIN QUERY PLAN SELECT * FROM t400, t401, t402 WHERE t402.z GLOB 'abc*'"
-    ).unwrap();
+        "EXPLAIN QUERY PLAN SELECT * FROM t400, t401, t402 WHERE t402.z GLOB 'abc*'",
+    )
+    .unwrap();
 
     if let Statement::Explain(explain) = stmt {
         assert!(explain.query_plan);
@@ -411,7 +413,8 @@ fn test_explain_query_plan_with_join() {
 
 #[test]
 fn test_explain_query_plan_insert() {
-    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN INSERT INTO users (name) VALUES ('test')").unwrap();
+    let stmt =
+        Parser::parse_sql("EXPLAIN QUERY PLAN INSERT INTO users (name) VALUES ('test')").unwrap();
 
     if let Statement::Explain(explain) = stmt {
         assert!(explain.query_plan);
@@ -423,7 +426,8 @@ fn test_explain_query_plan_insert() {
 
 #[test]
 fn test_explain_query_plan_update() {
-    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN UPDATE users SET name = 'test' WHERE id = 1").unwrap();
+    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN UPDATE users SET name = 'test' WHERE id = 1")
+        .unwrap();
 
     if let Statement::Explain(explain) = stmt {
         assert!(explain.query_plan);

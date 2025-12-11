@@ -110,7 +110,7 @@ mod tests {
 
         // Create a table first
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![ColumnDef {
                 name: "id".to_string(),
@@ -166,7 +166,7 @@ mod tests {
 
         // Create a table first
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "products".to_string(),
             columns: vec![ColumnDef {
                 name: "id".to_string(),
@@ -198,7 +198,7 @@ mod tests {
 
         // Create a table with data
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "customers".to_string(),
             columns: vec![
                 ColumnDef {
@@ -226,7 +226,8 @@ mod tests {
         // Insert some data
         use vibesql_storage::Row;
         use vibesql_types::SqlValue;
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         db.insert_row("customers", row).unwrap();
 
         // Verify data exists
@@ -249,7 +250,7 @@ mod tests {
 
         // Create table
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "temp".to_string(),
             columns: vec![ColumnDef {
                 name: "id".to_string(),
@@ -281,7 +282,7 @@ mod tests {
         // Create multiple tables
         for name in &["table1", "table2", "table3"] {
             let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+                if_not_exists: false,
                 table_name: name.to_string(),
                 columns: vec![ColumnDef {
                     name: "id".to_string(),
@@ -315,7 +316,7 @@ mod tests {
 
         // Create table with specific case
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "MyTable".to_string(),
             columns: vec![ColumnDef {
                 name: "id".to_string(),
@@ -338,14 +339,15 @@ mod tests {
 
     #[test]
     fn test_drop_table_cascades_to_indexes() {
-        use crate::CreateIndexExecutor;
         use vibesql_ast::{CreateIndexStmt, IndexColumn, OrderDirection};
+
+        use crate::CreateIndexExecutor;
 
         let mut db = Database::new();
 
         // Create table
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![
                 ColumnDef {
@@ -416,14 +418,15 @@ mod tests {
 
     #[test]
     fn test_drop_and_recreate_table_with_same_index_names() {
-        use crate::CreateIndexExecutor;
         use vibesql_ast::{CreateIndexStmt, IndexColumn, OrderDirection};
+
+        use crate::CreateIndexExecutor;
 
         let mut db = Database::new();
 
         // Create table
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "products".to_string(),
             columns: vec![
                 ColumnDef {
@@ -488,7 +491,7 @@ mod tests {
 
         // Create table without indexes
         let create_stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "simple_table".to_string(),
             columns: vec![ColumnDef {
                 name: "id".to_string(),

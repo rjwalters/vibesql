@@ -3,8 +3,9 @@
 //!
 //! Note: Unquoted SQL identifiers are normalized to uppercase by the parser
 
-use crate::Parser;
 use vibesql_ast::{DeallocateTarget, PreparedStatementBody, Statement};
+
+use crate::Parser;
 
 // ============================================================================
 // PREPARE statement tests

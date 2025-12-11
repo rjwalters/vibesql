@@ -1,4 +1,5 @@
-//! Comprehensive resource limit and error recovery testing for parallel execution and timeout scenarios
+//! Comprehensive resource limit and error recovery testing for parallel execution and timeout
+//! scenarios
 //!
 //! This test module covers:
 //! 1. Query Timeout and Resource Limit Enforcement

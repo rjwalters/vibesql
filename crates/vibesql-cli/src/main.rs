@@ -242,8 +242,9 @@ fn run_codegen(
     } else if let Some(db_path) = database {
         // Generate from database file
         println!("{}", vibe_msg!("codegen-from-database", path = db_path.as_str()));
-        let db = vibesql_executor::load_sql_dump(&db_path)
-            .map_err(|e| anyhow::anyhow!("{}", vibe_msg!("database-load-error", error = e.to_string())))?;
+        let db = vibesql_executor::load_sql_dump(&db_path).map_err(|e| {
+            anyhow::anyhow!("{}", vibe_msg!("database-load-error", error = e.to_string()))
+        })?;
         codegen::generate_from_database(&db, &config)?
     } else {
         return Err(anyhow::anyhow!("{}", vibe_msg!("codegen-error-no-source")));

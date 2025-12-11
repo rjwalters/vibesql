@@ -5,12 +5,13 @@
 
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef};
-use arrow::record_batch::RecordBatch;
-
-use crate::errors::ExecutorError;
+use arrow::{
+    array::{Array, ArrayRef},
+    record_batch::RecordBatch,
+};
 
 use super::types::{ColumnArray, ColumnarBatch};
+use crate::errors::ExecutorError;
 
 impl ColumnarBatch {
     /// Convert from Arrow RecordBatch to ColumnarBatch (zero-copy when possible)
@@ -57,11 +58,13 @@ fn convert_arrow_array(
     array: &ArrayRef,
     data_type: &arrow::datatypes::DataType,
 ) -> Result<ColumnArray, ExecutorError> {
-    use arrow::array::{
-        BooleanArray, Date32Array, Float32Array, Float64Array, Int32Array, Int64Array, StringArray,
-        TimestampMicrosecondArray,
+    use arrow::{
+        array::{
+            BooleanArray, Date32Array, Float32Array, Float64Array, Int32Array, Int64Array,
+            StringArray, TimestampMicrosecondArray,
+        },
+        datatypes::DataType as ArrowDataType,
     };
-    use arrow::datatypes::DataType as ArrowDataType;
 
     match data_type {
         ArrowDataType::Int64 => {
@@ -223,10 +226,13 @@ mod tests {
 
     #[test]
     fn test_arrow_integration() {
-        use arrow::array::{Float64Array, Int64Array};
-        use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
-        use arrow::record_batch::RecordBatch;
         use std::sync::Arc;
+
+        use arrow::{
+            array::{Float64Array, Int64Array},
+            datatypes::{DataType as ArrowDataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
 
         // Create Arrow RecordBatch
         let schema = Arc::new(Schema::new(vec![
@@ -272,10 +278,13 @@ mod tests {
 
     #[test]
     fn test_arrow_integration_with_nulls() {
-        use arrow::array::{Float64Array, Int64Array};
-        use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
-        use arrow::record_batch::RecordBatch;
         use std::sync::Arc;
+
+        use arrow::{
+            array::{Float64Array, Int64Array},
+            datatypes::{DataType as ArrowDataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
 
         // Create Arrow RecordBatch with NULLs
         let schema = Arc::new(Schema::new(vec![

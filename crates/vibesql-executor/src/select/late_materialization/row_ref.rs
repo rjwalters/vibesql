@@ -4,6 +4,7 @@
 //! avoiding data copying during intermediate query operations.
 
 use std::sync::Arc;
+
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -313,8 +314,14 @@ mod row_ref_tests {
         let ref0 = RowReference::new(0, 0);
         let ref1 = RowReference::new(1, 0);
 
-        assert_eq!(resolver.resolve_column(&ref0, 0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("A"))));
-        assert_eq!(resolver.resolve_column(&ref1, 0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("B"))));
+        assert_eq!(
+            resolver.resolve_column(&ref0, 0),
+            Some(&SqlValue::Varchar(arcstr::ArcStr::from("A")))
+        );
+        assert_eq!(
+            resolver.resolve_column(&ref1, 0),
+            Some(&SqlValue::Varchar(arcstr::ArcStr::from("B")))
+        );
     }
 
     #[test]

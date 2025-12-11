@@ -5,8 +5,10 @@
 
 #![allow(dead_code)]
 
-use std::env;
-use std::time::{Duration, Instant};
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 
 /// Default configuration for benchmarks
 pub const DEFAULT_WARMUP_ITERATIONS: usize = 3;
@@ -161,9 +163,6 @@ pub fn print_summary_table(results: &[BenchStats]) {
     eprintln!("{:-<35} {:->12} {:->12} {:->12}", "", "", "", "");
 
     for stat in results {
-        eprintln!(
-            "{:<35} {:>12.2?} {:>12.2?} {:>12.2?}",
-            stat.name, stat.mean, stat.min, stat.max
-        );
+        eprintln!("{:<35} {:>12.2?} {:>12.2?} {:>12.2?}", stat.name, stat.mean, stat.min, stat.max);
     }
 }

@@ -5,10 +5,10 @@
 //! - Internal node structure
 //! - Leaf node structure
 
-use crate::page::PageId;
 use vibesql_types::SqlValue;
 
 use super::super::NULL_PAGE_ID;
+use crate::page::PageId;
 
 /// Type alias for multi-column keys (compatible with existing IndexData)
 pub type Key = Vec<SqlValue>;
@@ -55,7 +55,8 @@ impl InternalNode {
 pub struct LeafNode {
     /// Page ID of this node
     pub page_id: PageId,
-    /// Key-value entries (sorted by key), supporting multiple row_ids per key for non-unique indexes
+    /// Key-value entries (sorted by key), supporting multiple row_ids per key for non-unique
+    /// indexes
     pub entries: Vec<(Key, Vec<RowId>)>,
     /// Page ID of next leaf node (for forward range scans), or NULL_PAGE_ID
     pub next_leaf: PageId,

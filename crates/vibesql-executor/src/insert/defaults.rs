@@ -47,7 +47,8 @@ pub fn evaluate_insert_expression_with_trigger_context(
             )))
         }
         vibesql_ast::Expression::PseudoVariable { .. } => {
-            // Pseudo-variables (OLD.x, NEW.y) require full expression evaluation with trigger context
+            // Pseudo-variables (OLD.x, NEW.y) require full expression evaluation with trigger
+            // context
             if let (Some(ctx), Some(db)) = (trigger_context, database) {
                 // Create a dummy row for evaluation (pseudo-variables don't depend on current row)
                 let dummy_row = vibesql_storage::Row::new(vec![]);
@@ -61,7 +62,8 @@ pub fn evaluate_insert_expression_with_trigger_context(
             }
         }
         _ => {
-            // For any other expression type, use full expression evaluator if trigger context available
+            // For any other expression type, use full expression evaluator if trigger context
+            // available
             if let (Some(ctx), Some(db)) = (trigger_context, database) {
                 // Create a dummy row for evaluation
                 let dummy_row = vibesql_storage::Row::new(vec![]);

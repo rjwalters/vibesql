@@ -5,9 +5,8 @@
 //! - Insertion and deletion
 //! - Key/value manipulation
 
-use crate::page::PageId;
-
 use super::structure::{InternalNode, Key, LeafNode, RowId};
+use crate::page::PageId;
 
 impl InternalNode {
     /// Find the child index for a given key

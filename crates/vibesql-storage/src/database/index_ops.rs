@@ -2,10 +2,10 @@
 // Database Index Operations
 // ============================================================================
 
-use super::core::Database;
-use super::operations::SpatialIndexMetadata;
-use crate::{Row, StorageError};
 use vibesql_ast::IndexColumn;
+
+use super::{core::Database, operations::SpatialIndexMetadata};
+use crate::{Row, StorageError};
 
 // ============================================================================
 // DELETE Profiling Statistics (thread-local aggregates)
@@ -166,8 +166,8 @@ impl Database {
     /// * `old_row` - Row data before the update
     /// * `new_row` - Row data after the update
     /// * `row_index` - Index of the row in the table
-    /// * `changed_columns` - Optional set of column indices that were modified.
-    ///   If provided, indexes that don't involve any changed columns will be skipped.
+    /// * `changed_columns` - Optional set of column indices that were modified. If provided,
+    ///   indexes that don't involve any changed columns will be skipped.
     pub fn update_indexes_for_update(
         &mut self,
         table_name: &str,
@@ -928,8 +928,12 @@ impl Database {
         // Update user-defined indexes first (using reference to values)
         // This must happen before we move ownership of values to WAL
         let phase_start = start.map(|_| Instant::now());
-        self.operations
-            .update_indexes_for_delete_with_values(&self.catalog, table_name, &values, row_index);
+        self.operations.update_indexes_for_delete_with_values(
+            &self.catalog,
+            table_name,
+            &values,
+            row_index,
+        );
         if let Some(ps) = phase_start {
             phase_times[3] = ps.elapsed().as_nanos(); // index_update
         }
@@ -1035,19 +1039,15 @@ impl Database {
         // Count hash indexes: 1 for PK (if exists) + 1 per unique constraint
         let has_primary_key = table.schema.primary_key.is_some();
         let unique_constraint_count = table.schema.unique_constraints.len();
-        let hash_index_count =
-            if has_primary_key { 1 } else { 0 } + unique_constraint_count;
+        let hash_index_count = if has_primary_key { 1 } else { 0 } + unique_constraint_count;
 
         // Count B-tree indexes (user-defined indexes managed at Database level)
         let btree_index_count = self.list_indexes_for_table(table_name).len();
 
         // Calculate deleted ratio
         let total_rows = table.physical_row_count();
-        let deleted_ratio = if total_rows > 0 {
-            table.deleted_count() as f64 / total_rows as f64
-        } else {
-            0.0
-        };
+        let deleted_ratio =
+            if total_rows > 0 { table.deleted_count() as f64 / total_rows as f64 } else { 0.0 };
 
         // Check if table uses native columnar storage
         let is_native_columnar = table.is_native_columnar();
@@ -1083,9 +1083,10 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     #[test]
     fn test_get_table_index_info_basic() {
@@ -1096,8 +1097,16 @@ mod tests {
             "users".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(100) }, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+                ColumnSchema::new(
+                    "email".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    true,
+                ),
             ],
             Some(vec!["id".to_string()]),
             vec![vec!["email".to_string()]],
@@ -1128,8 +1137,16 @@ mod tests {
             "products".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, false),
-                ColumnSchema::new("price".to_string(), DataType::Decimal { precision: 10, scale: 2 }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+                ColumnSchema::new(
+                    "price".to_string(),
+                    DataType::Decimal { precision: 10, scale: 2 },
+                    false,
+                ),
             ],
             vec!["id".to_string()],
         );
@@ -1145,7 +1162,8 @@ mod tests {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
             }],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Get table index info
         let info = db.get_table_index_info("products").unwrap();
@@ -1165,7 +1183,11 @@ mod tests {
             "items".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
             ],
             vec!["id".to_string()],
         );
@@ -1212,7 +1234,11 @@ mod tests {
         let schema = TableSchema::new(
             "logs".to_string(),
             vec![
-                ColumnSchema::new("message".to_string(), DataType::Varchar { max_length: Some(500) }, false),
+                ColumnSchema::new(
+                    "message".to_string(),
+                    DataType::Varchar { max_length: Some(500) },
+                    false,
+                ),
                 ColumnSchema::new("level".to_string(), DataType::Integer, false),
             ],
         );
@@ -1236,15 +1262,24 @@ mod tests {
             "accounts".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(100) }, false),
-                ColumnSchema::new("username".to_string(), DataType::Varchar { max_length: Some(50) }, false),
-                ColumnSchema::new("phone".to_string(), DataType::Varchar { max_length: Some(20) }, true),
+                ColumnSchema::new(
+                    "email".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    false,
+                ),
+                ColumnSchema::new(
+                    "username".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    false,
+                ),
+                ColumnSchema::new(
+                    "phone".to_string(),
+                    DataType::Varchar { max_length: Some(20) },
+                    true,
+                ),
             ],
             Some(vec!["id".to_string()]),
-            vec![
-                vec!["email".to_string()],
-                vec!["username".to_string()],
-            ],
+            vec![vec!["email".to_string()], vec!["username".to_string()]],
         );
         db.create_table(schema).unwrap();
 
@@ -1312,10 +1347,8 @@ mod tests {
         // Insert rows with LONG strings (filling the VARCHAR)
         for i in 0..10 {
             let long_description = "x".repeat(800); // Much longer than schema heuristic
-            let row = Row::new(vec![
-                SqlValue::Integer(i),
-                SqlValue::Varchar(long_description.into()),
-            ]);
+            let row =
+                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(long_description.into())]);
             db.insert_row("items", row).unwrap();
         }
 
@@ -1363,10 +1396,7 @@ mod tests {
         // Insert rows with SHORT strings (much shorter than heuristic)
         for i in 0..10 {
             let short_code = format!("A{}", i); // 2-3 chars, much shorter than 32-byte heuristic
-            let row = Row::new(vec![
-                SqlValue::Integer(i),
-                SqlValue::Varchar(short_code.into()),
-            ]);
+            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(short_code.into())]);
             db.insert_row("items", row).unwrap();
         }
 
@@ -1377,10 +1407,6 @@ mod tests {
         let info = db.get_table_index_info("items").unwrap();
 
         // Should have valid avg_row_size (from actual statistics)
-        assert!(
-            info.avg_row_size > 0,
-            "avg_row_size should be positive: {}",
-            info.avg_row_size
-        );
+        assert!(info.avg_row_size > 0, "avg_row_size should be positive: {}", info.avg_row_size);
     }
 }

@@ -22,17 +22,23 @@ fn test_like_wildcard_percent() {
     db.create_table(schema).unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Alice",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Bob",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alex"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Alex",
+        ))]),
     )
     .unwrap();
 
@@ -54,7 +60,9 @@ fn test_like_wildcard_percent() {
                 table: None,
                 column: "name".to_string(),
             }),
-            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
+            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Al%"),
+            ))),
             negated: false,
         }),
         group_by: None,
@@ -84,17 +92,23 @@ fn test_like_wildcard_underscore() {
     db.create_table(schema).unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("cat"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "cat",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bat"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "bat",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("cart"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "cart",
+        ))]),
     )
     .unwrap();
 
@@ -116,7 +130,9 @@ fn test_like_wildcard_underscore() {
                 table: None,
                 column: "name".to_string(),
             }),
-            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("_at")))),
+            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("_at"),
+            ))),
             negated: false,
         }),
         group_by: None,
@@ -146,17 +162,23 @@ fn test_not_like() {
     db.create_table(schema).unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Alice",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Bob",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alex"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Alex",
+        ))]),
     )
     .unwrap();
 
@@ -178,7 +200,9 @@ fn test_not_like() {
                 table: None,
                 column: "name".to_string(),
             }),
-            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
+            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Al%"),
+            ))),
             negated: true,
         }),
         group_by: None,
@@ -209,7 +233,9 @@ fn test_like_null_pattern() {
     db.create_table(schema).unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Alice",
+        ))]),
     )
     .unwrap();
 
@@ -262,7 +288,9 @@ fn test_like_null_value() {
     db.insert_row("test", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Null])).unwrap();
     db.insert_row(
         "test",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Alice",
+        ))]),
     )
     .unwrap();
 
@@ -284,7 +312,9 @@ fn test_like_null_value() {
                 table: None,
                 column: "name".to_string(),
             }),
-            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
+            pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Al%"),
+            ))),
             negated: false,
         }),
         group_by: None,
@@ -298,5 +328,8 @@ fn test_like_null_value() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1); // NULL value doesn't match, only Alice
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+    );
 }

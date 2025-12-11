@@ -18,16 +18,15 @@ use vibesql_ast::arena::{
 };
 
 use super::ArenaParser;
-use crate::keywords::Keyword;
-use crate::token::Token;
-use crate::ParseError;
+use crate::{keywords::Keyword, token::Token, ParseError};
 
 impl<'arena> ArenaParser<'arena> {
     // ========================================================================
     // Transaction Statements
     // ========================================================================
 
-    /// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY = <mode>] statement.
+    /// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY =
+    /// <mode>] statement.
     pub(crate) fn parse_begin_statement(&mut self) -> Result<BeginStmt, ParseError> {
         if self.peek_keyword(Keyword::Begin) {
             self.consume_keyword(Keyword::Begin)?;
@@ -69,7 +68,8 @@ impl<'arena> ArenaParser<'arena> {
             Ok(DurabilityHint::Volatile)
         } else {
             Err(ParseError {
-                message: "Expected durability mode: DEFAULT, DURABLE, LAZY, or VOLATILE".to_string(),
+                message: "Expected durability mode: DEFAULT, DURABLE, LAZY, or VOLATILE"
+                    .to_string(),
             })
         }
     }

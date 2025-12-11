@@ -4,17 +4,18 @@
 //! modules (pooling, caching, batching, timing, execution) into a cohesive
 //! SQLLogicTest database adapter.
 
-use async_trait::async_trait;
-use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use std::{
     env,
     time::{Duration, Instant},
 };
+
+use async_trait::async_trait;
+use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 use tokio::time::timeout;
 use vibesql_storage::Database;
 
-use super::super::execution::TestError;
 use super::{
+    super::execution::TestError,
     batching::BatchingManager,
     cache::CacheManager,
     executor, pool,

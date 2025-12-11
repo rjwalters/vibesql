@@ -29,8 +29,8 @@ impl Parser {
                 }
                 name
             }
-            // Allow LEFT, RIGHT, REPLACE, SCHEMA, GROUPING, and GROUPING_ID keywords as function names
-            // These are reserved keywords but can also be functions
+            // Allow LEFT, RIGHT, REPLACE, SCHEMA, GROUPING, and GROUPING_ID keywords as function
+            // names These are reserved keywords but can also be functions
             Token::Keyword(Keyword::Left)
             | Token::Keyword(Keyword::Right)
             | Token::Keyword(Keyword::Replace)

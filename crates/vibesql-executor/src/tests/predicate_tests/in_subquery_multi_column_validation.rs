@@ -58,7 +58,7 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
                 with_clause: None,
                 set_operation: None,
                 distinct: false,
-                select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], // * expands to 2 columns!
+                select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], /* * expands to 2 columns! */
                 from: Some(vibesql_ast::FromClause::Table {
                     name: "t1".to_string(),
                     alias: None,
@@ -332,7 +332,7 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
                 with_clause: None,
                 set_operation: None,
                 distinct: false,
-                select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], // * expands to 2 columns!
+                select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }], /* * expands to 2 columns! */
                 from: Some(vibesql_ast::FromClause::Table {
                     name: "t1".to_string(),
                     alias: None,

@@ -18,11 +18,7 @@ fn setup_products_table(db: &mut Database) {
         "PRODUCTS".to_string(),
         vec![
             ColumnSchema::new("ID".to_string(), DataType::Integer, false),
-            ColumnSchema::new(
-                "NAME".to_string(),
-                DataType::Varchar { max_length: Some(50) },
-                true,
-            ),
+            ColumnSchema::new("NAME".to_string(), DataType::Varchar { max_length: Some(50) }, true),
             ColumnSchema::new("PRICE".to_string(), DataType::Integer, true),
         ],
         vec!["ID".to_string()], // ID is PRIMARY KEY
@@ -112,14 +108,8 @@ fn test_delete_invalidates_columnar_cache() {
         !updated_prices.contains(&100),
         "Deleted price 100 should no longer exist after DELETE"
     );
-    assert!(
-        updated_prices.contains(&200),
-        "Unchanged price 200 should still exist"
-    );
-    assert!(
-        updated_prices.contains(&300),
-        "Unchanged price 300 should still exist"
-    );
+    assert!(updated_prices.contains(&200), "Unchanged price 200 should still exist");
+    assert!(updated_prices.contains(&300), "Unchanged price 300 should still exist");
 
     // Verify cache was invalidated and re-converted
     let final_stats = db.columnar_cache_stats();
@@ -166,9 +156,8 @@ fn test_delete_invalidates_prewarmed_cache() {
     let has_deleted_price = (0..2).any(|i| matches!(price_col.get(i), SqlValue::Integer(50)));
     assert!(!has_deleted_price, "Deleted price 50 should NOT be visible after DELETE");
 
-    let has_remaining_prices = (0..2).all(|i| {
-        matches!(price_col.get(i), SqlValue::Integer(75) | SqlValue::Integer(100))
-    });
+    let has_remaining_prices =
+        (0..2).all(|i| matches!(price_col.get(i), SqlValue::Integer(75) | SqlValue::Integer(100)));
     assert!(has_remaining_prices, "Remaining prices 75 and 100 should be visible");
 }
 
@@ -279,7 +268,8 @@ fn test_delete_complex_where_invalidates_cache() {
     assert_eq!(initial.row_count(), 4);
 
     // Delete rows matching complex condition: PRICE = 150 AND NAME LIKE 'Widget%'
-    let deleted = delete_sql(&mut db, "DELETE FROM PRODUCTS WHERE PRICE = 150 AND NAME LIKE 'Widget%'");
+    let deleted =
+        delete_sql(&mut db, "DELETE FROM PRODUCTS WHERE PRICE = 150 AND NAME LIKE 'Widget%'");
     assert_eq!(deleted, 1, "Should delete 1 row (Widget A)");
 
     // Verify cache reflects the deletion
@@ -298,8 +288,7 @@ fn test_delete_complex_where_invalidates_cache() {
     assert!(has_gadget_a, "Gadget A with price 150 should still exist");
 
     // Widget A should be gone
-    let has_widget_a = (0..3).any(|i| {
-        matches!(name_col.get(i), SqlValue::Varchar(ref n) if n.as_str() == "Widget A")
-    });
+    let has_widget_a = (0..3)
+        .any(|i| matches!(name_col.get(i), SqlValue::Varchar(ref n) if n.as_str() == "Widget A"));
     assert!(!has_widget_a, "Widget A should have been deleted");
 }

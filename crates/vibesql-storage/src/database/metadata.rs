@@ -3,6 +3,7 @@
 // ============================================================================
 
 use std::collections::HashMap;
+
 use vibesql_types::SqlValue;
 
 /// Manages schema metadata and session state
@@ -32,12 +33,16 @@ impl Metadata {
         );
 
         // version - simple version string
-        session_variables
-            .insert("VERSION".to_string(), SqlValue::Varchar(arcstr::ArcStr::from("8.0.0-vibesql")));
+        session_variables.insert(
+            "VERSION".to_string(),
+            SqlValue::Varchar(arcstr::ArcStr::from("8.0.0-vibesql")),
+        );
 
         // character_set_client - default to utf8mb4
-        session_variables
-            .insert("CHARACTER_SET_CLIENT".to_string(), SqlValue::Varchar(arcstr::ArcStr::from("utf8mb4")));
+        session_variables.insert(
+            "CHARACTER_SET_CLIENT".to_string(),
+            SqlValue::Varchar(arcstr::ArcStr::from("utf8mb4")),
+        );
 
         Metadata { session_variables, routine_body_cache: HashMap::new() }
     }

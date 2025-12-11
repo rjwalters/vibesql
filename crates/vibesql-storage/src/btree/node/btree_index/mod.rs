@@ -8,14 +8,18 @@
 //! - `rebalance`: Tree rebalancing after deletions
 
 use std::sync::Arc;
+
 use vibesql_types::DataType;
 
-use crate::page::{PageId, PageManager};
-use crate::StorageError;
-
-use super::super::calculate_degree;
-use super::datatype_serialization::{deserialize_datatype, serialize_datatype};
-use super::structure::{InternalNode, LeafNode};
+use super::{
+    super::calculate_degree,
+    datatype_serialization::{deserialize_datatype, serialize_datatype},
+    structure::{InternalNode, LeafNode},
+};
+use crate::{
+    page::{PageId, PageManager},
+    StorageError,
+};
 
 // Submodules
 mod bulk_load;

@@ -631,7 +631,8 @@ fn test_tpcds_q12_revenue_ratio_pattern() {
 
 /// Test AVG(SUM(...)) pattern - minimal reproduction of TPC-DS Q57 issue
 /// This is the exact pattern that fails in Q57:
-/// AVG(SUM(cs_sales_price)) OVER (PARTITION BY ... ORDER BY ... ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING)
+/// AVG(SUM(cs_sales_price)) OVER (PARTITION BY ... ORDER BY ... ROWS BETWEEN 2 PRECEDING AND 2
+/// FOLLOWING)
 #[test]
 fn test_window_function_avg_sum_nested() {
     use vibesql_storage::Row;
@@ -727,11 +728,7 @@ fn test_window_function_avg_sum_nested() {
         for row in &rows {
             // avg_monthly should be ~333.33 for all rows
             if let SqlValue::Numeric(avg) = row.values[3] {
-                assert!(
-                    (avg - 333.333).abs() < 1.0,
-                    "Expected avg ~333.33, got {}",
-                    avg
-                );
+                assert!((avg - 333.333).abs() < 1.0, "Expected avg ~333.33, got {}", avg);
             } else {
                 panic!("Expected Numeric for avg_monthly, got {:?}", row.values[3]);
             }
@@ -799,11 +796,7 @@ fn test_window_function_avg_sum_with_frame() {
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute(&select_stmt);
 
-        assert!(
-            result.is_ok(),
-            "AVG(SUM()) with frame should work: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "AVG(SUM()) with frame should work: {:?}", result.err());
 
         let rows = result.unwrap();
         assert_eq!(rows.len(), 5);

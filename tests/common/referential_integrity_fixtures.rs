@@ -71,8 +71,8 @@ pub fn create_child_table(
 
 /// Create a child table with a foreign key constraint and a default value for the FK column
 ///
-/// Creates a table with columns: ID (INTEGER, PK), PARENT_ID (INTEGER, nullable, FK with default), DATA
-/// (VARCHAR(50), nullable)
+/// Creates a table with columns: ID (INTEGER, PK), PARENT_ID (INTEGER, nullable, FK with default),
+/// DATA (VARCHAR(50), nullable)
 ///
 /// This is specifically for testing SET DEFAULT referential action.
 pub fn create_child_table_with_default(
@@ -257,7 +257,11 @@ pub fn insert_child_row(db: &mut Database, table: &str, id: i64, parent_id: i64,
 pub fn insert_child_row_null_fk(db: &mut Database, table: &str, id: i64, data: &str) {
     db.insert_row(
         table,
-        Row::new(vec![SqlValue::Integer(id), SqlValue::Null, SqlValue::Varchar(StringValue::from(data))]),
+        Row::new(vec![
+            SqlValue::Integer(id),
+            SqlValue::Null,
+            SqlValue::Varchar(StringValue::from(data)),
+        ]),
     )
     .unwrap();
 }

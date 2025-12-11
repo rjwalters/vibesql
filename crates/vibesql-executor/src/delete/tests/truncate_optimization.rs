@@ -31,7 +31,10 @@ fn test_truncate_optimization_basic() {
     for i in 0..1000 {
         db.insert_row(
             "large_table",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -160,7 +163,10 @@ fn test_truncate_allowed_when_no_fk_references() {
     for i in 1..=100 {
         db.insert_row(
             "parent",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("Parent {}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("Parent {}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -211,7 +217,10 @@ fn test_truncate_blocked_by_delete_trigger() {
     for i in 0..10 {
         db.insert_row(
             "test_table",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -263,7 +272,10 @@ fn test_truncate_allowed_with_insert_trigger() {
     for i in 0..100 {
         db.insert_row(
             "test_table",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -301,7 +313,10 @@ fn test_truncate_performance() {
     for i in 0..10_000 {
         db.insert_row(
             "large_table",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i))),
+            ]),
         )
         .unwrap();
     }

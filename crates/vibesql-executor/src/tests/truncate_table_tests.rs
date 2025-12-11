@@ -1,9 +1,10 @@
 //! Tests for TRUNCATE TABLE executor
 
-use crate::{CreateTableExecutor, TruncateTableExecutor};
 use vibesql_ast::{ColumnDef, CreateTableStmt, TruncateTableStmt};
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
+
+use crate::{CreateTableExecutor, TruncateTableExecutor};
 
 #[test]
 fn test_truncate_single_table() {
@@ -303,10 +304,11 @@ fn test_truncate_empty_table() {
 
 #[test]
 fn test_truncate_resets_auto_increment() {
-    use crate::InsertExecutor;
     use vibesql_ast::{
         ColumnConstraint, ColumnConstraintKind, Expression, InsertSource, InsertStmt,
     };
+
+    use crate::InsertExecutor;
 
     let mut db = Database::new();
 
@@ -373,7 +375,9 @@ fn test_truncate_resets_auto_increment() {
     let insert = InsertStmt {
         table_name: "auto_inc_test".to_string(),
         columns: vec!["data".to_string()],
-        source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("d")))]]),
+        source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
+            arcstr::ArcStr::from("d"),
+        ))]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
     };
@@ -391,10 +395,11 @@ fn test_truncate_resets_auto_increment() {
 
 #[test]
 fn test_truncate_resets_auto_increment_multiple_inserts() {
-    use crate::InsertExecutor;
     use vibesql_ast::{
         ColumnConstraint, ColumnConstraintKind, Expression, InsertSource, InsertStmt,
     };
+
+    use crate::InsertExecutor;
 
     let mut db = Database::new();
 

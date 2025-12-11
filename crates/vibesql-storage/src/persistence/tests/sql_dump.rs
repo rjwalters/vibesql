@@ -29,10 +29,16 @@ fn test_save_sql_dump() {
     // Insert test data
     let table = db.get_table_mut("test").unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]))
+        .insert(crate::Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+        ]))
         .unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]))
+        .insert(crate::Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+        ]))
         .unwrap();
 
     // Save SQL dump
@@ -57,7 +63,10 @@ fn test_sql_value_to_literal() {
     assert_eq!(sql_value_to_literal(&SqlValue::Null), "NULL");
     assert_eq!(sql_value_to_literal(&SqlValue::Integer(42)), "42");
     assert_eq!(sql_value_to_literal(&SqlValue::Varchar(arcstr::ArcStr::from("test"))), "'test'");
-    assert_eq!(sql_value_to_literal(&SqlValue::Varchar(arcstr::ArcStr::from("test's"))), "'test''s'");
+    assert_eq!(
+        sql_value_to_literal(&SqlValue::Varchar(arcstr::ArcStr::from("test's"))),
+        "'test''s'"
+    );
     assert_eq!(sql_value_to_literal(&SqlValue::Boolean(true)), "TRUE");
     assert_eq!(sql_value_to_literal(&SqlValue::Boolean(false)), "FALSE");
 }
@@ -85,7 +94,10 @@ fn test_sql_dump_with_nulls() {
     let table = db.get_table_mut("test_nulls").unwrap();
     table.insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Null])).unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("text"))]))
+        .insert(crate::Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("text")),
+        ]))
         .unwrap();
     table.insert(crate::Row::new(vec![SqlValue::Integer(3), SqlValue::Null])).unwrap();
 
@@ -126,7 +138,10 @@ fn test_sql_dump_with_quotes() {
     // Insert test data with various quote types
     let table = db.get_table_mut("test_quotes").unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("it's"))]))
+        .insert(crate::Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("it's")),
+        ]))
         .unwrap();
     table
         .insert(crate::Row::new(vec![
@@ -141,7 +156,10 @@ fn test_sql_dump_with_quotes() {
         ]))
         .unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from(""))]))
+        .insert(crate::Row::new(vec![
+            SqlValue::Integer(4),
+            SqlValue::Varchar(arcstr::ArcStr::from("")),
+        ]))
         .unwrap();
 
     // Save SQL dump
@@ -467,7 +485,10 @@ fn test_read_sql_dump() {
     // Insert test data
     let table = db.get_table_mut("test_load").unwrap();
     table
-        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Test"))]))
+        .insert(crate::Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Test")),
+        ]))
         .unwrap();
 
     // Save SQL dump

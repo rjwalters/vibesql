@@ -31,12 +31,16 @@ fn test_st_distance_point_to_point() {
         args: vec![
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(0 0)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(0 0)",
+                )))],
                 character_unit: None,
             },
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(3 4)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(3 4)",
+                )))],
                 character_unit: None,
             },
         ],
@@ -59,12 +63,16 @@ fn test_st_distance_same_point() {
         args: vec![
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(1 1)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(1 1)",
+                )))],
                 character_unit: None,
             },
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(1 1)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(1 1)",
+                )))],
                 character_unit: None,
             },
         ],
@@ -86,7 +94,9 @@ fn test_st_length_linestring() {
         name: "ST_LENGTH".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 3 0, 3 4)")))],
+            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "LINESTRING(0 0, 3 0, 3 4)",
+            )))],
             character_unit: None,
         }],
         character_unit: None,
@@ -107,7 +117,9 @@ fn test_st_area_polygon() {
         name: "ST_AREA".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))],
+            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))",
+            )))],
             character_unit: None,
         }],
         character_unit: None,
@@ -130,7 +142,9 @@ fn test_st_centroid_polygon() {
             name: "ST_CENTROID".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))",
+                )))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -155,7 +169,9 @@ fn test_st_envelope() {
             name: "ST_ENVELOPE".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(5 5)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(5 5)",
+                )))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -180,7 +196,9 @@ fn test_st_null_handling_distance() {
             Expression::Literal(SqlValue::Null),
             Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(0 0)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(0 0)",
+                )))],
                 character_unit: None,
             },
         ],
@@ -209,7 +227,9 @@ fn test_st_perimeter_polygon() {
         name: "ST_PERIMETER".to_string(),
         args: vec![Expression::Function {
             name: "ST_GEOMFROMTEXT".to_string(),
-            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))],
+            args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))",
+            )))],
             character_unit: None,
         }],
         character_unit: None,
@@ -232,7 +252,9 @@ fn test_st_convex_hull() {
             name: "ST_CONVEXHULL".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("LINESTRING(0 0, 1 1, 0 1)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "LINESTRING(0 0, 1 1, 0 1)",
+                )))],
                 character_unit: None,
             }],
             character_unit: None,
@@ -257,7 +279,9 @@ fn test_st_point_on_surface_point() {
             name: "ST_POINTONSURFACE".to_string(),
             args: vec![Expression::Function {
                 name: "ST_GEOMFROMTEXT".to_string(),
-                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("POINT(5 5)")))],
+                args: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "POINT(5 5)",
+                )))],
                 character_unit: None,
             }],
             character_unit: None,

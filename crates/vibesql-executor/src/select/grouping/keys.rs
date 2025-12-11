@@ -262,11 +262,17 @@ impl GroupKeySpec {
             GroupKey::SingleI64(v) => vec![SqlValue::Integer(*v)],
             GroupKey::SingleString(v) => vec![SqlValue::Varchar(arcstr::ArcStr::from(v.clone()))],
             GroupKey::TwoChars(a, b) => vec![
-                SqlValue::Varchar(arcstr::ArcStr::from(String::from_utf8_lossy(&[*a]).into_owned())),
-                SqlValue::Varchar(arcstr::ArcStr::from(String::from_utf8_lossy(&[*b]).into_owned())),
+                SqlValue::Varchar(arcstr::ArcStr::from(
+                    String::from_utf8_lossy(&[*a]).into_owned(),
+                )),
+                SqlValue::Varchar(arcstr::ArcStr::from(
+                    String::from_utf8_lossy(&[*b]).into_owned(),
+                )),
             ],
             GroupKey::TwoI64(a, b) => vec![SqlValue::Integer(*a), SqlValue::Integer(*b)],
-            GroupKey::I64String(i, s) => vec![SqlValue::Integer(*i), SqlValue::Varchar(arcstr::ArcStr::from(s.clone()))],
+            GroupKey::I64String(i, s) => {
+                vec![SqlValue::Integer(*i), SqlValue::Varchar(arcstr::ArcStr::from(s.clone()))]
+            }
             GroupKey::ThreeI64(a, b, c) => {
                 vec![SqlValue::Integer(*a), SqlValue::Integer(*b), SqlValue::Integer(*c)]
             }
@@ -506,8 +512,9 @@ impl GroupKeySpec {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
+    use super::*;
 
     #[test]
     fn test_single_i64_key() {
@@ -566,9 +573,18 @@ mod tests {
 
         // Create a batch with string columns (like TPC-H Q1: l_returnflag, l_linestatus)
         let rows = vec![
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("A")), SqlValue::Varchar(arcstr::ArcStr::from("F"))]),
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("N")), SqlValue::Varchar(arcstr::ArcStr::from("O"))]),
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("R")), SqlValue::Varchar(arcstr::ArcStr::from("F"))]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("A")),
+                SqlValue::Varchar(arcstr::ArcStr::from("F")),
+            ]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("N")),
+                SqlValue::Varchar(arcstr::ArcStr::from("O")),
+            ]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("R")),
+                SqlValue::Varchar(arcstr::ArcStr::from("F")),
+            ]),
         ];
         let batch = ColumnarBatch::from_rows(&rows).unwrap();
 

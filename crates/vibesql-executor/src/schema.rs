@@ -1,8 +1,10 @@
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::ops::Deref;
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    fmt,
+    hash::{Hash, Hasher},
+    ops::Deref,
+};
 
 /// A normalized table/alias key for case-insensitive lookups.
 /// Always stored as lowercase, making case-insensitive handling impossible to get wrong.
@@ -253,7 +255,11 @@ impl SchemaBuilder {
     ///
     /// This is an O(1) operation - columns are not copied, just indexed
     /// Note: Table names are automatically normalized via TableKey for case-insensitive lookups
-    pub fn add_table(&mut self, name: impl Into<TableKey>, schema: vibesql_catalog::TableSchema) -> &mut Self {
+    pub fn add_table(
+        &mut self,
+        name: impl Into<TableKey>,
+        schema: vibesql_catalog::TableSchema,
+    ) -> &mut Self {
         let num_columns = schema.columns.len();
         // TableKey automatically normalizes to lowercase
         self.table_schemas.insert(name.into(), (self.column_offset, schema));
@@ -277,12 +283,16 @@ impl Default for SchemaBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::ColumnSchema;
     use vibesql_types::DataType;
 
+    use super::*;
+
     /// Helper to create a simple table schema with the given columns
-    fn table_schema_with_columns(table_name: &str, columns: Vec<(&str, DataType)>) -> vibesql_catalog::TableSchema {
+    fn table_schema_with_columns(
+        table_name: &str,
+        columns: Vec<(&str, DataType)>,
+    ) -> vibesql_catalog::TableSchema {
         let cols: Vec<ColumnSchema> = columns
             .into_iter()
             .map(|(name, data_type)| ColumnSchema::new(name.to_string(), data_type, true))
@@ -291,7 +301,10 @@ mod tests {
     }
 
     /// Helper to create a table schema with a single column
-    fn table_schema_with_column(table_name: &str, column_name: &str) -> vibesql_catalog::TableSchema {
+    fn table_schema_with_column(
+        table_name: &str,
+        column_name: &str,
+    ) -> vibesql_catalog::TableSchema {
         table_schema_with_columns(table_name, vec![(column_name, DataType::Integer)])
     }
 
@@ -371,14 +384,20 @@ mod tests {
         // Create left schema with uppercase
         let left = CombinedSchema::from_table(
             "ORDERS".to_string(),
-            table_schema_with_columns("ORDERS", vec![("order_id", DataType::Integer), ("customer_id", DataType::Integer)]),
+            table_schema_with_columns(
+                "ORDERS",
+                vec![("order_id", DataType::Integer), ("customer_id", DataType::Integer)],
+            ),
         );
 
         // Combine with right table using different case
         let combined = CombinedSchema::combine(
             left,
             "Items".to_string(),
-            table_schema_with_columns("Items", vec![("item_id", DataType::Integer), ("price", DataType::DoublePrecision)]),
+            table_schema_with_columns(
+                "Items",
+                vec![("item_id", DataType::Integer), ("price", DataType::DoublePrecision)],
+            ),
         );
 
         // Verify left table columns accessible with any case
@@ -435,7 +454,10 @@ mod tests {
     fn test_unqualified_column_lookup_no_ambiguity() {
         let schema = CombinedSchema::from_table(
             "USERS".to_string(),
-            table_schema_with_columns("USERS", vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })]),
+            table_schema_with_columns(
+                "USERS",
+                vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })],
+            ),
         );
 
         // Unqualified lookup should work
@@ -525,14 +547,8 @@ mod tests {
         let mut builder = SchemaBuilder::new();
 
         // Add tables with different case
-        builder.add_table(
-            "ORDERS".to_string(),
-            table_schema_with_column("ORDERS", "order_id"),
-        );
-        builder.add_table(
-            "Items".to_string(),
-            table_schema_with_column("Items", "item_id"),
-        );
+        builder.add_table("ORDERS".to_string(), table_schema_with_column("ORDERS", "order_id"));
+        builder.add_table("Items".to_string(), table_schema_with_column("Items", "item_id"));
 
         let schema = builder.build();
 
@@ -548,7 +564,10 @@ mod tests {
         // Create initial schema with uppercase table name
         let initial = CombinedSchema::from_table(
             "PRODUCTS".to_string(),
-            table_schema_with_columns("PRODUCTS", vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })]),
+            table_schema_with_columns(
+                "PRODUCTS",
+                vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })],
+            ),
         );
 
         // Verify initial schema works
@@ -556,10 +575,8 @@ mod tests {
 
         // Create builder from schema and add another table
         let mut builder = SchemaBuilder::from_schema(initial);
-        builder.add_table(
-            "Categories".to_string(),
-            table_schema_with_column("Categories", "cat_id"),
-        );
+        builder
+            .add_table("Categories".to_string(), table_schema_with_column("Categories", "cat_id"));
 
         let final_schema = builder.build();
 
@@ -588,10 +605,8 @@ mod tests {
 
         // Create builder from combined schema
         let mut builder = SchemaBuilder::from_schema(combined);
-        builder.add_table(
-            "CUSTOMERS".to_string(),
-            table_schema_with_column("CUSTOMERS", "cust_id"),
-        );
+        builder
+            .add_table("CUSTOMERS".to_string(), table_schema_with_column("CUSTOMERS", "cust_id"));
 
         let final_schema = builder.build();
 
@@ -622,15 +637,22 @@ mod tests {
         // Simulate the scenario: outer query has table with alias "J"
         let schema = CombinedSchema::from_table(
             "J".to_string(), // Parser often uppercases aliases
-            table_schema_with_columns("items", vec![("price", DataType::DoublePrecision), ("quantity", DataType::Integer)]),
+            table_schema_with_columns(
+                "items",
+                vec![("price", DataType::DoublePrecision), ("quantity", DataType::Integer)],
+            ),
         );
 
         // The correlated subquery should be able to reference J.price
         // regardless of case used by the parser/resolver
-        assert!(schema.get_column_index(Some("J"), "price").is_some(),
-            "Uppercase J should find price (parser case)");
-        assert!(schema.get_column_index(Some("j"), "price").is_some(),
-            "Lowercase j should find price (normalized case)");
+        assert!(
+            schema.get_column_index(Some("J"), "price").is_some(),
+            "Uppercase J should find price (parser case)"
+        );
+        assert!(
+            schema.get_column_index(Some("j"), "price").is_some(),
+            "Lowercase j should find price (normalized case)"
+        );
     }
 
     #[test]
@@ -638,13 +660,19 @@ mod tests {
         // Simulates: SELECT * FROM orders O JOIN items I ON O.id = I.order_id
         let orders = CombinedSchema::from_table(
             "O".to_string(),
-            table_schema_with_columns("orders", vec![("id", DataType::Integer), ("date", DataType::Date)]),
+            table_schema_with_columns(
+                "orders",
+                vec![("id", DataType::Integer), ("date", DataType::Date)],
+            ),
         );
 
         let combined = CombinedSchema::combine(
             orders,
             "I".to_string(),
-            table_schema_with_columns("items", vec![("order_id", DataType::Integer), ("amount", DataType::DoublePrecision)]),
+            table_schema_with_columns(
+                "items",
+                vec![("order_id", DataType::Integer), ("amount", DataType::DoublePrecision)],
+            ),
         );
 
         // Both O and I aliases should work case-insensitively
@@ -685,10 +713,7 @@ mod tests {
 
     #[test]
     fn test_empty_table_name() {
-        let schema = CombinedSchema::from_table(
-            "".to_string(),
-            table_schema_with_column("", "id"),
-        );
+        let schema = CombinedSchema::from_table("".to_string(), table_schema_with_column("", "id"));
 
         // Empty string table should still work
         assert!(schema.get_column_index(Some(""), "id").is_some());
@@ -699,7 +724,10 @@ mod tests {
         let mut builder = SchemaBuilder::new();
         builder.add_table(
             "t1".to_string(),
-            table_schema_with_columns("t1", vec![("a", DataType::Integer), ("b", DataType::Integer)]),
+            table_schema_with_columns(
+                "t1",
+                vec![("a", DataType::Integer), ("b", DataType::Integer)],
+            ),
         );
         builder.add_table(
             "t2".to_string(),

@@ -35,7 +35,6 @@ pub use keywords::Keyword;
 pub use lexer::{Lexer, LexerError};
 pub use parser::{ParseError, Parser};
 pub use token::Token;
-
 use vibesql_ast::Statement;
 
 /// Parse SQL using arena allocation where supported, falling back to standard parsing.

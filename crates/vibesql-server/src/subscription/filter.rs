@@ -5,6 +5,7 @@
 //! are applied to subscription updates before sending to clients.
 
 use std::collections::HashMap;
+
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
 
@@ -37,11 +38,8 @@ impl SubscriptionFilter {
             .map_err(|e| format!("Failed to parse filter expression: {}", e))?;
 
         // Build column index map (case-insensitive)
-        let column_indices: HashMap<String, usize> = column_names
-            .iter()
-            .enumerate()
-            .map(|(idx, name)| (name.to_lowercase(), idx))
-            .collect();
+        let column_indices: HashMap<String, usize> =
+            column_names.iter().enumerate().map(|(idx, name)| (name.to_lowercase(), idx)).collect();
 
         Ok(Self { expression, column_indices })
     }
@@ -470,7 +468,8 @@ mod tests {
         let row2 = vec![SqlValue::Varchar(arcstr::ArcStr::from("active")), SqlValue::Integer(30)];
         assert!(!filter.matches(&row2));
 
-        let row3 = vec![SqlValue::Varchar(arcstr::ArcStr::from("inactive")), SqlValue::Integer(100)];
+        let row3 =
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("inactive")), SqlValue::Integer(100)];
         assert!(!filter.matches(&row3));
     }
 
@@ -517,8 +516,7 @@ mod tests {
     #[test]
     fn test_in_list() {
         let columns = vec!["status".to_string()];
-        let filter =
-            SubscriptionFilter::new("status IN ('active', 'pending')", &columns).unwrap();
+        let filter = SubscriptionFilter::new("status IN ('active', 'pending')", &columns).unwrap();
 
         let row1 = vec![SqlValue::Varchar(arcstr::ArcStr::from("active"))];
         assert!(filter.matches(&row1));

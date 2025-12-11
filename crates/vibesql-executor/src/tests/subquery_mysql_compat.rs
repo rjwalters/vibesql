@@ -366,8 +366,8 @@ fn test_mysql_triple_nested_subquery() {
     db.insert_row("t3", vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]))
         .unwrap();
 
-    // Query: SELECT * FROM t1 WHERE val < (SELECT max_val FROM t2 WHERE max_val > (SELECT multiplier * 25 FROM t3))
-    // This is a triple-nested scalar subquery
+    // Query: SELECT * FROM t1 WHERE val < (SELECT max_val FROM t2 WHERE max_val > (SELECT
+    // multiplier * 25 FROM t3)) This is a triple-nested scalar subquery
     // Inner: SELECT multiplier * 25 FROM t3 = 50
     // Middle: SELECT max_val FROM t2 WHERE max_val > 50 = 100
     // Outer: SELECT * FROM t1 WHERE val < 100 = returns the row

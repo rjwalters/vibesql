@@ -44,7 +44,9 @@ fn test_update_with_where_clause() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef { table: None, column: "department".to_string() }),
             op: BinaryOperator::Equal,
-            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Engineering")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "Engineering",
+            )))),
         })),
     };
 

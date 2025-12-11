@@ -733,5 +733,8 @@ fn test_inner_join_null_values_dont_match() {
     // NULL rows should NOT match each other
     assert_eq!(result.len(), 1, "INNER JOIN should only match non-NULL values");
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("matched")));
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("matched"))
+    );
 }

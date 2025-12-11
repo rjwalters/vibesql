@@ -1,9 +1,10 @@
-use crate::errors::ExecutorError;
 /// Storage-related SQL functions
 ///
 /// Functions for working with blob/file storage:
 /// - STORAGE_URL(blob_id) - Generate URL for accessing a blob
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// STORAGE_URL(blob_id TEXT) -> TEXT
 ///
@@ -67,7 +68,8 @@ mod tests {
 
     #[test]
     fn test_storage_url_function() {
-        let blob_id = SqlValue::Varchar(arcstr::ArcStr::from("550e8400-e29b-41d4-a716-446655440000"));
+        let blob_id =
+            SqlValue::Varchar(arcstr::ArcStr::from("550e8400-e29b-41d4-a716-446655440000"));
         let result = eval_storage_url(&[blob_id]).unwrap();
 
         match result {

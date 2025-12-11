@@ -10,9 +10,10 @@
 //! avoids per-row CSE cache clearing and expression tree traversal, providing
 //! ~5-10% improvement in aggregate-heavy GROUP BY queries.
 
-use crate::schema::CombinedSchema;
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
+
+use crate::schema::CombinedSchema;
 
 /// Compiled representation of simple CASE expressions for fast evaluation
 #[derive(Debug)]

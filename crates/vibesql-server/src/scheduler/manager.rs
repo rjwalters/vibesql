@@ -5,10 +5,10 @@
 //! - Triggering execution
 //! - Updating status and history
 
-use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
+
+use anyhow::Result;
+use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::info;
 
 use super::executor::{ScheduleExecutor, ScheduleExecutorConfig};

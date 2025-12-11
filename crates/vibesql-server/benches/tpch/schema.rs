@@ -11,9 +11,7 @@
 //! This module provides schema creation and data loading functions for TPC-H
 //! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB).
 
-use super::data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
-use vibesql_storage::Database as VibeDB;
-use vibesql_types::Date;
+use std::str::FromStr;
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
@@ -23,8 +21,10 @@ use mysql::prelude::*;
 use mysql::{Pool, PooledConn};
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use vibesql_storage::Database as VibeDB;
+use vibesql_types::Date;
 
-use std::str::FromStr;
+use super::data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 
 /// Batch size for bulk inserts - matches TPC-DS for consistency
 const BATCH_SIZE: usize = 5000;
@@ -622,6 +622,7 @@ fn create_tpch_schema_vibesql(db: &mut VibeDB) {
 /// making the comparison unfair (276x performance gap on Q2).
 fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
     use std::time::Instant;
+
     use vibesql_ast::{IndexColumn, OrderDirection};
 
     // Region table: PRIMARY KEY (r_regionkey)
@@ -1348,9 +1349,10 @@ fn load_supplier_duckdb(conn: &DuckDBConn, data: &mut TPCHData) {
 // =============================================================================
 
 fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
-    use super::data::{COLORS, CONTAINERS, TYPES};
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    use super::data::{COLORS, CONTAINERS, TYPES};
 
     let mut rows = Vec::with_capacity(BATCH_SIZE);
 
@@ -1363,7 +1365,11 @@ fn load_part_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
             SqlValue::Integer(i as i64 + 1),
             SqlValue::Varchar(arcstr::ArcStr::from(p_name)),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Manufacturer#{}", (i % 5) + 1))),
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("Brand#{}{}", (i % 5) + 1, (i / 5 % 5) + 1))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                "Brand#{}{}",
+                (i % 5) + 1,
+                (i / 5 % 5) + 1
+            ))),
             SqlValue::Varchar(arcstr::ArcStr::from(TYPES[i % TYPES.len()].to_string())),
             SqlValue::Integer(((i % 50) + 1) as i64),
             SqlValue::Varchar(arcstr::ArcStr::from(CONTAINERS[i % CONTAINERS.len()].to_string())),
@@ -1670,7 +1676,9 @@ fn load_lineitem_vibesql(db: &mut VibeDB, data: &mut TPCHData) {
                 SqlValue::Date(Date::from_str(&commit_date).unwrap()),
                 SqlValue::Date(Date::from_str(&receipt_date).unwrap()),
                 SqlValue::Varchar(arcstr::ArcStr::from("DELIVER IN PERSON")),
-                SqlValue::Varchar(arcstr::ArcStr::from(SHIP_MODES[line_id % SHIP_MODES.len()].to_string())),
+                SqlValue::Varchar(arcstr::ArcStr::from(
+                    SHIP_MODES[line_id % SHIP_MODES.len()].to_string(),
+                )),
                 SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(44))),
             ]);
             rows.push(row);

@@ -1,5 +1,9 @@
-use ahash::AHashMap;
+#[cfg(feature = "parallel")]
+use std::sync::Arc;
 
+use ahash::AHashMap;
+#[cfg(feature = "parallel")]
+use crossbeam_deque::{Injector, Steal, Worker};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -7,13 +11,10 @@ use rayon::prelude::*;
 use crate::select::morsel::{global_config, Morsel};
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
-#[cfg(feature = "parallel")]
-use crossbeam_deque::{Injector, Steal, Worker};
-#[cfg(feature = "parallel")]
-use std::sync::Arc;
-
-use crate::errors::ExecutorError;
-use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
+use crate::{
+    errors::ExecutorError,
+    timeout::{TimeoutContext, CHECK_INTERVAL},
+};
 
 /// Environment variable to enable morsel build debug logging
 #[cfg(feature = "parallel")]

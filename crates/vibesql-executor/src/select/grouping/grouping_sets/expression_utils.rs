@@ -280,9 +280,10 @@ fn window_spec_equal(a: &WindowSpec, b: &WindowSpec) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{BinaryOperator, SelectStmt, UnaryOperator};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn col(name: &str) -> Expression {
         Expression::ColumnRef { table: None, column: name.to_string() }

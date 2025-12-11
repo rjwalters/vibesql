@@ -3,9 +3,11 @@
 //! Provides reusable buffers to reduce allocation overhead in high-volume query execution.
 //! Thread-local pools eliminate lock contention for concurrent access.
 
-use crate::Row;
 use std::cell::RefCell;
+
 use vibesql_types::SqlValue;
+
+use crate::Row;
 
 /// Default initial capacity for row buffers
 const DEFAULT_ROW_CAPACITY: usize = 128;
@@ -291,8 +293,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_access_thread_safety() {
-        use std::sync::Arc;
-        use std::thread;
+        use std::{sync::Arc, thread};
 
         let pool = Arc::new(QueryBufferPool::new());
         let mut handles = vec![];

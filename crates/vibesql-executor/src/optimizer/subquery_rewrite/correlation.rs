@@ -68,8 +68,8 @@ pub(crate) fn is_correlated(subquery: &SelectStmt) -> bool {
 ///
 /// Current approach:
 /// - **Qualified refs** (e.g., `orders.region`): Can detect if table is external
-/// - **Unqualified refs** (e.g., `region`): Follow SQL resolution rules - assume
-///   internal first (matches innermost scope per SQL semantics)
+/// - **Unqualified refs** (e.g., `region`): Follow SQL resolution rules - assume internal first
+///   (matches innermost scope per SQL semantics)
 ///
 /// This conservative approach may:
 /// - Miss some correlations (when unqualified ref is actually external)

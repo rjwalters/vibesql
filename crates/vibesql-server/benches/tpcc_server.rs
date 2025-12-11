@@ -35,28 +35,24 @@
 
 mod tpcc;
 
-use std::env;
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::net::TcpListener;
-use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
-use tpcc::data::TPCCRng;
-use tpcc::schema::load_vibesql;
-use tpcc::transactions::*;
-
-// PostgreSQL wire protocol client
-use tokio_postgres::NoTls;
+use std::{
+    env,
+    net::SocketAddr,
+    sync::{atomic::AtomicUsize, Arc},
+    time::{Duration, Instant},
+};
 
 // MySQL client (optional)
 #[cfg(feature = "mysql")]
 use mysql::prelude::*;
 #[cfg(feature = "mysql")]
 use mysql::Pool;
+use tokio::{net::TcpListener, runtime::Runtime, sync::oneshot};
+// PostgreSQL wire protocol client
+use tokio_postgres::NoTls;
 #[cfg(feature = "mysql")]
 use tpcc::schema::load_mysql;
+use tpcc::{data::TPCCRng, schema::load_vibesql, transactions::*};
 
 /// Default port for vibesql-server (different from other server benchmarks to avoid conflicts)
 /// - 15432: sysbench_server
@@ -136,11 +132,13 @@ async fn start_vibesql_server_with_db(
     db: vibesql_storage::Database,
     shutdown_signal: oneshot::Receiver<()>,
 ) -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
-    use vibesql_server::config::{AuthConfig, Config, LoggingConfig, ServerConfig};
-    use vibesql_server::connection::ConnectionHandler;
-    use vibesql_server::observability::ObservabilityProvider;
-    use vibesql_server::registry::DatabaseRegistry;
-    use vibesql_server::subscription::SubscriptionManager;
+    use vibesql_server::{
+        config::{AuthConfig, Config, LoggingConfig, ServerConfig},
+        connection::ConnectionHandler,
+        observability::ObservabilityProvider,
+        registry::DatabaseRegistry,
+        subscription::SubscriptionManager,
+    };
 
     // Create minimal configuration for benchmark
     let config = Config {
@@ -318,7 +316,11 @@ impl PostgresTPCCExecutor {
             }
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     /// Execute Payment transaction
@@ -371,7 +373,11 @@ impl PostgresTPCCExecutor {
             };
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     /// Execute Order-Status transaction
@@ -412,7 +418,11 @@ impl PostgresTPCCExecutor {
             };
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     /// Execute Delivery transaction
@@ -435,7 +445,11 @@ impl PostgresTPCCExecutor {
             }
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     /// Execute Stock-Level transaction
@@ -472,11 +486,19 @@ impl PostgresTPCCExecutor {
             };
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     /// Run a single transaction based on type
-    async fn run_transaction(&self, tx_type: TransactionType, rng: &mut TPCCRng) -> TransactionResult {
+    async fn run_transaction(
+        &self,
+        tx_type: TransactionType,
+        rng: &mut TPCCRng,
+    ) -> TransactionResult {
         match tx_type {
             TransactionType::NewOrder => {
                 let input = generate_new_order_input(rng, self.num_warehouses);
@@ -499,7 +521,8 @@ impl PostgresTPCCExecutor {
                 self.stock_level(&input).await
             }
             TransactionType::Mixed => {
-                // Standard TPC-C mix: 45% New-Order, 43% Payment, 4% Order-Status, 4% Delivery, 4% Stock-Level
+                // Standard TPC-C mix: 45% New-Order, 43% Payment, 4% Order-Status, 4% Delivery, 4%
+                // Stock-Level
                 let r = rng.random_int(1, 100);
                 if r <= 45 {
                     let input = generate_new_order_input(rng, self.num_warehouses);
@@ -608,7 +631,11 @@ impl MysqlTPCCExecutor {
             }
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     fn payment(&self, input: &PaymentInput) -> TransactionResult {
@@ -657,7 +684,11 @@ impl MysqlTPCCExecutor {
             };
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     fn order_status(&self, input: &OrderStatusInput) -> TransactionResult {
@@ -695,7 +726,11 @@ impl MysqlTPCCExecutor {
             };
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     fn delivery(&self, input: &DeliveryInput) -> TransactionResult {
@@ -715,7 +750,11 @@ impl MysqlTPCCExecutor {
             }
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
@@ -748,7 +787,11 @@ impl MysqlTPCCExecutor {
             };
         }
 
-        TransactionResult { success: true, duration_us: start.elapsed().as_micros() as u64, error: None }
+        TransactionResult {
+            success: true,
+            duration_us: start.elapsed().as_micros() as u64,
+            error: None,
+        }
     }
 
     fn run_transaction(&self, tx_type: TransactionType, rng: &mut TPCCRng) -> TransactionResult {
@@ -858,10 +901,7 @@ fn print_comparison(vibesql_results: &TPCCServerResults, mysql_results: &TPCCSer
     }
 
     eprintln!("\n=== Comparison Summary ===");
-    eprintln!(
-        "{:<15} {:>15} {:>15} {:>12}",
-        "Metric", "VibeSQL", "MySQL", "Ratio"
-    );
+    eprintln!("{:<15} {:>15} {:>15} {:>12}", "Metric", "VibeSQL", "MySQL", "Ratio");
     eprintln!("{:-<15} {:->15} {:->15} {:->12}", "", "", "", "");
 
     let ratio = if mysql_results.transactions_per_second > 0.0 {
@@ -871,7 +911,10 @@ fn print_comparison(vibesql_results: &TPCCServerResults, mysql_results: &TPCCSer
     };
     eprintln!(
         "{:<15} {:>15.2} {:>15.2} {:>11.2}x",
-        "TPS", vibesql_results.transactions_per_second, mysql_results.transactions_per_second, ratio
+        "TPS",
+        vibesql_results.transactions_per_second,
+        mysql_results.transactions_per_second,
+        ratio
     );
 }
 
@@ -1004,7 +1047,8 @@ fn main() {
         // Give server time to start
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        let conn_str = format!("host=127.0.0.1 port={} user=postgres dbname=tpcc", server_addr.port());
+        let conn_str =
+            format!("host=127.0.0.1 port={} user=postgres dbname=tpcc", server_addr.port());
         eprintln!("Connecting to vibesql-server at {}...", conn_str);
 
         let executor = match PostgresTPCCExecutor::connect(&conn_str, scale_factor).await {
@@ -1050,8 +1094,8 @@ fn main() {
         }
 
         results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
-        results.transactions_per_second = results.successful_transactions as f64
-            / (results.total_duration_ms as f64 / 1000.0);
+        results.transactions_per_second =
+            results.successful_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
 
         let _ = shutdown_tx.send(());
         results
@@ -1103,7 +1147,8 @@ fn main() {
                     }
 
                     mysql_results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
-                    mysql_results.transactions_per_second = mysql_results.successful_transactions as f64
+                    mysql_results.transactions_per_second = mysql_results.successful_transactions
+                        as f64
                         / (mysql_results.total_duration_ms as f64 / 1000.0);
 
                     print_results(&mysql_results, "MySQL", transaction_type);

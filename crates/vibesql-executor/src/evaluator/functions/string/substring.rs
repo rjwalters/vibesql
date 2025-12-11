@@ -2,8 +2,9 @@
 //!
 //! SQL:1999 Section 6.29: String value functions
 
-use crate::errors::ExecutorError;
 use std::borrow::Cow;
+
+use crate::errors::ExecutorError;
 
 /// SUBSTRING(string, start [, length]) - Extract substring
 /// SQL:1999 Section 6.29: String value functions

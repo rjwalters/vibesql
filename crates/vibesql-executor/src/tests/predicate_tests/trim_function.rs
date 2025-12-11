@@ -42,7 +42,10 @@ fn test_trim_both_default() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
+    );
 }
 
 #[test]
@@ -78,7 +81,10 @@ fn test_trim_leading() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello  ")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello  "))
+    );
 }
 
 #[test]
@@ -114,7 +120,10 @@ fn test_trim_trailing() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello"))
+    );
 }
 
 #[test]
@@ -152,7 +161,10 @@ fn test_trim_custom_char() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))
+    );
 }
 
 #[test]

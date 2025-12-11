@@ -22,10 +22,7 @@ fn test_parse_create_table_single_typeless_column() {
             assert_eq!(create.columns.len(), 1);
             assert_eq!(create.columns[0].name, "X");
             // Typeless columns default to BLOB affinity
-            assert_eq!(
-                create.columns[0].data_type,
-                vibesql_types::DataType::BinaryLargeObject
-            );
+            assert_eq!(create.columns[0].data_type, vibesql_types::DataType::BinaryLargeObject);
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -66,10 +63,7 @@ fn test_parse_create_table_typeless_with_primary_key() {
             assert_eq!(create.table_name, "T1");
             assert_eq!(create.columns.len(), 1);
             assert_eq!(create.columns[0].name, "X");
-            assert_eq!(
-                create.columns[0].data_type,
-                vibesql_types::DataType::BinaryLargeObject
-            );
+            assert_eq!(create.columns[0].data_type, vibesql_types::DataType::BinaryLargeObject);
             // Should have PRIMARY KEY constraint
             assert!(create.columns[0]
                 .constraints
@@ -173,8 +167,12 @@ fn test_parse_create_table_typeless_with_multiple_constraints() {
             assert!(constraints
                 .iter()
                 .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::PrimaryKey)));
-            assert!(constraints.iter().any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)));
-            assert!(constraints.iter().any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
+            assert!(constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)));
+            assert!(constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -222,9 +220,7 @@ fn test_parse_create_table_typeless_with_references() {
 #[test]
 fn test_parse_create_table_complex_sqlite_pattern() {
     // Real-world SQLite pattern from test suite
-    let result = Parser::parse_sql(
-        "CREATE TABLE t1(w, x, y, z, PRIMARY KEY(w, x));",
-    );
+    let result = Parser::parse_sql("CREATE TABLE t1(w, x, y, z, PRIMARY KEY(w, x));");
     assert!(result.is_ok(), "Failed to parse: {:?}", result);
     let stmt = result.unwrap();
 

@@ -7,15 +7,14 @@ use std::collections::HashMap;
 use vibesql_ast::Expression;
 use vibesql_storage::{Database, Row};
 
-use crate::{
-    errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
-};
-
 use super::predicate::{
     build_residual_where_clause, extract_composite_predicates_with_in, extract_index_predicate,
     extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
     generate_composite_keys, where_clause_fully_satisfied_by_composite_key, CompositePredicateType,
     IndexPredicate, PrefixPredicateResult, PrefixWithRangeResult,
+};
+use crate::{
+    errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
 };
 
 /// Execute an index scan
@@ -99,8 +98,8 @@ pub(crate) fn execute_index_scan(
     // Determine if we can use composite key point lookup
     let use_composite_lookup = composite_keys.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
 
-    // Try prefix + trailing range lookup first (for queries like WHERE s_w_id = 1 AND s_quantity < 10)
-    // This is more efficient than prefix-only lookup because it bounds the scan
+    // Try prefix + trailing range lookup first (for queries like WHERE s_w_id = 1 AND s_quantity <
+    // 10) This is more efficient than prefix-only lookup because it bounds the scan
     let prefix_with_range_result: Option<PrefixWithRangeResult> = if !use_composite_lookup
         && is_multi_column_index
     {
@@ -179,7 +178,8 @@ pub(crate) fn execute_index_scan(
         // Prefix lookup - apply only residual WHERE clause
         match &residual_where {
             Some(residual) => (true, Some(residual.clone())), // Apply residual only
-            None => (false, None), // All predicates covered by prefix - skip filtering
+            None => (false, None),                            /* All predicates covered by
+                                                                * prefix - skip filtering */
         }
     } else {
         match (&where_clause, &index_predicate) {
@@ -192,7 +192,7 @@ pub(crate) fn execute_index_scan(
                 );
                 (need_filter, if need_filter { Some((*where_expr).clone()) } else { None })
             }
-            (Some(where_expr), None) => (true, Some((*where_expr).clone())), // WHERE present but no index predicate extracted
+            (Some(where_expr), None) => (true, Some((*where_expr).clone())), /* WHERE present but no index predicate extracted */
             (None, _) => (false, None),                                      // No WHERE clause
         }
     };
@@ -281,10 +281,7 @@ pub(crate) fn execute_index_scan(
 
                     rows
                 } else {
-                    streaming_iter
-                        .filter_map(|idx| table.get_row(idx))
-                        .cloned()
-                        .collect()
+                    streaming_iter.filter_map(|idx| table.get_row(idx)).cloned().collect()
                 };
 
                 // Build schema and return result
@@ -370,9 +367,10 @@ pub(crate) fn execute_index_scan(
                 // Use storage layer's optimized range_scan for >, <, >=, <=, BETWEEN
                 // The storage layer handles empty/inverted range validation efficiently
                 //
-                // Optimization: Use range_scan_limit when LIMIT is provided and no post-filter needed
-                // This enables early termination at the index level for simple LIMIT queries (#3638)
-                // Example: SELECT c FROM t WHERE id BETWEEN 1 AND 100 LIMIT 10
+                // Optimization: Use range_scan_limit when LIMIT is provided and no post-filter
+                // needed This enables early termination at the index level for
+                // simple LIMIT queries (#3638) Example: SELECT c FROM t WHERE id
+                // BETWEEN 1 AND 100 LIMIT 10
                 //   - Without: Fetch all 100 rows, then take first 10
                 //   - With: Stop scanning after 10 rows
                 let use_limit_optimization =
@@ -562,9 +560,10 @@ fn apply_where_filter_zerocopy<'a>(
     database: &vibesql_storage::Database,
     cte_results: &HashMap<String, CteResult>,
 ) -> Result<Vec<&'a Row>, ExecutorError> {
-    use crate::evaluator::compiled::CompiledPredicate;
-    use crate::evaluator::CombinedExpressionEvaluator;
-    use crate::select::scan::predicates::combine_predicates_with_and;
+    use crate::{
+        evaluator::{compiled::CompiledPredicate, CombinedExpressionEvaluator},
+        select::scan::predicates::combine_predicates_with_and,
+    };
 
     // Get table statistics for selectivity-based ordering
     // If no statistics available, create fallback estimates based on schema
@@ -580,7 +579,8 @@ fn apply_where_filter_zerocopy<'a>(
     });
 
     // Get predicates ordered by selectivity (most selective first)
-    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
+    let ordered_preds =
+        predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
 
     // If no table-local predicates, return all rows
     if ordered_preds.is_empty() {
@@ -688,12 +688,13 @@ fn apply_where_filter_compiled<'a>(
 
 /// Apply WHERE filter using zero-copy row references with parallel execution
 ///
-/// This function filters rows using Rayon's parallel iterators while maintaining zero-copy semantics.
-/// Only used for large datasets where parallelization provides performance benefits.
+/// This function filters rows using Rayon's parallel iterators while maintaining zero-copy
+/// semantics. Only used for large datasets where parallelization provides performance benefits.
 ///
 /// # Performance
-/// Parallelization is beneficial for datasets where `ParallelConfig::should_parallelize_scan()` returns true,
-/// typically for 10,000+ rows. The overhead of thread spawning is amortized across many rows.
+/// Parallelization is beneficial for datasets where `ParallelConfig::should_parallelize_scan()`
+/// returns true, typically for 10,000+ rows. The overhead of thread spawning is amortized across
+/// many rows.
 #[cfg(feature = "parallel")]
 fn apply_where_filter_zerocopy_parallel<'a>(
     row_refs: Vec<&'a Row>,
@@ -701,8 +702,9 @@ fn apply_where_filter_zerocopy_parallel<'a>(
     combined_where: vibesql_ast::Expression,
     evaluator: crate::evaluator::CombinedExpressionEvaluator,
 ) -> Result<Vec<&'a Row>, ExecutorError> {
-    use rayon::prelude::*;
     use std::sync::Arc;
+
+    use rayon::prelude::*;
 
     // Clone expression for thread-safe sharing
     let where_expr_arc = Arc::new(combined_where);
@@ -793,8 +795,9 @@ fn where_clause_fully_satisfied_by_index(
     indexed_column: &str,
     index_predicate: &Option<IndexPredicate>,
 ) -> bool {
-    use super::super::super::scan::index_scan::selection::is_column_reference;
     use vibesql_ast::BinaryOperator;
+
+    use super::super::super::scan::index_scan::selection::is_column_reference;
 
     let Some(pred) = index_predicate else {
         return false; // No index predicate, can't be satisfied
@@ -840,7 +843,8 @@ fn where_clause_fully_satisfied_by_index(
                 | BinaryOperator::GreaterThanOrEqual
                 | BinaryOperator::LessThan
                 | BinaryOperator::LessThanOrEqual => {
-                    // Check if this is "indexed_column <op> literal" or "literal <op> indexed_column"
+                    // Check if this is "indexed_column <op> literal" or "literal <op>
+                    // indexed_column"
                     let is_simple_range = (is_column_reference(left, indexed_column)
                         && matches!(right.as_ref(), Expression::Literal(_)))
                         || (is_column_reference(right, indexed_column)
@@ -850,7 +854,8 @@ fn where_clause_fully_satisfied_by_index(
                         return false;
                     }
 
-                    // Verify the index predicate is a range (any range is fine for simple comparisons)
+                    // Verify the index predicate is a range (any range is fine for simple
+                    // comparisons)
                     matches!(pred, IndexPredicate::Range(_))
                 }
 
@@ -861,7 +866,8 @@ fn where_clause_fully_satisfied_by_index(
                     // For now, be conservative and reject AND unless it's obviously safe
                     // The predicate extraction already handles simple "col >= a AND col <= b" cases
 
-                    // Check if this is exactly the pattern: indexed_col >= val AND indexed_col <= val
+                    // Check if this is exactly the pattern: indexed_col >= val AND indexed_col <=
+                    // val
                     match (left.as_ref(), right.as_ref()) {
                         (
                             Expression::BinaryOp { left: l_left, op: l_op, right: l_right },
@@ -1009,10 +1015,7 @@ pub(in crate::select::scan) fn execute_skip_scan(
     };
 
     if std::env::var("SKIP_SCAN_DEBUG").is_ok() {
-        eprintln!(
-            "[SKIP_SCAN] Found {} matching rows from skip-scan",
-            matching_row_indices.len()
-        );
+        eprintln!("[SKIP_SCAN] Found {} matching rows from skip-scan", matching_row_indices.len());
     }
 
     // Build schema
@@ -1063,9 +1066,13 @@ enum SkipScanPredicate {
 }
 
 /// Extract predicate for skip-scan filter column from WHERE clause
-fn extract_skip_scan_predicate(where_clause: &Expression, filter_column: &str) -> SkipScanPredicate {
-    use super::selection::is_column_reference;
+fn extract_skip_scan_predicate(
+    where_clause: &Expression,
+    filter_column: &str,
+) -> SkipScanPredicate {
     use vibesql_ast::BinaryOperator;
+
+    use super::selection::is_column_reference;
 
     match where_clause {
         Expression::BinaryOp { left, op, right } => {
@@ -1184,13 +1191,29 @@ fn extract_skip_scan_predicate(where_clause: &Expression, filter_column: &str) -
                         (SkipScanPredicate::None, SkipScanPredicate::Equality(v)) => {
                             return SkipScanPredicate::Equality(v);
                         }
-                        (SkipScanPredicate::Range { lower: l1, inclusive_lower: il1, upper: u1, inclusive_upper: iu1 },
-                         SkipScanPredicate::Range { lower: l2, inclusive_lower: il2, upper: u2, inclusive_upper: iu2 }) => {
+                        (
+                            SkipScanPredicate::Range {
+                                lower: l1,
+                                inclusive_lower: il1,
+                                upper: u1,
+                                inclusive_upper: iu1,
+                            },
+                            SkipScanPredicate::Range {
+                                lower: l2,
+                                inclusive_lower: il2,
+                                upper: u2,
+                                inclusive_upper: iu2,
+                            },
+                        ) => {
                             // Merge ranges: take the more restrictive bounds
                             let (lower, inclusive_lower) = match (l1, l2) {
                                 (Some(v1), Some(v2)) => {
                                     // Take the larger lower bound (more restrictive)
-                                    if v1 >= v2 { (Some(v1), il1) } else { (Some(v2), il2) }
+                                    if v1 >= v2 {
+                                        (Some(v1), il1)
+                                    } else {
+                                        (Some(v2), il2)
+                                    }
                                 }
                                 (Some(v), None) | (None, Some(v)) => (Some(v), il1 || il2),
                                 (None, None) => (None, false),
@@ -1198,12 +1221,21 @@ fn extract_skip_scan_predicate(where_clause: &Expression, filter_column: &str) -
                             let (upper, inclusive_upper) = match (u1, u2) {
                                 (Some(v1), Some(v2)) => {
                                     // Take the smaller upper bound (more restrictive)
-                                    if v1 <= v2 { (Some(v1), iu1) } else { (Some(v2), iu2) }
+                                    if v1 <= v2 {
+                                        (Some(v1), iu1)
+                                    } else {
+                                        (Some(v2), iu2)
+                                    }
                                 }
                                 (Some(v), None) | (None, Some(v)) => (Some(v), iu1 || iu2),
                                 (None, None) => (None, false),
                             };
-                            return SkipScanPredicate::Range { lower, inclusive_lower, upper, inclusive_upper };
+                            return SkipScanPredicate::Range {
+                                lower,
+                                inclusive_lower,
+                                upper,
+                                inclusive_upper,
+                            };
                         }
                         (r @ SkipScanPredicate::Range { .. }, SkipScanPredicate::None) => return r,
                         (SkipScanPredicate::None, r @ SkipScanPredicate::Range { .. }) => return r,
@@ -1244,9 +1276,10 @@ fn apply_where_filter_for_skip_scan<'a>(
     database: &Database,
     cte_results: &HashMap<String, CteResult>,
 ) -> Result<Vec<&'a Row>, ExecutorError> {
-    use crate::evaluator::compiled::CompiledPredicate;
-    use crate::evaluator::CombinedExpressionEvaluator;
-    use crate::select::scan::predicates::combine_predicates_with_and;
+    use crate::{
+        evaluator::{compiled::CompiledPredicate, CombinedExpressionEvaluator},
+        select::scan::predicates::combine_predicates_with_and,
+    };
 
     // Get table statistics for selectivity-based ordering
     let table_stats_owned = database.get_table(table_name).map(|table| {
@@ -1259,7 +1292,8 @@ fn apply_where_filter_for_skip_scan<'a>(
     });
 
     // Get predicates ordered by selectivity
-    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
+    let ordered_preds =
+        predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
 
     // If no table-local predicates, return all rows
     if ordered_preds.is_empty() {

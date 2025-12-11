@@ -132,7 +132,8 @@ pub fn execute_drop_procedure(
 /// - ColumnRef without table qualifier (treated as session variable): @var_name
 /// - Function call to session variable function (if we add one)
 ///
-/// Returns the variable name (without @ prefix) or error if expression is not a valid variable reference.
+/// Returns the variable name (without @ prefix) or error if expression is not a valid variable
+/// reference.
 fn extract_variable_name(expr: &Expression) -> Result<String, ExecutorError> {
     match expr {
         Expression::ColumnRef { table: None, column } => {
@@ -170,10 +171,10 @@ fn extract_variable_name(expr: &Expression) -> Result<String, ExecutorError> {
 /// # Parameter Binding
 ///
 /// - **IN parameters**: Values are evaluated and passed to the procedure
-/// - **OUT parameters**: Must be session variables (@var), initialized to NULL,
-///   procedure can assign values that are returned to caller
-/// - **INOUT parameters**: Must be session variables (@var), values are passed in
-///   and can be modified by the procedure
+/// - **OUT parameters**: Must be session variables (@var), initialized to NULL, procedure can
+///   assign values that are returned to caller
+/// - **INOUT parameters**: Must be session variables (@var), values are passed in and can be
+///   modified by the procedure
 ///
 /// # Example
 ///
@@ -302,7 +303,8 @@ pub fn execute_call(stmt: &CallStmt, db: &mut Database) -> Result<(), ExecutorEr
                         // Continue to next statement
                     }
                     ControlFlow::Return(_) => {
-                        // RETURN in procedures exits early (functions will handle return value later)
+                        // RETURN in procedures exits early (functions will handle return value
+                        // later)
                         break;
                     }
                     ControlFlow::Leave(_) | ControlFlow::Iterate(_) => {

@@ -11,11 +11,14 @@
 //! Part of Phase 1.1 of Real-Time Reactive Query Subscriptions (#3421)
 //! Issue: #3447
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use vibesql_catalog::{ColumnSchema, TableSchema};
-use vibesql_storage::change_events::{self, ChangeEvent, ChangeEventReceiver};
-use vibesql_storage::{Database, Row};
+use vibesql_storage::{
+    change_events::{self, ChangeEvent, ChangeEventReceiver},
+    Database, Row,
+};
 use vibesql_types::{DataType, SqlValue};
 
 /// Create a test row with the given id

@@ -189,9 +189,10 @@ pub fn hash_join_indices_columnar_multi(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_hash_join_indices_columnar_multi() {
@@ -205,7 +206,8 @@ mod tests {
 
         // Probe rows: (a, b) pairs
         let probe_rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]), // Matches build[0] and build[3]
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)]), /* Matches build[0] and
+                                                                          * build[3] */
             Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(20)]), // Matches build[1]
             Row::new(vec![SqlValue::Integer(99), SqlValue::Integer(99)]), // No match
         ];
@@ -233,11 +235,15 @@ mod tests {
     #[test]
     fn test_hash_join_indices_columnar_multi_with_non_integer() {
         // Build rows with string column (should fall back to None)
-        let build_rows =
-            vec![Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("a")), SqlValue::Integer(10)])];
+        let build_rows = vec![Row::new(vec![
+            SqlValue::Varchar(arcstr::ArcStr::from("a")),
+            SqlValue::Integer(10),
+        ])];
 
-        let probe_rows =
-            vec![Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("a")), SqlValue::Integer(10)])];
+        let probe_rows = vec![Row::new(vec![
+            SqlValue::Varchar(arcstr::ArcStr::from("a")),
+            SqlValue::Integer(10),
+        ])];
 
         // Should return None because not all columns are integers
         let result = hash_join_indices_columnar_multi(&build_rows, &probe_rows, &[0, 1], &[0, 1]);
@@ -270,7 +276,10 @@ mod tests {
         let rows = vec![
             Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("alice")), SqlValue::Integer(1)]),
             Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("bob")), SqlValue::Integer(2)]),
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("charlie")), SqlValue::Integer(3)]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("charlie")),
+                SqlValue::Integer(3),
+            ]),
         ];
 
         let strings = extract_string_column(&rows, 0).unwrap();
@@ -291,14 +300,14 @@ mod tests {
             Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(100)]),
             Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C002")), SqlValue::Integer(200)]),
             Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C003")), SqlValue::Integer(300)]),
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(400)]), // Duplicate key
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(400)]), /* Duplicate key */
         ];
 
         // Probe rows: (customer_id, amount) pairs
         let probe_rows = vec![
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(50)]), // Matches build[0] and build[3]
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C002")), SqlValue::Integer(60)]), // Matches build[1]
-            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C999")), SqlValue::Integer(70)]), // No match
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C001")), SqlValue::Integer(50)]), /* Matches build[0] and build[3] */
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C002")), SqlValue::Integer(60)]), /* Matches build[1] */
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("C999")), SqlValue::Integer(70)]), /* No match */
         ];
 
         let pairs = hash_join_indices_columnar_str(&build_rows, &probe_rows, 0, 0).unwrap();

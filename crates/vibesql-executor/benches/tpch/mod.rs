@@ -23,11 +23,10 @@ pub mod schema;
 // Re-export commonly used items for convenience
 pub use data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 pub use queries::*;
-pub use schema::load_vibesql;
-
-#[cfg(feature = "sqlite")]
-pub use schema::load_sqlite;
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
 #[cfg(feature = "mysql")]
 pub use schema::load_mysql;
+#[cfg(feature = "sqlite")]
+pub use schema::load_sqlite;
+pub use schema::load_vibesql;

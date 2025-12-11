@@ -3,10 +3,10 @@
 //! These benchmarks compare row-at-a-time vs vectorized predicate evaluation,
 //! demonstrating the performance benefits of SIMD filtering.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
-use vibesql_executor::select::columnar::batch::ColumnarBatch;
-use vibesql_executor::select::columnar::filter::ColumnPredicate;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use vibesql_executor::select::columnar::{batch::ColumnarBatch, filter::ColumnPredicate};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 

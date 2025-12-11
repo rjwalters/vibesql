@@ -10,11 +10,10 @@
 //! and enables faster equality comparisons for enum-like columns.
 
 use std::sync::Arc;
+
 use vibesql_types::{Date, Interval, SqlValue, Time, Timestamp};
 
-use super::data::ColumnData;
-use super::interner::StringInterner;
-use super::types::ColumnTypeClass;
+use super::{data::ColumnData, interner::StringInterner, types::ColumnTypeClass};
 
 /// Builder for constructing column data with pre-allocated capacity
 ///

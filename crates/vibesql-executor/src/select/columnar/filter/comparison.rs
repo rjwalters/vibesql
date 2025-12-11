@@ -165,10 +165,11 @@ mod tests {
     /// Integration test for issue #3360: Full columnar filter path with Float column
     #[test]
     fn test_issue_3360_filter_float_column() {
+        use vibesql_storage::Row;
+
         use super::super::{
             apply_columnar_filter, create_filter_bitmap, evaluate_predicate, ColumnPredicate,
         };
-        use vibesql_storage::Row;
 
         // Reproduce the exact issue: FLOAT column with integer predicate
         let rows = vec![

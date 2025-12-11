@@ -1,10 +1,11 @@
 //! Table-level statistics
 
-use super::histogram::BucketStrategy;
-use super::{ColumnStatistics, SampleMetadata, SamplingConfig};
+use std::collections::HashMap;
+
 use instant::SystemTime;
 use rand::SeedableRng;
-use std::collections::HashMap;
+
+use super::{histogram::BucketStrategy, ColumnStatistics, SampleMetadata, SamplingConfig};
 
 /// Statistics for an entire table
 #[derive(Debug, Clone)]
@@ -47,8 +48,10 @@ impl TableStatistics {
     /// # Heuristics Used
     /// - **Boolean columns**: n_distinct = 2
     /// - **Integer/Smallint/Bigint/Unsigned columns**: n_distinct = sqrt(row_count) (conservative)
-    /// - **Float/Real/DoublePrecision columns**: n_distinct = sqrt(row_count) to 100 (high cardinality)
-    /// - **Varchar/Character/Name columns**: n_distinct = row_count * 0.5 (assume moderate uniqueness)
+    /// - **Float/Real/DoublePrecision columns**: n_distinct = sqrt(row_count) to 100 (high
+    ///   cardinality)
+    /// - **Varchar/Character/Name columns**: n_distinct = row_count * 0.5 (assume moderate
+    ///   uniqueness)
     /// - **Date/Timestamp/Time columns**: n_distinct = row_count * 0.8 (high cardinality)
     /// - **Numeric/Decimal columns**: n_distinct = sqrt(row_count) (moderate)
     /// - **Nullable columns**: null_count ≈ row_count * 0.01 (1% estimated nulls)
@@ -67,10 +70,7 @@ impl TableStatistics {
     /// // Varchar col: n_distinct = 2500
     /// // All columns: is_stale = true
     /// ```
-    pub fn estimate_from_schema(
-        row_count: usize,
-        schema: &vibesql_catalog::TableSchema,
-    ) -> Self {
+    pub fn estimate_from_schema(row_count: usize, schema: &vibesql_catalog::TableSchema) -> Self {
         use vibesql_types::DataType;
 
         let mut columns = std::collections::HashMap::new();
@@ -120,10 +120,10 @@ impl TableStatistics {
             let col_stats = ColumnStatistics {
                 n_distinct: n_distinct.max(1), // At least 1 distinct value
                 null_count,
-                min_value: None,    // No range info without scanning
+                min_value: None, // No range info without scanning
                 max_value: None,
                 most_common_values: Vec::new(), // No MCVs without scanning
-                histogram: None,    // No histogram without scanning
+                histogram: None,                // No histogram without scanning
             };
 
             columns.insert(col.name.clone(), col_stats);
@@ -291,10 +291,11 @@ impl TableStatistics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::Row;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
+    use crate::Row;
 
     #[test]
     fn test_table_statistics() {
@@ -387,7 +388,11 @@ mod tests {
             vec![
                 ColumnSchema::new("bool_col".to_string(), DataType::Boolean, false),
                 ColumnSchema::new("int_col".to_string(), DataType::Integer, false),
-                ColumnSchema::new("float_col".to_string(), DataType::Float { precision: 24 }, false),
+                ColumnSchema::new(
+                    "float_col".to_string(),
+                    DataType::Float { precision: 24 },
+                    false,
+                ),
                 ColumnSchema::new("date_col".to_string(), DataType::Date, false),
                 ColumnSchema::new(
                     "nullable_col".to_string(),
@@ -476,7 +481,10 @@ mod tests {
         let rows = vec![
             Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
             Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
-            Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))]),
+            Row::new(vec![
+                SqlValue::Integer(3),
+                SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+            ]),
         ];
 
         let stats = TableStatistics::compute(&rows, &schema);
@@ -526,10 +534,7 @@ mod tests {
 
         // Empty table should have avg_row_bytes = None
         let stats = TableStatistics::compute(&[], &schema);
-        assert!(
-            stats.avg_row_bytes.is_none(),
-            "Empty table should have avg_row_bytes = None"
-        );
+        assert!(stats.avg_row_bytes.is_none(), "Empty table should have avg_row_bytes = None");
     }
 
     #[test]
@@ -556,8 +561,14 @@ mod tests {
         // Long strings
         let long_string = "x".repeat(500);
         let long_rows = vec![
-            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from(&long_string))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from(&long_string))]),
+            Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from(&long_string)),
+            ]),
+            Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from(&long_string)),
+            ]),
         ];
         let long_stats = TableStatistics::compute(&long_rows, &schema);
 

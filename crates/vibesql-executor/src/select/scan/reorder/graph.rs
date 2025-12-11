@@ -3,6 +3,7 @@
 #![allow(clippy::only_used_in_recursion)]
 
 use std::collections::{HashMap, HashSet};
+
 use vibesql_ast::{Expression, FromClause, JoinType};
 
 /// Information about a table extracted from a FROM clause
@@ -250,7 +251,8 @@ pub(super) fn extract_referenced_tables_with_schema(
                 column_to_table,
             );
         }
-        // For other expressions (literals, wildcards, subqueries, etc.), no direct column refs to extract
+        // For other expressions (literals, wildcards, subqueries, etc.), no direct column refs to
+        // extract
         _ => {}
     }
 }

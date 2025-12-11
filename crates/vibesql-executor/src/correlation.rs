@@ -3,8 +3,9 @@
 //! This module provides utilities to determine if a subquery is correlated
 //! (references columns from an outer query) or non-correlated (independent).
 
-use crate::schema::CombinedSchema;
 use vibesql_ast::{Expression, FromClause, SelectItem, SelectStmt};
+
+use crate::schema::CombinedSchema;
 
 /// Check if a subquery is correlated with the outer query
 ///
@@ -403,11 +404,13 @@ fn is_expression_correlated(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{BinaryOperator, Expression, SelectItem, SelectStmt};
 
+    use super::*;
+
     fn make_outer_schema() -> CombinedSchema {
-        // Create a simple schema with one table "tab0" with columns: pk, col0, col1, col2, col3, col4
+        // Create a simple schema with one table "tab0" with columns: pk, col0, col1, col2, col3,
+        // col4
         let columns = vec![
             vibesql_catalog::ColumnSchema {
                 name: "pk".to_string(),

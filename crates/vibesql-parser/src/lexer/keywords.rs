@@ -1,5 +1,6 @@
-use crate::keywords::Keyword;
 use phf::phf_map;
+
+use crate::keywords::Keyword;
 
 /// Perfect hash map for O(1) keyword lookup.
 /// Keys must be uppercase ASCII strings.

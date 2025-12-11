@@ -82,8 +82,8 @@ pub fn is_simple_point_query(stmt: &SelectStmt) -> bool {
 /// 1. Query a single table (no joins)
 /// 2. Have no CTEs, set operations, GROUP BY, HAVING, DISTINCT, ORDER BY
 /// 3. Have a simple WHERE clause with PK range predicate (BETWEEN)
-/// 4. SELECT list contains only simple aggregates (SUM, COUNT, AVG, MIN, MAX)
-///    on single column references (not DISTINCT aggregates)
+/// 4. SELECT list contains only simple aggregates (SUM, COUNT, AVG, MIN, MAX) on single column
+///    references (not DISTINCT aggregates)
 ///
 /// # Example queries that use this path:
 /// ```sql
@@ -399,9 +399,10 @@ pub(crate) fn is_column_or_literal(expr: &Expression) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::Statement;
     use vibesql_parser::Parser;
+
+    use super::*;
 
     fn parse_select(sql: &str) -> SelectStmt {
         match Parser::parse_sql(sql).unwrap() {

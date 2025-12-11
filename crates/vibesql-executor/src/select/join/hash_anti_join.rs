@@ -2,13 +2,16 @@
 
 use ahash::AHashMap;
 
-use super::hash_join::build_existence_hash_table_parallel;
-use super::hash_semi_join::partition_filter_predicates;
-use super::{combine_rows, FromResult};
-use crate::errors::ExecutorError;
-use crate::evaluator::CombinedExpressionEvaluator;
-use crate::schema::CombinedSchema;
-use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
+use super::{
+    combine_rows, hash_join::build_existence_hash_table_parallel,
+    hash_semi_join::partition_filter_predicates, FromResult,
+};
+use crate::{
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+    schema::CombinedSchema,
+    timeout::{TimeoutContext, CHECK_INTERVAL},
+};
 
 /// Hash anti-join implementation
 ///
@@ -16,8 +19,10 @@ use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 /// This is the opposite of semi-join.
 ///
 /// Use cases:
-/// - NOT EXISTS subqueries: SELECT * FROM orders WHERE NOT EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey = o_orderkey)
-/// - NOT IN subqueries: SELECT * FROM orders WHERE o_orderkey NOT IN (SELECT l_orderkey FROM lineitem)
+/// - NOT EXISTS subqueries: SELECT * FROM orders WHERE NOT EXISTS (SELECT 1 FROM lineitem WHERE
+///   l_orderkey = o_orderkey)
+/// - NOT IN subqueries: SELECT * FROM orders WHERE o_orderkey NOT IN (SELECT l_orderkey FROM
+///   lineitem)
 ///
 /// Algorithm:
 /// 1. Build phase: Hash the RIGHT table into a HashSet (O(n))
@@ -27,7 +32,8 @@ use crate::timeout::{TimeoutContext, CHECK_INTERVAL};
 ///
 /// Performance characteristics:
 /// - Time: O(n + m) vs O(n*m) for nested loop
-/// - Space: O(n) where n is the size of the right table (smaller than inner join because we don't store indices)
+/// - Space: O(n) where n is the size of the right table (smaller than inner join because we don't
+///   store indices)
 /// - Expected speedup: 100-10,000x for large anti-joins
 pub(super) fn hash_anti_join(
     left: FromResult,
@@ -81,7 +87,8 @@ pub(super) fn hash_anti_join(
 /// Hash anti-join with additional filter conditions
 ///
 /// This is an optimized version of hash_anti_join that supports additional filter predicates
-/// beyond the equi-join condition. This is essential for NOT EXISTS subqueries with complex WHERE clauses.
+/// beyond the equi-join condition. This is essential for NOT EXISTS subqueries with complex WHERE
+/// clauses.
 ///
 /// Example use case:
 /// ```sql
@@ -94,18 +101,16 @@ pub(super) fn hash_anti_join(
 ///
 /// ## Optimization: Right-Side Predicate Pushdown
 ///
-/// When the filter contains predicates that reference only the right table (e.g., `s_quantity < 10`),
-/// these predicates are applied during the hash table build phase, reducing the hash table size.
-/// This is critical for NOT IN subquery performance.
+/// When the filter contains predicates that reference only the right table (e.g., `s_quantity <
+/// 10`), these predicates are applied during the hash table build phase, reducing the hash table
+/// size. This is critical for NOT IN subquery performance.
 ///
 /// Algorithm:
 /// 1. **Predicate partitioning**: Split filter into right-only and cross-table predicates
 /// 2. **Build phase**: Hash the RIGHT table, applying right-only predicates as a pre-filter
-/// 3. **Probe phase**: For each LEFT row:
-///    a. Check if hash table contains matching key
-///    b. If yes, verify cross-table predicates against ALL matching right rows
-///    c. If NO right row passes, emit the left row
-///    d. If no matching key, emit the left row
+/// 3. **Probe phase**: For each LEFT row: a. Check if hash table contains matching key b. If yes,
+///    verify cross-table predicates against ALL matching right rows c. If NO right row passes, emit
+///    the left row d. If no matching key, emit the left row
 ///
 /// Performance: O(n + m) average case with reduced hash table size
 pub(super) fn hash_anti_join_with_filter(

@@ -9,9 +9,7 @@ use vibesql_ast::arena::{
 };
 
 use super::ArenaParser;
-use crate::keywords::Keyword;
-use crate::token::Token;
-use crate::ParseError;
+use crate::{keywords::Keyword, token::Token, ParseError};
 
 /// Counter for generating unique derived table aliases when none is provided.
 /// SQLite allows derived tables without aliases, unlike SQL:1999 which requires them.
@@ -212,10 +210,11 @@ impl<'arena> ArenaParser<'arena> {
         let expr = self.parse_expression()?;
 
         // Check for qualified wildcard (table.*)
-        // Note: We compare the symbol directly now, which means we need to intern "*" for comparison
-        // But actually, the Wildcard expression is separate - column reference with "*" becomes Expression::Wildcard
-        // So this check shouldn't match anymore since Expression::ColumnRef won't have "*" as column.
-        // The wildcard case is handled in expression parsing.
+        // Note: We compare the symbol directly now, which means we need to intern "*" for
+        // comparison But actually, the Wildcard expression is separate - column reference
+        // with "*" becomes Expression::Wildcard So this check shouldn't match anymore since
+        // Expression::ColumnRef won't have "*" as column. The wildcard case is handled in
+        // expression parsing.
         if let Expression::ColumnRef { table: Some(t), column: _ } = &expr {
             // Check if it's a qualified wildcard - but this won't happen since
             // we parse table.* as Wildcard expression, not as ColumnRef with "*" column

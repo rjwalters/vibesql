@@ -73,10 +73,7 @@ fn test_aggregate_without_group_by_with_null_is_not_null_returns_one_row() {
 
     // SQL: Aggregate WITHOUT GROUP BY on empty input returns 1 row
     // COUNT(*) returns 0, other aggregates return NULL
-    let rows = execute_query(
-        &db,
-        "SELECT AVG(col0), COUNT(*) FROM tab1 WHERE (NULL) IS NOT NULL",
-    );
+    let rows = execute_query(&db, "SELECT AVG(col0), COUNT(*) FROM tab1 WHERE (NULL) IS NOT NULL");
 
     assert_eq!(
         rows.len(),
@@ -96,10 +93,7 @@ fn test_group_by_with_col_greater_than_100_returns_empty() {
 
     // All values in col0 are 1, 2, 3 - none > 100
     // With GROUP BY, this should return 0 rows
-    let rows = execute_query(
-        &db,
-        "SELECT AVG(col0) FROM tab1 WHERE col0 > 100 GROUP BY col0",
-    );
+    let rows = execute_query(&db, "SELECT AVG(col0) FROM tab1 WHERE col0 > 100 GROUP BY col0");
 
     assert_eq!(
         rows.len(),
@@ -141,12 +135,7 @@ fn test_group_by_on_empty_table_returns_empty() {
     // GROUP BY on empty table should return 0 rows
     let rows = execute_query(&db, "SELECT AVG(col0) FROM empty_tab GROUP BY col0");
 
-    assert_eq!(
-        rows.len(),
-        0,
-        "GROUP BY on empty table should return 0 rows, got {}",
-        rows.len()
-    );
+    assert_eq!(rows.len(), 0, "GROUP BY on empty table should return 0 rows, got {}", rows.len());
 }
 
 #[test]
@@ -178,10 +167,8 @@ fn test_count_with_group_by_always_false_where_returns_empty() {
     let db = setup_db();
 
     // COUNT with GROUP BY and always-false WHERE should return 0 rows
-    let rows = execute_query(
-        &db,
-        "SELECT COUNT(*) FROM tab1 WHERE (NULL) IS NOT NULL GROUP BY col0",
-    );
+    let rows =
+        execute_query(&db, "SELECT COUNT(*) FROM tab1 WHERE (NULL) IS NOT NULL GROUP BY col0");
 
     assert_eq!(
         rows.len(),
@@ -198,15 +185,7 @@ fn test_group_by_with_false_literal_returns_empty() {
 
     // WHERE FALSE should filter all rows
     // With GROUP BY, this should return 0 rows
-    let rows = execute_query(
-        &db,
-        "SELECT AVG(col0) FROM tab1 WHERE FALSE GROUP BY col0",
-    );
+    let rows = execute_query(&db, "SELECT AVG(col0) FROM tab1 WHERE FALSE GROUP BY col0");
 
-    assert_eq!(
-        rows.len(),
-        0,
-        "GROUP BY with WHERE FALSE should return 0 rows, got {}",
-        rows.len()
-    );
+    assert_eq!(rows.len(), 0, "GROUP BY with WHERE FALSE should return 0 rows, got {}", rows.len());
 }

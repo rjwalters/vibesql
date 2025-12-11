@@ -15,7 +15,6 @@ use axum::{
 };
 use tokio::sync::RwLock;
 use tracing::{debug, error};
-
 use vibesql_storage::{BlobId, BlobStorageConfig, BlobStorageService, Database};
 
 use super::types::*;
@@ -45,7 +44,11 @@ impl StorageState {
 
     /// Create storage state with custom config
     #[allow(dead_code)]
-    pub fn with_config(config: BlobStorageConfig, db: Arc<Database>, registry: DatabaseRegistry) -> Self {
+    pub fn with_config(
+        config: BlobStorageConfig,
+        db: Arc<Database>,
+        registry: DatabaseRegistry,
+    ) -> Self {
         // Create blob service with the database reference
         let blob_service = Arc::new(BlobStorageService::new(config, db.clone()));
         // Wrap Database in RwLock for safe concurrent access
@@ -249,17 +252,16 @@ async fn delete_blob(
 /// These tests require the memory storage backend to be enabled.
 #[cfg(all(test, feature = "opendal", feature = "storage-memory"))]
 mod tests {
-    use super::*;
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
+
+    use super::*;
 
     fn create_test_router() -> Router {
         let db = Arc::new(Database::new());
         let registry = DatabaseRegistry::new();
-        let config = BlobStorageConfig {
-            backend: "memory".to_string(),
-            config: serde_json::json!({}),
-        };
+        let config =
+            BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
         let state = StorageState::with_config(config, db, registry);
 
         Router::new()

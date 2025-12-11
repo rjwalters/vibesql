@@ -2,11 +2,10 @@
 //!
 //! Implements a two-phase external merge sort:
 //!
-//! 1. **Sort Phase**: Process input in chunks, sort each chunk in memory,
-//!    and spill sorted runs to disk when memory is exhausted.
+//! 1. **Sort Phase**: Process input in chunks, sort each chunk in memory, and spill sorted runs to
+//!    disk when memory is exhausted.
 //!
-//! 2. **Merge Phase**: K-way merge of sorted runs, streaming results
-//!    with bounded memory usage.
+//! 2. **Merge Phase**: K-way merge of sorted runs, streaming results with bounded memory usage.
 //!
 //! # Algorithm
 //!
@@ -38,17 +37,21 @@
 //! - **Streaming merge**: Outputs rows incrementally without materializing all results
 //! - **Stable sort**: Preserves relative order of equal elements
 
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::io::{self, Cursor};
-use std::sync::Arc;
+use std::{
+    cmp::Ordering,
+    collections::BinaryHeap,
+    io::{self, Cursor},
+    sync::Arc,
+};
 
 use vibesql_ast::OrderDirection;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::row_serialization::{deserialize_row_with_keys, serialize_row_with_keys};
-use super::{MemoryController, MemoryReservation, SpillFile};
+use super::{
+    row_serialization::{deserialize_row_with_keys, serialize_row_with_keys},
+    MemoryController, MemoryReservation, SpillFile,
+};
 
 /// Sort key for a row: the evaluated ORDER BY values with their directions
 pub type SortKey = Vec<(SqlValue, OrderDirection)>;
@@ -69,8 +72,8 @@ pub struct ExternalSortConfig {
 impl Default for ExternalSortConfig {
     fn default() -> Self {
         Self {
-            max_run_size: 50_000,    // ~50K rows per run
-            merge_fanout: 16,        // 16-way merge
+            max_run_size: 50_000, // ~50K rows per run
+            merge_fanout: 16,     // 16-way merge
         }
     }
 }
@@ -82,10 +85,7 @@ enum SortRun {
     InMemory(Vec<RowWithKeys>),
 
     /// Spilled to disk
-    OnDisk {
-        file: SpillFile,
-        row_count: usize,
-    },
+    OnDisk { file: SpillFile, row_count: usize },
 }
 
 impl SortRun {
@@ -281,9 +281,10 @@ impl ExternalSort {
             // Keep in memory if we have no spilled runs
             if self.runs.is_empty() {
                 // All data fits in memory - return directly
-                return Ok(SortedIterator::InMemory(
-                    InMemoryIterator::new(self.buffer, self.reservation),
-                ));
+                return Ok(SortedIterator::InMemory(InMemoryIterator::new(
+                    self.buffer,
+                    self.reservation,
+                )));
             }
 
             // We have spilled runs - spill this buffer too for consistent merge
@@ -292,15 +293,14 @@ impl ExternalSort {
 
         // If no runs, return empty iterator
         if self.runs.is_empty() {
-            return Ok(SortedIterator::InMemory(
-                InMemoryIterator::new(Vec::new(), self.reservation),
-            ));
+            return Ok(SortedIterator::InMemory(InMemoryIterator::new(
+                Vec::new(),
+                self.reservation,
+            )));
         }
 
         // Create merge iterator over all runs
-        Ok(SortedIterator::Merge(
-            MergeIterator::new(self.runs, self.comparator, self.reservation)?,
-        ))
+        Ok(SortedIterator::Merge(MergeIterator::new(self.runs, self.comparator, self.reservation)?))
     }
 
     /// Get the number of runs created so far
@@ -343,10 +343,7 @@ pub struct InMemoryIterator {
 
 impl InMemoryIterator {
     fn new(rows: Vec<RowWithKeys>, reservation: MemoryReservation) -> Self {
-        Self {
-            rows: rows.into_iter(),
-            reservation,
-        }
+        Self { rows: rows.into_iter(), reservation }
     }
 }
 
@@ -423,10 +420,7 @@ impl RunReader {
     fn new(mut file: SpillFile, row_count: usize) -> io::Result<Self> {
         file.prepare_for_read()?;
         let data = file.read_to_vec()?;
-        Ok(Self {
-            cursor: Cursor::new(data),
-            remaining: row_count,
-        })
+        Ok(Self { cursor: Cursor::new(data), remaining: row_count })
     }
 
     fn read_next(&mut self) -> io::Result<Option<RowWithKeys>> {
@@ -460,10 +454,7 @@ impl MergeIterator {
                             comparator: comparator.clone(),
                         });
                     }
-                    readers.push(RunReader {
-                        cursor: Cursor::new(Vec::new()),
-                        remaining: 0,
-                    });
+                    readers.push(RunReader { cursor: Cursor::new(Vec::new()), remaining: 0 });
                 }
                 SortRun::OnDisk { file, row_count } => {
                     let mut reader = RunReader::new(file, row_count)?;
@@ -483,12 +474,7 @@ impl MergeIterator {
             }
         }
 
-        Ok(Self {
-            heap,
-            readers,
-            comparator,
-            reservation,
-        })
+        Ok(Self { heap, readers, comparator, reservation })
     }
 }
 

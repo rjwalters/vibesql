@@ -1,11 +1,12 @@
 //! Tests for WHEN clause conditional trigger execution
 
-use super::{count_audit_rows, create_audit_table};
-use crate::{CreateTableExecutor, InsertExecutor};
 use vibesql_ast::{
     CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
 };
 use vibesql_storage::Database;
+
+use super::{count_audit_rows, create_audit_table};
+use crate::{CreateTableExecutor, InsertExecutor};
 
 #[test]
 fn test_when_clause_filters_firing() {

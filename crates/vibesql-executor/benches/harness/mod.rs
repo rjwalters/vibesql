@@ -23,8 +23,10 @@
 // migrate to this harness.
 #![allow(dead_code)]
 
-use std::env;
-use std::time::{Duration, Instant};
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 
 /// Default configuration for benchmarks
 pub const DEFAULT_WARMUP_ITERATIONS: usize = 3;
@@ -63,11 +65,7 @@ impl Default for BenchConfig {
 impl BenchConfig {
     /// Create a new config with specified values
     pub fn new(warmup_iterations: usize, benchmark_iterations: usize, timeout_secs: u64) -> Self {
-        Self {
-            warmup_iterations,
-            benchmark_iterations,
-            timeout: Duration::from_secs(timeout_secs),
-        }
+        Self { warmup_iterations, benchmark_iterations, timeout: Duration::from_secs(timeout_secs) }
     }
 
     /// Create a config for smoke tests (minimal iterations)
@@ -314,10 +312,7 @@ pub fn print_summary_table(engine_name: &str, results: &[BenchStats]) {
     eprintln!("{:-<25} {:->12} {:->12} {:->12}", "", "", "", "");
 
     for stat in results {
-        eprintln!(
-            "{:<25} {:>12.2?} {:>12.2?} {:>12.2?}",
-            stat.name, stat.mean, stat.min, stat.max
-        );
+        eprintln!("{:<25} {:>12.2?} {:>12.2?} {:>12.2?}", stat.name, stat.mean, stat.min, stat.max);
     }
 }
 
@@ -427,33 +422,18 @@ impl EngineFilter {
 
     /// Enable all engines (default when no filter is set)
     pub fn all() -> Self {
-        Self {
-            vibesql: true,
-            sqlite: true,
-            duckdb: true,
-            mysql: true,
-        }
+        Self { vibesql: true, sqlite: true, duckdb: true, mysql: true }
     }
 
     /// Enable only VibeSQL
     pub fn vibesql_only() -> Self {
-        Self {
-            vibesql: true,
-            sqlite: false,
-            duckdb: false,
-            mysql: false,
-        }
+        Self { vibesql: true, sqlite: false, duckdb: false, mysql: false }
     }
 
     /// Enable only embedded databases (excludes MySQL which is client-server)
     /// Use this as the default for embedded benchmark binaries like tpcc_benchmark.
     pub fn embedded_only() -> Self {
-        Self {
-            vibesql: true,
-            sqlite: true,
-            duckdb: true,
-            mysql: false,
-        }
+        Self { vibesql: true, sqlite: true, duckdb: true, mysql: false }
     }
 
     /// Parse ENGINE_FILTER environment variable for embedded benchmarks.

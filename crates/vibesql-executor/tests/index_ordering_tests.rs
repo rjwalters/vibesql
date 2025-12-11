@@ -42,15 +42,21 @@ fn test_index_ordering() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("Charlie"),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("Alice"),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("Bob"),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -106,7 +112,13 @@ fn test_index_ordering() {
 
     // Check that results are ordered
     assert_eq!(result.len(), 3);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+    );
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
-    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
+    assert_eq!(
+        result[2].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))
+    );
 }

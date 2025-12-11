@@ -3,15 +3,17 @@
 //! This module provides the CombinedExpressionEvaluator for evaluating expressions
 //! in the context of combined schemas (e.g., JOINs with multiple tables).
 
-use crate::{errors::ExecutorError, schema::CombinedSchema, select::WindowFunctionKey};
-use ahash::AHasher;
-use lru::LruCache;
 use std::{
     cell::RefCell,
     collections::HashMap,
     hash::{Hash, Hasher},
     rc::Rc,
 };
+
+use ahash::AHasher;
+use lru::LruCache;
+
+use crate::{errors::ExecutorError, schema::CombinedSchema, select::WindowFunctionKey};
 
 /// Evaluates expressions with combined schema (for JOINs)
 pub struct CombinedExpressionEvaluator<'a> {
@@ -27,18 +29,19 @@ pub struct CombinedExpressionEvaluator<'a> {
     /// Cache for column lookups to avoid repeated schema traversals
     /// Uses pre-computed hash of (table, column) as key to avoid string allocations
     column_cache: RefCell<HashMap<u64, usize>>,
-    /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value = result rows)
-    /// Shared via Rc across child evaluators within a single statement execution.
+    /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value =
+    /// result rows) Shared via Rc across child evaluators within a single statement execution.
     /// Cache lifetime is tied to the evaluator instance - each new evaluator gets a fresh cache.
     pub(super) subquery_cache: Rc<RefCell<LruCache<u64, Vec<vibesql_storage::Row>>>>,
     /// Current depth in expression tree (for preventing stack overflow)
     pub(super) depth: usize,
-    /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across depth levels)
+    /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across
+    /// depth levels)
     pub(super) cse_cache: Rc<RefCell<LruCache<u64, vibesql_types::SqlValue>>>,
     /// Whether CSE is enabled (can be disabled for debugging)
     pub(super) enable_cse: bool,
-    /// Cache for subquery correlation analysis (key = subquery pointer address, value = is_correlated)
-    /// Avoids expensive AST traversal for every row evaluation (issue #4142)
+    /// Cache for subquery correlation analysis (key = subquery pointer address, value =
+    /// is_correlated) Avoids expensive AST traversal for every row evaluation (issue #4142)
     pub(super) correlation_cache: Rc<RefCell<HashMap<usize, bool>>>,
     /// Cache for subquery hash values (key = subquery pointer address, value = hash)
     /// Avoids expensive Debug format + hash computation for every row evaluation (issue #4142)
@@ -240,7 +243,8 @@ impl<'a> CombinedExpressionEvaluator<'a> {
         }
     }
 
-    /// Create a new combined expression evaluator with database, procedural context, and CTE context
+    /// Create a new combined expression evaluator with database, procedural context, and CTE
+    /// context
     pub(crate) fn with_database_and_procedural_context_and_cte(
         schema: &'a CombinedSchema,
         database: &'a vibesql_storage::Database,

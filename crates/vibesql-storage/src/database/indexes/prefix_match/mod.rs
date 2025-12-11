@@ -19,11 +19,14 @@ mod skip_scan;
 mod tests;
 
 use std::ops::Bound;
+
 use vibesql_types::SqlValue;
 
-use super::index_metadata::{acquire_btree_lock, IndexData};
-use super::range_bounds::{try_increment_sqlvalue, try_increment_sqlvalue_prefix};
-use super::value_normalization::normalize_for_comparison;
+use super::{
+    index_metadata::{acquire_btree_lock, IndexData},
+    range_bounds::{try_increment_sqlvalue, try_increment_sqlvalue_prefix},
+    value_normalization::normalize_for_comparison,
+};
 
 impl IndexData {
     /// Lookup multiple values using prefix matching for multi-column indexes
@@ -560,7 +563,8 @@ impl IndexData {
                         .range_scan(
                             start_key.as_ref(),
                             end_key.as_ref(),
-                            inclusive_lower || lower_bound.is_none(), // Inclusive start if no lower bound
+                            inclusive_lower || lower_bound.is_none(), /* Inclusive start if no
+                                                                       * lower bound */
                             inclusive_upper,
                         )
                         .unwrap_or_else(|_| vec![]),
@@ -732,7 +736,8 @@ impl IndexData {
                 }
             }
             IndexData::IVFFlat { .. } => {
-                // IVFFlat indexes don't support prefix scan with limit - use search() method instead
+                // IVFFlat indexes don't support prefix scan with limit - use search() method
+                // instead
                 vec![]
             }
             IndexData::Hnsw { .. } => {

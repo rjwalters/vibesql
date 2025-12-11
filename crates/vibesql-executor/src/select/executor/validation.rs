@@ -6,8 +6,9 @@
 
 #![allow(clippy::collapsible_if)]
 
-use crate::{errors::ExecutorError, schema::CombinedSchema};
 use vibesql_ast::{Expression, SelectItem};
+
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Represents a column reference extracted from an expression
 #[derive(Debug)]
@@ -270,8 +271,7 @@ pub fn validate_select_columns_with_context(
                 });
 
                 if !table_in_inner && !table_in_outer {
-                    let mut available_tables: Vec<String> =
-                        schema.table_names();
+                    let mut available_tables: Vec<String> = schema.table_names();
                     if let Some(outer) = outer_schema {
                         available_tables.extend(outer.table_names());
                     }
@@ -320,9 +320,10 @@ pub fn validate_select_columns(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn make_test_schema() -> CombinedSchema {
         let columns = vec![

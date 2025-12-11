@@ -2,13 +2,15 @@
 
 use std::fmt;
 
-use super::location::Location;
-use super::retry_parser::RetryConfig;
-use crate::ColumnType;
 // SortMode and ResultMode are used in Display impl via ControlItem trait
 #[allow(unused_imports)]
 use super::directive_parser::{Condition, Connection, Control, ControlItem, ResultMode, SortMode};
-use super::record_parser::{QueryExpect, StatementExpect};
+use super::{
+    location::Location,
+    record_parser::{QueryExpect, StatementExpect},
+    retry_parser::RetryConfig,
+};
+use crate::ColumnType;
 
 /// A single directive in a sqllogictest file.
 #[derive(Debug, Clone, PartialEq)]

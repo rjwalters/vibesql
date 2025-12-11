@@ -21,14 +21,12 @@
 mod mutation;
 mod visitor;
 
-use vibesql_ast::{Expression, Statement};
-use vibesql_types::SqlValue;
-
 // Re-export mutation-based functions
 pub use mutation::bind_statement_mut;
 #[cfg(test)]
 use mutation::bind_statement_named_mut;
-
+use vibesql_ast::{Expression, Statement};
+use vibesql_types::SqlValue;
 // Re-export visitor for placeholder counting
 pub use visitor::visit_statement;
 
@@ -86,7 +84,8 @@ pub fn bind_parameters(stmt: &Statement, params: &[SqlValue]) -> Statement {
     result
 }
 
-/// Bind named parameters to a statement by replacing NamedPlaceholder expressions with Literal values
+/// Bind named parameters to a statement by replacing NamedPlaceholder expressions with Literal
+/// values
 ///
 /// Returns a new statement with all named placeholders replaced. The params HashMap must
 /// contain values for all named placeholders in the statement.
@@ -106,8 +105,9 @@ fn bind_parameters_named(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::InsertSource;
+
+    use super::*;
 
     #[test]
     fn test_count_placeholders_simple() {
@@ -160,7 +160,10 @@ mod tests {
         if let Statement::Insert(insert) = bound {
             if let InsertSource::Values(rows) = &insert.source {
                 assert_eq!(rows[0][0], Expression::Literal(SqlValue::Integer(1)));
-                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))));
+                assert_eq!(
+                    rows[0][1],
+                    Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))
+                );
             } else {
                 panic!("Expected VALUES insert source");
             }
@@ -250,7 +253,7 @@ mod tests {
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
 
         let params = vec![
-            SqlValue::Integer(42),                // $1
+            SqlValue::Integer(42),                          // $1
             SqlValue::Varchar(arcstr::ArcStr::from("Bob")), // $2
         ];
         let bound = bind_parameters(&stmt, &params);

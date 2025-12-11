@@ -313,10 +313,11 @@ fn estimate_like_selectivity(pattern: &Expression) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     fn create_test_stats() -> TableStatistics {
         let schema = TableSchema::new(
@@ -333,7 +334,10 @@ mod tests {
 
         let rows = vec![
             Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("active"))]),
-            Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("inactive"))]),
+            Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("inactive")),
+            ]),
             Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("active"))]),
             Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from("active"))]),
             Row::new(vec![SqlValue::Integer(5), SqlValue::Null]),
@@ -367,7 +371,9 @@ mod tests {
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "active",
+                )))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
@@ -398,7 +404,9 @@ mod tests {
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "active",
+                )))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
@@ -471,7 +479,9 @@ mod tests {
                         table: None,
                         column: "status".to_string(),
                     }),
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "active",
+                    )))),
                 }),
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
@@ -479,7 +489,9 @@ mod tests {
                         table: None,
                         column: "status".to_string(),
                     }),
-                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("inactive")))),
+                    right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "inactive",
+                    )))),
                 }),
             }),
             right: Box::new(Expression::BinaryOp {

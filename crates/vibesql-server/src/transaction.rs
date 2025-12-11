@@ -8,8 +8,8 @@
 //! When multiple sessions share a database via `DatabaseRegistry`, each session
 //! needs its own transaction state to provide proper isolation:
 //!
-//! - **READ COMMITTED**: Uncommitted changes in one transaction are NOT visible
-//!   to other sessions. Only committed changes propagate to other sessions.
+//! - **READ COMMITTED**: Uncommitted changes in one transaction are NOT visible to other sessions.
+//!   Only committed changes propagate to other sessions.
 //!
 //! # Implementation
 //!
@@ -25,6 +25,7 @@
 //! - Committed changes become visible to all sessions
 
 use std::collections::HashMap;
+
 use vibesql_storage::Row;
 
 /// A change made during a transaction that needs to be applied on commit.
@@ -32,40 +33,19 @@ use vibesql_storage::Row;
 #[allow(clippy::large_enum_variant)]
 pub enum TransactionChange {
     /// A row was inserted
-    Insert {
-        table_name: String,
-        row: Row,
-    },
+    Insert { table_name: String, row: Row },
     /// A row was updated (old values for rollback reference)
-    Update {
-        table_name: String,
-        row_index: usize,
-        old_row: Row,
-        new_row: Row,
-    },
+    Update { table_name: String, row_index: usize, old_row: Row, new_row: Row },
     /// A row was deleted
-    Delete {
-        table_name: String,
-        row_index: usize,
-        row: Row,
-    },
+    Delete { table_name: String, row_index: usize, row: Row },
     /// A table was created
-    CreateTable {
-        table_name: String,
-    },
+    CreateTable { table_name: String },
     /// A table was dropped
-    DropTable {
-        table_name: String,
-    },
+    DropTable { table_name: String },
     /// An index was created
-    CreateIndex {
-        index_name: String,
-        table_name: String,
-    },
+    CreateIndex { index_name: String, table_name: String },
     /// An index was dropped
-    DropIndex {
-        index_name: String,
-    },
+    DropIndex { index_name: String },
 }
 
 /// Transaction state for a session.
@@ -103,10 +83,8 @@ impl TransactionState {
 
     /// Record an insert operation.
     pub fn record_insert(&mut self, table_name: String, row: Row) {
-        self.changes.push(TransactionChange::Insert {
-            table_name: table_name.clone(),
-            row: row.clone(),
-        });
+        self.changes
+            .push(TransactionChange::Insert { table_name: table_name.clone(), row: row.clone() });
         self.inserted_rows.entry(table_name).or_default().push(row);
     }
 
@@ -124,10 +102,7 @@ impl TransactionState {
             old_row,
             new_row: new_row.clone(),
         });
-        self.updated_rows
-            .entry(table_name)
-            .or_default()
-            .insert(row_index, new_row);
+        self.updated_rows.entry(table_name).or_default().insert(row_index, new_row);
     }
 
     /// Record a delete operation.
@@ -177,16 +152,12 @@ impl TransactionState {
 
     /// Check if a row at a given index was deleted in this transaction.
     pub fn is_deleted(&self, table_name: &str, row_index: usize) -> bool {
-        self.deleted_indices
-            .get(table_name)
-            .is_some_and(|indices| indices.contains(&row_index))
+        self.deleted_indices.get(table_name).is_some_and(|indices| indices.contains(&row_index))
     }
 
     /// Get the updated version of a row if it was updated in this transaction.
     pub fn get_updated_row(&self, table_name: &str, row_index: usize) -> Option<&Row> {
-        self.updated_rows
-            .get(table_name)
-            .and_then(|updates| updates.get(&row_index))
+        self.updated_rows.get(table_name).and_then(|updates| updates.get(&row_index))
     }
 
     /// Consume the transaction state and return all changes for commit.
@@ -346,8 +317,9 @@ impl std::error::Error for TransactionError {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn make_row(values: Vec<SqlValue>) -> Row {
         Row::new(values)
@@ -396,7 +368,8 @@ mod tests {
         let mut mgr = SessionTransactionManager::new();
         mgr.begin().unwrap();
 
-        let row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
+        let row =
+            make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
         mgr.record_insert("users".to_string(), row.clone());
 
         let state = mgr.current().unwrap();
@@ -426,8 +399,10 @@ mod tests {
         let mut mgr = SessionTransactionManager::new();
         mgr.begin().unwrap();
 
-        let old_row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("old"))]);
-        let new_row = make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("new"))]);
+        let old_row =
+            make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("old"))]);
+        let new_row =
+            make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("new"))]);
         mgr.record_update("users".to_string(), 3, old_row, new_row.clone());
 
         let state = mgr.current().unwrap();

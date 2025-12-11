@@ -32,11 +32,10 @@ pub mod schema;
 pub use data::{TPCDSConfig, TPCDSData, TimeGranularity};
 pub use memory::{get_memory_usage, hint_memory_release, MemoryStats, MemoryTracker};
 pub use queries::*;
-pub use schema::load_vibesql;
-
-#[cfg(feature = "sqlite")]
-pub use schema::load_sqlite;
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
 #[cfg(feature = "mysql")]
 pub use schema::load_mysql;
+#[cfg(feature = "sqlite")]
+pub use schema::load_sqlite;
+pub use schema::load_vibesql;

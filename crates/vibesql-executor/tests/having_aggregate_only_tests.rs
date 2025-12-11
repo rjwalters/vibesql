@@ -151,7 +151,8 @@ fn test_having_different_aggregate_than_select() {
     let executor = SelectExecutor::new(&db);
 
     // COUNT(*) in SELECT, SUM(amount) in HAVING
-    let sql = "SELECT dept_id, COUNT(*) as cnt FROM sales GROUP BY dept_id HAVING SUM(amount) > 100";
+    let sql =
+        "SELECT dept_id, COUNT(*) as cnt FROM sales GROUP BY dept_id HAVING SUM(amount) > 100";
     println!("Test SQL: {}", sql);
 
     let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
@@ -229,7 +230,8 @@ fn test_having_multiple_aggregates_not_in_select() {
     let executor = SelectExecutor::new(&db);
 
     // Both AVG and COUNT in HAVING, neither in SELECT
-    let sql = "SELECT dept_id FROM sales GROUP BY dept_id HAVING AVG(amount) > 100 AND COUNT(*) > 1";
+    let sql =
+        "SELECT dept_id FROM sales GROUP BY dept_id HAVING AVG(amount) > 100 AND COUNT(*) > 1";
     println!("Test SQL: {}", sql);
 
     let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
@@ -390,18 +392,26 @@ fn test_having_compare_two_aggregates() {
     db.create_table(schema).unwrap();
 
     // Group 1: avg_a=200, avg_b=50 -> avg_a > avg_b * 2 (200 > 100) TRUE
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(1),
-        vibesql_types::SqlValue::Integer(200),
-        vibesql_types::SqlValue::Integer(50),
-    ])).unwrap();
+    db.insert_row(
+        "DATA",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(1),
+            vibesql_types::SqlValue::Integer(200),
+            vibesql_types::SqlValue::Integer(50),
+        ]),
+    )
+    .unwrap();
 
     // Group 2: avg_a=100, avg_b=100 -> avg_a > avg_b * 2 (100 > 200) FALSE
-    db.insert_row("DATA", vibesql_storage::Row::new(vec![
-        vibesql_types::SqlValue::Integer(2),
-        vibesql_types::SqlValue::Integer(100),
-        vibesql_types::SqlValue::Integer(100),
-    ])).unwrap();
+    db.insert_row(
+        "DATA",
+        vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(100),
+            vibesql_types::SqlValue::Integer(100),
+        ]),
+    )
+    .unwrap();
 
     let executor = SelectExecutor::new(&db);
 

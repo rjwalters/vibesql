@@ -314,9 +314,8 @@ fn test_select_sql_column_unquoted() {
 #[test]
 fn test_select_type_and_sql_columns_together() {
     // Full sqlite_master query pattern
-    let result = Parser::parse_sql(
-        "SELECT type, name, sql FROM sqlite_master WHERE type = 'table';",
-    );
+    let result =
+        Parser::parse_sql("SELECT type, name, sql FROM sqlite_master WHERE type = 'table';");
     assert!(result.is_ok(), "Should parse type and sql columns: {:?}", result.err());
     let stmt = result.unwrap();
 
@@ -358,18 +357,16 @@ fn test_select_qualified_type_column() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select) => {
-            match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { table, column, .. } => {
-                        assert_eq!(table.as_deref(), Some("SQLITE_MASTER"));
-                        assert_eq!(column, "TYPE");
-                    }
-                    _ => panic!("Expected ColumnRef"),
-                },
-                _ => panic!("Expected Expression select item"),
-            }
-        }
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::ColumnRef { table, column, .. } => {
+                    assert_eq!(table.as_deref(), Some("SQLITE_MASTER"));
+                    assert_eq!(column, "TYPE");
+                }
+                _ => panic!("Expected ColumnRef"),
+            },
+            _ => panic!("Expected Expression select item"),
+        },
         _ => panic!("Expected SELECT statement"),
     }
 }

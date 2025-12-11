@@ -5,10 +5,12 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 use super::core::{AsyncDB, Runner};
-use crate::error_handling::{RecordKind, TestError, TestErrorKind};
-use crate::output::RecordOutput;
-use crate::parser::*;
-use crate::{ColumnType, MakeConnection};
+use crate::{
+    error_handling::{RecordKind, TestError, TestErrorKind},
+    output::RecordOutput,
+    parser::*,
+    ColumnType, MakeConnection,
+};
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Run a single record without retry.
@@ -170,7 +172,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                         };
 
                         if !(self.validator)(self.normalizer, &actual_results, &expected_results) {
-                            // Flatten the rows so each column value is on its own line for error reporting
+                            // Flatten the rows so each column value is on its own line for error
+                            // reporting
                             let output_rows: Vec<String> =
                                 rows.iter().flat_map(|strs| strs.iter().cloned()).collect_vec();
                             self.dialect_stats.record(&current_dialect, false);

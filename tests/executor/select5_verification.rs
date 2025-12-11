@@ -6,9 +6,9 @@
 //!
 //! ## Test Strategy
 //!
-//! - **Fast Sampled Test** (`test_select5_sampled_regression`): Runs 1 representative 4-table
-//!   join query. This test runs in <1 second and is suitable for regular CI. It verifies
-//!   the predicate pushdown optimization is working.
+//! - **Fast Sampled Test** (`test_select5_sampled_regression`): Runs 1 representative 4-table join
+//!   query. This test runs in <1 second and is suitable for regular CI. It verifies the predicate
+//!   pushdown optimization is working.
 //!
 //! ## Performance History
 //!
@@ -16,8 +16,9 @@
 //! - **After PR #1129 (predicate pushdown)**: 6.48 GB memory, 5-10 min runtime → Success but slow
 //! - **Current (sampled test)**: <100 MB memory, <10 sec runtime → Fast regression test
 
-use ::sqllogictest::Runner;
 use std::path::Path;
+
+use ::sqllogictest::Runner;
 
 #[path = "../sqllogictest/mod.rs"]
 mod sqllogictest;

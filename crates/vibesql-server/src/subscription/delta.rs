@@ -3,8 +3,10 @@
 //! This module provides types and functions for computing the differences
 //! between result sets, enabling efficient incremental updates to subscribers.
 
-use super::hash::hash_row;
-use super::types::{SubscriptionId, SubscriptionUpdate};
+use super::{
+    hash::hash_row,
+    types::{SubscriptionId, SubscriptionUpdate},
+};
 
 // ============================================================================
 // Partial Row Delta
@@ -155,9 +157,10 @@ pub fn compute_delta_with_pk(
     }
 
     // Validate PK columns are within bounds for both old and new rows
-    let valid_pk = old.iter().chain(new.iter()).all(|row| {
-        pk_columns.iter().all(|&idx| idx < row.values.len())
-    });
+    let valid_pk = old
+        .iter()
+        .chain(new.iter())
+        .all(|row| pk_columns.iter().all(|&idx| idx < row.values.len()));
 
     if !valid_pk {
         // Fall back to hash-based if PK columns are out of bounds

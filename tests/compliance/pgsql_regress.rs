@@ -9,17 +9,13 @@
 #[path = "../pgsql/mod.rs"]
 mod pgsql;
 
-use std::fs;
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use pgsql::{runner, stats::PgTestStats};
 
 /// Get the test SQL directory
 fn get_test_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("pgsql")
-        .join("sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("pgsql").join("sql")
 }
 
 /// Get the output directory for test results
@@ -59,16 +55,8 @@ fn test_pgsql_regression_suite() {
 
     // Assert no failures for CI
     let total = stats.total_stats();
-    assert_eq!(
-        total.failed, 0,
-        "PostgreSQL regression tests had {} failures",
-        total.failed
-    );
-    assert_eq!(
-        total.errors, 0,
-        "PostgreSQL regression tests had {} errors",
-        total.errors
-    );
+    assert_eq!(total.failed, 0, "PostgreSQL regression tests had {} failures", total.failed);
+    assert_eq!(total.errors, 0, "PostgreSQL regression tests had {} errors", total.errors);
 }
 
 /// Save test results to JSON file
@@ -112,10 +100,7 @@ fn test_pgsql_triggers() {
 
     // For now, allow failures while we develop - remove this for strict mode
     if stats.pass_rate() < 50.0 {
-        println!(
-            "\nWARNING: Pass rate ({:.1}%) is below 50% threshold",
-            stats.pass_rate()
-        );
+        println!("\nWARNING: Pass rate ({:.1}%) is below 50% threshold", stats.pass_rate());
     }
 }
 

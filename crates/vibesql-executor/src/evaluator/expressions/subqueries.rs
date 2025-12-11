@@ -1,7 +1,6 @@
 //! Subquery evaluation methods
 
-use super::super::caching::compute_subquery_hash;
-use super::super::core::ExpressionEvaluator;
+use super::super::{caching::compute_subquery_hash, core::ExpressionEvaluator};
 use crate::errors::ExecutorError;
 
 impl ExpressionEvaluator<'_> {

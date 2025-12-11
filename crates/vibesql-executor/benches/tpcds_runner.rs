@@ -52,24 +52,29 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 mod memory_monitor;
 mod tpcds;
 
-use memory_monitor::compute_parallelism;
-use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tpcds::memory::{
-    get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled, MemoryTracker,
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::{Duration, Instant},
 };
-use tpcds::queries::TPCDS_QUERIES;
-use tpcds::schema::load_vibesql;
-use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
-use vibesql_parser::Parser;
-use vibesql_storage::QueryBufferPool;
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
+use memory_monitor::compute_parallelism;
+use rayon::prelude::*;
 #[cfg(feature = "duckdb")]
 use tpcds::schema::load_duckdb;
+use tpcds::{
+    memory::{
+        get_jemalloc_stats, get_memory_usage, hint_memory_release, is_jemalloc_enabled,
+        MemoryTracker,
+    },
+    queries::TPCDS_QUERIES,
+    schema::load_vibesql,
+};
+use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
+use vibesql_parser::Parser;
+use vibesql_storage::QueryBufferPool;
 
 /// Queries known to be extremely slow or memory-intensive
 /// These can be skipped with SKIP_SLOW=1 environment variable
@@ -157,11 +162,7 @@ impl QueryResult {
 }
 
 /// Execute a single query and return the result
-fn execute_query(
-    db: &vibesql_storage::Database,
-    name: &str,
-    sql: &str,
-) -> QueryResult {
+fn execute_query(db: &vibesql_storage::Database, name: &str, sql: &str) -> QueryResult {
     let start = Instant::now();
 
     // Parse the query
@@ -405,16 +406,10 @@ fn main() {
         // Execute queries (parallel or sequential based on configuration)
         let batch_results: Vec<QueryResult> = if parallel_batches && to_execute.len() > 1 {
             // Parallel execution within batch
-            to_execute
-                .par_iter()
-                .map(|(name, sql)| execute_query(&db, name, sql))
-                .collect()
+            to_execute.par_iter().map(|(name, sql)| execute_query(&db, name, sql)).collect()
         } else {
             // Sequential execution
-            to_execute
-                .iter()
-                .map(|(name, sql)| execute_query(&db, name, sql))
-                .collect()
+            to_execute.iter().map(|(name, sql)| execute_query(&db, name, sql)).collect()
         };
 
         // Combine skipped and executed results
