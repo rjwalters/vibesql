@@ -340,6 +340,9 @@ impl FromResult {
 
 /// Helper function to combine two rows without unnecessary cloning
 /// Only creates a single combined row, avoiding intermediate clones
+///
+/// Note: This preserves existing row_ids from both rows when present.
+/// For optimal ROWID tracking in JOINs, use combine_rows_with_schema.
 #[inline]
 fn combine_rows(
     left_row: &vibesql_storage::Row,
@@ -348,7 +351,45 @@ fn combine_rows(
     let mut combined_values = Vec::with_capacity(left_row.values.len() + right_row.values.len());
     combined_values.extend_from_slice(&left_row.values);
     combined_values.extend_from_slice(&right_row.values);
-    vibesql_storage::Row::new(combined_values)
+
+    // Merge existing row_ids from both rows (issue #4370)
+    // This handles nested joins where intermediate results already have row_ids
+    let mut combined_row_ids = std::collections::HashMap::new();
+    let mut has_row_ids = false;
+
+    if let Some(ref row_ids) = left_row.row_ids {
+        combined_row_ids.extend(row_ids.iter().map(|(k, v)| (k.clone(), *v)));
+        has_row_ids = true;
+    }
+    if let Some(ref row_ids) = right_row.row_ids {
+        combined_row_ids.extend(row_ids.iter().map(|(k, v)| (k.clone(), *v)));
+        has_row_ids = true;
+    }
+
+    if has_row_ids {
+        vibesql_storage::Row::with_row_ids(combined_values, combined_row_ids)
+    } else {
+        vibesql_storage::Row::new(combined_values)
+    }
+}
+
+/// Combine two rows with ROWID tracking using schema for table name resolution
+///
+/// This is the preferred method for combining rows in JOIN operations when
+/// ROWID tracking is needed. It uses the left schema's table names for the left row
+/// and the right schema's table names for the right row.
+///
+/// Issue #4370: Enables qualified ROWID references like `t1.rowid` in JOIN results.
+#[inline]
+fn combine_rows_with_schema(
+    left_row: &vibesql_storage::Row,
+    right_row: &vibesql_storage::Row,
+    left_schema: &CombinedSchema,
+    right_schema: &CombinedSchema,
+) -> vibesql_storage::Row {
+    let left_table_names = left_schema.table_names();
+    let right_table_names = right_schema.table_names();
+    vibesql_storage::Row::combine_for_join(left_row, right_row, &left_table_names, &right_table_names)
 }
 
 /// Apply a post-join filter expression to join result rows

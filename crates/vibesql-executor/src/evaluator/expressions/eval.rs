@@ -472,29 +472,18 @@ impl ExpressionEvaluator<'_> {
         if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
             // First check if schema has a real column with this name
             if self.schema.get_column_index(column).is_none() {
-                // No real column - check if table qualifier matches (if provided)
-                let qualifier_matches = match table_qualifier {
-                    Some(qualifier) => {
-                        let qualifier_lower = qualifier.to_lowercase();
-                        let schema_name_lower = self.schema.name.to_lowercase();
-                        qualifier_lower == schema_name_lower
-                    }
-                    None => true, // No qualifier means it applies to the current table
-                };
-
-                if qualifier_matches {
-                    // Check row's embedded row_id first (from scan_live_vec)
-                    if let Some(row_id) = row.row_id {
-                        return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
-                    }
-                    // Fall back to evaluator's row_index (for older code paths)
-                    if let Some(row_index) = self.row_index {
-                        return Ok(vibesql_types::SqlValue::Bigint(row_index as i64));
-                    }
-                    // ROWID not available - this happens for joined/derived rows
-                    // Return NULL in this case (matching SQLite behavior for derived tables)
-                    return Ok(vibesql_types::SqlValue::Null);
+                // Use get_row_id_for_table to handle both single-table and multi-table (JOIN) rows
+                // This fixes issue #4370 where qualified ROWIDs like `t1.rowid` returned NULL in JOINs
+                if let Some(row_id) = row.get_row_id_for_table(table_qualifier) {
+                    return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
                 }
+                // Fall back to evaluator's row_index (for older code paths)
+                if let Some(row_index) = self.row_index {
+                    return Ok(vibesql_types::SqlValue::Bigint(row_index as i64));
+                }
+                // ROWID not available - this happens for derived rows without ROWID tracking
+                // Return NULL in this case (matching SQLite behavior for derived tables)
+                return Ok(vibesql_types::SqlValue::Null);
             }
         }
 

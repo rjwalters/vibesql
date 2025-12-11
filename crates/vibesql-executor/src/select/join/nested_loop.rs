@@ -108,6 +108,8 @@ fn execute_optimized_equijoin(
     schema: &CombinedSchema,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    left_table_names: &[String],
+    right_table_names: &[String],
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     let mut result_rows = Vec::new();
     let mut iterations = 0;
@@ -140,7 +142,13 @@ fn execute_optimized_equijoin(
             // Values match! Now check remaining conditions if any
             if let Some(remaining_cond) = remaining_condition {
                 // Need to create combined_row to evaluate remaining condition
-                let combined_row = combine_rows(left_row, right_row);
+                // Use combine_for_join to preserve ROWIDs (issue #4370)
+                let combined_row = vibesql_storage::Row::combine_for_join(
+                    left_row,
+                    right_row,
+                    left_table_names,
+                    right_table_names,
+                );
 
                 // Clear CSE cache before evaluation
                 evaluator.as_ref().unwrap().clear_cse_cache();
@@ -164,7 +172,13 @@ fn execute_optimized_equijoin(
                 }
             } else {
                 // No remaining conditions - equijoin matched, add the row
-                result_rows.push(combine_rows(left_row, right_row));
+                // Use combine_for_join to preserve ROWIDs (issue #4370)
+                result_rows.push(vibesql_storage::Row::combine_for_join(
+                    left_row,
+                    right_row,
+                    left_table_names,
+                    right_table_names,
+                ));
             }
         }
     }
@@ -176,6 +190,7 @@ fn execute_optimized_equijoin(
 ///
 /// This function uses morsel-driven parallelism when the outer relation is large enough
 /// to benefit from parallel execution. The decision is based on `ParallelConfig::should_parallelize_join()`.
+#[allow(clippy::too_many_arguments)]
 fn execute_nested_loop_classic(
     left_rows: &[vibesql_storage::Row],
     right_rows: &[vibesql_storage::Row],
@@ -183,13 +198,21 @@ fn execute_nested_loop_classic(
     schema: &CombinedSchema,
     database: &vibesql_storage::Database,
     timeout_ctx: &TimeoutContext,
+    left_table_names: &[String],
+    right_table_names: &[String],
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // OPTIMIZATION: Fast path for cross joins with no condition (#3388)
     // When there's no condition to evaluate, skip evaluator overhead entirely.
     // This is critical for 6-way cross joins with single-table predicates where
     // each join has no equijoin condition but tables are pre-filtered to small sizes.
     if condition.is_none() {
-        return execute_cross_product_fast(left_rows, right_rows, timeout_ctx);
+        return execute_cross_product_fast(
+            left_rows,
+            right_rows,
+            timeout_ctx,
+            left_table_names,
+            right_table_names,
+        );
     }
 
     // OPTIMIZATION: Use morsel-driven parallelism for large joins (#4276)
@@ -223,8 +246,13 @@ fn execute_nested_loop_classic(
                 timeout_ctx.check()?;
             }
 
-            // Combine rows using optimized helper (single allocation)
-            let combined_row = combine_rows(left_row, right_row);
+            // Combine rows preserving ROWIDs for multi-table queries (issue #4370)
+            let combined_row = vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                left_table_names,
+                right_table_names,
+            );
 
             // Clear CSE cache before evaluating join condition for this row combination
             // to prevent stale cached column values from previous combinations
@@ -267,6 +295,8 @@ fn execute_cross_product_fast(
     left_rows: &[vibesql_storage::Row],
     right_rows: &[vibesql_storage::Row],
     timeout_ctx: &TimeoutContext,
+    left_table_names: &[String],
+    right_table_names: &[String],
 ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
     // Pre-allocate result vector with exact capacity
     let result_size = left_rows.len() * right_rows.len();
@@ -284,7 +314,13 @@ fn execute_cross_product_fast(
             if iterations % CROSS_CHECK_INTERVAL == 0 {
                 timeout_ctx.check()?;
             }
-            result_rows.push(combine_rows(left_row, right_row));
+            // Use combine_for_join for proper ROWID tracking (issue #4370)
+            result_rows.push(vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                left_table_names,
+                right_table_names,
+            ));
         }
     }
 
@@ -560,6 +596,10 @@ pub(super) fn nested_loop_inner_join(
     // If equijoins exist (either in condition OR in additional_equijoins), hash join will be used.
     // This function only handles cases where hash join cannot be used (e.g., complex conditions).
 
+    // Extract table names for ROWID tracking (issue #4370)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
+
     // Execute join with optimized strategy
     let result_rows = match eval_strategy {
         EquijoinEvalStrategy::Simple { left_col_idx, right_col_idx, remaining_condition } => {
@@ -573,6 +613,8 @@ pub(super) fn nested_loop_inner_join(
                 &combined_schema,
                 database,
                 timeout_ctx,
+                &left_table_names,
+                &right_table_names,
             )?
         }
         EquijoinEvalStrategy::Complex => {
@@ -584,6 +626,8 @@ pub(super) fn nested_loop_inner_join(
                 &combined_schema,
                 database,
                 timeout_ctx,
+                &left_table_names,
+                &right_table_names,
             )?
         }
     };
@@ -604,6 +648,10 @@ pub(super) fn nested_loop_left_outer_join(
 
     // Get total right column count (handles nested joins with multiple tables)
     let right_column_count = right.schema.total_columns;
+
+    // Extract table names for ROWID tracking (issue #4370)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
 
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
@@ -626,8 +674,13 @@ pub(super) fn nested_loop_left_outer_join(
                 timeout_ctx.check()?;
             }
 
-            // Combine rows using optimized helper (single allocation)
-            let combined_row = combine_rows(left_row, right_row);
+            // Combine rows preserving ROWIDs for multi-table queries (issue #4370)
+            let combined_row = vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                &left_table_names,
+                &right_table_names,
+            );
 
             // Clear CSE cache before evaluating join condition for this row combination
             // to prevent stale cached column values from previous combinations
@@ -657,12 +710,25 @@ pub(super) fn nested_loop_left_outer_join(
         }
 
         // If no match found, add left row with NULLs for right columns
+        // Preserve left side ROWIDs (issue #4370)
         if !matched {
             let mut combined_values =
                 Vec::with_capacity(left_row.values.len() + right_column_count);
             combined_values.extend_from_slice(&left_row.values);
             combined_values.extend(vec![vibesql_types::SqlValue::Null; right_column_count]);
-            result_rows.push(vibesql_storage::Row::new(combined_values));
+
+            // Preserve left side ROWIDs for unmatched rows
+            let mut row_ids = std::collections::HashMap::new();
+            if let Some(ref left_row_ids) = left_row.row_ids {
+                row_ids.extend(left_row_ids.iter().map(|(k, v)| (k.clone(), *v)));
+            } else if let Some(row_id) = left_row.row_id {
+                // Single table case - use first left table name if available
+                if let Some(table_name) = left_table_names.first() {
+                    row_ids.insert(table_name.to_lowercase(), row_id);
+                }
+            }
+
+            result_rows.push(vibesql_storage::Row::with_row_ids(combined_values, row_ids));
         }
     }
 
@@ -849,6 +915,10 @@ pub(super) fn nested_loop_cross_join(
     let combined_schema =
         CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
 
+    // Get table names for ROWID tracking (issue #4370)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
+
     // CROSS JOIN = Cartesian product (every row from left × every row from right)
     let mut result_rows = Vec::new();
     let mut iterations = 0;
@@ -859,7 +929,13 @@ pub(super) fn nested_loop_cross_join(
             if iterations % CHECK_INTERVAL == 0 {
                 timeout_ctx.check()?;
             }
-            result_rows.push(combine_rows(left_row, right_row));
+            // Use combine_for_join for proper ROWID tracking (issue #4370)
+            result_rows.push(vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                &left_table_names,
+                &right_table_names,
+            ));
         }
     }
 
@@ -1132,6 +1208,8 @@ mod tests {
             &schema,
             &db,
             &timeout_ctx,
+            &["users".to_string()],
+            &["orders".to_string()],
         )
         .unwrap();
 
@@ -1175,9 +1253,17 @@ mod tests {
         let db = Database::default();
         let timeout_ctx = crate::timeout::TimeoutContext::new_default();
 
-        let result =
-            execute_nested_loop_classic(&left_rows, &right_rows, &None, &schema, &db, &timeout_ctx)
-                .unwrap();
+        let result = execute_nested_loop_classic(
+            &left_rows,
+            &right_rows,
+            &None,
+            &schema,
+            &db,
+            &timeout_ctx,
+            &["left".to_string()],
+            &["right".to_string()],
+        )
+        .unwrap();
 
         // Cross product: 2 x 3 = 6 rows
         assert_eq!(result.len(), 6);
@@ -1198,9 +1284,17 @@ mod tests {
         let db = Database::default();
         let timeout_ctx = crate::timeout::TimeoutContext::new_default();
 
-        let result =
-            execute_nested_loop_classic(&left_rows, &right_rows, &None, &schema, &db, &timeout_ctx)
-                .unwrap();
+        let result = execute_nested_loop_classic(
+            &left_rows,
+            &right_rows,
+            &None,
+            &schema,
+            &db,
+            &timeout_ctx,
+            &["left".to_string()],
+            &["right".to_string()],
+        )
+        .unwrap();
 
         assert_eq!(result.len(), 0);
     }

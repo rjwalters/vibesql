@@ -167,16 +167,19 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
         }
     }
 
-    /// Combine two rows into a single row (left + right)
+    /// Combine two rows into a single row (left + right) with ROWID tracking
+    ///
+    /// Uses `Row::combine_for_join()` to preserve per-table row IDs through JOINs,
+    /// enabling qualified ROWID references like `t1.rowid` in join results.
+    /// Issue #4370: Fix ROWID returning NULL in JOIN context.
     #[inline]
     fn combine_rows(
         left: &vibesql_storage::Row,
         right: &vibesql_storage::Row,
+        left_table_names: &[String],
+        right_table_names: &[String],
     ) -> vibesql_storage::Row {
-        let mut values = Vec::with_capacity(left.values.len() + right.values.len());
-        values.extend_from_slice(&left.values);
-        values.extend_from_slice(&right.values);
-        vibesql_storage::Row::new(values)
+        vibesql_storage::Row::combine_for_join(left, right, left_table_names, right_table_names)
     }
 
     /// Create a row with NULL values for outer join
@@ -297,8 +300,11 @@ impl<'schema, I: RowIterator> Iterator for LazyNestedLoopJoin<'schema, I> {
                 let right_idx = self.right_index;
                 self.right_index += 1;
 
-                // Combine rows for condition check
-                let combined_row = Self::combine_rows(&left_row, right_row);
+                // Combine rows for condition check with ROWID tracking (issue #4370)
+                let left_table_names = self.left.schema().table_names();
+                let right_table_names = self.right_schema.table_names();
+                let combined_row =
+                    Self::combine_rows(&left_row, right_row, &left_table_names, &right_table_names);
 
                 // Check join condition
                 match self.check_condition(&combined_row) {

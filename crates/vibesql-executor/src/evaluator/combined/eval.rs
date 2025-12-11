@@ -71,8 +71,10 @@ impl CombinedExpressionEvaluator<'_> {
                 if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
                     // First check if schema has a real column with this name
                     if self.get_column_index_cached(table.as_deref(), column).is_none() {
-                        // No real column - check if we have a row_id
-                        if let Some(row_id) = row.row_id {
+                        // No real column - check if we have a row_id for this table
+                        // Use the new get_row_id_for_table method that handles both single-table
+                        // and multi-table (JOIN) rows (issue #4370)
+                        if let Some(row_id) = row.get_row_id_for_table(table.as_deref()) {
                             return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
                         }
                         // ROWID not available - return NULL (matches SQLite behavior for derived tables)

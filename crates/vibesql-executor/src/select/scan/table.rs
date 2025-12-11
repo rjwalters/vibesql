@@ -451,10 +451,17 @@ pub(crate) fn execute_table_scan(
 
                 // Clone only the rows that pass the filter AND aren't deleted
                 // This is the key optimization: we skip cloning rows that don't pass
+                // Issue #4370: Preserve row_id for ROWID pseudo-column support
                 let filtered_rows: Vec<_> = indices
                     .into_iter()
                     .filter(|&idx| !table.is_row_deleted(idx))
-                    .filter_map(|idx| all_rows.get(idx).cloned())
+                    .filter_map(|idx| {
+                        all_rows.get(idx).map(|row| {
+                            let mut cloned = row.clone();
+                            cloned.row_id = Some(idx as u64);
+                            cloned
+                        })
+                    })
                     .collect();
                 return Ok(super::FromResult::from_rows(schema, filtered_rows));
             }
@@ -623,8 +630,17 @@ fn filter_with_cached_columnar(
 
     // Step 4: Clone only the rows that passed all predicates (late materialization)
     // This is the payoff - we only clone passing_indices.len() rows instead of all rows
-    let filtered_rows: Vec<vibesql_storage::Row> =
-        passing_indices.into_iter().filter_map(|idx| live_rows.get(idx).cloned()).collect();
+    // Issue #4370: Preserve row_id for ROWID pseudo-column support
+    let filtered_rows: Vec<vibesql_storage::Row> = passing_indices
+        .into_iter()
+        .filter_map(|idx| {
+            live_rows.get(idx).map(|row| {
+                let mut cloned = row.clone();
+                cloned.row_id = Some(idx as u64);
+                cloned
+            })
+        })
+        .collect();
 
     Ok(filtered_rows)
 }
