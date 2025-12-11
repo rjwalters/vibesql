@@ -2,6 +2,62 @@
 
 use super::*;
 
+// ============================================================================
+// SQLite compatibility: == operator
+// ============================================================================
+
+#[test]
+fn test_double_equals_sqlite_compat() {
+    // SQLite uses == as a synonym for = (equality)
+    let sql = "SELECT * FROM users WHERE id == 1";
+    let stmt = Parser::parse_sql(sql).expect("Parse failed");
+
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        assert!(select.where_clause.is_some());
+        let where_expr = select.where_clause.unwrap();
+
+        // Verify it's an equality comparison
+        match where_expr {
+            vibesql_ast::Expression::BinaryOp { op, left, right } => {
+                assert_eq!(op, vibesql_ast::BinaryOperator::Equal, "== should parse as Equal");
+
+                // Check left is 'id'
+                match *left {
+                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                        assert_eq!(column, "ID");
+                    }
+                    _ => panic!("Expected ColumnRef for left"),
+                }
+
+                // Check right is 1
+                match *right {
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(val)) => {
+                        assert_eq!(val, 1);
+                    }
+                    _ => panic!("Expected Integer literal for right"),
+                }
+            }
+            _ => panic!("Expected BinaryOp expression"),
+        }
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_double_equals_in_expression() {
+    // Test == in more complex expressions
+    let sql = "SELECT a, b FROM t WHERE a == b AND c == 'test'";
+    let stmt = Parser::parse_sql(sql).expect("Parse failed");
+
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        assert!(select.where_clause.is_some());
+        // If it parses without error, the == operator is working
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
 #[test]
 fn test_between_integer() {
     let sql = "SELECT * FROM users WHERE age BETWEEN 18 AND 65";

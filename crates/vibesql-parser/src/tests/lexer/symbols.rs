@@ -55,6 +55,21 @@ fn test_tokenize_multi_char_operators() {
 }
 
 #[test]
+fn test_tokenize_double_equals_sqlite_compat() {
+    // SQLite uses == as a synonym for = (equality)
+    let mut lexer = Lexer::new("==");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::Operator(MultiCharOperator::DoubleEqual));
+
+    // Test in expression context
+    let mut lexer2 = Lexer::new("a==b");
+    let tokens2 = lexer2.tokenize().unwrap();
+    assert_eq!(tokens2[0], Token::Identifier("A".to_string()));
+    assert_eq!(tokens2[1], Token::Operator(MultiCharOperator::DoubleEqual));
+    assert_eq!(tokens2[2], Token::Identifier("B".to_string()));
+}
+
+#[test]
 fn test_tokenize_operators_without_spaces() {
     // Test that >= is tokenized as one operator, not two
     let mut lexer = Lexer::new("age>=18");

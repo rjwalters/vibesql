@@ -310,6 +310,8 @@ impl Parser {
                         MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
                             vibesql_ast::BinaryOperator::NotEqual
                         }
+                        // SQLite compatibility: == is a synonym for =
+                        MultiCharOperator::DoubleEqual => vibesql_ast::BinaryOperator::Equal,
                         // Vector distance operators (pgvector compatible)
                         MultiCharOperator::CosineDistance => {
                             vibesql_ast::BinaryOperator::CosineDistance

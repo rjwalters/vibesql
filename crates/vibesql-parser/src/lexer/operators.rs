@@ -68,6 +68,11 @@ impl<'a> Lexer<'a> {
                             self.advance();
                             Ok(Token::Operator(MultiCharOperator::NotEqual))
                         }
+                        ('=', '=') => {
+                            // SQLite compatibility: == is a synonym for =
+                            self.advance();
+                            Ok(Token::Operator(MultiCharOperator::DoubleEqual))
+                        }
                         _ => Ok(Token::Symbol(ch)),
                     }
                 } else {
