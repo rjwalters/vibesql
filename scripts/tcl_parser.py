@@ -90,6 +90,8 @@ class TclTestParser:
     """
 
     # Patterns for different test types
+    # Note: These simple patterns don't handle nested braces well.
+    # We use them as a first pass and fall back to brace-balancing parsing.
     DO_EXECSQL_PATTERN = re.compile(
         r'do_execsql_test\s+(\S+)\s*\{([^}]*)\}\s*\{([^}]*)\}',
         re.DOTALL
@@ -103,6 +105,12 @@ class TclTestParser:
     # Simpler catchsql pattern: {1 {error message}}
     DO_CATCHSQL_SIMPLE_PATTERN = re.compile(
         r'do_catchsql_test\s+(\S+)\s*\{([^}]*)\}\s*\{(\d+)\s+([^}]+)\}',
+        re.DOTALL
+    )
+
+    # Pattern to find do_test start - we'll parse braces manually
+    DO_TEST_START_PATTERN = re.compile(
+        r'do_test\s+(\S+)\s*\{',
         re.DOTALL
     )
 
@@ -270,6 +278,125 @@ class TclTestParser:
             return self._clean_sql(match.group(1))
         return None
 
+    def _extract_ddl_from_do_test(self, body: str) -> Optional[str]:
+        """
+        Extract DDL statements from a do_test body.
+
+        Looks for execsql or db eval blocks and extracts only DDL statements
+        (CREATE, DROP, ALTER) that set up database schema. This allows tests
+        with complex TCL to still contribute their table definitions.
+        """
+        ddl_statements = []
+
+        # Look for execsql blocks
+        for match in self.EXECSQL_BLOCK_PATTERN.finditer(body):
+            sql = self._clean_sql(match.group(1))
+            ddl = self._extract_ddl_statements(sql)
+            if ddl:
+                ddl_statements.append(ddl)
+
+        # Look for db eval blocks
+        for match in self.DB_EVAL_BLOCK_PATTERN.finditer(body):
+            sql = self._clean_sql(match.group(1))
+            ddl = self._extract_ddl_statements(sql)
+            if ddl:
+                ddl_statements.append(ddl)
+
+        if ddl_statements:
+            return '\n'.join(ddl_statements)
+        return None
+
+    def _extract_ddl_statements(self, sql: str) -> Optional[str]:
+        """
+        Extract only DDL statements (CREATE, DROP, ALTER) from a SQL block.
+
+        This filters out DML and queries to get just the schema-modifying statements.
+        """
+        if not sql:
+            return None
+
+        ddl_keywords = ('CREATE', 'DROP', 'ALTER')
+        ddl_statements = []
+
+        # Split into individual statements (simple split on semicolon)
+        # This is a simple heuristic - may not handle all cases
+        statements = sql.split(';')
+
+        for stmt in statements:
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+
+            # Check if this is a DDL statement
+            stmt_upper = stmt.upper()
+            for keyword in ddl_keywords:
+                if stmt_upper.startswith(keyword):
+                    # Skip statements with TCL variables
+                    if not self._has_complex_tcl(stmt):
+                        ddl_statements.append(stmt)
+                    break
+
+        if ddl_statements:
+            return ';\n'.join(ddl_statements) + ';'
+        return None
+
+    def _extract_balanced_brace_block(self, content: str, start: int) -> Optional[str]:
+        """
+        Extract a brace-balanced block starting at position start.
+
+        start should point to the opening brace '{'.
+        Returns the content between the braces (excluding them), or None if unbalanced.
+        """
+        if start >= len(content) or content[start] != '{':
+            return None
+
+        depth = 0
+        i = start
+        while i < len(content):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    return content[start+1:i]
+            i += 1
+        return None  # Unbalanced
+
+    def _parse_do_test_with_balanced_braces(self, content: str) -> list[tuple[str, str, str, int]]:
+        """
+        Parse do_test blocks using brace-balancing for nested braces.
+
+        Returns list of (name, body, expected, line_number) tuples.
+        """
+        results = []
+
+        for match in self.DO_TEST_START_PATTERN.finditer(content):
+            name = match.group(1)
+            brace_start = match.end() - 1  # Position of opening brace
+
+            # Extract the body (first brace block)
+            body = self._extract_balanced_brace_block(content, brace_start)
+            if body is None:
+                continue
+
+            # Find the expected output (second brace block)
+            # It should come after the body, possibly with whitespace
+            after_body = brace_start + len(body) + 2  # +2 for braces
+            remaining = content[after_body:after_body + 100].lstrip()
+
+            if remaining.startswith('{'):
+                expected_start = content.index('{', after_body)
+                expected = self._extract_balanced_brace_block(content, expected_start)
+                if expected is None:
+                    expected = ""
+            else:
+                expected = ""
+
+            line_num = content[:match.start()].count('\n') + 1
+            results.append((name, body, expected, line_num))
+
+        return results
+
     def parse_file(self, file_path: str) -> ParsedFile:
         """Parse a single TCL test file."""
         result = ParsedFile(file_path=file_path)
@@ -377,11 +504,9 @@ class TclTestParser:
                 ))
 
         # Parse do_test with execsql (more complex)
-        for match in self.DO_TEST_PATTERN.finditer(content):
-            name = match.group(1)
-            body = match.group(2)
-            expected = match.group(3).strip()
-            line_num = content[:match.start()].count('\n') + 1
+        # Use balanced brace parsing to handle nested braces in test bodies
+        for name, body, expected, line_num in self._parse_do_test_with_balanced_braces(content):
+            expected = expected.strip()
 
             # Skip if already parsed as execsql_test or catchsql_test
             if any(t.name == name for t in result.tests):
@@ -391,7 +516,17 @@ class TclTestParser:
             sql = self._extract_execsql_from_do_test(body)
 
             if sql is None:
-                # Complex test body, skip
+                # Complex test body without execsql - check for db eval blocks
+                # and extract DDL statements that might set up tables
+                ddl_sql = self._extract_ddl_from_do_test(body)
+                if ddl_sql:
+                    # Add DDL as setup before adding the skipped test
+                    result.tests.append(ParsedTest(
+                        name=f"setup-from-{name}",
+                        test_type=TestType.SETUP,
+                        sql=ddl_sql,
+                        line_number=line_num
+                    ))
                 result.tests.append(ParsedTest(
                     name=name,
                     test_type=TestType.SKIPPED,
@@ -401,6 +536,16 @@ class TclTestParser:
                 ))
                 result.skipped_count += 1
             elif self._has_complex_tcl(sql) or self._has_complex_tcl(body):
+                # Test has complex TCL but we could extract the SQL
+                # Try to extract DDL from it for setup
+                ddl_sql = self._extract_ddl_statements(sql)
+                if ddl_sql:
+                    result.tests.append(ParsedTest(
+                        name=f"setup-from-{name}",
+                        test_type=TestType.SETUP,
+                        sql=ddl_sql,
+                        line_number=line_num
+                    ))
                 result.tests.append(ParsedTest(
                     name=name,
                     test_type=TestType.SKIPPED,
@@ -418,63 +563,72 @@ class TclTestParser:
                     line_number=line_num
                 ))
 
-        # Find the position of the first test to extract only setup SQL before it
-        # We look for ANY do_test/do_execsql_test/do_catchsql_test, not just parsed ones
-        first_test_pos = len(content)
-        test_patterns = [
-            re.compile(r'^do_test\s+', re.MULTILINE),
-            re.compile(r'^do_execsql_test\s+', re.MULTILINE),
-            re.compile(r'^do_catchsql_test\s+', re.MULTILINE),
-        ]
-        for pattern in test_patterns:
-            match = pattern.search(content)
-            if match:
-                first_test_pos = min(first_test_pos, match.start())
-
-        # Extract standalone execsql blocks for setup (only before first test)
-        # Look for execsql that are NOT inside do_test/do_execsql_test
-        # Standalone execsql blocks start at the beginning of a line (no indentation)
+        # Extract standalone execsql blocks throughout the file as SETUP tests.
+        # These execute SQL without assertions and need to run in order with tests.
+        # Look for execsql that are NOT inside do_test/do_execsql_test blocks.
+        # Standalone execsql blocks should be at the beginning of a line (no indentation).
         for match in self.EXECSQL_BLOCK_PATTERN.finditer(content):
             start = match.start()
+            line_num = content[:start].count('\n') + 1
 
-            # Only consider setup SQL before the first test
-            if start >= first_test_pos:
+            # Skip if this is inside a do_test/do_execsql_test (check for preceding patterns)
+            # Find the start of the current line
+            line_start = content.rfind('\n', 0, start) + 1
+            line_prefix = content[line_start:start]
+
+            # Skip if indented (inside a test block) or has non-whitespace before
+            # Standalone setup execsql should be at the start of a line
+            if line_prefix.strip():
                 continue
+
+            # Check we're not inside any TCL block structure by counting braces
+            # Look back further to catch nested structures
+            preceding = content[max(0, start-1000):start]
+            open_braces = preceding.count('{') - preceding.count('}')
+            if open_braces > 0:
+                # We're inside some block, likely do_test or a loop
+                continue
+
+            sql = self._clean_sql(match.group(1))
+            if sql and not self._has_complex_tcl(sql) and self._is_valid_setup_sql(sql):
+                # Add as a SETUP test that will be interleaved with other tests
+                result.tests.append(ParsedTest(
+                    name=f"setup-{line_num}",
+                    test_type=TestType.SETUP,
+                    sql=sql,
+                    line_number=line_num
+                ))
+
+        # Extract standalone db eval {...} blocks throughout the file as SETUP tests.
+        # These are commonly used in TCL tests to set up tables and data.
+        for match in self.DB_EVAL_BLOCK_PATTERN.finditer(content):
+            start = match.start()
+            line_num = content[:start].count('\n') + 1
 
             # Find the start of the current line
             line_start = content.rfind('\n', 0, start) + 1
             line_prefix = content[line_start:start]
 
-            # Skip if indented (inside a test block) or inside a statement
-            # Standalone setup execsql should be at the start of a line
+            # Skip if indented (inside a test block)
             if line_prefix.strip():
                 continue
 
-            # Double-check by looking for unclosed brace patterns that would
-            # indicate we're inside a do_test block
-            preceding = content[max(0, start-500):start]
-            # Count open and close braces
+            # Check we're not inside any TCL block structure
+            preceding = content[max(0, start-1000):start]
             open_braces = preceding.count('{') - preceding.count('}')
             if open_braces > 0:
-                # We're inside some block, likely do_test
                 continue
 
             sql = self._clean_sql(match.group(1))
             if sql and not self._has_complex_tcl(sql) and self._is_valid_setup_sql(sql):
-                result.setup_sql.append(sql)
-
-        # Extract db eval {...} blocks for setup (only before first test)
-        # These are commonly used in TCL tests to set up tables and data
-        for match in self.DB_EVAL_BLOCK_PATTERN.finditer(content):
-            start = match.start()
-
-            # Only consider setup SQL before the first test
-            if start >= first_test_pos:
-                continue
-
-            sql = self._clean_sql(match.group(1))
-            if sql and not self._has_complex_tcl(sql) and self._is_valid_setup_sql(sql):
-                result.setup_sql.append(sql)
+                # Check if we already have a setup at this line (avoid duplicates)
+                if not any(t.line_number == line_num and t.test_type == TestType.SETUP for t in result.tests):
+                    result.tests.append(ParsedTest(
+                        name=f"setup-{line_num}",
+                        test_type=TestType.SETUP,
+                        sql=sql,
+                        line_number=line_num
+                    ))
 
         # Sort tests by line number
         result.tests.sort(key=lambda t: t.line_number)

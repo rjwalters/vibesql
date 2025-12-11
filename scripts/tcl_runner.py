@@ -228,8 +228,11 @@ class TclTestRunner:
         self.timeout = timeout
         self.parser = TclTestParser(verbose=verbose)
 
-    def run_single_test(self, test: ParsedTest, vibesql: VibeSQL, file_path: str) -> TestResult:
-        """Run a single test and return the result."""
+    def run_single_test(self, test: ParsedTest, vibesql: VibeSQL, file_path: str) -> Optional[TestResult]:
+        """Run a single test and return the result.
+
+        Returns None for successful SETUP tests (they don't count as test results).
+        """
         start_time = time.time()
 
         # Handle skipped tests
@@ -243,6 +246,24 @@ class TclTestRunner:
                 error_message=test.skip_reason,
                 line_number=test.line_number,
             )
+
+        # Handle SETUP tests - execute SQL but don't count as pass/fail
+        # Return None to signal this shouldn't be counted as a test result
+        if test.test_type == TestType.SETUP:
+            success, _, stderr = vibesql.execute(test.sql)
+            if not success:
+                # Setup failed - return a result so we can track the failure
+                return TestResult(
+                    test_name=test.name,
+                    file_path=file_path,
+                    test_type=test.test_type.value,
+                    status="setup_failed",
+                    sql=test.sql,
+                    error_message=f"Setup SQL failed: {stderr}",
+                    line_number=test.line_number,
+                )
+            # Setup succeeded - return None to indicate no test result
+            return None
 
         # Execute the SQL
         success, stdout, stderr = vibesql.execute(test.sql)
@@ -373,6 +394,9 @@ class TclTestRunner:
         """
         Run all tests in a single TCL file.
 
+        Tests are executed in line-number order, which includes interleaved
+        SETUP tests (standalone execsql/db eval blocks) that set up database state.
+
         Returns:
             Tuple of (results list, setup_failed boolean)
         """
@@ -398,57 +422,15 @@ class TclTestRunner:
 
         # Create a fresh database for this file
         with VibeSQL(self.vibesql_path, timeout=self.timeout) as vibesql:
-            # Run setup SQL first
-            for sql in parsed.setup_sql:
-                success, error = vibesql.execute_setup([sql])
-                if not success:
-                    setup_failed = True
-                    setup_error_message = error
-                    if self.verbose:
-                        print(f"  Setup FAILED: {error}")
-                    # Don't break - try to execute remaining setup statements
-                    # as some may succeed and allow partial test execution
-
-            # If setup failed, mark all tests as skipped (not failed)
-            if setup_failed and parsed.tests:
-                if self.verbose:
-                    print(f"  Skipping {len(parsed.tests)} tests due to setup failure")
-
-                for test in parsed.tests:
-                    # Tests already marked as skipped (e.g., complex TCL) stay skipped
-                    if test.test_type == TestType.SKIPPED:
-                        results.append(TestResult(
-                            test_name=test.name,
-                            file_path=file_path,
-                            test_type=test.test_type.value,
-                            status="skipped",
-                            sql=test.sql,
-                            error_message=test.skip_reason,
-                            line_number=test.line_number,
-                        ))
-                    else:
-                        # Mark as skipped due to setup failure
-                        results.append(TestResult(
-                            test_name=test.name,
-                            file_path=file_path,
-                            test_type=test.test_type.value,
-                            status="skipped",
-                            sql=test.sql,
-                            error_message=f"Setup failed: {setup_error_message}",
-                            line_number=test.line_number,
-                        ))
-
-                return results, True
-
             # Track missing tables to detect cascading failures
             # When a test fails with "Table 'X' not found", subsequent tests
             # that also fail with the same error are marked as skipped
             missing_tables: set[str] = set()
 
-            # Run each test (setup succeeded)
+            # Run each test in order (including interleaved SETUP tests)
             for test in parsed.tests:
                 # Check if this test would fail due to a known missing table
-                if missing_tables:
+                if missing_tables and test.test_type != TestType.SETUP:
                     referenced_tables = self._extract_table_references(test.sql)
                     missing_in_test = referenced_tables & missing_tables
                     if missing_in_test:
@@ -468,6 +450,25 @@ class TclTestRunner:
                         continue
 
                 result = self.run_single_test(test, vibesql, file_path)
+
+                # SETUP tests return None on success (we don't count them as test results)
+                if result is None:
+                    if self.verbose:
+                        print(f"  ⚙ {test.name}: setup OK")
+                    continue
+
+                # Check if this was a setup failure
+                if result.status == "setup_failed":
+                    setup_failed = True
+                    setup_error_message = result.error_message
+                    # Track the missing table if applicable
+                    table_name = self._extract_missing_table(result.error_message)
+                    if table_name:
+                        missing_tables.add(table_name)
+                    if self.verbose:
+                        print(f"  ⚠ {test.name}: setup FAILED - {result.error_message}")
+                    # Don't add setup failures to results - they aren't tests
+                    continue
 
                 # Check if this failure reveals a missing table
                 if result.status == "failed" and result.error_message:
