@@ -12,7 +12,7 @@
 //!    have much more work than others.
 //!
 //! 3. **Morsel Size Sensitivity**: Test different morsel sizes to find optimal configuration for
-//!    different query types.
+//!    different query types. Tests SIMD-friendly sizes (1K-8K) vs current defaults (50K).
 //!
 //! ## Usage
 //!
@@ -25,6 +25,23 @@
 //! BENCHMARK_FILTER=thread_scaling ./target/release/deps/morsel_scaling-*
 //! BENCHMARK_FILTER=load_balancing ./target/release/deps/morsel_scaling-*
 //! BENCHMARK_FILTER=morsel_size ./target/release/deps/morsel_scaling-*
+//! ```
+//!
+//! ## Cache Profiling (Linux only)
+//!
+//! To analyze cache behavior with different morsel sizes:
+//!
+//! ```bash
+//! # Profile cache misses with perf stat
+//! MORSEL_SIZE=2048 perf stat -e cache-misses,cache-references,L1-dcache-load-misses \
+//!   ./target/release/deps/morsel_scaling-* morsel_size
+//!
+//! # Compare different sizes
+//! for size in 2048 8192 50000; do
+//!   echo "=== Morsel size: $size ==="
+//!   MORSEL_SIZE=$size perf stat -e cache-misses,cache-references \
+//!     ./target/release/deps/morsel_scaling-* morsel_size 2>&1 | grep -E "(cache|time)"
+//! done
 //! ```
 //!
 //! ## Environment Variables
@@ -48,7 +65,7 @@ use std::{
 
 use harness::{print_group_header, BenchConfig, BenchResult, BenchStats, Harness};
 use tpch::{
-    queries::{TPCH_Q1, TPCH_Q6},
+    queries::{TPCH_Q1, TPCH_Q5, TPCH_Q6},
     schema::load_vibesql,
 };
 use vibesql_executor::SelectExecutor;
@@ -275,25 +292,43 @@ fn bench_load_balancing(harness: &Harness) {
 // =============================================================================
 
 /// Benchmark different morsel sizes on various query types
+///
+/// Tests a range of sizes from SIMD-friendly (1K-8K) to current defaults (50K)
+/// to evaluate the tradeoff between:
+/// - Smaller sizes: Better L1/L2 cache locality, more SIMD-friendly
+/// - Larger sizes: Lower scheduling overhead, better L3 cache amortization
 fn bench_morsel_size(db: &VibeDB, harness: &Harness) {
     print_group_header("Morsel Size Sensitivity Benchmark");
 
-    let morsel_sizes = [10_000, 25_000, 50_000, 100_000, 200_000];
+    // Test both SIMD-friendly small sizes (DuckDB uses 2048) and larger sizes
+    // Small sizes: 1024, 2048, 4096, 8192 - fit well in L1/L2 cache
+    // Medium sizes: 16384, 32768 - transitional
+    // Large sizes: 50000, 100000 - current defaults, better for L3
+    let morsel_sizes = [1024, 2048, 4096, 8192, 16_384, 32_768, 50_000, 100_000];
 
-    // Different query types to test
+    // Different query types to test (as specified in issue #4257)
+    // Q1: Heavy aggregation with SIMD-friendly operations
+    // Q6: Filter-heavy with SIMD predicates
+    // Q5: Complex 6-way join - tests morsel overhead vs join efficiency
     let queries = [
-        ("Q6_filter", TPCH_Q6), // Filter-heavy
-        ("Q1_agg", TPCH_Q1),    // Aggregation-heavy
+        ("Q1_agg", TPCH_Q1),    // Aggregation-heavy (benefits from SIMD)
+        ("Q6_filter", TPCH_Q6), // Filter-heavy (benefits from SIMD)
+        ("Q5_join", TPCH_Q5),   // Complex 6-way join (tests scheduling overhead)
     ];
 
     eprintln!("Testing morsel sizes: {:?}\n", morsel_sizes);
+    eprintln!("Note: DuckDB uses 2048 rows per vector for SIMD efficiency");
+    eprintln!("      Current VibeSQL default is 50,000 rows per morsel\n");
 
-    // Results table
+    // Results table header
     eprintln!(
-        "{:<15} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "Query", "10K", "25K", "50K", "100K", "200K"
+        "{:<12} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+        "Query", "1K", "2K", "4K", "8K", "16K", "32K", "50K", "100K"
     );
-    eprintln!("{:-<15} {:->12} {:->12} {:->12} {:->12} {:->12}", "", "", "", "", "", "");
+    eprintln!(
+        "{:-<12} {:->10} {:->10} {:->10} {:->10} {:->10} {:->10} {:->10} {:->10}",
+        "", "", "", "", "", "", "", "", ""
+    );
 
     for (query_name, query_sql) in queries {
         let mut times: Vec<Duration> = Vec::new();
@@ -310,9 +345,9 @@ fn bench_morsel_size(db: &VibeDB, harness: &Harness) {
         }
 
         // Print row with all morsel size results
-        eprint!("{:<15}", query_name);
+        eprint!("{:<12}", query_name);
         for time in &times {
-            eprint!(" {:>12.2?}", time);
+            eprint!(" {:>10.2?}", time);
         }
         eprintln!();
     }
@@ -320,7 +355,19 @@ fn bench_morsel_size(db: &VibeDB, harness: &Harness) {
     // Reset to default
     env::remove_var("MORSEL_SIZE");
 
-    eprintln!("\nNote: Use MORSEL_SIZE=<rows> to set a specific morsel size globally");
+    // Analysis guidance
+    eprintln!("\n--- Analysis ---");
+    eprintln!("Look for the sweet spot where:");
+    eprintln!("  - Smaller sizes may show better per-row efficiency (SIMD vectorization)");
+    eprintln!("  - Larger sizes may show better throughput (amortized overhead)");
+    eprintln!("  - Cache effects: L1 (~32KB), L2 (~256KB), L3 (~8-32MB)");
+    eprintln!();
+    eprintln!("Typical row sizes (TPC-H lineitem ~100 bytes):");
+    eprintln!("  - 2K rows ≈ 200KB (fits L2)");
+    eprintln!("  - 8K rows ≈ 800KB (fits L3 slice)");
+    eprintln!("  - 50K rows ≈ 5MB (fills L3)");
+    eprintln!();
+    eprintln!("Hint: Use MORSEL_SIZE=<rows> to set a specific morsel size globally");
 }
 
 // =============================================================================
