@@ -403,6 +403,10 @@ name = "issue_3809"
 path = "tests/regression/issue_3809.rs"
 
 [[test]]
+name = "issue_4237"
+path = "tests/regression/issue_4237.rs"
+
+[[test]]
 name = "issue_having_null"
 path = "tests/regression/issue_having_null.rs"
 
