@@ -634,6 +634,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
         let subq2 = Expression::ScalarSubquery(Box::new(SelectStmt {
             with_clause: None,
@@ -649,6 +650,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         // Subqueries always compare as false (reference inequality)

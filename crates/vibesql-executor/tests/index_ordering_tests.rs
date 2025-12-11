@@ -105,6 +105,7 @@ fn test_index_ordering() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = SelectExecutor::new(&db);

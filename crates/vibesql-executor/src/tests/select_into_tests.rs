@@ -74,6 +74,7 @@ fn test_select_into_single_row() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let result = SelectIntoExecutor::execute(&select_stmt, "target", &mut db);
@@ -102,6 +103,7 @@ fn test_select_into_single_row() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
     let rows = executor.execute(&query).unwrap();
     assert_eq!(rows.len(), 1);
@@ -154,6 +156,7 @@ fn test_select_into_no_rows_error() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let result = SelectIntoExecutor::execute(&select_stmt, "target", &mut db);
@@ -221,6 +224,7 @@ fn test_select_into_multiple_rows_error() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let result = SelectIntoExecutor::execute(&select_stmt, "target", &mut db);
@@ -292,6 +296,7 @@ fn test_select_into_with_expressions() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let result = SelectIntoExecutor::execute(&select_stmt, "target", &mut db);
@@ -317,6 +322,7 @@ fn test_select_into_with_expressions() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
     let rows = executor.execute(&query).unwrap();
     assert_eq!(rows.len(), 1);

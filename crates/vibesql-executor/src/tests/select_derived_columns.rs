@@ -44,6 +44,7 @@ fn test_select_star_with_derived_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
             alias: Some(vec!["C".to_string(), "D".to_string()]),
@@ -107,6 +108,7 @@ fn test_select_qualified_star_with_derived_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::QualifiedWildcard {
             qualifier: "t1".to_string(),
@@ -173,6 +175,7 @@ fn test_derived_columns_count_mismatch() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
             alias: Some(vec!["C".to_string(), "D".to_string(), "E".to_string()]),
@@ -243,6 +246,7 @@ fn test_select_distinct_star_with_derived_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true, // DISTINCT
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
             alias: Some(vec!["C".to_string(), "D".to_string()]),
@@ -306,6 +310,7 @@ fn test_select_star_alias_with_table_alias() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::QualifiedWildcard {
             qualifier: "alias_name".to_string(),
@@ -636,6 +641,7 @@ fn test_select_without_from() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -667,6 +673,7 @@ fn test_select_expression_without_from() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {

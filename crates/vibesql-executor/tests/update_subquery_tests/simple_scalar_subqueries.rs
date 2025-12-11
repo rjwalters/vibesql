@@ -73,6 +73,7 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     })
 }
 
@@ -106,6 +107,7 @@ fn create_aggregate_subquery(
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     })
 }
 

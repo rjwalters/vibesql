@@ -95,6 +95,7 @@ fn test_mysql_null_in_empty_subquery() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             }),
             negated: false,
         }),
@@ -104,6 +105,7 @@ fn test_mysql_null_in_empty_subquery() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -183,6 +185,7 @@ fn test_mysql_null_not_in_empty_subquery() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             }),
             negated: true, // NOT IN
         }),
@@ -192,6 +195,7 @@ fn test_mysql_null_not_in_empty_subquery() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -280,6 +284,7 @@ fn test_mysql_null_in_non_empty_without_null() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             }),
             negated: false,
         }),
@@ -289,6 +294,7 @@ fn test_mysql_null_in_non_empty_without_null() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -444,6 +450,7 @@ fn test_mysql_triple_nested_subquery() {
                                 limit: None,
                                 offset: None,
                                 set_operation: None,
+            values: None,
                             },
                         ))),
                     }),
@@ -453,6 +460,7 @@ fn test_mysql_triple_nested_subquery() {
                     limit: None,
                     offset: None,
                     set_operation: None,
+            values: None,
                 },
             ))),
         }),
@@ -462,6 +470,7 @@ fn test_mysql_triple_nested_subquery() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -572,6 +581,7 @@ fn test_mysql_exists_short_circuit() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             }),
             negated: false,
         }),
@@ -581,6 +591,7 @@ fn test_mysql_exists_short_circuit() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);
@@ -710,6 +721,7 @@ fn test_mysql_scalar_within_exists() {
                             limit: None,
                             offset: None,
                             set_operation: None,
+            values: None,
                         },
                     ))),
                 }),
@@ -719,6 +731,7 @@ fn test_mysql_scalar_within_exists() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             }),
             negated: false,
         }),
@@ -728,6 +741,7 @@ fn test_mysql_scalar_within_exists() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let executor = crate::SelectExecutor::new(&db);

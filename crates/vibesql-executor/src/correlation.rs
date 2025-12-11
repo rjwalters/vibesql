@@ -477,6 +477,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         // With the fixed implementation, this is correctly detected as non-correlated
@@ -514,6 +515,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert!(is_correlated(&subquery, &outer_schema));
@@ -541,6 +543,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert!(!is_correlated(&subquery, &outer_schema));

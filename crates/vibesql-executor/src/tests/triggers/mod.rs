@@ -94,6 +94,7 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
     let executor = SelectExecutor::new(db);
     let result = executor.execute(&select).expect("Failed to select from audit_log");

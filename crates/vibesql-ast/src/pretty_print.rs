@@ -739,49 +739,63 @@ impl ToSql for SelectStmt {
             result.push_str(&format!("WITH {} ", cte_strs.join(", ")));
         }
 
-        // SELECT
-        result.push_str("SELECT ");
+        // Check if this is a VALUES statement
+        if let Some(rows) = &self.values {
+            // VALUES clause
+            result.push_str("VALUES");
+            let row_strs: Vec<String> = rows
+                .iter()
+                .map(|row| {
+                    let exprs: Vec<String> = row.iter().map(|e| e.to_sql()).collect();
+                    format!("({})", exprs.join(", "))
+                })
+                .collect();
+            result.push_str(&row_strs.join(", "));
+        } else {
+            // SELECT
+            result.push_str("SELECT ");
 
-        // DISTINCT
-        if self.distinct {
-            result.push_str("DISTINCT ");
+            // DISTINCT
+            if self.distinct {
+                result.push_str("DISTINCT ");
+            }
+
+            // Select list
+            let items: Vec<String> = self.select_list.iter().map(|i| i.to_sql()).collect();
+            result.push_str(&items.join(", "));
+
+            // INTO clause (DDL)
+            if let Some(table) = &self.into_table {
+                result.push_str(&format!(" INTO {}", format_identifier(table)));
+            }
+
+            // INTO variables (procedural)
+            if let Some(vars) = &self.into_variables {
+                result.push_str(&format!(" INTO {}", vars.join(", ")));
+            }
+
+            // FROM
+            if let Some(from) = &self.from {
+                result.push_str(&format!(" FROM {}", from.to_sql()));
+            }
+
+            // WHERE
+            if let Some(where_clause) = &self.where_clause {
+                result.push_str(&format!(" WHERE {}", where_clause.to_sql()));
+            }
+
+            // GROUP BY
+            if let Some(group_by) = &self.group_by {
+                result.push_str(&format!(" GROUP BY {}", group_by.to_sql()));
+            }
+
+            // HAVING
+            if let Some(having) = &self.having {
+                result.push_str(&format!(" HAVING {}", having.to_sql()));
+            }
         }
 
-        // Select list
-        let items: Vec<String> = self.select_list.iter().map(|i| i.to_sql()).collect();
-        result.push_str(&items.join(", "));
-
-        // INTO clause (DDL)
-        if let Some(table) = &self.into_table {
-            result.push_str(&format!(" INTO {}", format_identifier(table)));
-        }
-
-        // INTO variables (procedural)
-        if let Some(vars) = &self.into_variables {
-            result.push_str(&format!(" INTO {}", vars.join(", ")));
-        }
-
-        // FROM
-        if let Some(from) = &self.from {
-            result.push_str(&format!(" FROM {}", from.to_sql()));
-        }
-
-        // WHERE
-        if let Some(where_clause) = &self.where_clause {
-            result.push_str(&format!(" WHERE {}", where_clause.to_sql()));
-        }
-
-        // GROUP BY
-        if let Some(group_by) = &self.group_by {
-            result.push_str(&format!(" GROUP BY {}", group_by.to_sql()));
-        }
-
-        // HAVING
-        if let Some(having) = &self.having {
-            result.push_str(&format!(" HAVING {}", having.to_sql()));
-        }
-
-        // ORDER BY
+        // ORDER BY (applies to both SELECT and VALUES)
         if let Some(order_by) = &self.order_by {
             let items: Vec<String> = order_by.iter().map(|o| o.to_sql()).collect();
             result.push_str(&format!(" ORDER BY {}", items.join(", ")));
@@ -1105,6 +1119,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
         assert_eq!(stmt.to_sql(), "SELECT id FROM users");
     }
@@ -1142,6 +1157,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
         assert_eq!(stmt.to_sql(), "SELECT id, name FROM users WHERE active = 1");
     }
@@ -1172,6 +1188,7 @@ mod tests {
             limit: Some(10),
             offset: None,
             set_operation: None,
+            values: None,
         };
         assert_eq!(stmt.to_sql(), "SELECT DISTINCT name FROM users ORDER BY name ASC LIMIT 10");
     }

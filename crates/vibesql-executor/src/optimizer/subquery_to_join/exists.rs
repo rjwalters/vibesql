@@ -244,6 +244,7 @@ fn try_convert_complex_exists_to_join(
         limit: None,
         offset: None,
         set_operation: None,
+        values: None,
     };
 
     // Create the derived table as FromClause::Subquery

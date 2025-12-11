@@ -396,6 +396,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             limit: stmt.limit,
             offset: stmt.offset,
             set_operation: stmt.set_operation.as_ref().map(|so| self.convert_set_operation(so)),
+            values: stmt.values.as_ref().map(|rows| {
+                rows.iter()
+                    .map(|row| row.iter().map(|e| self.convert_expression(e)).collect())
+                    .collect()
+            }),
         }
     }
 

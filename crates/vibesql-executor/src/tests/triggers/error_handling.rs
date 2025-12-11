@@ -65,6 +65,7 @@ fn test_trigger_failure_causes_rollback() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
     let executor = SelectExecutor::new(&db);
     let rows = executor.execute(&select).expect("Failed to select");

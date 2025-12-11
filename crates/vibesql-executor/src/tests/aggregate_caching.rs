@@ -88,6 +88,7 @@ fn test_repeated_count_star_cached() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr: final_expr, alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -161,6 +162,7 @@ fn test_repeated_sum_cached() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr, alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -269,6 +271,7 @@ fn test_cache_cleared_between_groups() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
@@ -359,6 +362,7 @@ fn test_distinct_aggregates_not_confused() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {

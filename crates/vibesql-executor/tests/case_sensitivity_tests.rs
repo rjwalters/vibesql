@@ -274,6 +274,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
         with_clause: None,
     };
 
@@ -331,6 +332,7 @@ fn test_drop_view_case_insensitive_when_enabled() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
         with_clause: None,
     };
 
@@ -390,6 +392,7 @@ fn test_view_case_sensitive_mode() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
         with_clause: None,
     };
 

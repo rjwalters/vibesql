@@ -54,6 +54,7 @@ fn test_update_with_subquery_multiple_rows_error() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     let stmt = UpdateStmt {
@@ -134,6 +135,7 @@ fn test_update_with_subquery_multiple_columns_error() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     let stmt = UpdateStmt {

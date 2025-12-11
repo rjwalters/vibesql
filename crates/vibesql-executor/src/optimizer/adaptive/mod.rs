@@ -152,6 +152,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         // Should use row-oriented (wildcard projection, no aggregation)
@@ -206,6 +207,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         // Should use columnar (GROUP BY with aggregation is now supported in Phase 6)
@@ -251,6 +253,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         // Should use columnar (aggregation + arithmetic, no GROUP BY)
@@ -311,6 +314,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         // Should use row-oriented (4 tables > threshold, wildcard)
@@ -344,6 +348,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert!(query::has_aggregate_functions(&query_with_count));
@@ -382,6 +387,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert!(query::has_arithmetic_expressions(&query_with_arithmetic));
@@ -417,6 +423,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert!(query::has_selective_projection(&selective));
@@ -440,6 +447,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert!(!query::has_selective_projection(&non_selective));

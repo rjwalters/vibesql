@@ -1107,6 +1107,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         // SELECT col0 FROM tab WHERE col1 > 10 (different literal)
@@ -1135,6 +1136,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         let sig1 = QuerySignature::from_ast(&stmt1);
@@ -1177,6 +1179,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         // SELECT col0 FROM tab WHERE col1 < 5 (different operator)
@@ -1205,6 +1208,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         let sig1 = QuerySignature::from_ast(&stmt1);

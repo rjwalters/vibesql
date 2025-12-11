@@ -392,6 +392,7 @@ fn test_procedural_select_into_single_column() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             })))),
         ],
     );
@@ -474,6 +475,7 @@ fn test_procedural_select_into_multiple_columns() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             })))),
         ],
     );
@@ -542,6 +544,7 @@ fn test_procedural_select_into_error_no_rows() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             })))),
         ]),
         sql_security: None,
@@ -616,6 +619,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             })))),
         ],
     );
@@ -689,6 +693,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 limit: None,
                 offset: None,
                 set_operation: None,
+            values: None,
             })))),
         ],
     );

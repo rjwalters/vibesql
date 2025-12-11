@@ -31,6 +31,7 @@ fn test_count_star_in_multiplication() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
@@ -91,6 +92,7 @@ fn test_count_star_in_addition() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
@@ -179,6 +181,7 @@ fn test_count_star_complex_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr: full_expr, alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -261,6 +264,7 @@ fn test_count_star_with_unary_operators() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr: full_expr, alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -326,6 +330,7 @@ fn test_count_star_with_negative_unary() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr: full_expr, alias: None }],
         from: Some(vibesql_ast::FromClause::Table {

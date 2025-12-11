@@ -59,6 +59,7 @@ fn test_scalar_subquery() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
@@ -95,6 +96,7 @@ fn test_in_expression() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "department_id".to_string() },
@@ -131,6 +133,7 @@ fn test_not_in_expression() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,

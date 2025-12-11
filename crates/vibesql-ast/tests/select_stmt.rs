@@ -10,6 +10,7 @@ fn test_select_star() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -35,6 +36,7 @@ fn test_select_with_columns() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             SelectItem::Expression {
@@ -65,6 +67,7 @@ fn test_select_with_alias() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "id".to_string() },
@@ -92,6 +95,7 @@ fn test_select_from_table() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -120,6 +124,7 @@ fn test_select_with_where() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -149,6 +154,7 @@ fn test_select_with_order_by() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -182,6 +188,7 @@ fn test_select_distinct() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true,
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "country".to_string() },
@@ -209,6 +216,7 @@ fn test_select_with_group_by() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
@@ -243,6 +251,7 @@ fn test_select_with_having() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -278,6 +287,7 @@ fn test_select_with_limit() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -302,6 +312,7 @@ fn test_select_with_offset() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -326,6 +337,7 @@ fn test_order_by_desc() {
     let select = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,
@@ -492,6 +504,7 @@ fn test_from_subquery() {
     let subquery = SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
         into_table: None,

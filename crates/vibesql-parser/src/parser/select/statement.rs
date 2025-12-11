@@ -133,24 +133,31 @@ impl Parser {
                 false // Default behavior is DISTINCT
             };
 
-            // Parse the right-hand side SELECT statement
+            // Parse the right-hand side SELECT or VALUES statement
             // Don't allow ORDER BY/LIMIT on the right side - they should only apply to the final
             // result
             //
-            // Standard SQL allows the right-hand SELECT to be wrapped in parentheses:
-            //   SELECT ... UNION ALL (SELECT ...)
-            // This is commonly used in CTEs and TPC-DS queries.
+            // Standard SQL allows the right-hand side to be:
+            //   - A SELECT statement: SELECT ... UNION ALL SELECT ...
+            //   - A VALUES clause: SELECT ... UNION VALUES(1)
+            //   - Parenthesized: SELECT ... UNION ALL (SELECT ...) or SELECT ... UNION (VALUES(1))
             let right = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume '('
-                let stmt = self.parse_select_statement_internal(false)?;
+                let stmt = if self.peek_keyword(Keyword::Values) {
+                    self.parse_values_statement_internal(false)?
+                } else {
+                    self.parse_select_statement_internal(false)?
+                };
                 if !matches!(self.peek(), Token::RParen) {
                     return Err(ParseError {
-                        message: "Expected ')' after parenthesized SELECT in set operation"
+                        message: "Expected ')' after parenthesized statement in set operation"
                             .to_string(),
                     });
                 }
                 self.advance(); // consume ')'
                 Box::new(stmt)
+            } else if self.peek_keyword(Keyword::Values) {
+                Box::new(self.parse_values_statement_internal(false)?)
             } else {
                 Box::new(self.parse_select_statement_internal(false)?)
             };
@@ -247,6 +254,7 @@ impl Parser {
             limit,
             offset,
             set_operation,
+            values: None,
         })
     }
 
@@ -326,5 +334,162 @@ impl Parser {
         self.advance(); // consume ')'
 
         Ok(vibesql_ast::CommonTableExpr { name, columns, query })
+    }
+
+    /// Parse a VALUES statement (standalone or in set operations)
+    ///
+    /// Syntax: VALUES(expr, ...) [, (expr, ...), ...] [set_operation] [ORDER BY] [LIMIT] [OFFSET]
+    ///
+    /// Examples:
+    /// - VALUES(1);
+    /// - VALUES(1,2,3);
+    /// - VALUES(1),(2),(3);
+    /// - VALUES(1) UNION VALUES(2);
+    pub(crate) fn parse_values_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
+        self.parse_values_statement_internal(true)
+    }
+
+    /// Internal VALUES parser with control over ORDER BY/LIMIT parsing
+    fn parse_values_statement_internal(
+        &mut self,
+        allow_order_limit: bool,
+    ) -> Result<vibesql_ast::SelectStmt, ParseError> {
+        // Parse the VALUES rows
+        let rows = self.parse_values_rows()?;
+
+        // Parse set operations (UNION, INTERSECT, EXCEPT)
+        let set_operation = if self.peek_keyword(Keyword::Union)
+            || self.peek_keyword(Keyword::Intersect)
+            || self.peek_keyword(Keyword::Except)
+        {
+            let op = if self.peek_keyword(Keyword::Union) {
+                self.consume_keyword(Keyword::Union)?;
+                vibesql_ast::SetOperator::Union
+            } else if self.peek_keyword(Keyword::Intersect) {
+                self.consume_keyword(Keyword::Intersect)?;
+                vibesql_ast::SetOperator::Intersect
+            } else {
+                self.consume_keyword(Keyword::Except)?;
+                vibesql_ast::SetOperator::Except
+            };
+
+            let all = if self.peek_keyword(Keyword::All) {
+                self.consume_keyword(Keyword::All)?;
+                true
+            } else if self.peek_keyword(Keyword::Distinct) {
+                self.consume_keyword(Keyword::Distinct)?;
+                false
+            } else {
+                false
+            };
+
+            // Parse the right-hand side (can be SELECT or VALUES)
+            let right = if matches!(self.peek(), Token::LParen) {
+                self.advance(); // consume '('
+                let stmt = if self.peek_keyword(Keyword::Values) {
+                    self.parse_values_statement_internal(false)?
+                } else {
+                    self.parse_select_statement_internal(false)?
+                };
+                if !matches!(self.peek(), Token::RParen) {
+                    return Err(ParseError {
+                        message: "Expected ')' after parenthesized statement in set operation"
+                            .to_string(),
+                    });
+                }
+                self.advance(); // consume ')'
+                Box::new(stmt)
+            } else if self.peek_keyword(Keyword::Values) {
+                Box::new(self.parse_values_statement_internal(false)?)
+            } else {
+                Box::new(self.parse_select_statement_internal(false)?)
+            };
+
+            Some(vibesql_ast::SetOperation { op, all, right })
+        } else {
+            None
+        };
+
+        // Parse ORDER BY (only if allowed)
+        let order_by = if allow_order_limit && self.peek_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::Order)?;
+            self.expect_keyword(Keyword::By)?;
+
+            let order_items = self.parse_comma_separated_list(|p| {
+                let expr = p.parse_expression()?;
+
+                let direction = if p.peek_keyword(Keyword::Asc) {
+                    p.consume_keyword(Keyword::Asc)?;
+                    vibesql_ast::OrderDirection::Asc
+                } else if p.peek_keyword(Keyword::Desc) {
+                    p.consume_keyword(Keyword::Desc)?;
+                    vibesql_ast::OrderDirection::Desc
+                } else {
+                    vibesql_ast::OrderDirection::Asc
+                };
+
+                Ok(vibesql_ast::OrderByItem { expr, direction })
+            })?;
+
+            Some(order_items)
+        } else {
+            None
+        };
+
+        // Parse LIMIT
+        let limit = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
+            self.consume_keyword(Keyword::Limit)?;
+            match self.peek() {
+                Token::Number(n) => {
+                    let limit_value = n.parse::<usize>().map_err(|_| ParseError {
+                        message: format!("Invalid LIMIT value: {}", n),
+                    })?;
+                    self.advance();
+                    Some(limit_value)
+                }
+                _ => return Err(ParseError { message: "Expected number after LIMIT".to_string() }),
+            }
+        } else {
+            None
+        };
+
+        // Parse OFFSET
+        let offset = if allow_order_limit && self.peek_keyword(Keyword::Offset) {
+            self.consume_keyword(Keyword::Offset)?;
+            match self.peek() {
+                Token::Number(n) => {
+                    let offset_value = n.parse::<usize>().map_err(|_| ParseError {
+                        message: format!("Invalid OFFSET value: {}", n),
+                    })?;
+                    self.advance();
+                    Some(offset_value)
+                }
+                _ => return Err(ParseError { message: "Expected number after OFFSET".to_string() }),
+            }
+        } else {
+            None
+        };
+
+        // Consume optional semicolon
+        if matches!(self.peek(), Token::Semicolon) {
+            self.advance();
+        }
+
+        Ok(vibesql_ast::SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order_by,
+            limit,
+            offset,
+            set_operation,
+            values: Some(rows),
+        })
     }
 }

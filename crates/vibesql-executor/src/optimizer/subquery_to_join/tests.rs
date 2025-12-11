@@ -27,6 +27,7 @@ fn simple_select(table: &str, column: &str) -> SelectStmt {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     }
 }
 
@@ -343,6 +344,7 @@ fn test_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Create correlated EXISTS subquery:
@@ -374,6 +376,7 @@ fn test_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     stmt.where_clause =
@@ -460,6 +463,7 @@ fn test_not_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Create correlated NOT EXISTS subquery:
@@ -491,6 +495,7 @@ fn test_not_exists_self_join_column_qualification() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     stmt.where_clause = Some(Expression::Exists {
@@ -580,6 +585,7 @@ fn test_conjunction_exists_to_semi_join() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Create correlated EXISTS subquery
@@ -604,6 +610,7 @@ fn test_conjunction_exists_to_semi_join() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Build Conjunction: [predicate1, predicate2, EXISTS(...)]
@@ -667,6 +674,7 @@ fn test_conjunction_not_exists_to_anti_join() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Create correlated NOT EXISTS subquery
@@ -691,6 +699,7 @@ fn test_conjunction_not_exists_to_anti_join() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Build Conjunction with NOT EXISTS

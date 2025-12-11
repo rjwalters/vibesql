@@ -33,6 +33,7 @@ fn test_in_list_basic() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -90,6 +91,7 @@ fn test_not_in_list() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -145,6 +147,7 @@ fn test_in_list_with_null_value() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -200,6 +203,7 @@ fn test_in_list_with_null_in_list() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -256,6 +260,7 @@ fn test_empty_in_list() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -308,6 +313,7 @@ fn test_empty_not_in_list() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -359,6 +365,7 @@ fn test_null_in_empty_subquery() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
@@ -366,6 +373,7 @@ fn test_null_in_empty_subquery() {
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
+            values: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
                     from: Some(vibesql_ast::FromClause::Table {
@@ -425,6 +433,7 @@ fn test_null_not_in_empty_subquery() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
@@ -432,6 +441,7 @@ fn test_null_not_in_empty_subquery() {
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
+            values: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
                     from: Some(vibesql_ast::FromClause::Table {
@@ -490,6 +500,7 @@ fn test_value_in_empty_subquery() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::In {
@@ -499,6 +510,7 @@ fn test_value_in_empty_subquery() {
                 subquery: Box::new(vibesql_ast::SelectStmt {
                     with_clause: None,
                     set_operation: None,
+            values: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
                     from: Some(vibesql_ast::FromClause::Table {

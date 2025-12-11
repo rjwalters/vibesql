@@ -123,6 +123,7 @@ impl<'arena> ArenaParser<'arena> {
             limit,
             offset,
             set_operation,
+            values: None,
         };
 
         Ok(self.arena.alloc(stmt))
