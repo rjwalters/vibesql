@@ -137,7 +137,9 @@ fn collect_window_functions_from_expression(
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_) => {}
 
-        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => {
             for child in children {
                 collect_window_functions_from_expression(child, window_functions);
             }

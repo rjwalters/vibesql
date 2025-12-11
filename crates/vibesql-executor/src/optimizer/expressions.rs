@@ -374,7 +374,7 @@ pub fn optimize_expression(
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_) => Ok(expr.clone()),
 
-        // Conjunction and Disjunction - optimize children
+        // Conjunction, Disjunction, and RowValueConstructor - optimize children
         Expression::Conjunction(children) => {
             let optimized: Result<Vec<_>, _> =
                 children.iter().map(|child| optimize_expression(child, evaluator)).collect();
@@ -385,6 +385,12 @@ pub fn optimize_expression(
             let optimized: Result<Vec<_>, _> =
                 children.iter().map(|child| optimize_expression(child, evaluator)).collect();
             Ok(Expression::Disjunction(optimized?))
+        }
+
+        Expression::RowValueConstructor(children) => {
+            let optimized: Result<Vec<_>, _> =
+                children.iter().map(|child| optimize_expression(child, evaluator)).collect();
+            Ok(Expression::RowValueConstructor(optimized?))
         }
     }
 }

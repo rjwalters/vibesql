@@ -226,6 +226,12 @@ pub enum ExtendedExpr<'arena> {
 
     /// Session/system variable reference
     SessionVariable { name: Symbol },
+
+    /// Row value constructor (tuple)
+    /// SQL:1999 Section 7.1: Row value constructor
+    /// Example: (a, b) = (1, 2)
+    /// Example: (rowid, 1) <= (5, 0)
+    RowValueConstructor(BumpVec<'arena, Expression<'arena>>),
 }
 
 /// Full-text search mode specification

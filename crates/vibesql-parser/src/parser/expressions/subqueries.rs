@@ -17,7 +17,7 @@ impl Parser {
         Ok(select_stmt)
     }
 
-    /// Parse scalar subquery or parenthesized expression
+    /// Parse scalar subquery, parenthesized expression, or row value constructor
     pub(super) fn parse_parenthesized(
         &mut self,
     ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
@@ -32,10 +32,23 @@ impl Parser {
                     self.expect_token(Token::RParen)?;
                     Ok(Some(vibesql_ast::Expression::ScalarSubquery(Box::new(select_stmt))))
                 } else {
-                    // Regular parenthesized expression: (expr)
-                    let expr = self.parse_expression()?;
-                    self.expect_token(Token::RParen)?;
-                    Ok(Some(expr))
+                    // Parse first expression
+                    let first_expr = self.parse_expression()?;
+
+                    // Check if this is a row value constructor (tuple): (expr, expr, ...)
+                    if matches!(self.peek(), Token::Comma) {
+                        let mut values = vec![first_expr];
+                        while matches!(self.peek(), Token::Comma) {
+                            self.advance(); // consume ','
+                            values.push(self.parse_expression()?);
+                        }
+                        self.expect_token(Token::RParen)?;
+                        Ok(Some(vibesql_ast::Expression::RowValueConstructor(values)))
+                    } else {
+                        // Regular parenthesized expression: (expr)
+                        self.expect_token(Token::RParen)?;
+                        Ok(Some(first_expr))
+                    }
                 }
             }
             _ => Ok(None),

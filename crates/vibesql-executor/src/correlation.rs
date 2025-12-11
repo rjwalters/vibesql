@@ -387,7 +387,9 @@ fn is_expression_correlated(
             is_expression_correlated(value, outer_schema, subquery_tables)
         }
 
-        Expression::Conjunction(children) | Expression::Disjunction(children) => children
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => children
             .iter()
             .any(|child| is_expression_correlated(child, outer_schema, subquery_tables)),
 

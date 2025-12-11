@@ -37,6 +37,7 @@ mod quantified;
 mod revoke;
 mod role;
 mod routines;
+mod row_value;
 mod schema;
 mod select;
 mod set_operations;

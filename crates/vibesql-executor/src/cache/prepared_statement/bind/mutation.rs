@@ -264,7 +264,9 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(right, params);
         }
 
-        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => {
             for child in children {
                 bind_expression_mut(child, params);
             }
@@ -638,7 +640,9 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             bind_expression_named_mut(right, params);
         }
 
-        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => {
             for child in children {
                 bind_expression_named_mut(child, params);
             }

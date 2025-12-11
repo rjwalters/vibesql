@@ -174,7 +174,8 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
             tables.extend(subquery_tables);
         }
         vibesql_ast::Expression::Conjunction(children)
-        | vibesql_ast::Expression::Disjunction(children) => {
+        | vibesql_ast::Expression::Disjunction(children)
+        | vibesql_ast::Expression::RowValueConstructor(children) => {
             for child in children {
                 extract_from_expression(child, tables);
             }

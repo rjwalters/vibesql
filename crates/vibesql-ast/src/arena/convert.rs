@@ -291,6 +291,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             arena_expr::ExtendedExpr::SessionVariable { name } => {
                 Expression::SessionVariable { name: self.resolve(*name) }
             }
+            arena_expr::ExtendedExpr::RowValueConstructor(values) => {
+                Expression::RowValueConstructor(
+                    values.iter().map(|e| self.convert_expression(e)).collect(),
+                )
+            }
         }
     }
 

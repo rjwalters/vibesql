@@ -171,9 +171,10 @@ impl ExpressionHasher {
             | vibesql_ast::Expression::Default
             | vibesql_ast::Expression::DuplicateKeyValue { .. } => true,
 
-            // Conjunction and Disjunction - check all children
+            // Conjunction, Disjunction, and RowValueConstructor - check all children
             vibesql_ast::Expression::Conjunction(children)
-            | vibesql_ast::Expression::Disjunction(children) => {
+            | vibesql_ast::Expression::Disjunction(children)
+            | vibesql_ast::Expression::RowValueConstructor(children) => {
                 children.iter().all(Self::is_deterministic)
             }
 
@@ -417,7 +418,8 @@ impl ExpressionHasher {
             }
 
             vibesql_ast::Expression::Conjunction(children)
-            | vibesql_ast::Expression::Disjunction(children) => {
+            | vibesql_ast::Expression::Disjunction(children)
+            | vibesql_ast::Expression::RowValueConstructor(children) => {
                 children.len().hash(hasher);
                 for child in children {
                     Self::hash_expression(child, hasher);

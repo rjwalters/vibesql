@@ -191,7 +191,9 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
 
         Expression::Interval { value, .. } => has_external_column_refs(value, subquery),
 
-        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => {
             children.iter().any(|child| has_external_column_refs(child, subquery))
         }
 

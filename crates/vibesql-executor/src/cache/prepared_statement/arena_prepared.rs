@@ -503,6 +503,11 @@ where
             ExtendedExpr::MatchAgainst { search_modifier, .. } => {
                 visit_arena_expression(search_modifier, visitor);
             }
+            ExtendedExpr::RowValueConstructor(children) => {
+                for child in children.iter() {
+                    visit_arena_expression(child, visitor);
+                }
+            }
             // Extended leaf nodes - no recursion needed
             ExtendedExpr::DuplicateKeyValue { .. }
             | ExtendedExpr::NextValue { .. }

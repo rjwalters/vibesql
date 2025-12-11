@@ -340,7 +340,9 @@ impl LiteralExtractor {
                 Self::extract_from_expression(right, literals);
             }
 
-            Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            Expression::Conjunction(children)
+            | Expression::Disjunction(children)
+            | Expression::RowValueConstructor(children) => {
                 for child in children {
                     Self::extract_from_expression(child, literals);
                 }

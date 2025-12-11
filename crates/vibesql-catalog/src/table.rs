@@ -598,6 +598,10 @@ impl TableSchema {
             | vibesql_ast::Expression::NextValue { .. }
             | vibesql_ast::Expression::SessionVariable { .. }
             | vibesql_ast::Expression::MatchAgainst { .. } => false,
+
+            vibesql_ast::Expression::RowValueConstructor(values) => {
+                values.iter().any(|val| Self::expression_references_column(val, column_name))
+            }
         }
     }
 }

@@ -128,6 +128,11 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
         | vibesql_ast::Expression::Disjunction(children) => {
             children.iter().any(expression_references_column)
         }
+
+        // Row value constructor - check all values
+        vibesql_ast::Expression::RowValueConstructor(values) => {
+            values.iter().any(expression_references_column)
+        }
     }
 }
 
