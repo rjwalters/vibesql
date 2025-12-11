@@ -420,8 +420,8 @@ bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need
 bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
 bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
 bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
-bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
-bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
+bench-sysbench-emb-disc-architecture-title = Архітектурні компроміси
+bench-sysbench-emb-disc-architecture = Гібридна архітектура VibeSQL орієнтована як на OLTP, так і на OLAP навантаження. Наше B-tree сховище забезпечує продуктивність точкових запитів на рівні SQLite, тоді як колонкове виконання ефективно обробляє аналітичні запити. Це відрізняється від чистих OLAP баз даних, таких як DuckDB, які оптимізовані виключно для масових операцій на шкоду затримці одиночних рядків.
 
 # Sysbench Server specific
 bench-sysbench-server-name = Sysbench (Server)
@@ -601,8 +601,8 @@ conformance-generate-coverage = # Generate coverage report
 conformance-open-coverage = # Open coverage report
 
 bench-table-query = Query
-bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
-bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
+bench-tpcc-disc-duckdb-title = Чому DuckDB відстає в OLTP
+bench-tpcc-disc-duckdb = DuckDB досягає лише ~385 TPS в TPC-C (у 60 разів повільніше за VibeSQL, у 12 разів повільніше за SQLite). Це очікувано: DuckDB — це <strong>аналітична (OLAP) база даних</strong>, оптимізована для великих пакетних операцій, а не для транзакцій з одиночними рядками. Її колонковий формат зберігання чудово справляється зі скануванням мільйонів рядків, але додає накладні витрати для точкових запитів і дрібних оновлень, які переважають в OLTP-навантаженнях типу TPC-C.
 bench-tpcc-transactions-label = transactions executed
 
 # Conformance page (English placeholders)
