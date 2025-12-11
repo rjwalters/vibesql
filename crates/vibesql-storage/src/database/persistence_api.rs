@@ -1,0 +1,170 @@
+// ============================================================================
+// WAL Persistence API
+// ============================================================================
+//
+// This module provides WAL (Write-Ahead Log) persistence methods for the
+// Database struct. Enables durable storage through async persistence.
+
+use super::Database;
+use crate::wal::{PersistenceEngine, WalOp};
+use crate::StorageError;
+
+impl Database {
+    // ============================================================================
+    // WAL Persistence Support
+    // ============================================================================
+
+    /// Enable WAL-based async persistence
+    ///
+    /// Creates a persistence engine that writes changes to a WAL file in the background.
+    /// All subsequent DML and DDL operations will be logged to the WAL for durability.
+    ///
+    /// # Arguments
+    /// * `engine` - A pre-configured PersistenceEngine instance
+    ///
+    /// # Example
+    /// ```text
+    /// use vibesql_storage::{Database, PersistenceEngine, PersistenceConfig};
+    ///
+    /// let mut db = Database::new();
+    /// let engine = PersistenceEngine::new("/path/to/wal.log", PersistenceConfig::default())?;
+    /// db.enable_persistence(engine);
+    /// ```
+    pub fn enable_persistence(&mut self, engine: PersistenceEngine) {
+        self.persistence_engine = Some(engine);
+    }
+
+    /// Check if WAL persistence is enabled
+    pub fn persistence_enabled(&self) -> bool {
+        self.persistence_engine.is_some()
+    }
+
+    /// Get persistence statistics (if enabled)
+    pub fn persistence_stats(&self) -> Option<crate::wal::PersistenceStats> {
+        self.persistence_engine.as_ref().map(|e| e.stats())
+    }
+
+    /// Emit a WAL operation to the persistence engine (if enabled)
+    ///
+    /// This is a no-op if persistence is not enabled, providing zero overhead
+    /// when WAL is disabled.
+    pub(super) fn emit_wal_op(&self, op: WalOp) {
+        if let Some(engine) = &self.persistence_engine {
+            if let Err(e) = engine.send(op) {
+                log::error!("Failed to emit WAL op: {}", e);
+            }
+        }
+    }
+
+    /// Get the next table ID and increment the counter
+    pub(super) fn next_table_id(&mut self) -> u32 {
+        let id = self.next_table_id;
+        self.next_table_id += 1;
+        id
+    }
+
+    /// Compute a table ID from table name using hash (for consistent mapping)
+    ///
+    /// This is used when we don't have a monotonic table ID assigned at creation time,
+    /// such as for tables created before WAL was enabled.
+    pub(super) fn table_name_to_id(&self, name: &str) -> u32 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        name.hash(&mut hasher);
+        hasher.finish() as u32
+    }
+
+    /// Sync all pending WAL entries to disk
+    ///
+    /// Blocks until all pending entries have been written and flushed.
+    /// This is useful for ensuring durability before returning to the user.
+    pub fn sync_persistence(&self) -> Result<(), StorageError> {
+        if let Some(engine) = &self.persistence_engine {
+            engine.sync()
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Emit a WAL delete entry for persistence
+    ///
+    /// Called by the DELETE executor before rows are removed.
+    /// Captures old_values for recovery replay.
+    pub fn emit_wal_delete(
+        &self,
+        table_name: &str,
+        row_id: u64,
+        old_values: Vec<vibesql_types::SqlValue>,
+    ) {
+        self.emit_wal_op(WalOp::Delete {
+            table_id: self.table_name_to_id(table_name),
+            row_id,
+            old_values,
+        });
+    }
+
+    /// Emit a WAL create index entry for persistence
+    ///
+    /// Called by the CREATE INDEX executor after index is created.
+    pub fn emit_wal_create_index(
+        &self,
+        index_id: u32,
+        index_name: &str,
+        table_name: &str,
+        column_indices: Vec<u32>,
+        is_unique: bool,
+    ) {
+        self.emit_wal_op(WalOp::CreateIndex {
+            index_id,
+            index_name: index_name.to_string(),
+            table_id: self.table_name_to_id(table_name),
+            column_indices,
+            is_unique,
+        });
+    }
+
+    /// Emit a WAL drop index entry for persistence
+    ///
+    /// Called by the DROP INDEX executor before index is dropped.
+    pub fn emit_wal_drop_index(&self, index_id: u32, index_name: &str) {
+        self.emit_wal_op(WalOp::DropIndex { index_id, index_name: index_name.to_string() });
+    }
+
+    // ============================================================================
+    // AUTO_INCREMENT / LAST_INSERT_ROWID Support
+    // ============================================================================
+
+    /// Get the last auto-generated ID from an INSERT operation
+    ///
+    /// Returns the most recent value generated by AUTO_INCREMENT during an INSERT.
+    /// This is used to implement LAST_INSERT_ROWID() and LAST_INSERT_ID() functions.
+    ///
+    /// Returns 0 if no auto-generated values have been produced yet.
+    ///
+    /// # Example
+    /// ```text
+    /// // Create table with AUTO_INCREMENT
+    /// db.execute("CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100))")?;
+    ///
+    /// // Insert a row (ID is auto-generated)
+    /// db.execute("INSERT INTO users (name) VALUES ('Alice')")?;
+    ///
+    /// // Get the generated ID
+    /// let id = db.last_insert_rowid();
+    /// assert_eq!(id, 1);
+    /// ```
+    pub fn last_insert_rowid(&self) -> i64 {
+        self.last_insert_rowid
+    }
+
+    /// Set the last auto-generated ID
+    ///
+    /// This is called internally by the INSERT executor when a sequence value
+    /// is generated for an AUTO_INCREMENT column.
+    ///
+    /// For multi-row inserts, this will be the ID of the *first* row inserted
+    /// (following MySQL semantics for batch inserts).
+    pub fn set_last_insert_rowid(&mut self, id: i64) {
+        self.last_insert_rowid = id;
+    }
+}
