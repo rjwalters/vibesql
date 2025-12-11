@@ -16,14 +16,25 @@
 //!
 //! ## Operations Benchmarked
 //!
-//! 1. **Filter (WHERE)** - `morsel_parallel_filter`
-//! 2. **Scan** - `parallel_scan_materialize`
-//! 3. **Group By** - `morsel_parallel_group`
-//! 4. **Hash Join Build** - `build_hash_table_parallel`
-//! 5. **Hash Join Probe** - `morsel_parallel_probe_sqlvalue`
-//! 6. **Semi Join** - `build_existence_hash_table_parallel`
-//! 7. **Sort** - `par_sort_by`
-//! 8. **Aggregate** - `morsel_parallel_reduce`
+//! ### Direct API Benchmarks (Row-Oriented)
+//! These test the morsel-driven work-stealing functions directly:
+//!
+//! 1. **Morsel Filter** - `morsel_parallel_filter` (direct API, bypasses SQL/columnar)
+//! 2. **Group By** - `morsel_parallel_group`
+//! 3. **Hash Join Build** - `build_hash_table_parallel`
+//! 4. **Hash Join Probe** - `morsel_parallel_probe_sqlvalue`
+//! 5. **Semi Join** - `build_existence_hash_table_parallel`
+//! 6. **Sort** - `par_sort_by`
+//! 7. **Aggregate** - `morsel_parallel_reduce`
+//!
+//! ### SQL-Based Benchmarks (Columnar by Default)
+//! These use SQL queries which may route through the columnar execution engine:
+//!
+//! - **Filter (WHERE)** - SQL queries with WHERE clauses (typically uses SIMD columnar filter)
+//! - **Scan** - Table materialization via SQL
+//!
+//! **Note**: SQL filter benchmarks show columnar SIMD performance (~100x faster than row-based),
+//! which has different parallelism characteristics. Use `morsel_filter` for direct API testing.
 //!
 //! ## Usage
 //!
@@ -35,7 +46,8 @@
 //! ./target/release/deps/morsel_operation_benchmark-*
 //!
 //! # Run specific operation
-//! OPERATION_FILTER=filter ./target/release/deps/morsel_operation_benchmark-*
+//! OPERATION_FILTER=morsel_filter ./target/release/deps/morsel_operation_benchmark-*  # Direct API
+//! OPERATION_FILTER=filter ./target/release/deps/morsel_operation_benchmark-*         # SQL/columnar
 //! OPERATION_FILTER=groupby ./target/release/deps/morsel_operation_benchmark-*
 //! OPERATION_FILTER=join ./target/release/deps/morsel_operation_benchmark-*
 //!
@@ -51,7 +63,7 @@
 //!
 //! ## Environment Variables
 //!
-//! - `OPERATION_FILTER` - Run only specific operation (filter, scan, groupby, join, semi, sort, agg)
+//! - `OPERATION_FILTER` - Run only specific operation (morsel_filter, filter, scan, groupby, join, sort, agg)
 //! - `MORSEL_SIZES` - Comma-separated list of morsel sizes to test (default: 1024,2048,4096,8192,16384,32768,50000)
 //! - `ROW_COUNTS` - Comma-separated list of row counts to test (default: 100000,500000,1000000)
 //! - `MAX_THREADS` - Maximum thread count to test (default: 16)
@@ -69,6 +81,7 @@ use std::{
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
+use vibesql_executor::select::morsel::{morsel_parallel_filter, MorselConfig};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
@@ -544,6 +557,100 @@ fn bench_filter_operation(harness: &Harness) {
 }
 
 // =============================================================================
+// Direct Morsel Filter API Benchmark
+// =============================================================================
+
+/// Benchmark morsel_parallel_filter directly using the Rust API.
+///
+/// This bypasses SQL execution and columnar processing to directly measure
+/// the morsel-driven work-stealing filter performance. This is the correct
+/// way to benchmark morsel parallelism, as SQL queries may be routed through
+/// the columnar execution engine which has different parallelism strategies.
+fn bench_morsel_filter_direct(harness: &Harness) {
+    print_group_header("Morsel Filter (Direct API - Row-Oriented)");
+
+    let row_counts = get_row_counts();
+    let morsel_sizes = get_morsel_sizes();
+    let thread_counts = get_thread_counts();
+
+    // Create test data outside the timing loop
+    for &row_count in &row_counts {
+        eprintln!("\n--- {} rows ---", row_count);
+
+        // Generate rows: each row has (id, category, value, flag)
+        let rows: Vec<Row> = (0..row_count)
+            .map(|i| {
+                Row::new(vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Integer((i % 100) as i64),                  // category 0-99
+                    SqlValue::Bigint(((i * 17 + 42) % 1_000_000) as i64), // pseudo-random value
+                    SqlValue::Integer((i % 2) as i64),                    // flag 0 or 1
+                ])
+            })
+            .collect();
+
+        // Different filter predicates
+        let predicates: Vec<(&str, Box<dyn Fn(&Row) -> bool + Send + Sync>)> = vec![
+            // 50% selectivity: flag = 1
+            (
+                "50pct_flag",
+                Box::new(|row: &Row| matches!(row.values[3], SqlValue::Integer(1))),
+            ),
+            // 10% selectivity: category < 10
+            (
+                "10pct_category",
+                Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(c) if c < 10)),
+            ),
+            // 1% selectivity: category = 0
+            (
+                "1pct_category",
+                Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(0))),
+            ),
+            // Complex: category < 50 AND flag = 1 (~25%)
+            (
+                "25pct_compound",
+                Box::new(|row: &Row| {
+                    matches!(row.values[1], SqlValue::Integer(c) if c < 50)
+                        && matches!(row.values[3], SqlValue::Integer(1))
+                }),
+            ),
+        ];
+
+        for (pred_name, predicate) in &predicates {
+            eprintln!("\n  Predicate: {}", pred_name);
+
+            print_morsel_size_header(&morsel_sizes);
+
+            for &threads in &thread_counts {
+                eprint!("  {:>2}T ", threads);
+
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .expect("Failed to create thread pool");
+
+                for &morsel_size in &morsel_sizes {
+                    let config = MorselConfig::new(morsel_size);
+
+                    let stats = pool.install(|| {
+                        let name = format!("morsel_{}_{}t_{}m", pred_name, threads, morsel_size);
+                        harness.run(&name, || {
+                            let start = Instant::now();
+                            let result = morsel_parallel_filter(&rows, &config, |row| predicate(row));
+                            black_box(result);
+                            BenchResult::Ok(start.elapsed())
+                        })
+                    });
+
+                    eprint!(" {:>8.2?}", stats.mean);
+                }
+                eprintln!();
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Group By Operation Benchmark
 // =============================================================================
 
@@ -964,6 +1071,10 @@ fn main() {
         Some("filter") | Some("where") => {
             bench_filter_operation(&harness);
         }
+        Some("morsel_filter") | Some("morsel") => {
+            // Direct morsel API benchmark - tests morsel_parallel_filter without SQL/columnar
+            bench_morsel_filter_direct(&harness);
+        }
         Some("groupby") | Some("group") => {
             bench_groupby_operation(&harness);
         }
@@ -984,7 +1095,8 @@ fn main() {
         }
         None => {
             // Run all benchmarks
-            bench_filter_operation(&harness);
+            bench_morsel_filter_direct(&harness); // Direct API test first
+            bench_filter_operation(&harness);     // Then SQL-based (columnar) test
             bench_groupby_operation(&harness);
             bench_join_operation(&harness);
             bench_join_filter_operation(&harness);
@@ -994,7 +1106,7 @@ fn main() {
         }
         Some(unknown) => {
             eprintln!("Unknown operation filter: {}", unknown);
-            eprintln!("Valid filters: filter, groupby, join, join_filter, sort, agg, scan");
+            eprintln!("Valid filters: filter, morsel_filter, groupby, join, join_filter, sort, agg, scan");
             std::process::exit(1);
         }
     }
