@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-10T23:10:28.482207Z",
+  "generated_at": "2025-12-10T23:21:28.953137Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -239,8 +239,8 @@
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2025-12-10T23:10:13.106942",
-        "commit": "0933eed4"
+        "timestamp": "2025-12-10T23:20:44.350814",
+        "commit": "83593a08"
       },
       "tests": {
         "point_select_10000": {
@@ -248,11 +248,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 46.01,
+              "mean_us": 46.31,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 160.93,
+              "mean_us": 157.61,
               "std_dev_us": null
             }
           }
@@ -262,11 +262,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 58.88,
+              "mean_us": 58.57,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 731.27,
+              "mean_us": 535.08,
               "std_dev_us": null
             }
           }
@@ -276,11 +276,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 66.94,
+              "mean_us": 56.8,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 1444.3,
+              "mean_us": 697.75,
               "std_dev_us": null
             }
           }
@@ -290,11 +290,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 91.99,
+              "mean_us": 59.77,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 869.34,
+              "mean_us": 959.66,
               "std_dev_us": null
             }
           }
@@ -304,11 +304,11 @@
           "table_size": 10000,
           "engines": {
             "vibesql_server": {
-              "mean_us": 109.83,
+              "mean_us": 95.18,
               "std_dev_us": null
             },
             "mysql": {
-              "mean_us": 281.39,
+              "mean_us": 319.49,
               "std_dev_us": null
             }
           }
@@ -361,7 +361,7 @@
   "timeline": [
     {
       "date": "2025-12-10",
-      "commit": "0933eed4",
+      "commit": "83593a08",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 17.83,
       "tpch_passing": 22,

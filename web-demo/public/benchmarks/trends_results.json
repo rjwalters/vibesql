@@ -1,6 +1,6 @@
 {
-  "generated_at": "2025-12-10T23:10:23.628749",
-  "git_commit": "0933eed4",
+  "generated_at": "2025-12-10T23:21:23.030442",
+  "git_commit": "83593a08",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
