@@ -189,6 +189,79 @@ class TclTestParser:
         # Multi-row results may have newlines
         return output
 
+    def _is_valid_setup_sql(self, sql: str) -> bool:
+        """
+        Check if SQL is valid for setup (modifies database state).
+
+        Filters out:
+        - PRAGMA statements (SQLite-specific configuration)
+        - Pure SELECT statements (don't modify state)
+        - Statements referencing sqlite_master (SQLite-specific)
+        - ANALYZE statements (SQLite-specific)
+        - REINDEX statements (SQLite-specific)
+        """
+        sql_upper = sql.upper().strip()
+
+        # Skip empty SQL
+        if not sql_upper:
+            return False
+
+        # Skip PRAGMA statements
+        if sql_upper.startswith('PRAGMA'):
+            return False
+
+        # Skip ANALYZE statements (SQLite-specific)
+        if sql_upper.startswith('ANALYZE'):
+            return False
+
+        # Skip REINDEX statements (SQLite-specific)
+        if sql_upper.startswith('REINDEX'):
+            return False
+
+        # Skip statements that reference sqlite_master (SQLite internal table)
+        if 'SQLITE_MASTER' in sql_upper:
+            return False
+
+        # Skip statements that reference sqlite_temp_master
+        if 'SQLITE_TEMP_MASTER' in sql_upper:
+            return False
+
+        # Skip statements that reference sqlite_schema (alias for sqlite_master)
+        if 'SQLITE_SCHEMA' in sql_upper:
+            return False
+
+        # Skip pure SELECT statements - they don't modify state
+        # But allow SELECT inside INSERT (INSERT INTO ... SELECT ...)
+        # or as subqueries in other DML
+        if sql_upper.startswith('SELECT'):
+            return False
+
+        # Skip EXPLAIN statements
+        if sql_upper.startswith('EXPLAIN'):
+            return False
+
+        # Skip standalone transaction control statements
+        # BEGIN/COMMIT/ROLLBACK are typically used with TCL control structures
+        # that we can't parse, so they'd be orphaned without matching pairs
+        if sql_upper in ('BEGIN', 'BEGIN TRANSACTION', 'COMMIT', 'ROLLBACK',
+                         'BEGIN;', 'COMMIT;', 'ROLLBACK;'):
+            return False
+
+        # Allow DDL and DML statements
+        valid_prefixes = (
+            'CREATE', 'DROP', 'ALTER', 'INSERT', 'UPDATE', 'DELETE',
+            'SAVEPOINT', 'RELEASE',
+            'WITH',  # CTEs that start with WITH ... INSERT/UPDATE/DELETE
+        )
+
+        # Check if it starts with a valid prefix
+        for prefix in valid_prefixes:
+            if sql_upper.startswith(prefix):
+                return True
+
+        # Default: skip unknown statement types
+        return False
+
     def _extract_execsql_from_do_test(self, body: str) -> Optional[str]:
         """Extract SQL from a do_test body that uses execsql."""
         # Look for execsql { ... } pattern
@@ -345,24 +418,62 @@ class TclTestParser:
                     line_number=line_num
                 ))
 
-        # Extract standalone execsql blocks for setup
+        # Find the position of the first test to extract only setup SQL before it
+        # We look for ANY do_test/do_execsql_test/do_catchsql_test, not just parsed ones
+        first_test_pos = len(content)
+        test_patterns = [
+            re.compile(r'^do_test\s+', re.MULTILINE),
+            re.compile(r'^do_execsql_test\s+', re.MULTILINE),
+            re.compile(r'^do_catchsql_test\s+', re.MULTILINE),
+        ]
+        for pattern in test_patterns:
+            match = pattern.search(content)
+            if match:
+                first_test_pos = min(first_test_pos, match.start())
+
+        # Extract standalone execsql blocks for setup (only before first test)
         # Look for execsql that are NOT inside do_test/do_execsql_test
+        # Standalone execsql blocks start at the beginning of a line (no indentation)
         for match in self.EXECSQL_BLOCK_PATTERN.finditer(content):
-            # Check if this is inside a test block
             start = match.start()
-            preceding = content[max(0, start-100):start]
-            if 'do_test' in preceding or 'do_execsql_test' in preceding:
+
+            # Only consider setup SQL before the first test
+            if start >= first_test_pos:
+                continue
+
+            # Find the start of the current line
+            line_start = content.rfind('\n', 0, start) + 1
+            line_prefix = content[line_start:start]
+
+            # Skip if indented (inside a test block) or inside a statement
+            # Standalone setup execsql should be at the start of a line
+            if line_prefix.strip():
+                continue
+
+            # Double-check by looking for unclosed brace patterns that would
+            # indicate we're inside a do_test block
+            preceding = content[max(0, start-500):start]
+            # Count open and close braces
+            open_braces = preceding.count('{') - preceding.count('}')
+            if open_braces > 0:
+                # We're inside some block, likely do_test
                 continue
 
             sql = self._clean_sql(match.group(1))
-            if sql and not self._has_complex_tcl(sql):
+            if sql and not self._has_complex_tcl(sql) and self._is_valid_setup_sql(sql):
                 result.setup_sql.append(sql)
 
-        # Extract db eval {...} blocks for setup
+        # Extract db eval {...} blocks for setup (only before first test)
         # These are commonly used in TCL tests to set up tables and data
         for match in self.DB_EVAL_BLOCK_PATTERN.finditer(content):
+            start = match.start()
+
+            # Only consider setup SQL before the first test
+            if start >= first_test_pos:
+                continue
+
             sql = self._clean_sql(match.group(1))
-            if sql and not self._has_complex_tcl(sql):
+            if sql and not self._has_complex_tcl(sql) and self._is_valid_setup_sql(sql):
                 result.setup_sql.append(sql)
 
         # Sort tests by line number

@@ -125,9 +125,53 @@ class VibeSQL:
         except Exception as e:
             return (False, "", str(e))
 
+    def _should_skip_setup_sql(self, sql: str) -> bool:
+        """
+        Check if a setup SQL statement should be skipped.
+
+        Skips SQLite-specific statements that we don't support.
+        """
+        sql_upper = sql.upper().strip()
+
+        # Skip PRAGMA statements (SQLite configuration)
+        if sql_upper.startswith('PRAGMA'):
+            return True
+
+        # Skip ANALYZE statements (SQLite-specific)
+        if sql_upper.startswith('ANALYZE'):
+            return True
+
+        # Skip REINDEX statements (SQLite-specific)
+        if sql_upper.startswith('REINDEX'):
+            return True
+
+        # Skip EXPLAIN statements
+        if sql_upper.startswith('EXPLAIN'):
+            return True
+
+        # Skip SELECT statements (don't modify state)
+        if sql_upper.startswith('SELECT'):
+            return True
+
+        # Skip statements that reference sqlite_master
+        if 'SQLITE_MASTER' in sql_upper or 'SQLITE_SCHEMA' in sql_upper:
+            return True
+
+        # Skip standalone transaction control statements
+        # These are typically used with TCL control structures we can't parse
+        if sql_upper in ('BEGIN', 'BEGIN TRANSACTION', 'COMMIT', 'ROLLBACK',
+                         'BEGIN;', 'COMMIT;', 'ROLLBACK;'):
+            return True
+
+        return False
+
     def execute_setup(self, sql_statements: list[str]) -> tuple[bool, str]:
-        """Execute setup SQL statements."""
+        """Execute setup SQL statements, skipping SQLite-specific ones."""
         for sql in sql_statements:
+            # Skip SQLite-specific statements
+            if self._should_skip_setup_sql(sql):
+                continue
+
             success, _, stderr = self.execute(sql)
             if not success:
                 return (False, f"Setup failed: {stderr}")
