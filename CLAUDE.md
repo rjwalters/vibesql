@@ -534,6 +534,8 @@ VibeSQL runs SQLite's canonical TCL test suite for conformance testing. The test
 
 #### Running TCL Tests
 
+Tests use native `tclsh` by default, which correctly handles TCL constructs like loops that cannot be statically parsed.
+
 ```bash
 # Run Priority 1 tests (core SQL: select, where, join, etc.)
 make test-tcl
@@ -547,8 +549,11 @@ make test-tcl-file FILE=select1.test
 # Show test status
 make test-tcl-status
 
-# Parse a test file to see extracted tests
+# Parse a test file to see extracted tests (static parsing)
 ./scripts/tcltest parse select1.test
+
+# Use static parsing mode (for debugging)
+./scripts/tcltest test select1.test --no-native-tcl
 ```
 
 #### Priority Levels
@@ -559,8 +564,9 @@ make test-tcl-status
 
 #### Test Infrastructure
 
-- **Parser**: `scripts/tcl_parser.py` - Extracts `do_execsql_test` and `do_catchsql_test` patterns
-- **Runner**: `scripts/tcl_runner.py` - Executes tests against VibeSQL
+- **TCL Shim**: `scripts/tester_vibesql.tcl` - Compatibility layer for running SQLite's TCL tests against VibeSQL
+- **Runner**: `scripts/tcl_runner.py` - Executes tests (supports both native TCL and static parsing modes)
+- **Parser**: `scripts/tcl_parser.py` - Static parser for extracting tests (used with `--no-native-tcl`)
 - **CLI**: `scripts/tcltest` - Unified command-line interface
 - **Results**: `~/.vibesql/test_results/tcl_test_results.vbsql`
 
