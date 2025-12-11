@@ -306,16 +306,12 @@ impl<'a> RowNormalizer<'a> {
                     });
                 }
             }
-            // Binary types - Note: No SqlValue::Blob variant exists yet
+            // Binary types - implements SQLite's BLOB affinity
             DataType::BinaryLargeObject => {
-                // For now, accept Varchar as a placeholder until BLOB is implemented
-                if !matches!(value, SqlValue::Varchar(_)) {
-                    return Err(StorageError::TypeMismatch {
-                        column: column_name.to_string(),
-                        expected: "BLOB".to_string(),
-                        actual: value.type_name().to_string(),
-                    });
-                }
+                // BLOB affinity accepts any value type.
+                // This implements SQLite's flexible typing where untyped columns
+                // (which default to BLOB affinity) can store values of any type.
+                // The value is stored as-is without conversion.
             }
             DataType::Bit { .. } => {
                 // BIT type: For now, accept Varchar or Integer as placeholder until proper BIT type
