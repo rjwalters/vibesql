@@ -57,7 +57,33 @@ pub(super) fn evaluate(
         }
     }
 
-    // Regular aggregate - evaluate argument for each row
+    // Handle multi-argument COUNT(DISTINCT a, b, ...) - SQLite extension
+    // This counts distinct combinations of values
+    if name.to_uppercase() == "COUNT" && args.len() > 1 {
+        if !distinct {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Multi-argument COUNT requires DISTINCT".to_string(),
+            ));
+        }
+
+        // Evaluate all arguments for each row and accumulate as tuples
+        for row in group_rows {
+            evaluator.clear_cse_cache();
+
+            let mut tuple_values = Vec::with_capacity(args.len());
+            for arg in args {
+                let value = evaluator.eval(arg, row)?;
+                tuple_values.push(value);
+            }
+            acc.accumulate_tuple(tuple_values);
+        }
+
+        let result = acc.finalize();
+        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+        return Ok(result);
+    }
+
+    // Regular aggregate - evaluate single argument for each row
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedExpression(format!(
             "Aggregate functions expect 1 argument, got {}",

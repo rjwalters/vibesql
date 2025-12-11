@@ -1,4 +1,20 @@
-use std::{cmp::Ordering, collections::HashSet};
+use std::{cmp::Ordering, collections::HashSet, hash::Hash};
+
+/// A tuple of SQL values that can be used as a hash key for multi-argument DISTINCT
+/// For example, COUNT(DISTINCT a, b) needs to track unique (a, b) pairs
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SqlValueTuple(Vec<vibesql_types::SqlValue>);
+
+impl SqlValueTuple {
+    pub fn new(values: Vec<vibesql_types::SqlValue>) -> Self {
+        Self(values)
+    }
+
+    /// Returns true if any value in the tuple is NULL
+    pub fn contains_null(&self) -> bool {
+        self.0.iter().any(|v| v.is_null())
+    }
+}
 
 /// Accumulator for aggregate functions
 #[derive(Debug, Clone)]
@@ -7,6 +23,8 @@ pub enum AggregateAccumulator {
         count: i64,
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
+        /// For multi-argument COUNT(DISTINCT a, b, ...) - track unique tuples
+        seen_tuples: Option<HashSet<SqlValueTuple>>,
     },
     Sum {
         sum: vibesql_types::SqlValue,
@@ -49,7 +67,12 @@ impl AggregateAccumulator {
     pub fn new(function_name: &str, distinct: bool) -> Result<Self, crate::errors::ExecutorError> {
         let seen = if distinct { Some(HashSet::new()) } else { None };
         match function_name.to_uppercase().as_str() {
-            "COUNT" => Ok(AggregateAccumulator::Count { count: 0, distinct, seen }),
+            "COUNT" => Ok(AggregateAccumulator::Count {
+                count: 0,
+                distinct,
+                seen,
+                seen_tuples: None, // Will be initialized on first tuple accumulation
+            }),
             "SUM" => Ok(AggregateAccumulator::Sum {
                 sum: vibesql_types::SqlValue::Integer(0),
                 count: 0,
@@ -81,7 +104,7 @@ impl AggregateAccumulator {
     pub fn accumulate(&mut self, value: &vibesql_types::SqlValue) {
         match self {
             // COUNT - counts non-NULL values
-            AggregateAccumulator::Count { ref mut count, distinct, seen } => {
+            AggregateAccumulator::Count { ref mut count, distinct, seen, .. } => {
                 if value.is_null() {
                     return; // Skip NULL values
                 }
@@ -233,6 +256,48 @@ impl AggregateAccumulator {
         }
     }
 
+    /// Accumulate a tuple of values for multi-argument COUNT(DISTINCT a, b, ...)
+    /// This method is only valid for COUNT with DISTINCT and multiple arguments.
+    /// SQLite semantics: If ANY value in the tuple is NULL, the entire tuple is skipped.
+    pub fn accumulate_tuple(&mut self, values: Vec<vibesql_types::SqlValue>) {
+        match self {
+            AggregateAccumulator::Count { ref mut count, distinct, ref mut seen_tuples, .. } => {
+                // Multi-arg COUNT(DISTINCT) requires DISTINCT flag
+                if !*distinct {
+                    // For non-DISTINCT, just count non-NULL tuples
+                    // SQLite: If any value is NULL, don't count the tuple
+                    if values.iter().any(|v| v.is_null()) {
+                        return;
+                    }
+                    *count += 1;
+                    return;
+                }
+
+                // Create tuple and check for NULLs
+                let tuple = SqlValueTuple::new(values);
+                if tuple.contains_null() {
+                    return; // Skip tuples with any NULL value
+                }
+
+                // Initialize seen_tuples if needed (lazy initialization)
+                if seen_tuples.is_none() {
+                    *seen_tuples = Some(HashSet::new());
+                }
+
+                // Only count if we haven't seen this tuple before
+                let seen_set = seen_tuples.as_mut().unwrap();
+                if !seen_set.contains(&tuple) {
+                    seen_set.insert(tuple);
+                    *count += 1;
+                }
+            }
+            _ => {
+                // Other aggregates don't support multi-argument form
+                // This should be caught earlier by validation
+            }
+        }
+    }
+
     pub fn finalize(&self) -> vibesql_types::SqlValue {
         match self {
             AggregateAccumulator::Count { count, .. } => vibesql_types::SqlValue::Integer(*count),
@@ -286,8 +351,8 @@ impl AggregateAccumulator {
         match (self, other) {
             // COUNT: Sum the counts
             (
-                AggregateAccumulator::Count { count: c1, distinct: d1, seen: s1 },
-                AggregateAccumulator::Count { count: c2, distinct: d2, seen: s2 },
+                AggregateAccumulator::Count { count: c1, distinct: d1, seen: s1, seen_tuples: st1 },
+                AggregateAccumulator::Count { count: c2, distinct: d2, seen: s2, seen_tuples: st2 },
             ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
@@ -296,10 +361,15 @@ impl AggregateAccumulator {
                 }
 
                 if *d1 {
-                    // DISTINCT: Merge seen sets
+                    // DISTINCT: Merge seen sets (single values) or seen_tuples (multi-arg)
                     if let (Some(seen1), Some(seen2)) = (s1, s2) {
                         seen1.extend(seen2);
                         *c1 = seen1.len() as i64;
+                    }
+                    // Also merge tuple sets for multi-arg COUNT(DISTINCT)
+                    if let (Some(st1_set), Some(st2_set)) = (st1, st2) {
+                        st1_set.extend(st2_set);
+                        *c1 = st1_set.len() as i64;
                     }
                 } else {
                     *c1 += c2;
@@ -653,8 +723,10 @@ mod tests {
 
     #[test]
     fn test_combine_count() {
-        let mut acc1 = AggregateAccumulator::Count { count: 5, distinct: false, seen: None };
-        let acc2 = AggregateAccumulator::Count { count: 3, distinct: false, seen: None };
+        let mut acc1 =
+            AggregateAccumulator::Count { count: 5, distinct: false, seen: None, seen_tuples: None };
+        let acc2 =
+            AggregateAccumulator::Count { count: 3, distinct: false, seen: None, seen_tuples: None };
 
         acc1.combine(acc2).unwrap();
 
@@ -674,8 +746,18 @@ mod tests {
         seen2.insert(SqlValue::Integer(2));
         seen2.insert(SqlValue::Integer(3));
 
-        let mut acc1 = AggregateAccumulator::Count { count: 2, distinct: true, seen: Some(seen1) };
-        let acc2 = AggregateAccumulator::Count { count: 2, distinct: true, seen: Some(seen2) };
+        let mut acc1 = AggregateAccumulator::Count {
+            count: 2,
+            distinct: true,
+            seen: Some(seen1),
+            seen_tuples: None,
+        };
+        let acc2 = AggregateAccumulator::Count {
+            count: 2,
+            distinct: true,
+            seen: Some(seen2),
+            seen_tuples: None,
+        };
 
         acc1.combine(acc2).unwrap();
 
@@ -686,6 +768,35 @@ mod tests {
             }
             _ => panic!("Expected Count accumulator"),
         }
+    }
+
+    #[test]
+    fn test_count_distinct_multi_arg() {
+        // Test COUNT(DISTINCT a, b) with tuple tracking
+        let mut acc = AggregateAccumulator::new("COUNT", true).unwrap();
+
+        // Accumulate some tuples: (1, 1), (1, 2), (2, 1), (1, 1) - last is duplicate
+        acc.accumulate_tuple(vec![SqlValue::Integer(1), SqlValue::Integer(1)]);
+        acc.accumulate_tuple(vec![SqlValue::Integer(1), SqlValue::Integer(2)]);
+        acc.accumulate_tuple(vec![SqlValue::Integer(2), SqlValue::Integer(1)]);
+        acc.accumulate_tuple(vec![SqlValue::Integer(1), SqlValue::Integer(1)]); // duplicate
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Integer(3)); // 3 unique tuples
+    }
+
+    #[test]
+    fn test_count_distinct_multi_arg_with_nulls() {
+        // Test that tuples with NULLs are skipped
+        let mut acc = AggregateAccumulator::new("COUNT", true).unwrap();
+
+        acc.accumulate_tuple(vec![SqlValue::Integer(1), SqlValue::Integer(1)]);
+        acc.accumulate_tuple(vec![SqlValue::Integer(1), SqlValue::Null]); // skipped
+        acc.accumulate_tuple(vec![SqlValue::Null, SqlValue::Integer(1)]); // skipped
+        acc.accumulate_tuple(vec![SqlValue::Integer(2), SqlValue::Integer(2)]);
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Integer(2)); // Only 2 valid tuples
     }
 
     #[test]
@@ -796,7 +907,8 @@ mod tests {
 
     #[test]
     fn test_combine_incompatible_types_fails() {
-        let mut acc1 = AggregateAccumulator::Count { count: 5, distinct: false, seen: None };
+        let mut acc1 =
+            AggregateAccumulator::Count { count: 5, distinct: false, seen: None, seen_tuples: None };
         let acc2 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(10),
             count: 3,
@@ -810,9 +922,14 @@ mod tests {
 
     #[test]
     fn test_combine_different_distinct_flags_fails() {
-        let mut acc1 = AggregateAccumulator::Count { count: 5, distinct: false, seen: None };
-        let acc2 =
-            AggregateAccumulator::Count { count: 3, distinct: true, seen: Some(HashSet::new()) };
+        let mut acc1 =
+            AggregateAccumulator::Count { count: 5, distinct: false, seen: None, seen_tuples: None };
+        let acc2 = AggregateAccumulator::Count {
+            count: 3,
+            distinct: true,
+            seen: Some(HashSet::new()),
+            seen_tuples: None,
+        };
 
         let result = acc1.combine(acc2);
         assert!(result.is_err());
