@@ -113,13 +113,15 @@ impl Parser {
             return Ok(Some(self.parse_extract_function()?));
         }
 
-        // Check if this is an aggregate function
+        // Check if this might be an aggregate function (before we know argument count)
+        // Note: MIN/MAX with multiple arguments are scalar functions (like LEAST/GREATEST)
+        // while MIN/MAX with a single argument are aggregate functions
         let function_name_upper = first.to_uppercase();
-        let is_aggregate =
+        let might_be_aggregate =
             matches!(function_name_upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX");
 
-        // Parse optional DISTINCT or ALL for aggregate functions
-        let distinct = if is_aggregate {
+        // Parse optional DISTINCT or ALL for potential aggregate functions
+        let distinct = if might_be_aggregate {
             if matches!(self.peek(), Token::Keyword(Keyword::Distinct)) {
                 self.advance(); // consume DISTINCT
                 true
@@ -186,6 +188,14 @@ impl Parser {
                 over: window_spec,
             }));
         }
+
+        // Determine if this is truly an aggregate function
+        // MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
+        let is_aggregate = match function_name_upper.as_str() {
+            "COUNT" | "SUM" | "AVG" => true,
+            "MIN" | "MAX" => args.len() <= 1 && !distinct, // multi-arg or DISTINCT with >1 arg = scalar
+            _ => false,
+        };
 
         // Return appropriate expression type
         if is_aggregate {

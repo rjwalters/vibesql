@@ -135,6 +135,51 @@ fn test_parse_min_max_functions() {
 }
 
 #[test]
+fn test_parse_scalar_min_max_functions() {
+    // Multi-argument MIN/MAX should be parsed as regular (scalar) functions, not aggregates
+    let result = Parser::parse_sql("SELECT min(11, 22), max(1, 2, 3);");
+    assert!(result.is_ok(), "Failed to parse scalar min/max: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert_eq!(select.select_list.len(), 2);
+
+            // Check min(11, 22) - should be a scalar Function, not AggregateFunction
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                    vibesql_ast::Expression::Function { name, args, .. } => {
+                        assert_eq!(name.to_uppercase(), "MIN");
+                        assert_eq!(args.len(), 2, "min(11, 22) should have 2 arguments");
+                    }
+                    vibesql_ast::Expression::AggregateFunction { .. } => {
+                        panic!("Multi-argument min should be parsed as scalar Function, not AggregateFunction");
+                    }
+                    _ => panic!("Expected scalar Function, got {:?}", expr),
+                },
+                _ => panic!("Expected expression"),
+            }
+
+            // Check max(1, 2, 3) - should be a scalar Function, not AggregateFunction
+            match &select.select_list[1] {
+                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                    vibesql_ast::Expression::Function { name, args, .. } => {
+                        assert_eq!(name.to_uppercase(), "MAX");
+                        assert_eq!(args.len(), 3, "max(1, 2, 3) should have 3 arguments");
+                    }
+                    vibesql_ast::Expression::AggregateFunction { .. } => {
+                        panic!("Multi-argument max should be parsed as scalar Function, not AggregateFunction");
+                    }
+                    _ => panic!("Expected scalar Function, got {:?}", expr),
+                },
+                _ => panic!("Expected expression"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
 fn test_parse_aggregate_with_alias() {
     let result = Parser::parse_sql("SELECT COUNT(*) AS total FROM users;");
     assert!(result.is_ok());

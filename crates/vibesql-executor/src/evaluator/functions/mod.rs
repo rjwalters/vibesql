@@ -89,6 +89,10 @@ pub(super) fn eval_scalar_function(
         "DEGREES" => numeric::degrees(args),
         "GREATEST" => numeric::greatest(args),
         "LEAST" => numeric::least(args),
+        // SQLite-compatible scalar MIN/MAX (multi-argument form)
+        // These return NULL if any argument is NULL, unlike LEAST/GREATEST
+        "MIN" => numeric::scalar_min(args),
+        "MAX" => numeric::scalar_max(args),
         "FORMAT" => numeric::format(args),
 
         // Vector functions

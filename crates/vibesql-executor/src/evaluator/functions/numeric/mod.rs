@@ -30,7 +30,7 @@ mod trigonometric;
 
 // Re-export all public functions
 pub(super) use basic::{abs, mod_fn as mod_func, pi, sign};
-pub(super) use comparison::{greatest, least};
+pub(super) use comparison::{greatest, least, scalar_max, scalar_min};
 pub(super) use decimal::format;
 pub(super) use exponential::{exp, ln, log10, power, sqrt};
 pub(super) use rounding::{ceil, floor, round, truncate};

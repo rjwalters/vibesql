@@ -24,9 +24,16 @@ impl SelectExecutor<'_> {
             // New AggregateFunction variant
             vibesql_ast::Expression::AggregateFunction { .. } => true,
             // Old Function variant (backwards compatibility for aggregates)
+            // Note: MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
             vibesql_ast::Expression::Function { name, args, .. } => {
+                let name_upper = name.to_uppercase();
                 // Check if this is an aggregate function name
-                if matches!(name.to_uppercase().as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX") {
+                let is_aggregate = match name_upper.as_str() {
+                    "COUNT" | "SUM" | "AVG" => true,
+                    "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
+                    _ => false,
+                };
+                if is_aggregate {
                     return true;
                 }
                 // Otherwise, check if any arguments contain aggregates
