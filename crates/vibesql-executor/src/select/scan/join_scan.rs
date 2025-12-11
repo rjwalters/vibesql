@@ -43,9 +43,19 @@ use crate::{
     timeout::TimeoutContext,
 };
 
-/// Threshold for using Index Nested Loop semi-join instead of hash join.
-/// If left side has fewer rows than this, INL is typically faster.
-const INL_THRESHOLD: usize = 1000;
+/// Base threshold for using Index Nested Loop semi-join instead of hash join.
+/// If left side has fewer rows than this, INL is always preferred.
+const INL_BASE_THRESHOLD: usize = 1000;
+
+/// Maximum threshold for INL semi-join when cost-based analysis is used.
+/// Even with favorable cost estimates, we cap INL at this threshold to avoid
+/// excessive random I/O for very large left sides.
+const INL_MAX_THRESHOLD: usize = 100_000;
+
+/// Minimum ratio of right table size to left size required for cost-based INL.
+/// When right_rows / left_rows > this ratio, INL is likely faster even for
+/// larger left sides because hash join would scan the entire right table.
+const INL_SIZE_RATIO_THRESHOLD: usize = 10;
 
 /// Execute a JOIN operation
 #[allow(clippy::too_many_arguments)]
@@ -95,25 +105,43 @@ where
         execute_subquery,
     )?;
 
-    // Index Nested Loop (INL) optimization for SEMI joins with small left side (#3392)
-    // When left side is small, use index lookups on right table instead of scanning all rows
+    // Index Nested Loop (INL) optimization for SEMI joins (#3392, #4354)
+    // When left side is small OR right table is much larger, use index lookups
+    // on right table instead of scanning all rows for hash join.
+    //
+    // Cost model:
+    // - Hash join: O(right_rows) to build hash table + O(left_rows) to probe
+    // - INL: O(left_distinct_keys * avg_matches_per_key) with index seeks
+    //
+    // INL wins when: left_rows * avg_matches << right_rows
+    // This is especially true for semi-joins where we stop at first match.
     if matches!(join_type, vibesql_ast::JoinType::Semi) {
         let left_row_count = left_result.as_slice().len();
-        if left_row_count > 0 && left_row_count < INL_THRESHOLD {
-            // Try exact-match INL first (requires full PK coverage)
-            if let Some(result) =
-                try_index_nested_loop_semi_join(&left_result, right, condition, database)?
-            {
-                return Ok(result);
-            }
+        if left_row_count > 0 {
+            // Determine if INL should be used based on cost estimation
+            let should_use_inl = should_use_inl_for_semi_join(
+                left_row_count,
+                right,
+                condition,
+                database,
+            );
 
-            // Try prefix-scan INL (works with partial index key match)
-            // This handles cases like TPC-H Q4 where we join on L_ORDERKEY but the
-            // index is on (L_ORDERKEY, L_LINENUMBER) - we can still use a prefix scan
-            if let Some(result) =
-                try_prefix_scan_semi_join(&left_result, right, condition, database)?
-            {
-                return Ok(result);
+            if should_use_inl {
+                // Try exact-match INL first (requires full PK coverage)
+                if let Some(result) =
+                    try_index_nested_loop_semi_join(&left_result, right, condition, database)?
+                {
+                    return Ok(result);
+                }
+
+                // Try prefix-scan INL (works with partial index key match)
+                // This handles cases like TPC-H Q4 where we join on L_ORDERKEY but the
+                // index is on (L_ORDERKEY, L_LINENUMBER) - we can still use a prefix scan
+                if let Some(result) =
+                    try_prefix_scan_semi_join(&left_result, right, condition, database)?
+                {
+                    return Ok(result);
+                }
             }
         }
     }
@@ -555,10 +583,98 @@ fn collect_table_names(from: &vibesql_ast::FromClause, tables: &mut Vec<String>)
     }
 }
 
+/// Determine whether to use Index Nested Loop (INL) for a semi-join.
+///
+/// This implements a cost-based decision between INL and hash semi-join:
+///
+/// 1. **Always use INL** when left_rows < INL_BASE_THRESHOLD (1000)
+///    - Small left side means few index lookups, definitely faster than hash
+///
+/// 2. **Use INL when right table is much larger** (right_rows / left_rows > ratio threshold)
+///    - Hash join scans the entire right table to build hash table
+///    - INL does left_rows index lookups, each returning ~(right_rows/distinct_keys) rows
+///    - For semi-join, we stop at first match, so avg cost is even lower
+///
+/// 3. **Cap at INL_MAX_THRESHOLD** to prevent excessive random I/O
+///
+/// Example (TPC-H Q4):
+/// - left_rows = 5,406 (orders after date filter)
+/// - right_rows = 600,000 (lineitem)
+/// - ratio = 600,000 / 5,406 ≈ 111 >> 10
+/// - Decision: Use INL (index lookups) instead of hash (full lineitem scan)
+fn should_use_inl_for_semi_join(
+    left_row_count: usize,
+    right_from: &vibesql_ast::FromClause,
+    _condition: &Option<vibesql_ast::Expression>,
+    database: &vibesql_storage::Database,
+) -> bool {
+    let debug = std::env::var("INL_DECISION_DEBUG").is_ok();
+
+    // Rule 1: Always use INL for small left sides
+    if left_row_count < INL_BASE_THRESHOLD {
+        if debug {
+            eprintln!(
+                "[INL_DECISION] left_rows={} < base_threshold={}, using INL",
+                left_row_count, INL_BASE_THRESHOLD
+            );
+        }
+        return true;
+    }
+
+    // Rule 3: Never use INL for very large left sides (too much random I/O)
+    if left_row_count > INL_MAX_THRESHOLD {
+        if debug {
+            eprintln!(
+                "[INL_DECISION] left_rows={} > max_threshold={}, using hash join",
+                left_row_count, INL_MAX_THRESHOLD
+            );
+        }
+        return false;
+    }
+
+    // Rule 2: Use cost-based decision for medium-sized left sides
+    // Get right table cardinality
+    let right_row_count = match right_from {
+        vibesql_ast::FromClause::Table { name, .. } => {
+            database.get_table(name).map(|t| t.row_count()).unwrap_or(0)
+        }
+        _ => {
+            // Complex right side (subquery/join), can't estimate, use hash join
+            if debug {
+                eprintln!("[INL_DECISION] Complex right side, using hash join");
+            }
+            return false;
+        }
+    };
+
+    // Calculate size ratio
+    let ratio = if left_row_count > 0 {
+        right_row_count / left_row_count
+    } else {
+        0
+    };
+
+    // Decision: Use INL if right table is significantly larger than left
+    let use_inl = ratio >= INL_SIZE_RATIO_THRESHOLD;
+
+    if debug {
+        eprintln!(
+            "[INL_DECISION] left_rows={}, right_rows={}, ratio={}, threshold={}, decision={}",
+            left_row_count,
+            right_row_count,
+            ratio,
+            INL_SIZE_RATIO_THRESHOLD,
+            if use_inl { "INL" } else { "hash" }
+        );
+    }
+
+    use_inl
+}
+
 /// Try to execute a SEMI join using Index Nested Loop (INL) strategy.
 ///
 /// This optimization is used when:
-/// 1. The left side is small (< INL_THRESHOLD rows)
+/// 1. The left side is small (< INL_BASE_THRESHOLD rows)
 /// 2. The right side is a simple table (not a subquery or join)
 /// 3. There's an equi-join condition on a column with an index
 ///
