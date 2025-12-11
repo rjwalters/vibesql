@@ -143,6 +143,13 @@ Options for 'run':
   --limit N                Limit to N files
   --parallel               Run tests in parallel
   --verbose                Show detailed output
+  --no-native-tcl          Use static parsing instead of native tclsh
+
+Options for 'test':
+  --no-native-tcl          Use static parsing instead of native tclsh
+
+Note: Native tclsh mode is used by default. This correctly handles TCL constructs
+like loops that cannot be statically parsed.
 
 Examples:
   # Test a specific file
@@ -159,6 +166,10 @@ Examples:
 
   # Quick status
   ./scripts/tcltest status
+
+  # Use static parsing (for debugging)
+  ./scripts/tcltest test select1.test --no-native-tcl
+  ./scripts/tcltest run --priority 1 --no-native-tcl
 
 Priority Levels:
   1 - Core SQL: select, insert, update, delete, where, join, aggregate, func
@@ -222,27 +233,61 @@ EOF
 
 # Test command: run a single file
 cmd_test() {
-    if [ $# -eq 0 ] || [ "$1" = "--help" ]; then
-        cat << 'EOF'
+    local native_tcl=true  # Default to native TCL mode
+    local test_file=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --help)
+                cat << 'EOF'
 Test a single TCL test file against VibeSQL
 
 Usage:
-  ./scripts/tcltest test <file>
+  ./scripts/tcltest test <file> [options]
 
 Arguments:
   <file>    Path to test file relative to docs/reference/sqlite/test/
 
+Options:
+  --native-tcl       Use native tclsh (default, handles TCL loops)
+  --no-native-tcl    Use static parsing instead of native tclsh
+
 Examples:
   ./scripts/tcltest test select1.test
-  ./scripts/tcltest test where1.test
+  ./scripts/tcltest test select1.test --no-native-tcl
 EOF
-        exit 0
+                exit 0
+                ;;
+            --native-tcl)
+                native_tcl=true
+                shift
+                ;;
+            --no-native-tcl)
+                native_tcl=false
+                shift
+                ;;
+            *)
+                if [ -z "$test_file" ]; then
+                    test_file="$1"
+                else
+                    print_error "Unknown option: $1"
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$test_file" ]; then
+        print_error "No test file specified"
+        echo "Usage: ./scripts/tcltest test <file> [--native-tcl]"
+        exit 1
     fi
 
     check_vibesql
     check_tcl_tests
 
-    local test_file="$1"
     local full_path="$TCL_TEST_DIR/$test_file"
 
     if [ ! -f "$full_path" ]; then
@@ -254,10 +299,23 @@ EOF
     fi
 
     print_info "Testing: $test_file"
+    if $native_tcl; then
+        print_info "Using native TCL mode"
+    fi
     echo ""
 
     # Run the test using Python runner
-    python3 scripts/tcl_runner.py --file "$full_path" --vibesql "$VIBESQL_BIN"
+    local py_args=(
+        "scripts/tcl_runner.py"
+        "--file" "$full_path"
+        "--vibesql" "$VIBESQL_BIN"
+    )
+
+    if $native_tcl; then
+        py_args+=("--native-tcl")
+    fi
+
+    python3 "${py_args[@]}"
 }
 
 # Run command: execute test suite
@@ -267,6 +325,7 @@ cmd_run() {
     local limit=""
     local parallel=false
     local verbose=false
+    local native_tcl=true  # Default to native TCL mode
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -284,6 +343,8 @@ Options:
   --limit N                Limit to N files
   --parallel               Run tests in parallel
   --verbose                Show detailed output
+  --native-tcl             Use native tclsh (default, handles TCL loops)
+  --no-native-tcl          Use static parsing instead of native tclsh
 
 Examples:
   # Run Priority 1 tests (core SQL)
@@ -294,6 +355,9 @@ Examples:
 
   # Run first 10 files
   ./scripts/tcltest run --limit 10
+
+  # Use static parsing (original mode)
+  ./scripts/tcltest run --no-native-tcl --pattern "select*.test"
 EOF
                 exit 0
                 ;;
@@ -315,6 +379,14 @@ EOF
                 ;;
             --verbose)
                 verbose=true
+                shift
+                ;;
+            --native-tcl)
+                native_tcl=true
+                shift
+                ;;
+            --no-native-tcl)
+                native_tcl=false
                 shift
                 ;;
             *)
@@ -356,6 +428,11 @@ EOF
     fi
 
     local file_count=${#files[@]}
+    if [ "$file_count" -eq 0 ]; then
+        print_error "No test files found matching the pattern"
+        exit 1
+    fi
+
     print_info "Running TCL test suite"
     echo "Files to test: $file_count"
     if [ -n "$pattern" ]; then
@@ -363,6 +440,11 @@ EOF
     fi
     if [ -n "$priority" ]; then
         echo "Priority: $priority"
+    fi
+    if $native_tcl; then
+        echo "Mode: native tclsh"
+    else
+        echo "Mode: static parsing"
     fi
     echo ""
 
@@ -379,6 +461,10 @@ EOF
 
     if $parallel; then
         py_args+=("--parallel")
+    fi
+
+    if $native_tcl; then
+        py_args+=("--native-tcl")
     fi
 
     # Add files
