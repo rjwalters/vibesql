@@ -3,7 +3,12 @@
 TCL Test Runner for VibeSQL
 
 Executes parsed TCL tests against VibeSQL and records results.
-Works with tcl_parser.py to parse test files first.
+Supports two modes:
+1. Static parsing mode (default): Extract tests from TCL files and execute them
+2. Native TCL mode (--native-tcl): Run test files directly with tclsh and our shim
+
+Use --native-tcl for test files that contain TCL constructs like for loops
+that generate data dynamically.
 """
 
 import argparse
@@ -691,6 +696,77 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
             pass
 
 
+def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 60.0) -> tuple[int, int, int, list[str]]:
+    """
+    Run a TCL test file using the native tclsh interpreter with our VibeSQL shim.
+
+    This mode is for test files that use TCL constructs (like for loops) that
+    can't be statically parsed.
+
+    Returns: (passed, failed, skipped, failed_test_names)
+    """
+    cmd = ["tclsh", shim_path, test_file]
+    if verbose:
+        cmd.append("--verbose")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = result.stdout + result.stderr
+
+        # Parse the summary from output
+        # Expected format:
+        # Tests run:    N
+        # Tests passed: N
+        # Tests failed: N
+        # Tests skipped: N
+
+        passed = 0
+        failed = 0
+        skipped = 0
+        failed_tests = []
+
+        for line in output.split('\n'):
+            if 'Tests passed:' in line:
+                match = re.search(r'Tests passed:\s*(\d+)', line)
+                if match:
+                    passed = int(match.group(1))
+            elif 'Tests failed:' in line:
+                match = re.search(r'Tests failed:\s*(\d+)', line)
+                if match:
+                    failed = int(match.group(1))
+            elif 'Tests skipped:' in line:
+                match = re.search(r'Tests skipped:\s*(\d+)', line)
+                if match:
+                    skipped = int(match.group(1))
+
+        # Extract failed test names if present
+        if 'Failed tests:' in output:
+            in_failed_section = False
+            for line in output.split('\n'):
+                if 'Failed tests:' in line:
+                    in_failed_section = True
+                    continue
+                if in_failed_section and line.strip().startswith('-'):
+                    failed_tests.append(line.strip().lstrip('- '))
+
+        if verbose:
+            print(output)
+
+        return passed, failed, skipped, failed_tests
+
+    except subprocess.TimeoutExpired:
+        print(f"Timeout running {test_file}")
+        return 0, 0, 0, ["TIMEOUT"]
+    except Exception as e:
+        print(f"Error running {test_file}: {e}")
+        return 0, 0, 0, [str(e)]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run TCL tests against VibeSQL")
     parser.add_argument("--file", "-f", help="Single file to test")
@@ -701,18 +777,16 @@ def main():
     parser.add_argument("--parallel", action="store_true", help="Run tests in parallel")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--timeout", type=float, default=5.0, help="Per-test timeout in seconds")
+    parser.add_argument("--native-tcl", action="store_true",
+                        help="Run tests using native tclsh instead of parsing (for files with TCL loops)")
+    parser.add_argument("--tcl-shim", default=None,
+                        help="Path to TCL shim (default: scripts/tester_vibesql.tcl)")
 
     args = parser.parse_args()
 
     if not os.path.exists(args.vibesql):
         print(f"Error: VibeSQL binary not found: {args.vibesql}", file=sys.stderr)
         sys.exit(1)
-
-    runner = TclTestRunner(
-        vibesql_path=args.vibesql,
-        verbose=args.verbose,
-        timeout=args.timeout,
-    )
 
     # Determine files to run
     if args.file:
@@ -722,6 +796,61 @@ def main():
     else:
         print("Error: No files specified", file=sys.stderr)
         sys.exit(1)
+
+    # Native TCL mode - run with tclsh and our shim
+    if args.native_tcl:
+        # Find the shim
+        script_dir = Path(__file__).parent
+        shim_path = args.tcl_shim or str(script_dir / "tester_vibesql.tcl")
+
+        if not os.path.exists(shim_path):
+            print(f"Error: TCL shim not found: {shim_path}", file=sys.stderr)
+            sys.exit(1)
+
+        total_passed = 0
+        total_failed = 0
+        total_skipped = 0
+        all_failed_tests = []
+
+        for file_path in file_paths:
+            if args.verbose:
+                print(f"\nRunning: {file_path}")
+
+            passed, failed, skipped, failed_tests = run_native_tcl(
+                file_path, shim_path, verbose=args.verbose, timeout=args.timeout
+            )
+            total_passed += passed
+            total_failed += failed
+            total_skipped += skipped
+            all_failed_tests.extend(failed_tests)
+
+        # Print summary
+        total_tests = total_passed + total_failed + total_skipped
+        print()
+        print("=" * 50)
+        print(f"Total tests: {total_tests}")
+        print(f"Passed:      {total_passed} ({total_passed/total_tests*100:.1f}%)" if total_tests > 0 else "Passed: 0")
+        print(f"Failed:      {total_failed}")
+        print(f"Skipped:     {total_skipped}")
+        print("=" * 50)
+
+        if all_failed_tests:
+            print("\nFailed tests:")
+            for t in all_failed_tests[:20]:  # Limit to first 20
+                print(f"  - {t}")
+            if len(all_failed_tests) > 20:
+                print(f"  ... and {len(all_failed_tests) - 20} more")
+
+        if total_failed > 0:
+            sys.exit(1)
+        sys.exit(0)
+
+    # Standard parsing mode
+    runner = TclTestRunner(
+        vibesql_path=args.vibesql,
+        verbose=args.verbose,
+        timeout=args.timeout,
+    )
 
     # Run tests
     summary = runner.run_files(file_paths, parallel=args.parallel)
