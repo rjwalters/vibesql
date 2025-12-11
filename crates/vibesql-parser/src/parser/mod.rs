@@ -389,6 +389,10 @@ impl Parser {
                 let deallocate_stmt = self.parse_deallocate_statement()?;
                 Ok(vibesql_ast::Statement::Deallocate(deallocate_stmt))
             }
+            Token::Keyword(Keyword::Pragma) => {
+                let pragma_stmt = self.parse_pragma_statement()?;
+                Ok(vibesql_ast::Statement::Pragma(pragma_stmt))
+            }
             _ => {
                 Err(ParseError { message: format!("Expected statement, found {:?}", self.peek()) })
             }

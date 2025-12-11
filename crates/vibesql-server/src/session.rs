@@ -406,6 +406,12 @@ impl Session {
                 Ok(ExecutionResult::Other { message: "RELEASE SAVEPOINT".to_string() })
             }
 
+            // PRAGMA statements are SQLite-specific configuration commands
+            // We parse them for compatibility but treat them as no-ops
+            Statement::Pragma(_pragma_stmt) => {
+                Ok(ExecutionResult::Other { message: "PRAGMA".to_string() })
+            }
+
             _ => {
                 // For now, return a generic success for other statements
                 Ok(ExecutionResult::Other { message: "Command completed successfully".to_string() })

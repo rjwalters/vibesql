@@ -162,6 +162,10 @@ impl<'arena> ArenaParser<'arena> {
                 let stmt = self.parse_analyze_statement()?;
                 Ok(Statement::Analyze(stmt))
             }
+            Token::Keyword(Keyword::Pragma) => {
+                let stmt = self.parse_pragma_statement()?;
+                Ok(Statement::Pragma(stmt))
+            }
 
             // Transaction statements
             Token::Keyword(Keyword::Begin) | Token::Keyword(Keyword::Start) => {

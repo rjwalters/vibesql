@@ -12,11 +12,12 @@ use crate::{
     DropCharacterSetStmt, DropCollationStmt, DropCronStmt, DropDomainStmt, DropFunctionStmt,
     DropIndexStmt, DropProcedureStmt, DropRoleStmt, DropSchemaStmt, DropSequenceStmt,
     DropTableStmt, DropTranslationStmt, DropTriggerStmt, DropTypeStmt, DropViewStmt, ExecuteStmt,
-    ExplainStmt, FetchStmt, GrantStmt, InsertStmt, OpenCursorStmt, PrepareStmt, ReindexStmt,
-    ReleaseSavepointStmt, RevokeStmt, RollbackStmt, RollbackToSavepointStmt, SavepointStmt,
-    ScheduleAfterStmt, ScheduleAtStmt, SelectStmt, SetCatalogStmt, SetNamesStmt, SetSchemaStmt,
-    SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, ShowColumnsStmt, ShowCreateTableStmt,
-    ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt, TruncateTableStmt, UpdateStmt,
+    ExplainStmt, FetchStmt, GrantStmt, InsertStmt, OpenCursorStmt, PragmaStmt, PrepareStmt,
+    ReindexStmt, ReleaseSavepointStmt, RevokeStmt, RollbackStmt, RollbackToSavepointStmt,
+    SavepointStmt, ScheduleAfterStmt, ScheduleAtStmt, SelectStmt, SetCatalogStmt, SetNamesStmt,
+    SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, ShowColumnsStmt,
+    ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt, TruncateTableStmt,
+    UpdateStmt,
 };
 
 // ============================================================================
@@ -108,4 +109,6 @@ pub enum Statement {
     DropCron(DropCronStmt),
     AlterCron(AlterCronStmt),
     CancelSchedule(CancelScheduleStmt),
+    // SQLite compatibility
+    Pragma(PragmaStmt),
 }
