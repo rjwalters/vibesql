@@ -20,7 +20,7 @@ use vibesql_types::SqlValue;
 use crate::{
     errors::ExecutorError,
     evaluator::casting::{
-        boolean_to_i64, is_approximate_numeric, is_exact_numeric, to_f64, to_i64,
+        boolean_to_i64, is_approximate_numeric, is_exact_numeric, string_to_number, to_f64, to_i64,
     },
 };
 
@@ -29,6 +29,27 @@ pub(super) enum CoercedValues {
     ExactNumeric(i64, i64),
     ApproximateNumeric(f64, f64),
     Numeric(f64, f64),
+}
+
+/// Helper to convert a value to numeric, with string coercion support
+/// Returns (value_as_i64, value_as_f64, is_float)
+fn coerce_single_value(value: &SqlValue) -> Option<(i64, f64, bool)> {
+    match value {
+        SqlValue::Integer(n) => Some((*n, *n as f64, false)),
+        SqlValue::Smallint(n) => Some((*n as i64, *n as f64, false)),
+        SqlValue::Bigint(n) => Some((*n, *n as f64, false)),
+        SqlValue::Unsigned(n) => Some((*n as i64, *n as f64, false)),
+        SqlValue::Float(f) => Some((*f as i64, *f as f64, true)),
+        SqlValue::Real(f) => Some((*f as i64, *f as f64, true)),
+        SqlValue::Double(f) => Some((*f as i64, *f, true)),
+        SqlValue::Numeric(f) => Some((*f as i64, *f, true)),
+        SqlValue::Boolean(b) => Some((if *b { 1 } else { 0 }, if *b { 1.0 } else { 0.0 }, false)),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            let (i, f, is_float) = string_to_number(s);
+            Some((i, f, is_float))
+        }
+        _ => None,
+    }
 }
 
 /// Helper function to coerce two values to a common numeric type
@@ -58,6 +79,30 @@ pub(super) fn coerce_numeric_values(
         })?;
 
         return Ok(CoercedValues::ExactNumeric(left_i64, right_i64));
+    }
+
+    // Handle string coercion (SQLite compatibility)
+    // When either operand is a string, coerce it to a number
+    if matches!(left, Varchar(_) | Character(_)) || matches!(right, Varchar(_) | Character(_)) {
+        let left_coerced = coerce_single_value(left).ok_or_else(|| ExecutorError::TypeMismatch {
+            left: left.clone(),
+            op: op.to_string(),
+            right: right.clone(),
+        })?;
+
+        let right_coerced =
+            coerce_single_value(right).ok_or_else(|| ExecutorError::TypeMismatch {
+                left: left.clone(),
+                op: op.to_string(),
+                right: right.clone(),
+            })?;
+
+        // If either value is a float, use ApproximateNumeric
+        if left_coerced.2 || right_coerced.2 {
+            return Ok(CoercedValues::ApproximateNumeric(left_coerced.1, right_coerced.1));
+        } else {
+            return Ok(CoercedValues::ExactNumeric(left_coerced.0, right_coerced.0));
+        }
     }
 
     // Mixed exact numeric types - integer arithmetic returns Integer type in both modes
@@ -603,5 +648,184 @@ mod tests {
 
         let step2 = ArithmeticOps::add(&step1, &SqlValue::Integer(-23)).unwrap();
         assert_eq!(step2, SqlValue::Null);
+    }
+
+    // String-to-number coercion tests (SQLite compatibility)
+    #[test]
+    fn test_string_integer_addition() {
+        // '123' + 1 = 124
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("123")),
+            &SqlValue::Integer(1),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(124));
+    }
+
+    #[test]
+    fn test_integer_string_addition() {
+        // 1 + '2' = 3
+        let result = ArithmeticOps::add(
+            &SqlValue::Integer(1),
+            &SqlValue::Varchar(arcstr::ArcStr::from("2")),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(3));
+    }
+
+    #[test]
+    fn test_string_float_addition() {
+        // 1 + '2.5' = 3.5
+        let result = ArithmeticOps::add(
+            &SqlValue::Integer(1),
+            &SqlValue::Varchar(arcstr::ArcStr::from("2.5")),
+        )
+        .unwrap();
+        match result {
+            SqlValue::Float(f) => assert!((f - 3.5).abs() < 0.01),
+            _ => panic!("Expected Float result, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_non_numeric_string() {
+        // 'abc' + 1 = 1 (non-numeric string converts to 0)
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+            &SqlValue::Integer(1),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_whitespace_string() {
+        // '  42  ' + 0 = 42 (whitespace trimmed)
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("  42  ")),
+            &SqlValue::Integer(0),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(42));
+    }
+
+    #[test]
+    fn test_numeric_prefix_string() {
+        // '3.14abc' + 0 = 3.14 (numeric prefix extracted)
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("3.14abc")),
+            &SqlValue::Integer(0),
+        )
+        .unwrap();
+        match result {
+            SqlValue::Float(f) => assert!((f - 3.14).abs() < 0.01),
+            _ => panic!("Expected Float result, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_string_multiplication() {
+        // '3' * 4 = 12
+        let result = ArithmeticOps::multiply(
+            &SqlValue::Varchar(arcstr::ArcStr::from("3")),
+            &SqlValue::Integer(4),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(12));
+    }
+
+    #[test]
+    fn test_string_subtraction() {
+        // '10' - 3 = 7
+        let result = ArithmeticOps::subtract(
+            &SqlValue::Varchar(arcstr::ArcStr::from("10")),
+            &SqlValue::Integer(3),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(7));
+    }
+
+    #[test]
+    fn test_string_division() {
+        // '20' / 4 = 5 (SQLite mode)
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("20")),
+            &SqlValue::Integer(4),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(5));
+    }
+
+    #[test]
+    fn test_string_modulo() {
+        // '17' % 5 = 2
+        let result = ArithmeticOps::modulo(
+            &SqlValue::Varchar(arcstr::ArcStr::from("17")),
+            &SqlValue::Integer(5),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(2));
+    }
+
+    #[test]
+    fn test_empty_string() {
+        // '' + 1 = 1 (empty string converts to 0)
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("")),
+            &SqlValue::Integer(1),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_negative_string() {
+        // '-5' + 10 = 5
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("-5")),
+            &SqlValue::Integer(10),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(5));
+    }
+
+    #[test]
+    fn test_string_with_exponent() {
+        // '1e2' + 0 = 100.0
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("1e2")),
+            &SqlValue::Integer(0),
+        )
+        .unwrap();
+        match result {
+            SqlValue::Float(f) => assert!((f - 100.0).abs() < 0.01),
+            _ => panic!("Expected Float result, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_string_string_addition() {
+        // '10' + '5' = 15 (both strings coerced)
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("10")),
+            &SqlValue::Varchar(arcstr::ArcStr::from("5")),
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(15));
+    }
+
+    #[test]
+    fn test_float_string_addition() {
+        // '1.5' + 0.5 = 2.0
+        let result = ArithmeticOps::add(
+            &SqlValue::Varchar(arcstr::ArcStr::from("1.5")),
+            &SqlValue::Float(0.5),
+        )
+        .unwrap();
+        match result {
+            SqlValue::Float(f) => assert!((f - 2.0).abs() < 0.01),
+            _ => panic!("Expected Float result, got {:?}", result),
+        }
     }
 }
