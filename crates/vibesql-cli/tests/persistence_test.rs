@@ -164,3 +164,60 @@ fn test_new_database_file_creation() {
     // Clean up
     let _ = fs::remove_file(test_db);
 }
+
+#[test]
+fn test_untyped_column_persistence() {
+    // Regression test for issue #4324: Untyped columns persist as BLOB, breaking reloads
+    // When a table with untyped columns is persisted and reloaded, it should still
+    // accept any value type (SQLite type affinity behavior).
+    let test_db = "/tmp/test_vibesql_untyped_column.db";
+
+    // Clean up any existing test file
+    let _ = fs::remove_file(test_db);
+
+    // Session 1: Create table with untyped column
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "CREATE TABLE t(a)"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success(), "CREATE TABLE should succeed");
+
+    // Session 2: Insert integer value (this was failing before the fix)
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "INSERT INTO t VALUES(1)"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(
+        output.status.success(),
+        "INSERT integer should succeed after reload. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Session 3: Insert string value
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "INSERT INTO t VALUES('hello')"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success(), "INSERT string should succeed after reload");
+
+    // Session 4: Insert float value
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "INSERT INTO t VALUES(3.14)"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success(), "INSERT float should succeed after reload");
+
+    // Session 5: Query all data to verify persistence
+    let output = Command::new(vibesql_binary())
+        .args(["--database", test_db, "-c", "SELECT * FROM t"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("1"), "Should contain integer value");
+    assert!(stdout.contains("hello"), "Should contain string value");
+    assert!(stdout.contains("3.14"), "Should contain float value");
+
+    // Clean up
+    let _ = fs::remove_file(test_db);
+}
