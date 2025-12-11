@@ -65,7 +65,9 @@ class RunSummary:
     passed: int = 0
     failed: int = 0
     skipped: int = 0
+    skipped_setup_failed: int = 0  # Tests skipped due to setup failure
     parse_errors: int = 0
+    setup_failures: int = 0  # Number of files with setup failures
     results: list[TestResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -78,7 +80,9 @@ class RunSummary:
             "passed": self.passed,
             "failed": self.failed,
             "skipped": self.skipped,
+            "skipped_setup_failed": self.skipped_setup_failed,
             "parse_errors": self.parse_errors,
+            "setup_failures": self.setup_failures,
             "pass_rate": (self.passed / self.total_tests * 100) if self.total_tests > 0 else 0,
             "results": [r.to_dict() for r in self.results],
         }
@@ -321,9 +325,16 @@ class TclTestRunner:
                     line_number=test.line_number,
                 )
 
-    def run_file(self, file_path: str) -> list[TestResult]:
-        """Run all tests in a single TCL file."""
+    def run_file(self, file_path: str) -> tuple[list[TestResult], bool]:
+        """
+        Run all tests in a single TCL file.
+
+        Returns:
+            Tuple of (results list, setup_failed boolean)
+        """
         results = []
+        setup_failed = False
+        setup_error_message = None
 
         # Parse the file
         parsed = self.parser.parse_file(file_path)
@@ -339,7 +350,7 @@ class TclTestRunner:
                     error_message=error,
                 ))
             if not parsed.tests:
-                return results
+                return results, False
 
         # Create a fresh database for this file
         with VibeSQL(self.vibesql_path, timeout=self.timeout) as vibesql:
@@ -347,10 +358,45 @@ class TclTestRunner:
             for sql in parsed.setup_sql:
                 success, error = vibesql.execute_setup([sql])
                 if not success:
+                    setup_failed = True
+                    setup_error_message = error
                     if self.verbose:
-                        print(f"  Setup warning: {error}")
+                        print(f"  Setup FAILED: {error}")
+                    # Don't break - try to execute remaining setup statements
+                    # as some may succeed and allow partial test execution
 
-            # Run each test
+            # If setup failed, mark all tests as skipped (not failed)
+            if setup_failed and parsed.tests:
+                if self.verbose:
+                    print(f"  Skipping {len(parsed.tests)} tests due to setup failure")
+
+                for test in parsed.tests:
+                    # Tests already marked as skipped (e.g., complex TCL) stay skipped
+                    if test.test_type == TestType.SKIPPED:
+                        results.append(TestResult(
+                            test_name=test.name,
+                            file_path=file_path,
+                            test_type=test.test_type.value,
+                            status="skipped",
+                            sql=test.sql,
+                            error_message=test.skip_reason,
+                            line_number=test.line_number,
+                        ))
+                    else:
+                        # Mark as skipped due to setup failure
+                        results.append(TestResult(
+                            test_name=test.name,
+                            file_path=file_path,
+                            test_type=test.test_type.value,
+                            status="skipped",
+                            sql=test.sql,
+                            error_message=f"Setup failed: {setup_error_message}",
+                            line_number=test.line_number,
+                        ))
+
+                return results, True
+
+            # Run each test (setup succeeded)
             for test in parsed.tests:
                 result = self.run_single_test(test, vibesql, file_path)
                 results.append(result)
@@ -359,7 +405,7 @@ class TclTestRunner:
                     status_icon = "✓" if result.status == "passed" else "✗" if result.status == "failed" else "○"
                     print(f"  {status_icon} {test.name}: {result.status}")
 
-        return results
+        return results, setup_failed
 
     def run_files(self, file_paths: list[str], parallel: bool = False) -> RunSummary:
         """Run tests from multiple files."""
@@ -380,6 +426,26 @@ class TclTestRunner:
         except:
             pass
 
+        def process_file_results(results: list[TestResult], file_setup_failed: bool):
+            """Process results from a single file."""
+            if file_setup_failed:
+                summary.setup_failures += 1
+
+            for result in results:
+                summary.results.append(result)
+                summary.total_tests += 1
+                if result.status == "passed":
+                    summary.passed += 1
+                elif result.status == "failed":
+                    summary.failed += 1
+                elif result.status == "skipped":
+                    # Track setup-failed skips separately
+                    if result.error_message and result.error_message.startswith("Setup failed:"):
+                        summary.skipped_setup_failed += 1
+                    summary.skipped += 1
+                elif result.status == "error":
+                    summary.parse_errors += 1
+
         if parallel:
             # Parallel execution
             with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -387,18 +453,8 @@ class TclTestRunner:
                 for future in as_completed(futures):
                     file_path = futures[future]
                     try:
-                        results = future.result()
-                        for result in results:
-                            summary.results.append(result)
-                            summary.total_tests += 1
-                            if result.status == "passed":
-                                summary.passed += 1
-                            elif result.status == "failed":
-                                summary.failed += 1
-                            elif result.status == "skipped":
-                                summary.skipped += 1
-                            elif result.status == "error":
-                                summary.parse_errors += 1
+                        results, file_setup_failed = future.result()
+                        process_file_results(results, file_setup_failed)
                     except Exception as e:
                         summary.parse_errors += 1
                         print(f"Error processing {file_path}: {e}")
@@ -409,18 +465,8 @@ class TclTestRunner:
                     print(f"[{i+1}/{len(file_paths)}] {Path(file_path).name}")
 
                 try:
-                    results = self.run_file(file_path)
-                    for result in results:
-                        summary.results.append(result)
-                        summary.total_tests += 1
-                        if result.status == "passed":
-                            summary.passed += 1
-                        elif result.status == "failed":
-                            summary.failed += 1
-                        elif result.status == "skipped":
-                            summary.skipped += 1
-                        elif result.status == "error":
-                            summary.parse_errors += 1
+                    results, file_setup_failed = self.run_file(file_path)
+                    process_file_results(results, file_setup_failed)
                 except Exception as e:
                     summary.parse_errors += 1
                     print(f"Error processing {file_path}: {e}")
@@ -448,11 +494,11 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     run_sql = f"""
         INSERT INTO tcl_test_runs (
             run_id, started_at, completed_at, git_commit,
-            total_files, total_tests, passed, failed, skipped, parse_errors
+            total_files, total_tests, passed, failed, skipped, skipped_setup_failed, parse_errors, setup_failures
         ) VALUES (
             {run_id}, '{summary.started_at}', '{summary.completed_at}', '{summary.git_commit}',
             {summary.total_files}, {summary.total_tests},
-            {summary.passed}, {summary.failed}, {summary.skipped}, {summary.parse_errors}
+            {summary.passed}, {summary.failed}, {summary.skipped}, {summary.skipped_setup_failed}, {summary.parse_errors}, {summary.setup_failures}
         );
     """
 
@@ -573,7 +619,11 @@ def main():
     print(f"Passed:      {summary.passed} ({summary.passed/summary.total_tests*100:.1f}%)" if summary.total_tests > 0 else "Passed: 0")
     print(f"Failed:      {summary.failed}")
     print(f"Skipped:     {summary.skipped}")
+    if summary.skipped_setup_failed > 0:
+        print(f"  (setup failed: {summary.skipped_setup_failed})")
     print(f"Errors:      {summary.parse_errors}")
+    if summary.setup_failures > 0:
+        print(f"Setup failures: {summary.setup_failures} files")
     print("=" * 50)
 
     # Save to database if specified
