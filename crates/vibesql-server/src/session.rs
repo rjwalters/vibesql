@@ -164,7 +164,7 @@ impl Session {
     /// This constructor is used for HTTP API requests and other stateless
     /// operations where data isolation between requests is acceptable.
     pub fn new_standalone(database: String, user: String) -> Self {
-        let db = Arc::new(tokio::sync::RwLock::new(vibesql_storage::Database::new()));
+        let db = SharedDatabase::new(vibesql_storage::Database::new());
         Self::new(database, user, db)
     }
 
@@ -623,13 +623,12 @@ fn evaluate_expression(expr: &vibesql_ast::Expression) -> Result<SqlValue> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::RwLock;
     use vibesql_storage::Database;
 
     use super::*;
 
     fn create_shared_db() -> SharedDatabase {
-        Arc::new(RwLock::new(Database::new()))
+        SharedDatabase::new(Database::new())
     }
 
     #[test]
@@ -799,8 +798,8 @@ mod tests {
         let db = create_shared_db();
 
         // Create two sessions using the same shared database
-        let mut session1 = Session::new("testdb".to_string(), "user1".to_string(), Arc::clone(&db));
-        let mut session2 = Session::new("testdb".to_string(), "user2".to_string(), Arc::clone(&db));
+        let mut session1 = Session::new("testdb".to_string(), "user1".to_string(), db.clone());
+        let mut session2 = Session::new("testdb".to_string(), "user2".to_string(), db.clone());
 
         // Create a table through session 1
         session1.execute("CREATE TABLE shared_test (id INT, value VARCHAR(100))").await.unwrap();
