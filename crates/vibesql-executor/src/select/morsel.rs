@@ -111,10 +111,35 @@ impl Morsel {
 }
 
 /// Configuration for morsel-driven execution.
+///
+/// Supports per-operation morsel sizes based on benchmark data showing that
+/// different operations perform optimally with different morsel sizes:
+///
+/// - **Filter/Aggregate**: Smaller sizes (2K) improve cache locality
+/// - **GROUP BY**: Smaller sizes (2K) benefit from faster hash table merges
+/// - **Join**: Medium sizes (4K) balance hash table operations
+/// - **Sort**: Larger sizes (8K) improve merge phase efficiency
+/// - **Scan**: Larger sizes (8K) optimize sequential I/O
+///
+/// DuckDB uses 2048 for SIMD vectorization alignment (32 x 64-byte AVX-512 elements).
 #[derive(Debug, Clone)]
 pub struct MorselConfig {
-    /// Morsel size (number of rows per morsel)
+    /// Default morsel size (used when no operation-specific size applies)
     pub morsel_size: usize,
+    /// Morsel size for filter operations (default: 2048)
+    pub filter_size: usize,
+    /// Morsel size for GROUP BY operations (default: 2048)
+    pub group_by_size: usize,
+    /// Morsel size for hash join build phase (default: 4096)
+    pub join_build_size: usize,
+    /// Morsel size for hash join probe phase (default: 4096)
+    pub join_probe_size: usize,
+    /// Morsel size for sort operations (default: 8192)
+    pub sort_size: usize,
+    /// Morsel size for scan/materialize operations (default: 8192)
+    pub scan_size: usize,
+    /// Morsel size for aggregate operations (default: 2048)
+    pub aggregate_size: usize,
 }
 
 /// Target cache size for morsel data (2MB = typical L3 cache slice)
@@ -129,36 +154,93 @@ const MAX_MORSEL_SIZE: usize = 100_000;
 /// Default morsel size when no hints are available
 const DEFAULT_MORSEL_SIZE: usize = 50_000;
 
+// Per-operation optimal morsel sizes based on benchmark data (TPC-H SF 0.1, 8 threads)
+// See issue #4282 and docs/performance/MORSEL_SIZE_INVESTIGATION.md
+
+/// Default filter morsel size - smaller for better cache locality
+/// Benchmark: Q1 aggregation 46.7ms (1K) vs 50.3ms (50K) = ~7% improvement
+const DEFAULT_FILTER_SIZE: usize = 2048;
+
+/// Default GROUP BY morsel size - smaller reduces hash table merge overhead
+/// Benefits from same cache locality as filter operations
+const DEFAULT_GROUP_BY_SIZE: usize = 2048;
+
+/// Default hash join build morsel size - medium size for hash table insertion
+/// Benchmark: Q5 join 281ms (2K) vs 286ms (50K) = ~2% improvement
+const DEFAULT_JOIN_BUILD_SIZE: usize = 4096;
+
+/// Default hash join probe morsel size - medium size for hash table lookups
+const DEFAULT_JOIN_PROBE_SIZE: usize = 4096;
+
+/// Default sort morsel size - larger for efficient merge phases
+/// Sort shows good parallel scaling, larger morsels reduce merge depth
+const DEFAULT_SORT_SIZE: usize = 8192;
+
+/// Default scan morsel size - larger for sequential I/O efficiency
+/// Scan is memory-bandwidth limited, larger morsels amortize overhead
+const DEFAULT_SCAN_SIZE: usize = 8192;
+
+/// Default aggregate morsel size - smaller for cache locality
+/// Similar characteristics to filter operations
+const DEFAULT_AGGREGATE_SIZE: usize = 2048;
+
 impl MorselConfig {
-    /// Create a new configuration with the given morsel size.
+    /// Create a new configuration with the given morsel size for all operations.
+    ///
+    /// This uses the same size for all operations, which is useful for testing
+    /// or when you want uniform behavior. For production use, prefer `optimal()`
+    /// which uses per-operation sizes based on benchmark data.
     pub fn new(morsel_size: usize) -> Self {
-        Self { morsel_size }
+        Self {
+            morsel_size,
+            filter_size: morsel_size,
+            group_by_size: morsel_size,
+            join_build_size: morsel_size,
+            join_probe_size: morsel_size,
+            sort_size: morsel_size,
+            scan_size: morsel_size,
+            aggregate_size: morsel_size,
+        }
+    }
+
+    /// Create a new configuration with per-operation optimal sizes.
+    ///
+    /// Uses different morsel sizes for each operation based on benchmark data:
+    /// - Filter/Aggregate: 2048 (cache locality)
+    /// - GROUP BY: 2048 (hash table merge efficiency)
+    /// - Join: 4096 (hash table operations)
+    /// - Sort: 8192 (merge phase efficiency)
+    /// - Scan: 8192 (sequential I/O)
+    pub fn with_per_operation_sizes() -> Self {
+        Self {
+            morsel_size: DEFAULT_MORSEL_SIZE,
+            filter_size: DEFAULT_FILTER_SIZE,
+            group_by_size: DEFAULT_GROUP_BY_SIZE,
+            join_build_size: DEFAULT_JOIN_BUILD_SIZE,
+            join_probe_size: DEFAULT_JOIN_PROBE_SIZE,
+            sort_size: DEFAULT_SORT_SIZE,
+            scan_size: DEFAULT_SCAN_SIZE,
+            aggregate_size: DEFAULT_AGGREGATE_SIZE,
+        }
     }
 
     /// Calculate optimal morsel size based on hardware characteristics.
     ///
-    /// The goal is to make each morsel fit in L3 cache while being large enough
-    /// to amortize work-stealing overhead.
+    /// Uses per-operation morsel sizes based on benchmark data (see issue #4282).
+    /// Supports `MORSEL_SIZE` environment variable override for all operations.
     ///
-    /// Heuristics:
-    /// - Target: ~1MB of row data per morsel (fits in typical L3 cache slice)
-    /// - Assume average row size of ~100 bytes (varies by query)
-    /// - Minimum: 10,000 rows (amortize stealing overhead)
-    /// - Maximum: 100,000 rows (ensure enough morsels for load balancing)
+    /// When `MORSEL_SIZE` is set, that value is used for all operations (uniform mode).
+    /// Otherwise, per-operation optimal sizes are used.
     pub fn optimal() -> Self {
-        // Check for user override
-        let morsel_size = if let Ok(size_str) = std::env::var("MORSEL_SIZE") {
-            size_str.parse::<usize>().unwrap_or(DEFAULT_MORSEL_SIZE).clamp(1000, 500_000)
-        } else {
-            // Default: 50,000 rows
-            // This balances:
-            // - Cache efficiency (50K rows * 100 bytes = 5MB, fits L3)
-            // - Load balancing (enough morsels for 16+ cores)
-            // - Stealing overhead (large enough to amortize)
-            DEFAULT_MORSEL_SIZE
-        };
+        // Check for user override - if set, use uniform size for all operations
+        if let Ok(size_str) = std::env::var("MORSEL_SIZE") {
+            let morsel_size =
+                size_str.parse::<usize>().unwrap_or(DEFAULT_MORSEL_SIZE).clamp(1000, 500_000);
+            return Self::new(morsel_size);
+        }
 
-        Self { morsel_size }
+        // Use per-operation optimal sizes
+        Self::with_per_operation_sizes()
     }
 
     /// Create an adaptive configuration based on estimated row width in bytes.
@@ -195,7 +277,8 @@ impl MorselConfig {
             );
         }
 
-        Self { morsel_size }
+        // Use uniform size for row-width-adaptive configs
+        Self::new(morsel_size)
     }
 
     /// Create an adaptive configuration based on a schema (list of column types).
@@ -277,7 +360,8 @@ impl MorselConfig {
             );
         }
 
-        Self { morsel_size }
+        // Use uniform size for selectivity-adaptive configs
+        Self::new(morsel_size)
     }
 
     /// Create an adaptive configuration combining row width and selectivity hints.
@@ -319,7 +403,8 @@ impl MorselConfig {
                     );
                 }
 
-                Self { morsel_size }
+                // Use uniform size for adaptive configs
+                Self::new(morsel_size)
             }
             _ => base_config,
         }
@@ -391,13 +476,16 @@ where
         return Vec::new();
     }
 
+    // Use filter-specific morsel size
+    let morsel_size = config.filter_size;
+
     // For small datasets, process directly (avoid morsel overhead)
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         return rows.iter().filter(|r| predicate(r)).cloned().collect();
     }
 
     // Create morsels
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     if morsel_debug_enabled() {
@@ -405,7 +493,7 @@ where
             "[MORSEL] Filter: {} morsels for {} rows (size={})",
             morsel_count,
             rows.len(),
-            config.morsel_size
+            morsel_size
         );
     }
 
@@ -494,13 +582,16 @@ where
         return Vec::new();
     }
 
+    // Use filter-size for map operations (similar cache locality characteristics)
+    let morsel_size = config.filter_size;
+
     // For small datasets, process directly
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         return rows.iter().map(&transform).collect();
     }
 
     // Create morsels
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     // Create global injector queue
@@ -563,13 +654,16 @@ where
         return Vec::new();
     }
 
+    // Use filter-size for filter-map operations
+    let morsel_size = config.filter_size;
+
     // For small datasets, process directly
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         return rows.iter().filter_map(&filter_map).collect();
     }
 
     // Create morsels
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     // Create global injector queue
@@ -642,13 +736,16 @@ where
         return initial;
     }
 
+    // Use aggregate-size for reduce operations
+    let morsel_size = config.aggregate_size;
+
     // For small datasets, process directly
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         return operation(rows);
     }
 
     // Create morsels
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
 
     // Create global injector queue
     let injector: Injector<Morsel> = Injector::new();
@@ -738,8 +835,11 @@ where
         return AHashMap::new();
     }
 
+    // Use group_by-specific morsel size
+    let morsel_size = config.group_by_size;
+
     // For small datasets, process directly
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         let estimated_groups = (rows.len() / 10).max(16);
         let mut groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<Row>> =
             AHashMap::with_capacity(estimated_groups);
@@ -752,7 +852,7 @@ where
     }
 
     // Create morsels
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     if morsel_debug_enabled() {
@@ -760,7 +860,7 @@ where
             "[MORSEL] Group: {} morsels for {} rows (size={})",
             morsel_count,
             rows.len(),
-            config.morsel_size
+            morsel_size
         );
     }
 
@@ -784,7 +884,7 @@ where
 
             s.spawn(move |_| {
                 let worker: Worker<Morsel> = Worker::new_fifo();
-                let estimated_groups = (config.morsel_size / 10).max(16);
+                let estimated_groups = (morsel_size / 10).max(16);
                 let mut local_groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<Row>> =
                     AHashMap::with_capacity(estimated_groups);
 
@@ -856,15 +956,18 @@ where
         return Vec::new();
     }
 
+    // Use sort-specific morsel size (larger for better merge efficiency)
+    let morsel_size = config.sort_size;
+
     // For small datasets, sort directly (avoid morsel overhead)
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         let mut result = rows.to_vec();
         result.sort_by(&compare);
         return result;
     }
 
     // Create morsels
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     if morsel_debug_enabled() {
@@ -872,7 +975,7 @@ where
             "[MORSEL] Sort: {} morsels for {} rows (size={})",
             morsel_count,
             rows.len(),
-            config.morsel_size
+            morsel_size
         );
     }
 
@@ -1088,8 +1191,11 @@ pub fn morsel_parallel_probe_sqlvalue(
         return Vec::new();
     }
 
+    // Use join-probe-specific morsel size
+    let morsel_size = config.join_probe_size;
+
     // For small datasets, process directly
-    if probe_rows.len() < config.morsel_size {
+    if probe_rows.len() < morsel_size {
         let mut pairs = Vec::with_capacity(probe_rows.len());
         for (probe_idx, probe_row) in probe_rows.iter().enumerate() {
             let key = &probe_row.values[probe_col_idx];
@@ -1106,7 +1212,7 @@ pub fn morsel_parallel_probe_sqlvalue(
     }
 
     // Create morsels
-    let morsels = create_morsels(probe_rows.len(), config.morsel_size);
+    let morsels = create_morsels(probe_rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     if morsel_debug_enabled() {
@@ -1114,7 +1220,7 @@ pub fn morsel_parallel_probe_sqlvalue(
             "[MORSEL] Probe: {} morsels for {} rows (size={})",
             morsel_count,
             probe_rows.len(),
-            config.morsel_size
+            morsel_size
         );
     }
 
@@ -1137,7 +1243,7 @@ pub fn morsel_parallel_probe_sqlvalue(
 
             s.spawn(move |_| {
                 let worker: Worker<Morsel> = Worker::new_fifo();
-                let mut local_pairs = Vec::with_capacity(config.morsel_size);
+                let mut local_pairs = Vec::with_capacity(morsel_size);
 
                 while let Some(m) = steal_morsel(injector_ref, &worker) {
                     let start_idx = m.start_idx();
