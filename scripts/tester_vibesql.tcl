@@ -184,6 +184,41 @@ proc execsql_with_headers {sql {db ""}} {
     return [parse_result_with_headers $result]
 }
 
+proc execsql2 {sql {db ""}} {
+    # Execute SQL and return results with column names interleaved:
+    # {colname1 value1 colname2 value2 ...} for each row, all in a flat list
+    # This is used by SQLite tests to verify column name handling
+
+    # Skip SQLite-specific statements we don't support
+    set sql_upper [string toupper [string trim $sql]]
+    if {[string match "PRAGMA*" $sql_upper]} {
+        return {}
+    }
+
+    if {$::db_file eq ""} {
+        set result [exec echo $sql | $::vibesql_path 2>@1]
+    } else {
+        set result [exec echo $sql | $::vibesql_path $::db_file 2>@1]
+    }
+
+    # Parse with headers
+    set parsed [parse_result_with_headers $result]
+    set headers [lindex $parsed 0]
+    set rows [lindex $parsed 1]
+
+    # Interleave column names with values
+    set output {}
+    foreach row $rows {
+        set idx 0
+        foreach col $headers {
+            lappend output $col [lindex $row $idx]
+            incr idx
+        }
+    }
+
+    return $output
+}
+
 proc catchsql {sql {db ""}} {
     # Execute SQL and catch errors, return {errorcode result}
     if {[catch {execsql $sql $db} result]} {
