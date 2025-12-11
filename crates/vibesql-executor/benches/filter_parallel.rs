@@ -3,14 +3,35 @@
 //! These benchmarks isolate the filter operation to measure the effect of
 //! morsel size on parallel filtering with different selectivities.
 //!
+//! ## Benchmark Types
+//!
+//! ### Direct API Benchmark (Row-Oriented)
+//! - `BENCHMARK_FILTER=morsel_filter` - Tests `morsel_parallel_filter` directly
+//! - Bypasses SQL parsing and columnar execution
+//! - Shows true morsel work-stealing performance (~1.8-3.5x speedup)
+//!
+//! ### SQL-Based Benchmark (Columnar by Default)
+//! - `BENCHMARK_FILTER=sql_filter` - Tests via SQL queries
+//! - Routes through columnar SIMD execution engine (~100x faster than row-based)
+//! - Different parallelism characteristics than morsel-driven execution
+//!
+//! **Note**: SQL filter benchmarks measure columnar SIMD performance, not morsel
+//! work-stealing. Use `morsel_filter` to test the direct row-oriented API.
+//!
 //! ## Usage
 //!
 //! ```bash
 //! # Build the benchmark
 //! cargo bench --package vibesql-executor --bench filter_parallel --no-run
 //!
-//! # Run the benchmark
+//! # Run all benchmarks
 //! ./target/release/deps/filter_parallel-*
+//!
+//! # Run only direct API benchmark (tests morsel parallelism)
+//! BENCHMARK_FILTER=morsel_filter ./target/release/deps/filter_parallel-*
+//!
+//! # Run only SQL-based benchmark (tests columnar execution)
+//! BENCHMARK_FILTER=sql_filter ./target/release/deps/filter_parallel-*
 //!
 //! # Test specific morsel sizes
 //! MORSEL_SIZES=2048,8192,50000 ./target/release/deps/filter_parallel-*
@@ -21,6 +42,7 @@
 //!
 //! ## Environment Variables
 //!
+//! - `BENCHMARK_FILTER` - Run specific benchmark (morsel_filter, sql_filter, or omit for all)
 //! - `MORSEL_SIZES` - Comma-separated list of morsel sizes to test
 //! - `ROW_COUNTS` - Comma-separated list of row counts to test
 //! - `MAX_THREADS` - Maximum thread count to test (default: 16)
@@ -38,6 +60,7 @@ use std::{
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
+use vibesql_executor::select::morsel::{morsel_parallel_filter, MorselConfig};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
@@ -69,6 +92,10 @@ fn get_thread_counts() -> Vec<usize> {
     let max_threads: usize =
         env::var("MAX_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
     DEFAULT_THREAD_COUNTS.iter().copied().filter(|&t| t <= max_threads).collect()
+}
+
+fn get_benchmark_filter() -> Option<String> {
+    env::var("BENCHMARK_FILTER").ok()
 }
 
 // =============================================================================
@@ -234,6 +261,91 @@ fn bench_filter_operation(harness: &Harness) {
     env::remove_var("MORSEL_SIZE");
 }
 
+/// Benchmark morsel_parallel_filter directly (bypasses SQL/columnar execution)
+///
+/// This tests the raw row-oriented morsel work-stealing performance without
+/// going through the SQL parser or columnar execution engine.
+fn bench_morsel_filter_direct(harness: &Harness) {
+    print_group_header("Morsel Filter (Direct API - Row-Oriented)");
+
+    let row_counts = get_row_counts();
+    let morsel_sizes = get_morsel_sizes();
+    let thread_counts = get_thread_counts();
+
+    for &row_count in &row_counts {
+        eprintln!("\n--- {} rows ---", row_count);
+
+        // Generate rows directly (no database)
+        let rows: Vec<Row> = (0..row_count)
+            .map(|i| {
+                Row::new(vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Integer((i % 100) as i64),                  // category
+                    SqlValue::Bigint(((i * 17 + 42) % 1_000_000) as i64), // value
+                    SqlValue::Integer((i % 2) as i64),                    // flag
+                ])
+            })
+            .collect();
+
+        // Different predicates with varying selectivities
+        let predicates: Vec<(&str, Box<dyn Fn(&Row) -> bool + Send + Sync>)> = vec![
+            (
+                "50pct_flag",
+                Box::new(|row: &Row| matches!(row.values[3], SqlValue::Integer(1))),
+            ),
+            (
+                "10pct_category",
+                Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(c) if c < 10)),
+            ),
+            (
+                "1pct_category",
+                Box::new(|row: &Row| matches!(row.values[1], SqlValue::Integer(0))),
+            ),
+            (
+                "25pct_compound",
+                Box::new(|row: &Row| {
+                    matches!(row.values[1], SqlValue::Integer(c) if c < 50)
+                        && matches!(row.values[3], SqlValue::Integer(1))
+                }),
+            ),
+        ];
+
+        for (pred_name, predicate) in &predicates {
+            eprintln!("\n  Predicate: {}", pred_name);
+            print_morsel_size_header(&morsel_sizes);
+
+            for &threads in &thread_counts {
+                eprint!("  {:>2}T ", threads);
+
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .expect("Failed to create thread pool");
+
+                for &morsel_size in &morsel_sizes {
+                    let config = MorselConfig {
+                        morsel_size,
+                        ..MorselConfig::default()
+                    };
+
+                    let stats = pool.install(|| {
+                        let name = format!("morsel_{}_{}t_{}m", pred_name, threads, morsel_size);
+                        harness.run(&name, || {
+                            let start = Instant::now();
+                            let result = morsel_parallel_filter(&rows, &config, |row| predicate(row));
+                            black_box(result);
+                            BenchResult::Ok(start.elapsed())
+                        })
+                    });
+
+                    eprint!(" {:>8.2?}", stats.mean);
+                }
+                eprintln!();
+            }
+        }
+    }
+}
+
 // =============================================================================
 // Main
 // =============================================================================
@@ -247,11 +359,13 @@ fn main() {
     let row_counts = get_row_counts();
     let morsel_sizes = get_morsel_sizes();
     let thread_counts = get_thread_counts();
+    let benchmark_filter = get_benchmark_filter();
 
     eprintln!("Configuration:");
     eprintln!("  Row Counts: {:?}", row_counts);
     eprintln!("  Morsel Sizes: {:?}", morsel_sizes);
     eprintln!("  Thread Counts: {:?}", thread_counts);
+    eprintln!("  BENCHMARK_FILTER: {:?}", benchmark_filter);
     eprintln!("  MORSEL_DEBUG: {}", env::var("MORSEL_DEBUG").unwrap_or_default());
     eprintln!();
 
@@ -263,7 +377,20 @@ fn main() {
     );
     let harness = Harness::with_config(config);
 
-    bench_filter_operation(&harness);
+    // Run selected benchmarks based on BENCHMARK_FILTER
+    match benchmark_filter.as_deref() {
+        Some("morsel_filter") => {
+            bench_morsel_filter_direct(&harness);
+        }
+        Some("sql_filter") => {
+            bench_filter_operation(&harness);
+        }
+        _ => {
+            // Run all benchmarks
+            bench_morsel_filter_direct(&harness);
+            bench_filter_operation(&harness);
+        }
+    }
 
     eprintln!("\n========================================");
     eprintln!("  Benchmark Complete");
