@@ -3,6 +3,7 @@
 // ============================================================================
 
 mod cache;
+mod change_events_api;
 mod config;
 mod constructors;
 mod core;
@@ -11,8 +12,12 @@ mod index_ops;
 mod lifecycle;
 mod metadata;
 mod operations;
+mod persistence_api;
+mod point_lookup;
 mod resource_tracker;
 mod session;
+mod table_api;
+mod transaction_api;
 
 pub mod indexes;
 pub mod transactions;
