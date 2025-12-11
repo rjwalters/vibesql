@@ -251,10 +251,9 @@ fn resolve_order_by_for_aggregates_inner(
     // Handle CASE expressions by recursively resolving sub-expressions
     // Use inner helper for recursion (doesn't validate column numbers)
     if let vibesql_ast::Expression::Case { operand, when_clauses, else_result } = order_expr {
-        let resolved_operand = match operand {
-            Some(op) => Some(Box::new(resolve_order_by_for_aggregates_inner(op, select_list))),
-            None => None,
-        };
+        let resolved_operand = operand
+            .as_ref()
+            .map(|op| Box::new(resolve_order_by_for_aggregates_inner(op, select_list)));
 
         let mut resolved_when_clauses: Vec<vibesql_ast::CaseWhen> = Vec::new();
         for clause in when_clauses {
@@ -268,10 +267,9 @@ fn resolve_order_by_for_aggregates_inner(
             });
         }
 
-        let resolved_else = match else_result {
-            Some(e) => Some(Box::new(resolve_order_by_for_aggregates_inner(e, select_list))),
-            None => None,
-        };
+        let resolved_else = else_result
+            .as_ref()
+            .map(|e| Box::new(resolve_order_by_for_aggregates_inner(e, select_list)));
 
         return vibesql_ast::Expression::Case {
             operand: resolved_operand,
