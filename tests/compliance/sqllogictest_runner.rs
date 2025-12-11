@@ -376,7 +376,8 @@ impl VibeSqlDB {
             | vibesql_ast::Statement::CreateCron(_)
             | vibesql_ast::Statement::DropCron(_)
             | vibesql_ast::Statement::AlterCron(_)
-            | vibesql_ast::Statement::CancelSchedule(_) => Ok(DBOutput::StatementComplete(0)),
+            | vibesql_ast::Statement::CancelSchedule(_)
+            | vibesql_ast::Statement::Pragma(_) => Ok(DBOutput::StatementComplete(0)),
         }
     }
 
