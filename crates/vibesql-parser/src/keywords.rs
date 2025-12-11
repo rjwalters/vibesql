@@ -288,6 +288,7 @@ pub enum Keyword {
     Expansion,
     Mode,
     Query,
+    Plan,
     // Spatial index keywords
     Spatial,
     // Vector index keywords (IVFFlat, HNSW)
@@ -605,6 +606,7 @@ impl fmt::Display for Keyword {
             Keyword::Expansion => "EXPANSION",
             Keyword::Mode => "MODE",
             Keyword::Query => "QUERY",
+            Keyword::Plan => "PLAN",
             // Spatial index keywords
             Keyword::Spatial => "SPATIAL",
             // Vector index keywords (IVFFlat, HNSW)

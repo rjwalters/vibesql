@@ -208,21 +208,30 @@ impl Parser {
         Ok(vibesql_ast::DescribeStmt { table_name, column_pattern })
     }
 
-    /// Parse EXPLAIN [ANALYZE] statement
+    /// Parse EXPLAIN [QUERY PLAN | ANALYZE] statement
     ///
-    /// Syntax: EXPLAIN [ANALYZE] [FORMAT {TEXT | JSON}] statement
+    /// Syntax: EXPLAIN [QUERY PLAN | ANALYZE] [FORMAT {TEXT | JSON}] statement
     pub fn parse_explain_statement(&mut self) -> Result<vibesql_ast::ExplainStmt, ParseError> {
         self.expect_keyword(Keyword::Explain)?;
 
-        // Check for ANALYZE option
-        let analyze = if matches!(self.peek(), Token::Keyword(Keyword::Analyze)) {
+        // Check for QUERY PLAN option (SQLite-style)
+        let query_plan = if matches!(self.peek(), Token::Keyword(Keyword::Query)) {
+            self.advance(); // consume QUERY
+            self.expect_keyword(Keyword::Plan)?;
+            true
+        } else {
+            false
+        };
+
+        // Check for ANALYZE option (not valid with QUERY PLAN in SQLite, but we parse both)
+        let analyze = if !query_plan && matches!(self.peek(), Token::Keyword(Keyword::Analyze)) {
             self.advance();
             true
         } else {
             false
         };
 
-        // Check for FORMAT option (optional)
+        // Check for FORMAT option (optional, not typically used with QUERY PLAN)
         let format = if matches!(self.peek(), Token::Identifier(ref s) if s.to_uppercase() == "FORMAT")
         {
             self.advance(); // consume FORMAT
@@ -276,6 +285,6 @@ impl Parser {
             }
         };
 
-        Ok(vibesql_ast::ExplainStmt { statement: Box::new(statement), format, analyze })
+        Ok(vibesql_ast::ExplainStmt { statement: Box::new(statement), format, analyze, query_plan })
     }
 }

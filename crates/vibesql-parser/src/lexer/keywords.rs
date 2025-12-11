@@ -283,6 +283,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "EXPANSION" => Keyword::Expansion,
     "MODE" => Keyword::Mode,
     "QUERY" => Keyword::Query,
+    "PLAN" => Keyword::Plan,
     // Spatial index keywords
     "SPATIAL" => Keyword::Spatial,
     // Vector index keywords (IVFFlat, HNSW)
