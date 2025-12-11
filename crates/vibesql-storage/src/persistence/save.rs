@@ -100,6 +100,13 @@ impl Database {
                     }
                 }
 
+                // Add PRIMARY KEY constraint if present
+                if let Some(pk_cols) = &schema.primary_key {
+                    write!(writer, ", PRIMARY KEY ({})", pk_cols.join(", ")).map_err(|e| {
+                        StorageError::NotImplemented(format!("Write error: {}", e))
+                    })?;
+                }
+
                 writeln!(writer, ");")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
@@ -132,10 +139,15 @@ impl Database {
             }
         }
 
-        // Export indexes
+        // Export indexes (skip auto-generated PK indexes which are recreated by PRIMARY KEY constraint)
         writeln!(writer, "-- Indexes")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for index_name in self.list_indexes() {
+            // Skip primary key indexes - these are automatically created by the PRIMARY KEY constraint
+            // PK indexes follow the naming convention "PK_<table_name>"
+            if index_name.starts_with("PK_") {
+                continue;
+            }
             let metadata = self.get_index(&index_name).unwrap();
             write!(writer, "CREATE")
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
