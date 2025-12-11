@@ -1,6 +1,6 @@
 {
-  "generated_at": "2025-12-11T00:02:55.185826",
-  "git_commit": "6937182d",
+  "generated_at": "2025-12-11T09:53:52.083830",
+  "git_commit": "f24823ed",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -192,6 +192,17 @@
           "min_ms": 0.63,
           "max_ms": 123.36,
           "geomean_ms": 15.23,
+          "queries_passed": 22,
+          "total_queries": 22
+        },
+        {
+          "date": "2025-12-11",
+          "timestamp": "2025-12-11T00:47:29.773546",
+          "commit": "be96661f",
+          "avg_ms": 418.22,
+          "min_ms": 16.87,
+          "max_ms": 1440.0,
+          "geomean_ms": 253.97,
           "queries_passed": 22,
           "total_queries": 22
         }
@@ -444,6 +455,13 @@
           "commit": "356692f6",
           "tps": 19629.17,
           "latency_us": 87.09
+        },
+        {
+          "date": "2025-12-11",
+          "timestamp": "2025-12-11T00:51:39.927323",
+          "commit": "be96661f",
+          "tps": 29040.77,
+          "latency_us": 35.66
         }
       ]
     },
