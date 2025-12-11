@@ -283,9 +283,7 @@ pub(super) fn validate_select_column_references_with_context(
 /// Returns true for 'rowid', '_rowid_', and 'oid' (case-insensitive)
 fn is_rowid_pseudo_column(column: &str) -> bool {
     let lower = column.to_lowercase();
-    let result = lower == "rowid" || lower == "_rowid_" || lower == "oid";
-    eprintln!("[DEBUG NONAGG VALIDATION] is_rowid_pseudo_column('{}') = {}", column, result);
-    result
+    lower == "rowid" || lower == "_rowid_" || lower == "oid"
 }
 
 fn validate_expression_column_refs(
@@ -298,7 +296,6 @@ fn validate_expression_column_refs(
 
     match expr {
         Expression::ColumnRef { table, column } => {
-            eprintln!("[DEBUG NONAGG] validate_expression_column_refs called for column: '{}'", column);
             // Skip "*" - it's a wildcard used in COUNT(*) and is not a real column
             if column == "*" {
                 return Ok(());
