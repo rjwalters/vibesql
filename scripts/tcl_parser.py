@@ -9,6 +9,7 @@ executed against VibeSQL. Focuses on the common test patterns:
 - do_catchsql_test: Execute SQL and expect specific error
 - do_test with execsql: General test with SQL execution
 - execsql blocks: Standalone SQL execution (setup)
+- db eval blocks: Standalone SQL execution (setup)
 
 This is a "hybrid" approach that parses simple patterns while skipping
 tests with complex TCL logic that would require a full TCL interpreter.
@@ -115,7 +116,14 @@ class TclTestParser:
         re.DOTALL
     )
 
+    # Pattern for db eval {...} blocks (common setup pattern in TCL tests)
+    DB_EVAL_BLOCK_PATTERN = re.compile(
+        r'db\s+eval\s*\{([^}]*)\}',
+        re.DOTALL
+    )
+
     # Patterns indicating complex TCL logic we should skip
+    # Note: db eval is NOT in this list - we extract it as setup SQL
     COMPLEX_PATTERNS = [
         r'\$\w+',           # TCL variables
         r'\[.*\]',          # TCL command substitution
@@ -125,7 +133,6 @@ class TclTestParser:
         r'if\s*\{',         # If statements (in test body)
         r'proc\s+',         # Procedure definitions
         r'expr\s*\{',       # Expressions
-        r'db\s+eval',       # Direct db calls
         r'db\s+close',      # DB operations
         r'file\s+',         # File operations
         r'sqlite3\s+',      # SQLite3 command
@@ -347,6 +354,13 @@ class TclTestParser:
             if 'do_test' in preceding or 'do_execsql_test' in preceding:
                 continue
 
+            sql = self._clean_sql(match.group(1))
+            if sql and not self._has_complex_tcl(sql):
+                result.setup_sql.append(sql)
+
+        # Extract db eval {...} blocks for setup
+        # These are commonly used in TCL tests to set up tables and data
+        for match in self.DB_EVAL_BLOCK_PATTERN.finditer(content):
             sql = self._clean_sql(match.group(1))
             if sql and not self._has_complex_tcl(sql):
                 result.setup_sql.append(sql)
