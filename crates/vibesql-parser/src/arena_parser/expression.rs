@@ -224,6 +224,7 @@ impl<'arena> ArenaParser<'arena> {
                     | MultiCharOperator::GreaterEqual
                     | MultiCharOperator::NotEqual
                     | MultiCharOperator::NotEqualAlt
+                    | MultiCharOperator::DoubleEqual
                     | MultiCharOperator::CosineDistance
                     | MultiCharOperator::NegativeInnerProduct
                     | MultiCharOperator::L2Distance
@@ -242,6 +243,8 @@ impl<'arena> ArenaParser<'arena> {
                     MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
                         BinaryOperator::NotEqual
                     }
+                    // SQLite compatibility: == is a synonym for =
+                    MultiCharOperator::DoubleEqual => BinaryOperator::Equal,
                     // Vector distance operators (pgvector compatible)
                     MultiCharOperator::CosineDistance => BinaryOperator::CosineDistance,
                     MultiCharOperator::NegativeInnerProduct => BinaryOperator::NegativeInnerProduct,
