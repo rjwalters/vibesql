@@ -178,6 +178,56 @@ class VibeSQL:
         return (True, "")
 
 
+def parse_tcl_list(tcl_list: str) -> list[str]:
+    """
+    Parse a TCL list string into a Python list of strings.
+
+    TCL lists are space-separated values where:
+    - {} represents an empty string
+    - {text with spaces} represents a string with spaces
+    - Unquoted words are strings
+
+    Examples:
+    - "abc {} {} xyz" -> ["abc", "", "", "xyz"]
+    - "{hello world} foo" -> ["hello world", "foo"]
+    """
+    result = []
+    i = 0
+    tcl_list = tcl_list.strip()
+    n = len(tcl_list)
+
+    while i < n:
+        # Skip whitespace
+        while i < n and tcl_list[i] in ' \t\n':
+            i += 1
+
+        if i >= n:
+            break
+
+        if tcl_list[i] == '{':
+            # Braced element - find matching close brace
+            depth = 1
+            start = i + 1
+            i += 1
+            while i < n and depth > 0:
+                if tcl_list[i] == '{':
+                    depth += 1
+                elif tcl_list[i] == '}':
+                    depth -= 1
+                i += 1
+            # Extract content between braces
+            content = tcl_list[start:i-1] if i > start else ""
+            result.append(content)
+        else:
+            # Unquoted element - read until whitespace
+            start = i
+            while i < n and tcl_list[i] not in ' \t\n':
+                i += 1
+            result.append(tcl_list[start:i])
+
+    return result
+
+
 def normalize_output(output: str) -> str:
     """Normalize output for comparison."""
     # Strip whitespace
@@ -190,33 +240,57 @@ def normalize_output(output: str) -> str:
 
 
 def compare_outputs(expected: str, actual: str) -> bool:
-    """Compare expected and actual output, handling TCL format quirks."""
+    """
+    Compare expected and actual output, handling TCL format quirks.
+
+    TCL uses {} to represent empty strings in lists. The raw output format
+    uses consecutive spaces for empty values (NULLs). This function handles
+    the conversion between these formats.
+    """
+    # First try simple normalized comparison
     expected_norm = normalize_output(expected)
     actual_norm = normalize_output(actual)
 
     if expected_norm == actual_norm:
         return True
 
-    # Handle numeric comparisons (e.g., 1.0 vs 1)
-    try:
-        exp_parts = expected_norm.split()
+    # Parse TCL list format for expected (handles {} as empty string)
+    exp_parts = parse_tcl_list(expected)
+
+    # Check if expected has empty strings (NULL values)
+    has_empty_expected = any(part == "" for part in exp_parts)
+
+    if has_empty_expected:
+        # Parse actual output preserving empty values
+        # The raw format outputs values space-separated, with empty strings for NULLs
+        # So "abc   xyz" means: "abc", "", "", "xyz" (3 spaces = 2 empty values between)
+        # " abc xyz" (leading space) means: "", "abc", "xyz"
+        # "abc xyz " (trailing space) means: "abc", "xyz", ""
+        #
+        # We need to:
+        # 1. Normalize newlines to spaces (multiline output)
+        # 2. Strip trailing newline only (not leading/trailing spaces that represent NULLs)
+        # 3. Split on single space to preserve empty strings
+        actual_lines = actual.rstrip('\n').split('\n')
+        actual_flat = ' '.join(actual_lines)
+        act_parts = actual_flat.split(' ')
+    else:
+        # No empty values expected, use simple split
         act_parts = actual_norm.split()
 
-        if len(exp_parts) != len(act_parts):
-            return False
-
-        for e, a in zip(exp_parts, act_parts):
-            # Try numeric comparison
-            try:
-                if float(e) != float(a):
-                    return False
-            except ValueError:
-                if e != a:
-                    return False
-
-        return True
-    except:
+    if len(exp_parts) != len(act_parts):
         return False
+
+    for e, a in zip(exp_parts, act_parts):
+        # Try numeric comparison
+        try:
+            if float(e) != float(a):
+                return False
+        except ValueError:
+            if e != a:
+                return False
+
+    return True
 
 
 class TclTestRunner:
