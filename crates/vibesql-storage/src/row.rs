@@ -42,6 +42,9 @@ pub type RowValues = SmallVec<[SqlValue; ROW_INLINE_CAPACITY]>;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub values: RowValues,
+    /// Optional row ID for SQLite ROWID compatibility
+    /// This is set during table scans and used to support ROWID, _rowid_, and oid pseudo-columns
+    pub row_id: Option<u64>,
 }
 
 impl Row {
@@ -49,14 +52,40 @@ impl Row {
     ///
     /// Accepts any iterable that can be converted into a SmallVec.
     pub fn new(values: impl Into<RowValues>) -> Self {
-        Row { values: values.into() }
+        Row {
+            values: values.into(),
+            row_id: None,
+        }
     }
 
     /// Create a new row from a Vec of values.
     ///
     /// This is a convenience method that accepts Vec<SqlValue> directly.
     pub fn from_vec(values: Vec<SqlValue>) -> Self {
-        Row { values: SmallVec::from_vec(values) }
+        Row {
+            values: SmallVec::from_vec(values),
+            row_id: None,
+        }
+    }
+
+    /// Create a new row with a specific row ID
+    ///
+    /// Used during table scans to preserve ROWID for SQLite compatibility.
+    pub fn with_row_id(values: impl Into<RowValues>, row_id: u64) -> Self {
+        Row {
+            values: values.into(),
+            row_id: Some(row_id),
+        }
+    }
+
+    /// Set the row ID
+    pub fn set_row_id(&mut self, row_id: u64) {
+        self.row_id = Some(row_id);
+    }
+
+    /// Get the row ID if set
+    pub fn get_row_id(&self) -> Option<u64> {
+        self.row_id
     }
 
     /// Get value at column index

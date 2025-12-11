@@ -26,6 +26,9 @@ pub struct ExpressionEvaluator<'a> {
     /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value = result rows)
     /// Shared via Rc across child evaluators within a single statement execution.
     pub(super) subquery_cache: Rc<RefCell<LruCache<u64, Vec<vibesql_storage::Row>>>>,
+    /// Row index for ROWID pseudo-column support (SQLite compatibility)
+    /// When set, ROWID/_rowid_/oid column references will return this value
+    pub(super) row_index: Option<u64>,
 }
 
 impl<'a> ExpressionEvaluator<'a> {
@@ -42,6 +45,7 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
         }
     }
 
@@ -62,6 +66,7 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
         }
     }
 
@@ -81,6 +86,7 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
         }
     }
 
@@ -101,6 +107,7 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
         }
     }
 
@@ -123,6 +130,7 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
         }
     }
 
@@ -143,7 +151,21 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: Rc::new(RefCell::new(super::caching::create_cse_cache())),
             enable_cse: super::caching::is_cse_enabled(),
             subquery_cache: Rc::new(RefCell::new(super::caching::create_subquery_cache())),
+            row_index: None,
         }
+    }
+
+    /// Set the row index for ROWID pseudo-column support
+    ///
+    /// When set, references to ROWID, _rowid_, or oid columns will return
+    /// this value as a Bigint. This provides SQLite compatibility.
+    pub fn set_row_index(&mut self, index: u64) {
+        self.row_index = Some(index);
+    }
+
+    /// Clear the row index (typically between row evaluations)
+    pub fn clear_row_index(&mut self) {
+        self.row_index = None;
     }
 
     /// Evaluate a binary operation
@@ -229,6 +251,7 @@ impl<'a> ExpressionEvaluator<'a> {
             cse_cache: self.cse_cache.clone(),
             enable_cse: self.enable_cse,
             subquery_cache: self.subquery_cache.clone(),
+            row_index: self.row_index,
         };
         f(&evaluator)
     }

@@ -116,6 +116,29 @@ impl SelectExecutor<'_> {
         match expr {
             Expression::ColumnRef { table, column } => {
                 if schema.get_column_index(table.as_deref(), column).is_none() {
+                    // SQLite compatibility: Allow ROWID pseudo-column references
+                    // Only if there's no actual column with that name (real columns take precedence)
+                    let lower = column.to_lowercase();
+                    let is_rowid_alias = lower == "rowid" || lower == "_rowid_" || lower == "oid";
+                    if is_rowid_alias {
+                        // Verify the qualifier matches a table in the schema (if qualified)
+                        if let Some(ref qualifier) = table {
+                            let qualifier_lower = qualifier.to_lowercase();
+                            let table_exists = schema
+                                .table_schemas
+                                .keys()
+                                .any(|k| k.to_lowercase() == qualifier_lower);
+                            if table_exists {
+                                return Ok(());
+                            }
+                        } else {
+                            // Unqualified ROWID is valid if there's at least one table in scope
+                            if !schema.table_schemas.is_empty() {
+                                return Ok(());
+                            }
+                        }
+                    }
+
                     // Collect available column names for the error message
                     let available_columns: Vec<String> = schema
                         .table_schemas

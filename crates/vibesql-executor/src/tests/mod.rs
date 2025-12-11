@@ -88,6 +88,7 @@ mod privilege_checker_tests;
 mod procedures;
 mod quantified_comparison_tests;
 mod query_timeout_tests;
+mod rowid_tests;
 mod scalar_subquery_basic_tests;
 mod scalar_subquery_caching_tests;
 mod scalar_subquery_correlated_tests;
