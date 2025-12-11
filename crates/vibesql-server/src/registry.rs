@@ -8,8 +8,12 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use vibesql_storage::Database;
 
-/// Shared database handle that can be cloned across connections.
-pub type SharedDatabase = Arc<RwLock<Database>>;
+// Re-export SharedDatabase from executor for backwards compatibility
+pub use vibesql_executor::SharedDatabase;
+
+/// Type alias for the raw Arc<RwLock<Database>> type.
+/// This maintains backwards compatibility with code that expects this type.
+pub type SharedDatabaseArc = Arc<RwLock<Database>>;
 
 /// Registry managing shared database instances.
 ///
@@ -36,7 +40,7 @@ impl DatabaseRegistry {
         {
             let databases = self.databases.read().await;
             if let Some(db) = databases.get(name) {
-                return Arc::clone(db);
+                return db.clone();
             }
         }
 
@@ -45,13 +49,22 @@ impl DatabaseRegistry {
 
         // Double-check after acquiring write lock (another task may have created it)
         if let Some(db) = databases.get(name) {
-            return Arc::clone(db);
+            return db.clone();
         }
 
         // Create new database
-        let db = Arc::new(RwLock::new(Database::new()));
-        databases.insert(name.to_string(), Arc::clone(&db));
+        let db = SharedDatabase::new(Database::new());
+        databases.insert(name.to_string(), db.clone());
         db
+    }
+
+    /// Get or create a shared database instance and return the raw Arc type.
+    ///
+    /// This is provided for backwards compatibility with code that expects
+    /// the raw `Arc<RwLock<Database>>` type.
+    pub async fn get_or_create_arc(&self, name: &str) -> SharedDatabaseArc {
+        let db = self.get_or_create(name).await;
+        db.into_inner()
     }
 
     /// Get a shared database instance if it exists.
@@ -83,7 +96,7 @@ impl DatabaseRegistry {
     /// before starting the server.
     pub async fn register_database(&self, name: &str, db: Database) {
         let mut databases = self.databases.write().await;
-        databases.insert(name.to_string(), Arc::new(RwLock::new(db)));
+        databases.insert(name.to_string(), SharedDatabase::new(db));
     }
 }
 
@@ -109,7 +122,7 @@ mod tests {
         assert_eq!(registry.database_count().await, 1);
 
         // Verify they point to the same database
-        assert!(Arc::ptr_eq(&db1, &db2));
+        assert!(Arc::ptr_eq(db1.as_arc(), db2.as_arc()));
     }
 
     #[tokio::test]
@@ -120,7 +133,7 @@ mod tests {
         let db2 = registry.get_or_create("db2").await;
 
         assert_eq!(registry.database_count().await, 2);
-        assert!(!Arc::ptr_eq(&db1, &db2));
+        assert!(!Arc::ptr_eq(db1.as_arc(), db2.as_arc()));
     }
 
     #[tokio::test]
@@ -165,5 +178,46 @@ mod tests {
         assert!(names.contains(&"alpha".to_string()));
         assert!(names.contains(&"beta".to_string()));
         assert!(names.contains(&"gamma".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_query_on_shared_db() {
+        let registry = DatabaseRegistry::new();
+        let db = registry.get_or_create("testdb").await;
+
+        // Setup: create table and insert data
+        {
+            let mut guard = db.write().await;
+            let schema = vibesql_catalog::TableSchema::new(
+                "users".to_string(),
+                vec![
+                    vibesql_catalog::ColumnSchema::new(
+                        "id".to_string(),
+                        vibesql_types::DataType::Integer,
+                        false,
+                    ),
+                    vibesql_catalog::ColumnSchema::new(
+                        "name".to_string(),
+                        vibesql_types::DataType::Varchar { max_length: Some(100) },
+                        true,
+                    ),
+                ],
+            );
+            guard.create_table(schema).unwrap();
+
+            guard
+                .insert_row(
+                    "users",
+                    vibesql_storage::Row::new(vec![
+                        vibesql_types::SqlValue::Integer(1),
+                        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                    ]),
+                )
+                .unwrap();
+        }
+
+        // Test concurrent reads using the query method
+        let result = db.query("SELECT * FROM users").await.unwrap();
+        assert_eq!(result.rows.len(), 1);
     }
 }

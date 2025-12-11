@@ -85,7 +85,7 @@ pub use pipeline::{
 };
 pub use privilege_checker::PrivilegeChecker;
 // Read-only query support for concurrent access
-pub use readonly::{ReadOnlyError, ReadOnlyQuery};
+pub use readonly::{ReadOnlyError, ReadOnlyQuery, SharedDatabase};
 pub use revoke::RevokeExecutor;
 pub use role_ddl::RoleExecutor;
 pub use schema_ddl::SchemaExecutor;
