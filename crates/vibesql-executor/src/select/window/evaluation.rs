@@ -1,8 +1,14 @@
 //! Core window function evaluation logic
+//!
+//! When the `parallel` feature is enabled and there are multiple partitions,
+//! partition sorting and evaluation is parallelized using rayon.
 
 use vibesql_ast::{Expression, WindowFunctionSpec};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use super::types::WindowFunctionInfo;
 use crate::{
@@ -16,7 +22,13 @@ use crate::{
     },
 };
 
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
+
 /// Evaluate a single window function over all rows
+///
+/// When the `parallel` feature is enabled and there are multiple partitions,
+/// partition sorting is parallelized for better performance on multi-core systems.
 pub(super) fn evaluate_single_window_function(
     rows: &[Row],
     win_func: &WindowFunctionInfo,
@@ -38,22 +50,120 @@ pub(super) fn evaluate_single_window_function(
     };
     let mut partitions = partition_rows(rows.to_vec(), &win_func.window_spec.partition_by, eval_fn);
 
-    // Sort each partition
-    for partition in &mut partitions {
-        sort_partition(partition, &win_func.window_spec.order_by);
+    // Sort each partition - parallelize when beneficial
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        // Use parallel sorting when we have multiple partitions and enough rows
+        // Threshold: parallelize if total rows > sort threshold AND partitions > 1
+        if partitions.len() > 1 && config.should_parallelize_sort(rows.len()) {
+            let order_by = &win_func.window_spec.order_by;
+            partitions.par_iter_mut().for_each(|partition| {
+                sort_partition(partition, order_by);
+            });
+        } else {
+            for partition in &mut partitions {
+                sort_partition(partition, &win_func.window_spec.order_by);
+            }
+        }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        for partition in &mut partitions {
+            sort_partition(partition, &win_func.window_spec.order_by);
+        }
     }
 
     // Evaluate window function for each partition
     // We need to collect results with their original indices, then reorder
+
+    #[cfg(feature = "parallel")]
+    let results_with_indices = {
+        let config = ParallelConfig::global();
+        // Parallelize evaluation when we have multiple partitions and enough rows
+        if partitions.len() > 1 && config.should_parallelize_aggregate(rows.len()) {
+            // Get components for thread-local evaluators
+            let components = evaluator.get_parallel_components();
+
+            // Parallel evaluation of partitions
+            let partition_results: Vec<Result<Vec<(usize, SqlValue)>, ExecutorError>> = partitions
+                .par_iter()
+                .map(|partition| {
+                    // Create thread-local evaluator
+                    let (schema, database, outer_row, outer_schema, window_mapping, cte_context, enable_cse) = components;
+                    let local_evaluator = CombinedExpressionEvaluator::from_parallel_components(
+                        schema,
+                        database,
+                        outer_row,
+                        outer_schema,
+                        window_mapping,
+                        cte_context,
+                        enable_cse,
+                    );
+
+                    let partition_results = evaluate_window_function_for_partition(
+                        partition,
+                        func_name,
+                        args,
+                        &win_func.window_spec.order_by,
+                        &win_func.window_spec.frame,
+                        &local_evaluator,
+                    )?;
+
+                    // Pair each result with its original index
+                    let indexed: Vec<(usize, SqlValue)> = partition_results
+                        .into_iter()
+                        .zip(partition.original_indices.iter())
+                        .map(|(result, &idx)| (idx, result))
+                        .collect();
+
+                    Ok(indexed)
+                })
+                .collect();
+
+            // Flatten results and check for errors
+            let mut all_results = Vec::with_capacity(rows.len());
+            for result in partition_results {
+                all_results.extend(result?);
+            }
+            all_results
+        } else {
+            // Sequential fallback for small datasets
+            evaluate_partitions_sequential(&partitions, func_name, args, &win_func.window_spec, evaluator)?
+        }
+    };
+
+    #[cfg(not(feature = "parallel"))]
+    let results_with_indices = evaluate_partitions_sequential(&partitions, func_name, args, &win_func.window_spec, evaluator)?;
+
+    // Sort by original index to restore original row order
+    let mut results_with_indices = results_with_indices;
+    results_with_indices.sort_by_key(|(idx, _)| *idx);
+
+    // Extract just the results
+    let all_results = results_with_indices.into_iter().map(|(_, result)| result).collect();
+
+    Ok(all_results)
+}
+
+/// Sequential evaluation of window function partitions
+fn evaluate_partitions_sequential(
+    partitions: &[Partition],
+    func_name: &str,
+    args: &[Expression],
+    window_spec: &vibesql_ast::WindowSpec,
+    evaluator: &CombinedExpressionEvaluator,
+) -> Result<Vec<(usize, SqlValue)>, ExecutorError> {
     let mut results_with_indices = Vec::new();
 
-    for partition in &partitions {
+    for partition in partitions {
         let partition_results = evaluate_window_function_for_partition(
             partition,
             func_name,
             args,
-            &win_func.window_spec.order_by,
-            &win_func.window_spec.frame,
+            &window_spec.order_by,
+            &window_spec.frame,
             evaluator,
         )?;
 
@@ -65,13 +175,7 @@ pub(super) fn evaluate_single_window_function(
         }
     }
 
-    // Sort by original index to restore original row order
-    results_with_indices.sort_by_key(|(idx, _)| *idx);
-
-    // Extract just the results
-    let all_results = results_with_indices.into_iter().map(|(_, result)| result).collect();
-
-    Ok(all_results)
+    Ok(results_with_indices)
 }
 
 /// Evaluate a window function for a single partition
