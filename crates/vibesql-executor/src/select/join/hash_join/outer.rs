@@ -36,30 +36,12 @@ pub(in crate::select::join) fn hash_join_left_outer(
     left_col_idx: usize,
     right_col_idx: usize,
 ) -> Result<FromResult, ExecutorError> {
-    // Extract right table name and schema for combining
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
+    // Get column counts (handles nested joins with multiple tables)
+    let right_col_count = right.schema.total_columns;
+    let left_col_count = left.schema.total_columns;
 
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    let right_col_count = right_schema.columns.len();
-    let left_col_count: usize =
-        left.schema.table_schemas.values().map(|(_, s)| s.columns.len()).sum();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // Use as_slice() for zero-cost access without triggering row materialization
     let left_slice = left.as_slice();
@@ -202,30 +184,12 @@ pub(in crate::select::join) fn hash_join_left_outer_multi(
     left_col_indices: &[usize],
     right_col_indices: &[usize],
 ) -> Result<FromResult, ExecutorError> {
-    // Extract right table name and schema for combining
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
+    // Get column counts (handles nested joins with multiple tables)
+    let right_col_count = right.schema.total_columns;
+    let left_col_count = left.schema.total_columns;
 
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    let right_col_count = right_schema.columns.len();
-    let left_col_count: usize =
-        left.schema.table_schemas.values().map(|(_, s)| s.columns.len()).sum();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // Use as_slice() for zero-cost access (we can't swap build/probe for LEFT JOIN)
     let left_slice = left.as_slice();

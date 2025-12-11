@@ -167,6 +167,28 @@ impl CombinedSchema {
         CombinedSchema { table_schemas, total_columns: left_total + right_columns }
     }
 
+    /// Merge two CombinedSchemas (for JOIN operations with nested joins)
+    ///
+    /// Unlike `combine` which adds a single table, this method merges ALL tables
+    /// from the right schema into the left schema. This is essential for nested
+    /// joins like `t1 JOIN (t2 JOIN t3 USING(a)) USING(a)` where the right side
+    /// contains multiple tables that must all remain visible.
+    ///
+    /// The right schema's tables have their start indices adjusted to account
+    /// for the left schema's total column count.
+    pub fn merge(left: CombinedSchema, right: CombinedSchema) -> Self {
+        let mut table_schemas = left.table_schemas;
+        let left_total = left.total_columns;
+
+        // Add all tables from right schema with adjusted start indices
+        for (table_key, (start_index, schema)) in right.table_schemas {
+            let adjusted_start = left_total + start_index;
+            table_schemas.insert(table_key, (adjusted_start, schema));
+        }
+
+        CombinedSchema { table_schemas, total_columns: left_total + right.total_columns }
+    }
+
     /// Look up a column by name (optionally qualified with table name)
     /// Uses case-insensitive matching for table/alias and column names
     pub fn get_column_index(&self, table: Option<&str>, column: &str) -> Option<usize> {

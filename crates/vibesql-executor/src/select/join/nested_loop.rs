@@ -540,26 +540,10 @@ pub(super) fn nested_loop_inner_join(
         check_cross_join_size_limit(left_slice.len(), right_slice.len())?;
     }
 
-    // Extract right table name (assume single table for now)
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
-
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    // This handles cases like `t1 JOIN (t2 JOIN t3 USING(a)) USING(a)` where
+    // the right side contains multiple tables that must remain visible
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // OPTIMIZATION: Analyze condition to see if we can evaluate equijoin before allocation
     // This prevents creating combined_row for pairs that won't match the join condition
@@ -618,28 +602,11 @@ pub(super) fn nested_loop_left_outer_join(
     // Note: No memory check here. Hash join is selected in mod.rs BEFORE this function is called.
     // OUTER JOINs typically preserve at least the left table size, making estimates more reliable.
 
-    // Extract right table name and schema
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
+    // Get total right column count (handles nested joins with multiple tables)
+    let right_column_count = right.schema.total_columns;
 
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    let right_column_count = right_schema.columns.len();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
     // Use as_slice() for zero-cost access without triggering row materialization
@@ -715,16 +682,8 @@ pub(super) fn nested_loop_right_outer_join(
     // RIGHT OUTER JOIN = LEFT OUTER JOIN with sides swapped
     // Then we need to reorder columns to put left first, right second
 
-    // Get the right column count before moving
-    let right_col_count = right
-        .schema
-        .table_schemas
-        .values()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .columns
-        .len();
+    // Get the right column count (handles nested joins with multiple tables)
+    let right_col_count = right.schema.total_columns;
 
     // Do LEFT OUTER JOIN with swapped sides
     let swapped_result =
@@ -763,37 +722,12 @@ pub(super) fn nested_loop_full_outer_join(
     // Note: Memory check removed - full outer joins are rare and typically used
     // with smaller datasets. Hash join is tried first for equijoins anyway.
 
-    // Extract right table name and schema
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
+    // Get column counts (handles nested joins with multiple tables)
+    let left_column_count = left.schema.total_columns;
+    let right_column_count = right.schema.total_columns;
 
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    let left_column_count = left
-        .schema
-        .table_schemas
-        .values()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .columns
-        .len();
-    let right_column_count = right_schema.columns.len();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
 
     // Use as_slice() for zero-cost access without triggering row materialization
