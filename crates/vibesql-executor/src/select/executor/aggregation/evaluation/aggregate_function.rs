@@ -97,7 +97,7 @@ pub(super) fn evaluate(
                     vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                         s.to_string()
                     }
-                    vibesql_types::SqlValue::Null => ",".to_string(), // NULL separator = default
+                    vibesql_types::SqlValue::Null => String::new(), // NULL separator = empty string (SQLite behavior)
                     other => other.to_string(), // Convert other types to string
                 }
             } else {
