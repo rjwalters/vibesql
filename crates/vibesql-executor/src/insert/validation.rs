@@ -174,6 +174,12 @@ pub fn coerce_value(
             Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))) // Remove trailing spaces
         }
 
+        // BinaryLargeObject (BLOB) accepts any value type
+        // This implements SQLite's type affinity behavior where untyped columns
+        // (which default to BLOB affinity) can store values of any type.
+        // The value is stored as-is without conversion.
+        (_, DataType::BinaryLargeObject) => Ok(value),
+
         // Type mismatch
         _ => Err(ExecutorError::UnsupportedExpression(format!(
             "Type mismatch: expected {:?}, got {:?}",
