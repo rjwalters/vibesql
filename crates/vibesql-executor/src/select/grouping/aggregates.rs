@@ -65,6 +65,15 @@ pub enum AggregateAccumulator {
 
 impl AggregateAccumulator {
     pub fn new(function_name: &str, distinct: bool) -> Result<Self, crate::errors::ExecutorError> {
+        Self::new_with_separator(function_name, distinct, ",")
+    }
+
+    /// Create a new aggregate accumulator with a custom separator for GROUP_CONCAT
+    pub fn new_with_separator(
+        function_name: &str,
+        distinct: bool,
+        separator: &str,
+    ) -> Result<Self, crate::errors::ExecutorError> {
         let seen = if distinct { Some(HashSet::new()) } else { None };
         match function_name.to_uppercase().as_str() {
             "COUNT" => Ok(AggregateAccumulator::Count {
@@ -89,7 +98,7 @@ impl AggregateAccumulator {
             "MAX" => Ok(AggregateAccumulator::Max { value: None, distinct, seen }),
             "GROUP_CONCAT" => Ok(AggregateAccumulator::GroupConcat {
                 values: Vec::new(),
-                separator: ",".to_string(), // Default separator
+                separator: separator.to_string(),
                 distinct,
                 seen: if distinct { Some(HashSet::new()) } else { None },
             }),
@@ -1024,6 +1033,30 @@ mod tests {
         let result = acc.finalize();
         // With DISTINCT, should only have "a,b"
         assert_eq!(result, SqlValue::Varchar("a,b".into()));
+    }
+
+    #[test]
+    fn test_group_concat_with_custom_separator() {
+        let mut acc = AggregateAccumulator::new_with_separator("GROUP_CONCAT", false, " - ").unwrap();
+
+        acc.accumulate(&SqlValue::Varchar("a".into()));
+        acc.accumulate(&SqlValue::Varchar("b".into()));
+        acc.accumulate(&SqlValue::Varchar("c".into()));
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Varchar("a - b - c".into()));
+    }
+
+    #[test]
+    fn test_group_concat_with_empty_separator() {
+        let mut acc = AggregateAccumulator::new_with_separator("GROUP_CONCAT", false, "").unwrap();
+
+        acc.accumulate(&SqlValue::Varchar("a".into()));
+        acc.accumulate(&SqlValue::Varchar("b".into()));
+        acc.accumulate(&SqlValue::Varchar("c".into()));
+
+        let result = acc.finalize();
+        assert_eq!(result, SqlValue::Varchar("abc".into()));
     }
 
     #[test]
