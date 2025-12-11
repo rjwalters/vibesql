@@ -133,6 +133,9 @@ pub(super) fn eval_scalar_function(
         "PRINTF" => sqlite_compat::printf(args),
         "TOREAL" => sqlite_compat::toreal(args),
         "TOINTEGER" => sqlite_compat::tointeger(args),
+        "CONCAT_WS" => sqlite_compat::concat_ws(args),
+        "QUOTE" => sqlite_compat::quote(args),
+        "INTREAL" => sqlite_compat::intreal(args),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),

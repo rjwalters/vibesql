@@ -363,3 +363,103 @@ fn test_explain_empty() {
     let result = Parser::parse_sql("EXPLAIN");
     assert!(result.is_err());
 }
+
+// ============================================================================
+// EXPLAIN QUERY PLAN Tests (SQLite-style)
+// ============================================================================
+
+#[test]
+fn test_explain_query_plan_select() {
+    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.query_plan);
+        assert!(!explain.analyze);
+        assert_eq!(explain.format, ExplainFormat::Text);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_query_plan_with_where() {
+    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN SELECT * FROM users WHERE id > 5").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.query_plan);
+        assert!(!explain.analyze);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_query_plan_with_join() {
+    let stmt = Parser::parse_sql(
+        "EXPLAIN QUERY PLAN SELECT * FROM t400, t401, t402 WHERE t402.z GLOB 'abc*'"
+    ).unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.query_plan);
+        assert!(matches!(*explain.statement, Statement::Select(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_query_plan_insert() {
+    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN INSERT INTO users (name) VALUES ('test')").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.query_plan);
+        assert!(matches!(*explain.statement, Statement::Insert(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_query_plan_update() {
+    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN UPDATE users SET name = 'test' WHERE id = 1").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.query_plan);
+        assert!(matches!(*explain.statement, Statement::Update(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_query_plan_delete() {
+    let stmt = Parser::parse_sql("EXPLAIN QUERY PLAN DELETE FROM users WHERE id = 1").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(explain.query_plan);
+        assert!(matches!(*explain.statement, Statement::Delete(_)));
+    } else {
+        panic!("Expected Explain statement");
+    }
+}
+
+#[test]
+fn test_explain_query_without_plan_fails() {
+    // EXPLAIN QUERY without PLAN should fail
+    let result = Parser::parse_sql("EXPLAIN QUERY SELECT * FROM users");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_regular_explain_has_query_plan_false() {
+    let stmt = Parser::parse_sql("EXPLAIN SELECT * FROM users").unwrap();
+
+    if let Statement::Explain(explain) = stmt {
+        assert!(!explain.query_plan);
+        assert!(!explain.analyze);
+    } else {
+        panic!("Expected Explain statement");
+    }
+}

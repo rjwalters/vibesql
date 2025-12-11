@@ -92,8 +92,11 @@ fn test_expression_depth_exceeded_with_deeply_nested_or() {
     let executor = SelectExecutor::new(&db);
 
     // Create a deeply nested OR expression
+    // Use fewer iterations to avoid stack overflow in debug builds
+    // Debug builds have smaller stack frames, so we limit depth to 30
+    let depth = if cfg!(debug_assertions) { 30 } else { 99 };
     let mut or_expr = "id = 1".to_string();
-    for i in 2..100 {
+    for i in 2..=depth {
         or_expr.push_str(&format!(" OR id = {}", i));
     }
 

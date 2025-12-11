@@ -106,10 +106,11 @@ class VibeSQL:
     def execute(self, sql: str) -> tuple[bool, str, str]:
         """
         Execute SQL and return (success, stdout, stderr).
+        Uses --format raw for TCL-compatible output (space-separated values).
         """
         try:
             result = subprocess.run(
-                [self.vibesql_path, self._db_file.name, "-c", sql],
+                [self.vibesql_path, self._db_file.name, "-c", sql, "--format", "raw"],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -432,7 +433,7 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     """Save run results to the database."""
     # First, get the next run_id
     result = subprocess.run(
-        [vibesql_path, db_path, "-c", "SELECT COALESCE(MAX(run_id), 0) + 1 FROM tcl_test_runs"],
+        [vibesql_path, db_path, "-c", "SELECT COALESCE(MAX(run_id), 0) + 1 FROM tcl_test_runs", "--format", "raw"],
         capture_output=True,
         text=True,
     )
@@ -478,7 +479,7 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
 
     # Get next result ID
     result = subprocess.run(
-        [vibesql_path, db_path, "-c", "SELECT COALESCE(MAX(id), 0) FROM tcl_test_results"],
+        [vibesql_path, db_path, "-c", "SELECT COALESCE(MAX(id), 0) FROM tcl_test_results", "--format", "raw"],
         capture_output=True,
         text=True,
     )

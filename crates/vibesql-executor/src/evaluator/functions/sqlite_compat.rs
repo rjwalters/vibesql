@@ -681,6 +681,99 @@ fn format_char(val: &SqlValue) -> String {
     char::from_u32(code).map(|c| c.to_string()).unwrap_or_default()
 }
 
+/// CONCAT_WS(separator, str1, str2, ...) - Concatenate with separator
+///
+/// Concatenates strings with the first argument as separator.
+/// NULL values are skipped (not included in result).
+/// Returns NULL if the separator is NULL.
+pub(super) fn concat_ws(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.is_empty() {
+        return Err(ExecutorError::UnsupportedFeature(
+            "CONCAT_WS requires at least 1 argument (separator)".to_string(),
+        ));
+    }
+
+    // First argument is the separator
+    let separator = match &args[0] {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+        other => other.to_string(),
+    };
+
+    // Remaining arguments are the strings to concatenate
+    let mut parts: Vec<String> = Vec::new();
+    for arg in &args[1..] {
+        match arg {
+            SqlValue::Null => continue, // Skip NULL values
+            SqlValue::Varchar(s) | SqlValue::Character(s) => parts.push(s.to_string()),
+            other => parts.push(other.to_string()),
+        }
+    }
+
+    Ok(SqlValue::Varchar(parts.join(&separator).into()))
+}
+
+/// QUOTE(x) - Return SQL literal representation of a value
+///
+/// Returns a string which is the value of its argument suitable for
+/// inclusion in another SQL statement. Strings are surrounded by
+/// single-quotes with escapes on interior quotes.
+pub(super) fn quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "QUOTE requires exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+
+    match &args[0] {
+        SqlValue::Null => Ok(SqlValue::Varchar("NULL".into())),
+        SqlValue::Integer(i) => Ok(SqlValue::Varchar(i.to_string().into())),
+        SqlValue::Bigint(i) => Ok(SqlValue::Varchar(i.to_string().into())),
+        SqlValue::Smallint(i) => Ok(SqlValue::Varchar(i.to_string().into())),
+        SqlValue::Unsigned(u) => Ok(SqlValue::Varchar(u.to_string().into())),
+        SqlValue::Real(r) => Ok(SqlValue::Varchar(r.to_string().into())),
+        SqlValue::Double(d) => Ok(SqlValue::Varchar(d.to_string().into())),
+        SqlValue::Numeric(n) => Ok(SqlValue::Varchar(n.to_string().into())),
+        SqlValue::Float(f) => Ok(SqlValue::Varchar(f.to_string().into())),
+        SqlValue::Boolean(b) => Ok(SqlValue::Varchar(if *b { "1" } else { "0" }.into())),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // Escape single quotes by doubling them
+            let escaped = s.replace('\'', "''");
+            Ok(SqlValue::Varchar(format!("'{}'", escaped).into()))
+        }
+        SqlValue::Vector(floats) => {
+            // Convert blob to X'...' hex format
+            let hex: String = floats
+                .iter()
+                .flat_map(|f| f.to_le_bytes())
+                .map(|b| format!("{:02X}", b))
+                .collect();
+            Ok(SqlValue::Varchar(format!("X'{}'", hex).into()))
+        }
+        SqlValue::Date(d) => Ok(SqlValue::Varchar(format!("'{}'", d).into())),
+        SqlValue::Time(t) => Ok(SqlValue::Varchar(format!("'{}'", t).into())),
+        SqlValue::Timestamp(ts) => Ok(SqlValue::Varchar(format!("'{}'", ts).into())),
+        SqlValue::Interval(i) => Ok(SqlValue::Varchar(format!("'{}'", i).into())),
+    }
+}
+
+/// INTREAL(x) - SQLite test function for integer/real type testing
+///
+/// This is a SQLite internal test function. It returns the value unchanged
+/// but with type affinity information preserved. In VibeSQL, we simply
+/// return the value as-is since we don't have the same type affinity system.
+pub(super) fn intreal(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "INTREAL requires exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+    // Simply return the argument unchanged
+    Ok(args[0].clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -949,5 +1042,156 @@ mod tests {
             tointeger(&[SqlValue::Varchar("  42  ".into())]).unwrap(),
             SqlValue::Integer(42)
         );
+    }
+
+    #[test]
+    fn test_concat_ws() {
+        // Basic concatenation with comma separator
+        assert_eq!(
+            concat_ws(&[
+                SqlValue::Varchar(",".into()),
+                SqlValue::Varchar("a".into()),
+                SqlValue::Varchar("b".into()),
+                SqlValue::Varchar("c".into())
+            ])
+            .unwrap(),
+            SqlValue::Varchar("a,b,c".into())
+        );
+
+        // NULL separator returns NULL
+        assert_eq!(
+            concat_ws(&[
+                SqlValue::Null,
+                SqlValue::Varchar("a".into()),
+                SqlValue::Varchar("b".into())
+            ])
+            .unwrap(),
+            SqlValue::Null
+        );
+
+        // NULL values in strings are skipped
+        assert_eq!(
+            concat_ws(&[
+                SqlValue::Varchar(",".into()),
+                SqlValue::Varchar("a".into()),
+                SqlValue::Null,
+                SqlValue::Varchar("c".into())
+            ])
+            .unwrap(),
+            SqlValue::Varchar("a,c".into())
+        );
+
+        // Empty separator
+        assert_eq!(
+            concat_ws(&[
+                SqlValue::Varchar("".into()),
+                SqlValue::Varchar("a".into()),
+                SqlValue::Varchar("b".into())
+            ])
+            .unwrap(),
+            SqlValue::Varchar("ab".into())
+        );
+
+        // Single string (no separator used)
+        assert_eq!(
+            concat_ws(&[
+                SqlValue::Varchar(",".into()),
+                SqlValue::Varchar("only".into())
+            ])
+            .unwrap(),
+            SqlValue::Varchar("only".into())
+        );
+
+        // No strings (empty result)
+        assert_eq!(
+            concat_ws(&[SqlValue::Varchar(",".into())]).unwrap(),
+            SqlValue::Varchar("".into())
+        );
+
+        // Integers are converted to strings
+        assert_eq!(
+            concat_ws(&[
+                SqlValue::Varchar("-".into()),
+                SqlValue::Integer(1),
+                SqlValue::Integer(2),
+                SqlValue::Integer(3)
+            ])
+            .unwrap(),
+            SqlValue::Varchar("1-2-3".into())
+        );
+    }
+
+    #[test]
+    fn test_quote() {
+        // NULL
+        assert_eq!(quote(&[SqlValue::Null]).unwrap(), SqlValue::Varchar("NULL".into()));
+
+        // Integer
+        assert_eq!(
+            quote(&[SqlValue::Integer(123)]).unwrap(),
+            SqlValue::Varchar("123".into())
+        );
+
+        // String without quotes
+        assert_eq!(
+            quote(&[SqlValue::Varchar("hello".into())]).unwrap(),
+            SqlValue::Varchar("'hello'".into())
+        );
+
+        // String with embedded single quote
+        assert_eq!(
+            quote(&[SqlValue::Varchar("it's".into())]).unwrap(),
+            SqlValue::Varchar("'it''s'".into())
+        );
+
+        // Float
+        assert_eq!(
+            quote(&[SqlValue::Numeric(3.14)]).unwrap(),
+            SqlValue::Varchar("3.14".into())
+        );
+
+        // Boolean
+        assert_eq!(
+            quote(&[SqlValue::Boolean(true)]).unwrap(),
+            SqlValue::Varchar("1".into())
+        );
+        assert_eq!(
+            quote(&[SqlValue::Boolean(false)]).unwrap(),
+            SqlValue::Varchar("0".into())
+        );
+
+        // Empty string
+        assert_eq!(
+            quote(&[SqlValue::Varchar("".into())]).unwrap(),
+            SqlValue::Varchar("''".into())
+        );
+    }
+
+    #[test]
+    fn test_intreal() {
+        // Integer passes through
+        assert_eq!(
+            intreal(&[SqlValue::Integer(42)]).unwrap(),
+            SqlValue::Integer(42)
+        );
+
+        // Real passes through
+        assert_eq!(
+            intreal(&[SqlValue::Numeric(3.14)]).unwrap(),
+            SqlValue::Numeric(3.14)
+        );
+
+        // NULL passes through
+        assert_eq!(intreal(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+
+        // String passes through
+        assert_eq!(
+            intreal(&[SqlValue::Varchar("test".into())]).unwrap(),
+            SqlValue::Varchar("test".into())
+        );
+
+        // Wrong number of arguments
+        assert!(intreal(&[]).is_err());
+        assert!(intreal(&[SqlValue::Integer(1), SqlValue::Integer(2)]).is_err());
     }
 }

@@ -97,4 +97,6 @@ pub struct ExplainStmt {
     pub format: ExplainFormat,
     /// Whether to analyze the query (run it and show actual timing)
     pub analyze: bool,
+    /// Whether this is EXPLAIN QUERY PLAN (SQLite-style execution plan)
+    pub query_plan: bool,
 }
