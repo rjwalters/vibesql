@@ -523,6 +523,11 @@ impl ToSql for Expression {
             }
 
             Expression::SessionVariable { name } => format!("@@{}", name),
+
+            Expression::RowValueConstructor(values) => {
+                let values_sql: Vec<String> = values.iter().map(|v| v.to_sql()).collect();
+                format!("({})", values_sql.join(", "))
+            }
         }
     }
 }

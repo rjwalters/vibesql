@@ -408,6 +408,16 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
         }
 
         Expression::SessionVariable { name } => visitor.visit_session_variable(name),
+
+        Expression::RowValueConstructor(values) => {
+            for value in values {
+                let result = walk_expression(visitor, value);
+                if result.should_stop() {
+                    return VisitResult::Stop;
+                }
+            }
+            VisitResult::Continue
+        }
     };
 
     if result.should_stop() {
@@ -678,6 +688,10 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             search_modifier: Box::new(transform_expression(visitor, *search_modifier)),
             mode,
         },
+
+        Expression::RowValueConstructor(values) => Expression::RowValueConstructor(
+            values.into_iter().map(|v| transform_expression(visitor, v)).collect(),
+        ),
     };
 
     // Post-order transform

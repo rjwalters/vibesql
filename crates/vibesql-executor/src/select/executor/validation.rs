@@ -148,7 +148,9 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
         Expression::PseudoVariable { .. } => {
             // OLD/NEW pseudo-variables in triggers - skip validation
         }
-        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => {
             for child in children {
                 extract_column_refs(child, refs);
             }

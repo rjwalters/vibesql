@@ -315,6 +315,13 @@ pub enum Expression {
     SessionVariable {
         name: String,
     },
+
+    /// Row value constructor (tuple)
+    /// SQL:1999 Section 7.1: Row value constructor
+    /// Example: (a, b) = (1, 2)
+    /// Example: (rowid, 1) <= (5, 0)
+    /// Row values are compared element by element, left to right
+    RowValueConstructor(Vec<Expression>),
 }
 
 /// Full-text search mode specification

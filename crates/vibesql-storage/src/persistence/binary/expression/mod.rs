@@ -75,6 +75,7 @@ enum ExprTag {
     Disjunction = 0x20,
     IsDistinctFrom = 0x21,
     IsTruthValue = 0x22,
+    RowValueConstructor = 0x23,
 }
 
 impl ExprTag {
@@ -115,6 +116,7 @@ impl ExprTag {
             0x20 => Ok(ExprTag::Disjunction),
             0x21 => Ok(ExprTag::IsDistinctFrom),
             0x22 => Ok(ExprTag::IsTruthValue),
+            0x23 => Ok(ExprTag::RowValueConstructor),
             _ => {
                 Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
             }
@@ -385,6 +387,13 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_expression(writer, child)?;
             }
         }
+        Expression::RowValueConstructor(values) => {
+            write_tag!(writer, ExprTag::RowValueConstructor);
+            write_u32(writer, values.len() as u32)?;
+            for val in values {
+                write_expression(writer, val)?;
+            }
+        }
     }
     Ok(())
 }
@@ -600,6 +609,14 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
                 children.push(read_expression(reader)?);
             }
             Ok(Expression::Disjunction(children))
+        }
+        ExprTag::RowValueConstructor => {
+            let count = read_u32(reader)? as usize;
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                values.push(read_expression(reader)?);
+            }
+            Ok(Expression::RowValueConstructor(values))
         }
     }
 }

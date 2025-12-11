@@ -455,7 +455,8 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             | ArenaExtendedExpr::SessionVariable { .. }
             | ArenaExtendedExpr::DuplicateKeyValue { .. }
             | ArenaExtendedExpr::NextValue { .. }
-            | ArenaExtendedExpr::MatchAgainst { .. } => Err(ExecutorError::UnsupportedExpression(
+            | ArenaExtendedExpr::MatchAgainst { .. }
+            | ArenaExtendedExpr::RowValueConstructor { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Advanced expression types not supported in arena evaluator".to_string(),
             )),
         }

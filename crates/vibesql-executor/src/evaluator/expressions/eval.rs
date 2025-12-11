@@ -405,6 +405,11 @@ impl ExpressionEvaluator<'_> {
                 }
                 Ok(result)
             }
+
+            // Row value constructor - not supported in regular evaluation context
+            vibesql_ast::Expression::RowValueConstructor(_) => Err(ExecutorError::UnsupportedExpression(
+                "Row value constructors are not supported in this context".to_string(),
+            )),
         }
     }
 

@@ -574,7 +574,9 @@ impl QuerySignature {
                 name.hash(hasher);
             }
 
-            Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            Expression::Conjunction(children)
+            | Expression::Disjunction(children)
+            | Expression::RowValueConstructor(children) => {
                 for child in children {
                     Self::hash_expression(child, hasher);
                 }
@@ -1028,6 +1030,13 @@ impl QuerySignature {
             ArenaExtendedExpr::SessionVariable { name } => {
                 "SESSION_VARIABLE".hash(hasher);
                 name.hash(hasher);
+            }
+
+            ArenaExtendedExpr::RowValueConstructor(children) => {
+                "ROW_VALUE_CONSTRUCTOR".hash(hasher);
+                for child in children {
+                    Self::hash_arena_expression(child, hasher);
+                }
             }
         }
     }

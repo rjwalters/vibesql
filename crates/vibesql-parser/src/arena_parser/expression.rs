@@ -496,7 +496,7 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(Expression::Wildcard);
         }
 
-        // Parenthesized expression or subquery
+        // Parenthesized expression, subquery, or row value constructor (tuple)
         if matches!(self.peek(), Token::LParen) {
             self.advance();
 
@@ -509,10 +509,26 @@ impl<'arena> ArenaParser<'arena> {
                 ));
             }
 
+            // Parse first expression
+            let first_expr = self.parse_expression()?;
+
+            // Check if this is a row value constructor (tuple): (expr, expr, ...)
+            if matches!(self.peek(), Token::Comma) {
+                let mut values = BumpVec::new_in(self.arena);
+                values.push(first_expr);
+                while matches!(self.peek(), Token::Comma) {
+                    self.advance(); // consume ','
+                    values.push(self.parse_expression()?);
+                }
+                self.expect_token(Token::RParen)?;
+                return Ok(Expression::Extended(
+                    self.arena.alloc(ExtendedExpr::RowValueConstructor(values)),
+                ));
+            }
+
             // Regular parenthesized expression
-            let expr = self.parse_expression()?;
             self.expect_token(Token::RParen)?;
-            return Ok(expr);
+            return Ok(first_expr);
         }
 
         Err(ParseError { message: format!("Expected expression, found {:?}", self.peek()) })

@@ -137,8 +137,10 @@ impl SelectExecutor<'_> {
                 ))
             }
 
-            // Conjunction and Disjunction - evaluate children recursively
-            vibesql_ast::Expression::Conjunction(_) | vibesql_ast::Expression::Disjunction(_) => {
+            // Conjunction, Disjunction, and RowValueConstructor - evaluate children recursively
+            vibesql_ast::Expression::Conjunction(_)
+            | vibesql_ast::Expression::Disjunction(_)
+            | vibesql_ast::Expression::RowValueConstructor(_) => {
                 simple::evaluate(self, expr, group_rows, group_key, evaluator)
             }
         }
