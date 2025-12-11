@@ -25,7 +25,9 @@ pub mod table_elimination;
 mod tests;
 pub mod where_pushdown;
 
-pub use column_pruning::{collect_required_columns, compute_projection_indices, project_rows};
+pub use column_pruning::{
+    collect_required_columns, compute_projection_indices, project_rows, remap_schema,
+};
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;

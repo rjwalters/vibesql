@@ -414,11 +414,83 @@ pub fn project_rows(
         .collect()
 }
 
+/// Remap a CombinedSchema to reflect projected columns
+///
+/// After projecting rows from wide (54 columns) to narrow (14 columns),
+/// we need a new schema that:
+/// 1. Only includes the columns that were kept
+/// 2. Has correct column indices (0-13 instead of scattered across 0-53)
+/// 3. Preserves table aliases for qualified column references
+///
+/// Returns the remapped schema where column lookups resolve to the correct
+/// projected indices.
+pub fn remap_schema(
+    original_schema: &crate::schema::CombinedSchema,
+    projection_indices: &[usize],
+) -> crate::schema::CombinedSchema {
+    use crate::schema::TableKey;
+    use std::collections::HashMap;
+
+    // Build a map from original index -> new projected index
+    let old_to_new: HashMap<usize, usize> = projection_indices
+        .iter()
+        .enumerate()
+        .map(|(new_idx, &old_idx)| (old_idx, new_idx))
+        .collect();
+
+    // For each table in the original schema, build a new TableSchema with only the kept columns
+    let mut new_table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)> =
+        HashMap::new();
+
+    // Track new column offset for each table
+    for (table_key, (original_start, original_table_schema)) in &original_schema.table_schemas {
+        // Find which columns from this table are in the projection
+        let mut kept_columns: Vec<(usize, vibesql_catalog::ColumnSchema)> = Vec::new();
+
+        for (col_idx, column) in original_table_schema.columns.iter().enumerate() {
+            let absolute_idx = original_start + col_idx;
+            if let Some(&new_idx) = old_to_new.get(&absolute_idx) {
+                kept_columns.push((new_idx, column.clone()));
+            }
+        }
+
+        // Skip tables with no kept columns
+        if kept_columns.is_empty() {
+            continue;
+        }
+
+        // Sort by new index to preserve column order
+        kept_columns.sort_by_key(|(new_idx, _)| *new_idx);
+
+        // Find the minimum new index - this is the new start for this table
+        let new_start = kept_columns.iter().map(|(idx, _)| *idx).min().unwrap_or(0);
+
+        // Create new columns vector
+        let new_columns: Vec<vibesql_catalog::ColumnSchema> =
+            kept_columns.into_iter().map(|(_, col)| col).collect();
+
+        // Create new TableSchema with filtered columns
+        let new_table_schema = vibesql_catalog::TableSchema::new(
+            original_table_schema.name.clone(),
+            new_columns,
+        );
+
+        new_table_schemas.insert(table_key.clone(), (new_start, new_table_schema));
+    }
+
+    crate::schema::CombinedSchema {
+        table_schemas: new_table_schemas,
+        total_columns: projection_indices.len(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::CombinedSchema;
     use vibesql_ast::BinaryOperator;
-    use vibesql_types::SqlValue;
+    use vibesql_catalog::ColumnSchema;
+    use vibesql_types::{DataType, SqlValue};
 
     #[test]
     fn test_collect_simple_column_ref() {
@@ -531,5 +603,113 @@ mod tests {
         assert_eq!(projected.len(), 2);
         assert_eq!(projected[0].values.as_slice(), &[SqlValue::Integer(1), SqlValue::Integer(3)]);
         assert_eq!(projected[1].values.as_slice(), &[SqlValue::Integer(5), SqlValue::Integer(7)]);
+    }
+
+    /// Helper to create a simple table schema with given columns
+    fn make_table_schema(name: &str, columns: &[(&str, DataType)]) -> vibesql_catalog::TableSchema {
+        let cols: Vec<ColumnSchema> = columns
+            .iter()
+            .map(|(col_name, dt)| ColumnSchema::new(col_name.to_string(), dt.clone(), true))
+            .collect();
+        vibesql_catalog::TableSchema::new(name.to_string(), cols)
+    }
+
+    #[test]
+    fn test_remap_schema_single_table() {
+        // Create a table with 4 columns
+        let table = make_table_schema(
+            "orders",
+            &[
+                ("id", DataType::Integer),
+                ("customer", DataType::Varchar { max_length: None }),
+                ("amount", DataType::DoublePrecision),
+                ("date", DataType::Date),
+            ],
+        );
+        let schema = CombinedSchema::from_table("orders".to_string(), table);
+
+        // Project columns 0 and 2 (id, amount)
+        let indices = vec![0, 2];
+        let remapped = remap_schema(&schema, &indices);
+
+        // Should have 2 columns total
+        assert_eq!(remapped.total_columns, 2);
+
+        // Column lookups should work with new indices
+        assert_eq!(remapped.get_column_index(Some("orders"), "id"), Some(0));
+        assert_eq!(remapped.get_column_index(Some("orders"), "amount"), Some(1));
+
+        // Original columns 1 and 3 should not be found
+        assert!(remapped.get_column_index(Some("orders"), "customer").is_none());
+        assert!(remapped.get_column_index(Some("orders"), "date").is_none());
+    }
+
+    #[test]
+    fn test_remap_schema_multiple_tables() {
+        // Simulate a JOIN of orders (3 cols) and items (2 cols) = 5 total columns
+        // Original layout: orders.id(0), orders.customer(1), orders.amount(2), items.item_id(3), items.price(4)
+        let orders = make_table_schema(
+            "orders",
+            &[
+                ("id", DataType::Integer),
+                ("customer", DataType::Varchar { max_length: None }),
+                ("amount", DataType::DoublePrecision),
+            ],
+        );
+        let items = make_table_schema(
+            "items",
+            &[("item_id", DataType::Integer), ("price", DataType::DoublePrecision)],
+        );
+
+        let schema = CombinedSchema::combine(
+            CombinedSchema::from_table("orders".to_string(), orders),
+            "items".to_string(),
+            items,
+        );
+
+        assert_eq!(schema.total_columns, 5);
+
+        // Project: orders.id(0), orders.amount(2), items.price(4)
+        // New layout: id(0), amount(1), price(2)
+        let indices = vec![0, 2, 4];
+        let remapped = remap_schema(&schema, &indices);
+
+        assert_eq!(remapped.total_columns, 3);
+
+        // Check orders columns
+        assert_eq!(remapped.get_column_index(Some("orders"), "id"), Some(0));
+        assert_eq!(remapped.get_column_index(Some("orders"), "amount"), Some(1));
+        assert!(remapped.get_column_index(Some("orders"), "customer").is_none());
+
+        // Check items columns
+        assert_eq!(remapped.get_column_index(Some("items"), "price"), Some(2));
+        assert!(remapped.get_column_index(Some("items"), "item_id").is_none());
+    }
+
+    #[test]
+    fn test_remap_schema_table_fully_pruned() {
+        // Simulate a JOIN where one table gets completely pruned
+        let t1 = make_table_schema("t1", &[("a", DataType::Integer), ("b", DataType::Integer)]);
+        let t2 = make_table_schema("t2", &[("c", DataType::Integer), ("d", DataType::Integer)]);
+
+        let schema = CombinedSchema::combine(
+            CombinedSchema::from_table("t1".to_string(), t1),
+            "t2".to_string(),
+            t2,
+        );
+
+        // Only keep columns from t2
+        let indices = vec![2, 3];
+        let remapped = remap_schema(&schema, &indices);
+
+        assert_eq!(remapped.total_columns, 2);
+
+        // t1 should not exist in the remapped schema
+        assert!(remapped.get_column_index(Some("t1"), "a").is_none());
+        assert!(remapped.get_column_index(Some("t1"), "b").is_none());
+
+        // t2 columns should be at new indices
+        assert_eq!(remapped.get_column_index(Some("t2"), "c"), Some(0));
+        assert_eq!(remapped.get_column_index(Some("t2"), "d"), Some(1));
     }
 }
