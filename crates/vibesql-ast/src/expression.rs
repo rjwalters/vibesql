@@ -89,6 +89,18 @@ pub enum Expression {
         negated: bool, // false = IS DISTINCT FROM, true = IS NOT DISTINCT FROM
     },
 
+    /// IS TRUE / IS FALSE / IS UNKNOWN (SQL:1999)
+    /// Boolean test predicates:
+    /// - `expr IS TRUE`: TRUE when expr evaluates to TRUE
+    /// - `expr IS FALSE`: TRUE when expr evaluates to FALSE
+    /// - `expr IS UNKNOWN`: TRUE when expr evaluates to NULL (for booleans)
+    /// Plus negated forms: IS NOT TRUE, IS NOT FALSE, IS NOT UNKNOWN
+    IsTruthValue {
+        expr: Box<Expression>,
+        truth_value: TruthValue,
+        negated: bool, // false = IS <value>, true = IS NOT <value>
+    },
+
     /// Wildcard (*)
     Wildcard,
 
@@ -347,6 +359,17 @@ pub enum Quantifier {
     Any,
     /// SOME - synonym for ANY
     Some,
+}
+
+/// Truth value for IS TRUE/IS FALSE/IS UNKNOWN predicates (SQL:1999)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TruthValue {
+    /// TRUE - the boolean true value
+    True,
+    /// FALSE - the boolean false value
+    False,
+    /// UNKNOWN - represents NULL in boolean context (three-valued logic)
+    Unknown,
 }
 
 /// Window function specification

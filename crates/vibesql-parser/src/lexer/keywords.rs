@@ -28,6 +28,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "NULL" => Keyword::Null,
     "TRUE" => Keyword::True,
     "FALSE" => Keyword::False,
+    "UNKNOWN" => Keyword::Unknown,
     "AS" => Keyword::As,
     "JOIN" => Keyword::Join,
     "LEFT" => Keyword::Left,

@@ -135,6 +135,16 @@ pub(super) fn rewrite_expression_with_context(
             negated: *negated,
         },
 
+        Expression::IsTruthValue { expr, truth_value, negated } => Expression::IsTruthValue {
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            truth_value: *truth_value,
+            negated: *negated,
+        },
+
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
             operand: operand.as_ref().map(|e| {
                 Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))

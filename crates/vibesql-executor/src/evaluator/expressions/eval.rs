@@ -255,6 +255,22 @@ impl ExpressionEvaluator<'_> {
                 Ok(SqlValue::Boolean(result))
             }
 
+            vibesql_ast::Expression::IsTruthValue { expr, truth_value, negated } => {
+                let val = self.eval(expr, row)?;
+                // SQL:1999 three-valued logic for IS TRUE/FALSE/UNKNOWN:
+                // - IS TRUE: TRUE if expr is TRUE, FALSE if expr is FALSE or UNKNOWN
+                // - IS FALSE: TRUE if expr is FALSE, FALSE if expr is TRUE or UNKNOWN
+                // - IS UNKNOWN: TRUE if expr is UNKNOWN (NULL), FALSE if expr is TRUE or FALSE
+                // - IS NOT X: negates the result
+                let result = match truth_value {
+                    vibesql_ast::TruthValue::True => matches!(val, SqlValue::Boolean(true)),
+                    vibesql_ast::TruthValue::False => matches!(val, SqlValue::Boolean(false)),
+                    vibesql_ast::TruthValue::Unknown => matches!(val, SqlValue::Null),
+                };
+                let final_result = if *negated { !result } else { result };
+                Ok(SqlValue::Boolean(final_result))
+            }
+
             vibesql_ast::Expression::WindowFunction { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Window functions should be evaluated separately".to_string(),
             )),

@@ -4,7 +4,7 @@ use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::{
     arena::{
         CaseWhen, Expression, ExtendedExpr, OrderByItem, OrderDirection, Quantifier, Symbol,
-        WindowFunctionSpec, WindowSpec,
+        TruthValue, WindowFunctionSpec, WindowSpec,
     },
     BinaryOperator, UnaryOperator,
 };
@@ -289,12 +289,12 @@ impl<'arena> ArenaParser<'arena> {
             left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
         }
 
-        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM
+        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT] TRUE/FALSE/UNKNOWN
         if self.peek_keyword(Keyword::Is) {
             self.consume_keyword(Keyword::Is)?;
             let negated = self.try_consume_keyword(Keyword::Not);
 
-            // Check for DISTINCT FROM (SQL:1999) or NULL
+            // Check for DISTINCT FROM (SQL:1999), NULL, TRUE, FALSE, or UNKNOWN
             if self.peek_keyword(Keyword::Distinct) {
                 self.consume_keyword(Keyword::Distinct)?;
                 self.expect_keyword(Keyword::From)?;
@@ -302,6 +302,30 @@ impl<'arena> ArenaParser<'arena> {
                 let left_ref = self.arena.alloc(left);
                 let right_ref = self.arena.alloc(right);
                 left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
+            } else if self.peek_keyword(Keyword::True) {
+                self.consume_keyword(Keyword::True)?;
+                let left_ref = self.arena.alloc(left);
+                left = Expression::IsTruthValue {
+                    expr: left_ref,
+                    truth_value: TruthValue::True,
+                    negated,
+                };
+            } else if self.peek_keyword(Keyword::False) {
+                self.consume_keyword(Keyword::False)?;
+                let left_ref = self.arena.alloc(left);
+                left = Expression::IsTruthValue {
+                    expr: left_ref,
+                    truth_value: TruthValue::False,
+                    negated,
+                };
+            } else if self.peek_keyword(Keyword::Unknown) {
+                self.consume_keyword(Keyword::Unknown)?;
+                let left_ref = self.arena.alloc(left);
+                left = Expression::IsTruthValue {
+                    expr: left_ref,
+                    truth_value: TruthValue::Unknown,
+                    negated,
+                };
             } else {
                 self.expect_keyword(Keyword::Null)?;
                 let left_ref = self.arena.alloc(left);

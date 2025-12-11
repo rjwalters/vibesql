@@ -145,6 +145,9 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
             extract_from_expression(left, tables);
             extract_from_expression(right, tables);
         }
+        vibesql_ast::Expression::IsTruthValue { expr, .. } => {
+            extract_from_expression(expr, tables);
+        }
         vibesql_ast::Expression::Cast { expr, .. } => {
             extract_from_expression(expr, tables);
         }

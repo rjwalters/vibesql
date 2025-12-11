@@ -372,7 +372,7 @@ impl Parser {
             };
         }
 
-        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM
+        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT] TRUE/FALSE/UNKNOWN
         if self.peek_keyword(Keyword::Is) {
             self.consume_keyword(Keyword::Is)?;
 
@@ -384,7 +384,7 @@ impl Parser {
                 false
             };
 
-            // Check for DISTINCT FROM (SQL:1999) or NULL
+            // Check for DISTINCT FROM (SQL:1999), NULL, TRUE, FALSE, or UNKNOWN
             if self.peek_keyword(Keyword::Distinct) {
                 self.consume_keyword(Keyword::Distinct)?;
                 self.expect_keyword(Keyword::From)?;
@@ -392,6 +392,27 @@ impl Parser {
                 left = vibesql_ast::Expression::IsDistinctFrom {
                     left: Box::new(left),
                     right: Box::new(right),
+                    negated,
+                };
+            } else if self.peek_keyword(Keyword::True) {
+                self.consume_keyword(Keyword::True)?;
+                left = vibesql_ast::Expression::IsTruthValue {
+                    expr: Box::new(left),
+                    truth_value: vibesql_ast::TruthValue::True,
+                    negated,
+                };
+            } else if self.peek_keyword(Keyword::False) {
+                self.consume_keyword(Keyword::False)?;
+                left = vibesql_ast::Expression::IsTruthValue {
+                    expr: Box::new(left),
+                    truth_value: vibesql_ast::TruthValue::False,
+                    negated,
+                };
+            } else if self.peek_keyword(Keyword::Unknown) {
+                self.consume_keyword(Keyword::Unknown)?;
+                left = vibesql_ast::Expression::IsTruthValue {
+                    expr: Box::new(left),
+                    truth_value: vibesql_ast::TruthValue::Unknown,
                     negated,
                 };
             } else {

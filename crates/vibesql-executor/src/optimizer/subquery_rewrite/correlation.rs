@@ -137,6 +137,8 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
             has_external_column_refs(left, subquery) || has_external_column_refs(right, subquery)
         }
 
+        Expression::IsTruthValue { expr, .. } => has_external_column_refs(expr, subquery),
+
         Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().is_some_and(|e| has_external_column_refs(e, subquery))
                 || when_clauses.iter().any(|clause| {

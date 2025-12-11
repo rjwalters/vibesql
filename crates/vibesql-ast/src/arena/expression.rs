@@ -90,6 +90,14 @@ pub enum Expression<'arena> {
         negated: bool, // false = IS DISTINCT FROM, true = IS NOT DISTINCT FROM
     },
 
+    /// IS TRUE / IS FALSE / IS UNKNOWN (SQL:1999)
+    /// Boolean test predicates.
+    IsTruthValue {
+        expr: ExprRef<'arena>,
+        truth_value: TruthValue,
+        negated: bool, // false = IS <value>, true = IS NOT <value>
+    },
+
     /// Wildcard (*)
     Wildcard,
 
@@ -248,6 +256,17 @@ pub enum Quantifier {
     All,
     Any,
     Some,
+}
+
+/// Truth value for IS TRUE/IS FALSE/IS UNKNOWN predicates (SQL:1999)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TruthValue {
+    /// TRUE - the boolean true value
+    True,
+    /// FALSE - the boolean false value
+    False,
+    /// UNKNOWN - represents NULL in boolean context (three-valued logic)
+    Unknown,
 }
 
 /// Window function specification

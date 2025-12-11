@@ -371,6 +371,13 @@ impl QuerySignature {
                 negated.hash(hasher);
             }
 
+            Expression::IsTruthValue { expr, truth_value, negated } => {
+                "IS_TRUTH_VALUE".hash(hasher);
+                Self::hash_expression(expr, hasher);
+                std::mem::discriminant(truth_value).hash(hasher);
+                negated.hash(hasher);
+            }
+
             Expression::Wildcard => "WILDCARD".hash(hasher),
 
             Expression::Case { operand, when_clauses, else_result } => {
@@ -774,6 +781,13 @@ impl QuerySignature {
                 "IS_DISTINCT_FROM".hash(hasher);
                 Self::hash_arena_expression(left, hasher);
                 Self::hash_arena_expression(right, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::IsTruthValue { expr, truth_value, negated } => {
+                "IS_TRUTH_VALUE".hash(hasher);
+                Self::hash_arena_expression(expr, hasher);
+                std::mem::discriminant(truth_value).hash(hasher);
                 negated.hash(hasher);
             }
 

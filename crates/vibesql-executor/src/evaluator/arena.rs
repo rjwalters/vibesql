@@ -230,6 +230,17 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 Ok(SqlValue::Boolean(if *negated { !is_distinct } else { is_distinct }))
             }
 
+            // IS TRUE / IS FALSE / IS UNKNOWN
+            ArenaExpression::IsTruthValue { expr, truth_value, negated } => {
+                let val = self.eval_with_depth(expr, row)?;
+                let result = match truth_value {
+                    vibesql_ast::arena::TruthValue::True => matches!(val, SqlValue::Boolean(true)),
+                    vibesql_ast::arena::TruthValue::False => matches!(val, SqlValue::Boolean(false)),
+                    vibesql_ast::arena::TruthValue::Unknown => matches!(val, SqlValue::Null),
+                };
+                Ok(SqlValue::Boolean(if *negated { !result } else { result }))
+            }
+
             // Wildcard (*)
             ArenaExpression::Wildcard => Ok(SqlValue::Null),
 

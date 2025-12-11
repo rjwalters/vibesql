@@ -474,6 +474,9 @@ impl TableSchema {
                 Self::expression_references_column(left, column_name)
                     || Self::expression_references_column(right, column_name)
             }
+            vibesql_ast::Expression::IsTruthValue { expr, .. } => {
+                Self::expression_references_column(expr, column_name)
+            }
             vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
                 // Check operand
                 if let Some(op) = operand {

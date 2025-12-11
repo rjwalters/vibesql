@@ -263,6 +263,8 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
             walk_expression(visitor, right)
         }
 
+        Expression::IsTruthValue { expr: inner, .. } => walk_expression(visitor, inner),
+
         Expression::Wildcard => visitor.visit_wildcard(),
 
         Expression::Case { operand, when_clauses, else_result } => {
@@ -569,6 +571,14 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             right: Box::new(transform_expression(visitor, *right)),
             negated,
         },
+
+        Expression::IsTruthValue { expr: inner, truth_value, negated } => {
+            Expression::IsTruthValue {
+                expr: Box::new(transform_expression(visitor, *inner)),
+                truth_value,
+                negated,
+            }
+        }
 
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
             operand: operand.map(|op| Box::new(transform_expression(visitor, *op))),
