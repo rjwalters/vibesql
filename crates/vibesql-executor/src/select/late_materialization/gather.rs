@@ -2,8 +2,15 @@
 //!
 //! This module provides efficient gather operations for materializing
 //! only the columns and rows needed for query output.
+//!
+//! Parallelization is enabled via the `parallel` feature flag.
+//! When the selection vector exceeds the scan threshold (determined by
+//! `ParallelConfig`), gather operations use rayon for parallel execution.
 
 use std::sync::Arc;
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
@@ -13,6 +20,9 @@ use crate::{
     errors::ExecutorError,
     select::columnar::{ColumnArray, ColumnarBatch},
 };
+
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
 
 /// Gather specific columns from a columnar batch using a selection vector
 ///
@@ -198,10 +208,44 @@ pub fn gather_column_array(
 /// Gather a columnar batch with selection applied to all columns
 ///
 /// Creates a new ColumnarBatch containing only the selected rows.
+/// Parallelizes column gathering when selection size exceeds the scan threshold.
 pub fn gather_batch(
     batch: &ColumnarBatch,
     selection: &SelectionVector,
 ) -> Result<ColumnarBatch, ExecutorError> {
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        // Parallelize when we have enough rows AND multiple columns
+        if batch.column_count() > 1 && config.should_parallelize_scan(selection.len()) {
+            // Collect column references first (can't fail)
+            let column_refs: Vec<_> = (0..batch.column_count())
+                .map(|col_idx| batch.column(col_idx))
+                .collect();
+
+            // Check all columns exist before parallel processing
+            for (col_idx, col_opt) in column_refs.iter().enumerate() {
+                if col_opt.is_none() {
+                    return Err(ExecutorError::ColumnarColumnNotFound {
+                        column_index: col_idx,
+                        batch_columns: batch.column_count(),
+                    });
+                }
+            }
+
+            // Parallel gather each column
+            let results: Vec<Result<ColumnArray, ExecutorError>> = column_refs
+                .par_iter()
+                .map(|col_opt| gather_column_array(col_opt.as_ref().unwrap(), selection))
+                .collect();
+
+            // Collect results, propagating any errors
+            let columns: Result<Vec<_>, _> = results.into_iter().collect();
+            return ColumnarBatch::from_columns(columns?, batch.column_names().map(|n| n.to_vec()));
+        }
+    }
+
+    // Sequential fallback (always used when parallel feature disabled)
     let mut columns = Vec::with_capacity(batch.column_count());
 
     for col_idx in 0..batch.column_count() {
@@ -219,11 +263,61 @@ pub fn gather_batch(
 }
 
 /// Gather specific columns from a batch, staying columnar
+/// Parallelizes column gathering when selection size exceeds the scan threshold.
 pub fn gather_batch_columns(
     batch: &ColumnarBatch,
     selection: &SelectionVector,
     column_indices: &[usize],
 ) -> Result<ColumnarBatch, ExecutorError> {
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        // Parallelize when we have enough rows AND multiple columns
+        if column_indices.len() > 1 && config.should_parallelize_scan(selection.len()) {
+            // Collect column references and validate first
+            let column_refs: Vec<_> = column_indices
+                .iter()
+                .map(|&col_idx| (col_idx, batch.column(col_idx)))
+                .collect();
+
+            // Check all columns exist before parallel processing
+            for &(col_idx, ref col_opt) in &column_refs {
+                if col_opt.is_none() {
+                    return Err(ExecutorError::ColumnarColumnNotFound {
+                        column_index: col_idx,
+                        batch_columns: batch.column_count(),
+                    });
+                }
+            }
+
+            // Parallel gather each column
+            let results: Vec<Result<ColumnArray, ExecutorError>> = column_refs
+                .par_iter()
+                .map(|(_, col_opt)| gather_column_array(col_opt.as_ref().unwrap(), selection))
+                .collect();
+
+            // Collect results
+            let columns: Result<Vec<_>, _> = results.into_iter().collect();
+
+            // Build names sequentially (fast and order-dependent)
+            let names = batch.column_names().map(|all_names| {
+                column_indices
+                    .iter()
+                    .filter_map(|&col_idx| {
+                        if col_idx < all_names.len() {
+                            Some(all_names[col_idx].clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            });
+
+            return ColumnarBatch::from_columns(columns?, names);
+        }
+    }
+
+    // Sequential fallback
     let mut columns = Vec::with_capacity(column_indices.len());
     let mut names = batch.column_names().map(|_| Vec::with_capacity(column_indices.len()));
 
@@ -252,16 +346,51 @@ pub fn gather_batch_columns(
 /// Gather from row-based data
 ///
 /// Fallback for when data is not columnar.
+/// Parallelizes row cloning when selection size exceeds the scan threshold.
 pub fn gather_rows(rows: &[Row], selection: &SelectionVector) -> Vec<Row> {
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        if config.should_parallelize_scan(selection.len()) {
+            return selection
+                .indices()
+                .par_iter()
+                .map(|&idx| rows[idx as usize].clone())
+                .collect();
+        }
+    }
+
+    // Sequential fallback
     selection.iter().map(|idx| rows[idx as usize].clone()).collect()
 }
 
 /// Gather specific columns from row-based data
+/// Parallelizes row construction when selection size exceeds the scan threshold.
 pub fn gather_row_columns(
     rows: &[Row],
     selection: &SelectionVector,
     column_indices: &[usize],
 ) -> Vec<Row> {
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        if config.should_parallelize_scan(selection.len()) {
+            return selection
+                .indices()
+                .par_iter()
+                .map(|&idx| {
+                    let source_row = &rows[idx as usize];
+                    let values: Vec<SqlValue> = column_indices
+                        .iter()
+                        .map(|&col_idx| source_row.get(col_idx).cloned().unwrap_or(SqlValue::Null))
+                        .collect();
+                    Row::new(values)
+                })
+                .collect();
+        }
+    }
+
+    // Sequential fallback
     selection
         .iter()
         .map(|idx| {
@@ -279,6 +408,7 @@ pub fn gather_row_columns(
 ///
 /// Combines columns from left and right batches based on join indices.
 /// Uses u32::MAX as a marker for NULL (outer join unmatched rows).
+/// Parallelizes row construction when index count exceeds the scan threshold.
 pub fn gather_join_output(
     left_batch: &ColumnarBatch,
     right_batch: &ColumnarBatch,
@@ -295,6 +425,52 @@ pub fn gather_join_output(
         .unwrap_or_else(|| (0..right_batch.column_count()).collect());
 
     let total_cols = left_cols.len() + right_cols.len();
+
+    #[cfg(feature = "parallel")]
+    {
+        let config = ParallelConfig::global();
+        if config.should_parallelize_scan(left_indices.len()) {
+            // Parallel row construction
+            let results: Vec<Result<Row, ExecutorError>> = left_indices
+                .par_iter()
+                .zip(right_indices.par_iter())
+                .map(|(&left_idx, &right_idx)| {
+                    let mut values = Vec::with_capacity(total_cols);
+
+                    // Gather left columns
+                    if left_idx == u32::MAX {
+                        // NULL row for RIGHT OUTER join
+                        for _ in 0..left_cols.len() {
+                            values.push(SqlValue::Null);
+                        }
+                    } else {
+                        for &col_idx in &left_cols {
+                            values.push(left_batch.get_value(left_idx as usize, col_idx)?);
+                        }
+                    }
+
+                    // Gather right columns
+                    if right_idx == u32::MAX {
+                        // NULL row for LEFT OUTER join
+                        for _ in 0..right_cols.len() {
+                            values.push(SqlValue::Null);
+                        }
+                    } else {
+                        for &col_idx in &right_cols {
+                            values.push(right_batch.get_value(right_idx as usize, col_idx)?);
+                        }
+                    }
+
+                    Ok(Row::new(values))
+                })
+                .collect();
+
+            // Collect results, propagating any errors
+            return results.into_iter().collect();
+        }
+    }
+
+    // Sequential fallback
     let mut rows = Vec::with_capacity(left_indices.len());
 
     for (&left_idx, &right_idx) in left_indices.iter().zip(right_indices) {
