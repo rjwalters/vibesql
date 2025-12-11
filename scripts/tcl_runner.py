@@ -516,6 +516,8 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     def escape_sql(s: str, max_len: int = 1000) -> str:
         if not s:
             return ""
+        # Remove null bytes and other control chars that break subprocess/SQL
+        s = s.replace('\x00', '')
         # Replace single quotes with doubled quotes
         s = s.replace("'", "''")
         # Remove newlines and other control chars that might break the INSERT
