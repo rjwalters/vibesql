@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-10T22:10:35.952490Z",
+  "generated_at": "2025-12-10T23:10:28.482207Z",
   "version": "2.0",
   "summary": {
     "conformance": {
@@ -33,7 +33,7 @@
       "scale_factor": "1.0"
     },
     "sysbench": {
-      "tests_count": 6
+      "tests_count": 5
     }
   },
   "benchmarks": {
@@ -239,24 +239,20 @@
     "sysbench": {
       "description": "Sysbench OLTP - Point operations",
       "latest": {
-        "timestamp": "2025-12-10T21:44:52.688284",
-        "commit": "f2362dde"
+        "timestamp": "2025-12-10T23:10:13.106942",
+        "commit": "0933eed4"
       },
       "tests": {
         "point_select_10000": {
           "test_name": "point_select",
           "table_size": 10000,
           "engines": {
-            "vibesql": {
-              "mean_us": 0.86,
+            "vibesql_server": {
+              "mean_us": 46.01,
               "std_dev_us": null
             },
-            "sqlite": {
-              "mean_us": 0.37,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 145.19,
+            "mysql": {
+              "mean_us": 160.93,
               "std_dev_us": null
             }
           }
@@ -265,16 +261,12 @@
           "test_name": "insert",
           "table_size": 10000,
           "engines": {
-            "vibesql": {
-              "mean_us": 5.59,
+            "vibesql_server": {
+              "mean_us": 58.88,
               "std_dev_us": null
             },
-            "sqlite": {
-              "mean_us": 11.13,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 217.14,
+            "mysql": {
+              "mean_us": 731.27,
               "std_dev_us": null
             }
           }
@@ -283,16 +275,12 @@
           "test_name": "update_index",
           "table_size": 10000,
           "engines": {
-            "vibesql": {
-              "mean_us": 4.78,
+            "vibesql_server": {
+              "mean_us": 66.94,
               "std_dev_us": null
             },
-            "sqlite": {
-              "mean_us": 1.57,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 203.9,
+            "mysql": {
+              "mean_us": 1444.3,
               "std_dev_us": null
             }
           }
@@ -301,34 +289,12 @@
           "test_name": "update_non_index",
           "table_size": 10000,
           "engines": {
-            "vibesql": {
-              "mean_us": 2.12,
+            "vibesql_server": {
+              "mean_us": 91.99,
               "std_dev_us": null
             },
-            "sqlite": {
-              "mean_us": 1.31,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 209.77,
-              "std_dev_us": null
-            }
-          }
-        },
-        "delete_10000": {
-          "test_name": "delete",
-          "table_size": 10000,
-          "engines": {
-            "vibesql": {
-              "mean_us": 3.38,
-              "std_dev_us": null
-            },
-            "sqlite": {
-              "mean_us": 1.48,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 207.92,
+            "mysql": {
+              "mean_us": 869.34,
               "std_dev_us": null
             }
           }
@@ -337,16 +303,12 @@
           "test_name": "range_queries",
           "table_size": 10000,
           "engines": {
-            "vibesql": {
-              "mean_us": 23.04,
+            "vibesql_server": {
+              "mean_us": 109.83,
               "std_dev_us": null
             },
-            "sqlite": {
-              "mean_us": 8.69,
-              "std_dev_us": null
-            },
-            "duckdb": {
-              "mean_us": 383.49,
+            "mysql": {
+              "mean_us": 281.39,
               "std_dev_us": null
             }
           }
@@ -399,7 +361,7 @@
   "timeline": [
     {
       "date": "2025-12-10",
-      "commit": "c4fbdcac",
+      "commit": "0933eed4",
       "conformance_pass_rate": 100.0,
       "tpch_geo_mean_ms": 17.83,
       "tpch_passing": 22,

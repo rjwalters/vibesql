@@ -179,12 +179,112 @@
         "max": 0.000421839,
         "rounds": 78200
       }
+    },
+    {
+      "name": "sysbench_point_select_vibesql_server",
+      "stats": {
+        "mean": 4.601e-05,
+        "stddev": 0,
+        "min": 4.1409e-05,
+        "max": 5.061100000000001e-05,
+        "rounds": 644340
+      }
+    },
+    {
+      "name": "sysbench_insert_vibesql_server",
+      "stats": {
+        "mean": 5.888e-05,
+        "stddev": 0,
+        "min": 5.2992e-05,
+        "max": 6.4768e-05,
+        "rounds": 497943
+      }
+    },
+    {
+      "name": "sysbench_update_index_vibesql_server",
+      "stats": {
+        "mean": 6.694e-05,
+        "stddev": 0,
+        "min": 6.0246000000000006e-05,
+        "max": 7.363400000000001e-05,
+        "rounds": 444448
+      }
+    },
+    {
+      "name": "sysbench_update_non_index_vibesql_server",
+      "stats": {
+        "mean": 9.199e-05,
+        "stddev": 0,
+        "min": 8.2791e-05,
+        "max": 0.00010118900000000001,
+        "rounds": 321418
+      }
+    },
+    {
+      "name": "sysbench_range_queries_vibesql_server",
+      "stats": {
+        "mean": 0.00010983,
+        "stddev": 0,
+        "min": 9.8847e-05,
+        "max": 0.00012081300000000001,
+        "rounds": 272772
+      }
+    },
+    {
+      "name": "sysbench_point_select_mysql",
+      "stats": {
+        "mean": 0.00016093,
+        "stddev": 0,
+        "min": 0.000144837,
+        "max": 0.000177023,
+        "rounds": 185768
+      }
+    },
+    {
+      "name": "sysbench_insert_mysql",
+      "stats": {
+        "mean": 0.00073127,
+        "stddev": 0,
+        "min": 0.000658143,
+        "max": 0.0008043970000000001,
+        "rounds": 40919
+      }
+    },
+    {
+      "name": "sysbench_update_index_mysql",
+      "stats": {
+        "mean": 0.0014443,
+        "stddev": 0,
+        "min": 0.00129987,
+        "max": 0.00158873,
+        "rounds": 20763
+      }
+    },
+    {
+      "name": "sysbench_update_non_index_mysql",
+      "stats": {
+        "mean": 0.00086934,
+        "stddev": 0,
+        "min": 0.000782406,
+        "max": 0.0009562740000000001,
+        "rounds": 34464
+      }
+    },
+    {
+      "name": "sysbench_range_queries_mysql",
+      "stats": {
+        "mean": 0.00028139,
+        "stddev": 0,
+        "min": 0.000253251,
+        "max": 0.00030952900000000006,
+        "rounds": 106556
+      }
     }
   ],
   "metadata": {
     "suite": "sysbench",
-    "timestamp": "2025-12-10T21:44:52.688284",
-    "git_commit": "f2362dde",
+    "timestamp": "2025-12-10T23:10:13.106942",
+    "git_commit": "0933eed4",
     "table_size": "10000"
   }
 }
