@@ -338,6 +338,30 @@ impl SqlExecutor {
             vibesql_ast::Statement::Describe(desc_stmt) => {
                 result = self.execute_describe(&desc_stmt)?;
             }
+            vibesql_ast::Statement::CreateAssertion(create_stmt) => {
+                match vibesql_executor::advanced_objects::execute_create_assertion(
+                    &create_stmt,
+                    &mut self.db,
+                ) {
+                    Ok(()) => {
+                        println!("Assertion '{}' created", create_stmt.assertion_name);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
+            vibesql_ast::Statement::DropAssertion(drop_stmt) => {
+                match vibesql_executor::advanced_objects::execute_drop_assertion(
+                    &drop_stmt,
+                    &mut self.db,
+                ) {
+                    Ok(()) => {
+                        println!("Assertion '{}' dropped", drop_stmt.assertion_name);
+                        result.row_count = 0;
+                    }
+                    Err(e) => return Err(anyhow::anyhow!("{}", e)),
+                }
+            }
             _ => {
                 return Err(anyhow::anyhow!("Statement type not yet supported in CLI"));
             }

@@ -1,0 +1,185 @@
+# Test CREATE ASSERTION runtime enforcement (SQL:1999 Feature F671/F672)
+# Issue #4235
+
+# Setup: Create tables for testing assertions
+statement ok
+CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY,
+    balance INTEGER NOT NULL
+);
+
+statement ok
+CREATE TABLE settings (
+    key VARCHAR(50) PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+
+# Insert some initial data
+statement ok
+INSERT INTO accounts VALUES (1, 100);
+
+statement ok
+INSERT INTO accounts VALUES (2, 200);
+
+statement ok
+INSERT INTO settings VALUES ('min_balance', 50);
+
+# Test 1: Create an assertion that should pass with current data
+statement ok
+CREATE ASSERTION positive_balances CHECK ((SELECT MIN(balance) FROM accounts) >= 0);
+
+# Test 2: INSERT that satisfies the assertion should succeed
+statement ok
+INSERT INTO accounts VALUES (3, 300);
+
+# Test 3: INSERT that violates the assertion should fail
+statement error
+INSERT INTO accounts VALUES (4, -100);
+
+# Verify the failed insert didn't add the row
+query I
+SELECT COUNT(*) FROM accounts;
+----
+3
+
+# Test 4: UPDATE that satisfies the assertion should succeed
+statement ok
+UPDATE accounts SET balance = 150 WHERE id = 1;
+
+# Test 5: UPDATE that violates the assertion should fail
+statement error
+UPDATE accounts SET balance = -50 WHERE id = 2;
+
+# Verify the failed update didn't change the value
+query I
+SELECT balance FROM accounts WHERE id = 2;
+----
+200
+
+# Test 6: DELETE that doesn't violate the assertion should succeed
+statement ok
+DELETE FROM accounts WHERE id = 3;
+
+# Verify delete succeeded
+query I
+SELECT COUNT(*) FROM accounts;
+----
+2
+
+# Test 7: Create a multi-table assertion
+# This assertion ensures the sum of all balances >= configured minimum * account count
+statement ok
+DROP ASSERTION positive_balances;
+
+statement ok
+CREATE ASSERTION total_balance_check CHECK (
+    (SELECT SUM(balance) FROM accounts) >=
+    (SELECT value FROM settings WHERE key = 'min_balance') * (SELECT COUNT(*) FROM accounts)
+);
+
+# Current state: accounts has 2 rows with balances 150 and 200 (total 350)
+# min_balance is 50, so minimum total should be 50 * 2 = 100
+# 350 >= 100, so assertion passes
+
+# Test 8: INSERT that satisfies multi-table assertion
+statement ok
+INSERT INTO accounts VALUES (4, 60);
+
+# Test 9: Verify we can change settings in a way that still satisfies the assertion
+statement ok
+UPDATE settings SET value = 100 WHERE key = 'min_balance';
+
+# Current: 3 accounts with balances 150, 200, 60 (total 410)
+# min_balance is now 100, so minimum total should be 100 * 3 = 300
+# 410 >= 300, so assertion still passes
+
+# Test 10: INSERT that would violate the multi-table assertion should fail
+# Adding an account with balance 10 would make total 420 with 4 accounts
+# But minimum would be 100 * 4 = 400, so 420 >= 400 would still pass
+# Let's first increase min_balance to make this test meaningful
+statement ok
+UPDATE settings SET value = 120 WHERE key = 'min_balance';
+
+# Now minimum is 120 * 3 = 360, total is 410, assertion passes
+# Adding an account with balance 10 would make: total 420, accounts 4, minimum 480
+# 420 < 480, so assertion should fail
+statement error
+INSERT INTO accounts VALUES (5, 10);
+
+# Verify the insert failed
+query I
+SELECT COUNT(*) FROM accounts;
+----
+3
+
+# Test 11: DROP ASSERTION and verify operations now succeed
+statement ok
+DROP ASSERTION total_balance_check;
+
+# Now the same insert should succeed
+statement ok
+INSERT INTO accounts VALUES (5, 10);
+
+query I
+SELECT COUNT(*) FROM accounts;
+----
+4
+
+# Test 12: Assertion with aggregate function
+statement ok
+CREATE ASSERTION max_accounts CHECK ((SELECT COUNT(*) FROM accounts) <= 10);
+
+# This should succeed (4 accounts)
+statement ok
+INSERT INTO accounts VALUES (6, 100);
+
+# Verify
+query I
+SELECT COUNT(*) FROM accounts;
+----
+5
+
+# Test 13: NULL handling in assertions
+# Per SQL standard, NULL in assertion evaluation is treated as passing (only FALSE triggers violation)
+statement ok
+DROP TABLE accounts;
+
+statement ok
+DROP TABLE settings;
+
+statement ok
+DROP ASSERTION max_accounts;
+
+# Create table with nullable column
+statement ok
+CREATE TABLE nullable_test (
+    id INTEGER PRIMARY KEY,
+    value INTEGER
+);
+
+statement ok
+INSERT INTO nullable_test VALUES (1, 100);
+
+statement ok
+INSERT INTO nullable_test VALUES (2, NULL);
+
+# Create assertion that involves NULL
+# (SELECT MIN(value) FROM nullable_test) >= 0
+# MIN ignores NULLs, so this returns 100 >= 0 = TRUE
+statement ok
+CREATE ASSERTION nullable_assertion CHECK ((SELECT MIN(value) FROM nullable_test) >= 0);
+
+# Insert another NULL - should succeed since MIN still returns 100
+statement ok
+INSERT INTO nullable_test VALUES (3, NULL);
+
+# Insert a negative value - should fail
+statement error
+INSERT INTO nullable_test VALUES (4, -10);
+
+# Clean up
+statement ok
+DROP ASSERTION nullable_assertion;
+
+statement ok
+DROP TABLE nullable_test;

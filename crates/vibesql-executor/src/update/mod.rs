@@ -175,9 +175,15 @@ impl UpdateExecutor {
                 .is_some();
 
         // Try fast path for simple single-row PK updates without triggers
-        // Conditions: no triggers, no procedural context, simple WHERE pk = value
-        if !has_triggers && procedural_context.is_none() && trigger_context.is_none() {
+        // Conditions: no triggers, no procedural context, simple WHERE pk = value, no assertions
+        // Skip fast path if assertions exist because we need rollback capability on violation
+        let has_assertions = database.catalog.get_all_assertions().next().is_some();
+        if !has_triggers && procedural_context.is_none() && trigger_context.is_none() && !has_assertions {
             if let Some(result) = Self::try_fast_path_update(stmt, database, schema)? {
+                // Invalidate columnar cache after fast path update
+                if result > 0 {
+                    database.invalidate_columnar_cache(&stmt.table_name);
+                }
                 return Ok(result);
             }
         }
@@ -398,6 +404,10 @@ impl UpdateExecutor {
 
         // Now update user-defined indexes after releasing table borrow
         // Pass changed_columns to skip indexes that don't involve any modified columns
+        // Clone for rollback support if assertions exist
+        let index_updates_for_rollback: Vec<_> = index_updates.iter()
+            .map(|(idx, old, _new, changed)| (*idx, old.clone(), changed.clone()))
+            .collect();
         for (index, old_row, new_row, changed_columns) in index_updates {
             database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, index, Some(&changed_columns));
         }
@@ -418,6 +428,21 @@ impl UpdateExecutor {
                 &stmt.table_name,
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
+        }
+
+        // Check all assertions after UPDATE completes (SQL:1999 Feature F671/F672)
+        // This ensures database-wide integrity constraints are maintained
+        if let Err(assertion_error) = crate::advanced_objects::AssertionChecker::check_all_assertions(database) {
+            // Assertion violated - rollback the update by restoring old values
+            if let Some(table_mut) = database.get_table_mut(&stmt.table_name) {
+                for (index, old_row, changed_columns) in &index_updates_for_rollback {
+                    // Restore the old row values for changed columns
+                    let _ = table_mut.update_row_selective(*index, old_row.clone(), changed_columns);
+                }
+            }
+            // Also invalidate cache after rollback
+            database.invalidate_columnar_cache(&stmt.table_name);
+            return Err(assertion_error);
         }
 
         Ok(update_count)
