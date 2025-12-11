@@ -188,6 +188,7 @@ fn test_before_trigger_executes_first() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
     let executor = SelectExecutor::new(&db);
     let result = executor.execute(&select).expect("Failed to select counter");
@@ -213,6 +214,7 @@ fn test_before_trigger_executes_first() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
     let user_result = executor.execute(&user_select).expect("Failed to select users");
     assert_eq!(user_result.len(), 1, "User should be inserted after BEFORE trigger");

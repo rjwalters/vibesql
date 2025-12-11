@@ -517,6 +517,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         let analysis = AggregateAnalysis::analyze(&stmt);
@@ -551,6 +552,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         let analysis = AggregateAnalysis::analyze(&stmt);
@@ -590,6 +592,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         let analysis = AggregateAnalysis::analyze(&stmt);

@@ -48,6 +48,7 @@ fn test_like_wildcard_percent() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -118,6 +119,7 @@ fn test_like_wildcard_underscore() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -188,6 +190,7 @@ fn test_not_like() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -245,6 +248,7 @@ fn test_like_null_pattern() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -300,6 +304,7 @@ fn test_like_null_value() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {

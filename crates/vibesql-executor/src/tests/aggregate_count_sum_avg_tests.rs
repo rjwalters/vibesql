@@ -54,6 +54,7 @@ fn test_count_star_no_group_by() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -131,6 +132,7 @@ fn test_sum_no_group_by() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -212,6 +214,7 @@ fn test_count_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -289,6 +292,7 @@ fn test_sum_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -370,6 +374,7 @@ fn test_avg_function() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -451,6 +456,7 @@ fn test_avg_with_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -535,6 +541,7 @@ fn test_count_column_all_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -570,6 +577,7 @@ fn test_count_column_all_nulls() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
@@ -627,6 +635,7 @@ fn test_count_star_in_simple_case_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -696,6 +705,7 @@ fn test_count_star_in_searched_case_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -770,6 +780,7 @@ fn test_count_star_in_arithmetic_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
@@ -827,6 +838,7 @@ fn test_count_star_in_case_then_clause() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
@@ -895,6 +907,7 @@ fn test_count_star_in_nested_case_expression() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {

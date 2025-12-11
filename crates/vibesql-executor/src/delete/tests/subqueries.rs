@@ -205,6 +205,7 @@ mod in_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
@@ -265,6 +266,7 @@ mod in_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM employees WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
@@ -336,6 +338,7 @@ mod scalar_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM employees WHERE salary < (SELECT AVG(salary) FROM employees)
@@ -406,6 +409,7 @@ mod scalar_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM items WHERE price = (SELECT MAX(price) FROM items)
@@ -466,6 +470,7 @@ mod scalar_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM employees WHERE salary > (SELECT threshold FROM config)
@@ -526,6 +531,7 @@ mod empty_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM old_depts)
@@ -601,6 +607,7 @@ mod complex_subquery {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         });
 
         // DELETE FROM orders WHERE customer_id IN (SELECT customer_id FROM inactive_customers WHERE

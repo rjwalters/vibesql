@@ -15,6 +15,7 @@ pub fn create_select_stmt(expr: vibesql_ast::Expression, alias: &str) -> vibesql
     vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr,

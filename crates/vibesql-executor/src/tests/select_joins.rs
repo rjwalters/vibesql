@@ -87,6 +87,7 @@ fn test_inner_join_two_tables() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -214,6 +215,7 @@ fn test_right_outer_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -348,6 +350,7 @@ fn test_full_outer_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -485,6 +488,7 @@ fn test_cross_join() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -547,6 +551,7 @@ fn test_cross_join_with_condition_fails() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -676,6 +681,7 @@ fn test_inner_join_null_values_dont_match() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {

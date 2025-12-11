@@ -47,6 +47,7 @@ fn test_select_star() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -114,6 +115,7 @@ fn test_select_specific_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {

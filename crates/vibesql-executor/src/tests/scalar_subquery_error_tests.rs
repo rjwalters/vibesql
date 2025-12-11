@@ -40,6 +40,7 @@ fn test_scalar_subquery_error_multiple_rows() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
@@ -64,6 +65,7 @@ fn test_scalar_subquery_error_multiple_rows() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
@@ -135,6 +137,7 @@ fn test_scalar_subquery_error_multiple_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
@@ -168,6 +171,7 @@ fn test_scalar_subquery_error_multiple_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),

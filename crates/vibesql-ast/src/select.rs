@@ -30,6 +30,10 @@ pub struct CommonTableExpr {
 // ============================================================================
 
 /// SELECT statement structure
+///
+/// This can represent either a traditional SELECT statement or a standalone VALUES clause.
+/// When `values` is Some, this represents a VALUES clause (e.g., `VALUES(1),(2),(3)`).
+/// When `values` is None, this is a traditional SELECT statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt {
     /// Optional WITH clause containing CTEs
@@ -51,6 +55,10 @@ pub struct SelectStmt {
     pub offset: Option<usize>,
     /// Set operation (UNION, INTERSECT, EXCEPT) combining this query with another
     pub set_operation: Option<SetOperation>,
+    /// VALUES clause for standalone VALUES statements (SQL:1999)
+    /// When this is Some, the statement represents a VALUES clause like `VALUES(1),(2),(3)`
+    /// Each inner Vec is a row of expressions
+    pub values: Option<Vec<Vec<Expression>>>,
 }
 
 // ============================================================================

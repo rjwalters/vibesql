@@ -26,6 +26,7 @@ fn test_nested_comparisons() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {

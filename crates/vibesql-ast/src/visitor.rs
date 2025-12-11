@@ -1042,6 +1042,11 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
             all: op.all,
             right: Box::new(transform_select(visitor, *op.right)),
         }),
+        values: stmt.values.map(|rows| {
+            rows.into_iter()
+                .map(|row| row.into_iter().map(|e| transform_expression(visitor, e)).collect())
+                .collect()
+        }),
     }
 }
 
@@ -1511,6 +1516,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         let stmt = Statement::Select(Box::new(select));

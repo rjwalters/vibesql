@@ -271,6 +271,7 @@ fn test_insert_select_invalidates_cache() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let insert_stmt = vibesql_ast::InsertStmt {

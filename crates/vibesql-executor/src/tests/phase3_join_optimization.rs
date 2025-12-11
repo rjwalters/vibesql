@@ -82,6 +82,7 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -207,6 +208,7 @@ fn test_hash_join_multiple_equijoins_in_where() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -325,6 +327,7 @@ fn test_cascading_joins_with_where_equijoins() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -490,6 +493,7 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -634,6 +638,7 @@ fn test_multi_column_hash_join_composite_keys() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
@@ -782,6 +787,7 @@ fn test_star_join_select5_pattern() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {

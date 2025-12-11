@@ -952,6 +952,7 @@ fn test_json_view_preservation() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     // Create view with SQL definition
@@ -1030,6 +1031,7 @@ fn test_json_view_preservation_without_sql_definition() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let view = ViewDefinition::new("all_products".to_string(), None, select_stmt, false);

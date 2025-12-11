@@ -18,6 +18,7 @@ fn test_trim_both_default() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -57,6 +58,7 @@ fn test_trim_leading() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -96,6 +98,7 @@ fn test_trim_trailing() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -135,6 +138,7 @@ fn test_trim_custom_char() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -176,6 +180,7 @@ fn test_trim_null_string() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {
@@ -210,6 +215,7 @@ fn test_trim_null_removal_char() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Trim {

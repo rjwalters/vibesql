@@ -45,6 +45,7 @@ fn test_count_star_fast_path_simple() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
@@ -92,6 +93,7 @@ fn test_count_star_fast_path_empty_table() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
@@ -157,6 +159,7 @@ fn test_count_star_with_where_no_fast_path() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
@@ -261,6 +264,7 @@ fn test_count_star_with_group_by_no_fast_path() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
@@ -327,6 +331,7 @@ fn test_count_star_distinct_no_fast_path() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true, // DISTINCT specified
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
@@ -382,6 +387,7 @@ fn test_count_column_no_fast_path() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
@@ -440,6 +446,7 @@ fn test_count_star_with_alias() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
@@ -505,6 +512,7 @@ fn test_count_star_multiple_select_items_no_fast_path() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {

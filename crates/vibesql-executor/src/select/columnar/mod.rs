@@ -932,6 +932,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         let aggregates = vec![Expression::AggregateFunction {

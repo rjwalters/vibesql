@@ -66,6 +66,7 @@ fn test_distinct_removes_duplicate_rows() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef {
@@ -177,6 +178,7 @@ fn test_distinct_with_multiple_columns() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
@@ -275,6 +277,7 @@ fn test_distinct_with_null_values() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef {
@@ -345,6 +348,7 @@ fn test_distinct_false_preserves_duplicates() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Table {
@@ -427,6 +431,7 @@ fn test_distinct_with_where_clause() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "role".to_string() },
@@ -521,6 +526,7 @@ fn test_distinct_with_order_by() {
         into_variables: None,
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef {

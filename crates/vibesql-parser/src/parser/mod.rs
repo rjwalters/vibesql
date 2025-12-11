@@ -110,6 +110,10 @@ impl Parser {
                 let select_stmt = self.parse_select_statement()?;
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
             }
+            Token::Keyword(Keyword::Values) => {
+                let select_stmt = self.parse_values_statement()?;
+                Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
+            }
             Token::Keyword(Keyword::Insert) => {
                 let insert_stmt = self.parse_insert_statement()?;
                 Ok(vibesql_ast::Statement::Insert(insert_stmt))

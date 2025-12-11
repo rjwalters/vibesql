@@ -291,6 +291,7 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         limit: stmt.limit,
         offset: stmt.offset,
         set_operation: stmt.set_operation.clone(),
+        values: stmt.values.clone(),
     }
 }
 
@@ -806,6 +807,7 @@ fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Expression> {
                 limit: Some(1),
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             Expression::Exists { subquery: Box::new(subquery), negated: false }
@@ -1309,6 +1311,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1344,6 +1347,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1378,6 +1382,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1413,6 +1418,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1457,6 +1463,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1483,6 +1490,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1509,6 +1517,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1552,6 +1561,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);
@@ -1599,6 +1609,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 set_operation: None,
+                values: None,
             };
 
             let result = eliminate_unused_tables(&stmt);

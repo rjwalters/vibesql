@@ -17,6 +17,7 @@ fn test_cast_integer_to_varchar() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -52,6 +53,7 @@ fn test_cast_varchar_to_integer() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -87,6 +89,7 @@ fn test_cast_null() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -120,6 +123,7 @@ fn test_cast_integer_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -155,6 +159,7 @@ fn test_cast_negative_integer_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -191,6 +196,7 @@ fn test_cast_varchar_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -230,6 +236,7 @@ fn test_cast_float_to_unsigned() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -266,6 +273,7 @@ fn test_cast_as_signed_positive() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -304,6 +312,7 @@ fn test_cast_as_signed_negative() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -346,6 +355,7 @@ fn test_cast_as_signed_from_float() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -390,6 +400,7 @@ fn test_cast_negative_float_to_signed_rounds() {
     let stmt = vibesql_ast::SelectStmt {
         with_clause: None,
         set_operation: None,
+            values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
@@ -431,6 +442,7 @@ fn test_cast_rounding_edge_cases() {
         let stmt = vibesql_ast::SelectStmt {
             with_clause: None,
             set_operation: None,
+            values: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Cast {

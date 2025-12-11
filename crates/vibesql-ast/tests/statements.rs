@@ -21,6 +21,7 @@ fn test_create_select_statement() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     }));
 
     match stmt {

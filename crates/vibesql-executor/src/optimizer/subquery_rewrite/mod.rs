@@ -211,6 +211,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }
     }
 
@@ -572,6 +573,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }
     }
 

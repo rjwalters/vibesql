@@ -53,6 +53,7 @@ fn test_update_where_scalar_subquery_equal() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     // UPDATE employees SET salary = 55000 WHERE salary = (SELECT min_salary FROM config)
@@ -130,6 +131,7 @@ fn test_update_where_scalar_subquery_less_than() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     // UPDATE employees SET bonus = 5000 WHERE salary < (SELECT AVG(salary) FROM employees)
@@ -201,6 +203,7 @@ fn test_update_where_subquery_returns_null() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     // UPDATE employees SET salary = 60000 WHERE salary < (SELECT max_salary FROM config)
@@ -282,6 +285,7 @@ fn test_update_where_subquery_with_aggregate() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     // UPDATE items SET discounted = TRUE WHERE price = (SELECT MAX(price) FROM items)
@@ -372,6 +376,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     // WHERE subquery
@@ -396,6 +401,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     });
 
     // UPDATE employees SET salary = (SELECT target FROM salary_targets) WHERE dept_id IN (SELECT

@@ -574,6 +574,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         let literals = LiteralExtractor::extract(&stmt);
@@ -614,6 +615,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         }));
 
         let literals = LiteralExtractor::extract(&stmt);

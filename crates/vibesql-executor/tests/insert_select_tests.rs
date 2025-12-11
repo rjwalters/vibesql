@@ -60,6 +60,7 @@ fn test_insert_from_select_basic() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
@@ -149,6 +150,7 @@ fn test_insert_from_select_with_where() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
@@ -228,6 +230,7 @@ fn test_insert_from_select_column_mismatch() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
@@ -341,6 +344,7 @@ fn test_insert_from_select_with_aggregates() {
         limit: None,
         offset: None,
         set_operation: None,
+            values: None,
     };
 
     let insert_select_stmt = vibesql_ast::InsertStmt {

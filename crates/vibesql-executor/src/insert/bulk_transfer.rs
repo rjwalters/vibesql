@@ -293,6 +293,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert_eq!(extract_simple_table_select(&stmt), Some("source".to_string()));
@@ -318,6 +319,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert_eq!(extract_simple_table_select(&stmt), None);
@@ -343,6 +345,7 @@ mod tests {
             limit: None,
             offset: None,
             set_operation: None,
+            values: None,
         };
 
         assert_eq!(extract_simple_table_select(&stmt), None);
