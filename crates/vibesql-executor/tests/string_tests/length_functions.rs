@@ -225,15 +225,31 @@ fn test_length_wrong_arg_count() {
 }
 
 #[test]
-fn test_length_wrong_type() {
+fn test_length_integer() {
+    // SQLite compatibility: LENGTH() accepts any type, converting to string first
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123))],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // 123 as string is "123" which has length 3
+    assert_eq!(result, vibesql_types::SqlValue::Integer(3));
+}
+
+#[test]
+fn test_length_float() {
+    // SQLite compatibility: LENGTH() accepts any type, converting to string first
+    let (evaluator, row) = create_test_evaluator();
+    let expr = vibesql_ast::Expression::Function {
+        name: "LENGTH".to_string(),
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(1.5))],
+        character_unit: None,
+    };
+    let result = evaluator.eval(&expr, &row).unwrap();
+    // 1.5 as string is "1.5" which has length 3
+    assert_eq!(result, vibesql_types::SqlValue::Integer(3));
 }
 
 #[test]
