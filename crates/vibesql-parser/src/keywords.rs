@@ -347,7 +347,10 @@ impl Keyword {
             Keyword::Microsecond |
             // SQLite compatibility: TYPE and SQL are not reserved in SQLite
             // (allows unquoted access to sqlite_master.type and sqlite_master.sql columns)
-            Keyword::Type | Keyword::Sql
+            Keyword::Type | Keyword::Sql |
+            // Vector index parameter: M is only contextual in HNSW WITH clause
+            // SQLite TCL tests commonly use 'm' as a column name
+            Keyword::M
         )
     }
 }
