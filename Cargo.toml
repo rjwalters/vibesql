@@ -410,6 +410,10 @@ path = "tests/regression/issue_4237.rs"
 name = "issue_having_null"
 path = "tests/regression/issue_having_null.rs"
 
+[[test]]
+name = "issue_4236_group_by_expression"
+path = "tests/regression/issue_4236_group_by_expression.rs"
+
 # Parser tests - SQL parsing and syntax
 [[test]]
 name = "coverage_improvements"

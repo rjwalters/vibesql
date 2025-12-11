@@ -579,26 +579,31 @@ impl SelectExecutor<'_> {
                 }
             }
 
-            // Issue #4233: Validate SELECT list matches [group_keys..., aggregates...] format
+            // Issue #4233, #4236: Validate SELECT list matches [group_keys..., aggregates...] format
             // columnar_group_by_batch returns rows with all group keys followed by all aggregates.
             // If the SELECT list doesn't have this exact structure (e.g., only aggregates without
             // group keys, or different column ordering), we must fall back to row-oriented
             // execution which applies proper projection.
-            let group_by_exprs = stmt
+            //
+            // IMPORTANT: Each non-aggregate SELECT expression must be IDENTICAL to a GROUP BY
+            // expression. Expressions like `col1 * 11` where `col1` is the GROUP BY key are NOT
+            // the same - they require post-projection computation that columnar doesn't support.
+            let group_by_exprs_list = stmt
                 .group_by
                 .as_ref()
                 .and_then(|g| g.as_simple())
-                .map_or(0, |exprs| exprs.len());
+                .map(|exprs| exprs.to_vec())
+                .unwrap_or_default();
 
-            // Count non-aggregate and aggregate expressions in SELECT list
-            let mut select_non_agg_count = 0;
+            // Collect non-aggregate SELECT expressions
+            let mut select_non_agg_exprs: Vec<&Expression> = Vec::new();
             let mut select_agg_count = 0;
             for item in &stmt.select_list {
                 if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
                     if matches!(expr, Expression::AggregateFunction { .. }) {
                         select_agg_count += 1;
                     } else {
-                        select_non_agg_count += 1;
+                        select_non_agg_exprs.push(expr);
                     }
                 }
             }
@@ -606,14 +611,30 @@ impl SelectExecutor<'_> {
             // SELECT list must have exactly: all group keys + all aggregates
             // If SELECT list has different number of non-aggregates than GROUP BY columns,
             // the projection won't match columnar_group_by_batch output format.
-            if select_non_agg_count != group_by_exprs {
+            if select_non_agg_exprs.len() != group_by_exprs_list.len() {
                 log::debug!(
                     "Native columnar: skipping GROUP BY - SELECT list ({} non-aggs, {} aggs) doesn't match GROUP BY ({} keys)",
-                    select_non_agg_count,
+                    select_non_agg_exprs.len(),
                     select_agg_count,
-                    group_by_exprs
+                    group_by_exprs_list.len()
                 );
                 return Ok(None);
+            }
+
+            // Each non-aggregate SELECT expression must match a GROUP BY expression exactly
+            // This catches cases like SELECT col1 * 11 FROM t GROUP BY col1 where col1 * 11 != col1
+            use crate::select::grouping::expressions_equal;
+            for select_expr in &select_non_agg_exprs {
+                let matches_group_by = group_by_exprs_list
+                    .iter()
+                    .any(|group_expr| expressions_equal(select_expr, group_expr));
+                if !matches_group_by {
+                    log::debug!(
+                        "Native columnar: skipping GROUP BY - SELECT expression {:?} is not a GROUP BY key",
+                        select_expr
+                    );
+                    return Ok(None);
+                }
             }
         }
 
