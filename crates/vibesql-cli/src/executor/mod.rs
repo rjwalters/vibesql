@@ -27,8 +27,17 @@ pub struct QueryResult {
     pub message: Option<String>,
 }
 
+/// Check if a database path represents an in-memory database.
+/// SQLite uses ":memory:" as a special value for in-memory databases.
+fn is_memory_database(path: &str) -> bool {
+    path == ":memory:" || path == "file::memory:" || path.starts_with("file::memory:?")
+}
+
 impl SqlExecutor {
     pub fn new(database: Option<String>) -> anyhow::Result<Self> {
+        // Treat :memory: as an in-memory database (no file path)
+        let database = database.filter(|p| !is_memory_database(p));
+
         // Load database from file if provided, otherwise create new in-memory database
         let db = if let Some(db_path) = database {
             // Check if file exists

@@ -11,6 +11,12 @@ use crate::{
     formatter::{OutputFormat, ResultFormatter},
 };
 
+/// Check if a database path represents an in-memory database.
+/// SQLite uses ":memory:" as a special value for in-memory databases.
+fn is_memory_database(path: &str) -> bool {
+    path == ":memory:" || path == "file::memory:" || path.starts_with("file::memory:?")
+}
+
 /// Script executor - runs multiple SQL statements from files or stdin
 pub struct ScriptExecutor {
     executor: SqlExecutor,
@@ -25,7 +31,8 @@ impl ScriptExecutor {
         verbose: bool,
         format: Option<OutputFormat>,
     ) -> anyhow::Result<Self> {
-        let database_path = database.clone();
+        // Treat :memory: as an in-memory database (no file path for saving)
+        let database_path = database.as_ref().filter(|p| !is_memory_database(p)).cloned();
         let executor = SqlExecutor::new(database)?;
         let mut formatter = ResultFormatter::new();
 
