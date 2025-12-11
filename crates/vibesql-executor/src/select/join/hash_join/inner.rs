@@ -45,26 +45,8 @@ pub(in crate::select::join) fn hash_join_inner(
     // Note: No memory limit check here. Hash join is already O(n+m) time and O(smaller_table)
     // space, which is optimal for equijoins. We cannot predict output size accurately anyway.
 
-    // Extract right table name and schema for combining
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
-
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // Use as_slice() for zero-cost access without triggering row materialization
     // This avoids the 57% performance bottleneck from premature row collection
@@ -174,26 +156,8 @@ pub(in crate::select::join) fn hash_join_inner_multi(
     left_col_indices: &[usize],
     right_col_indices: &[usize],
 ) -> Result<FromResult, ExecutorError> {
-    // Extract right table name and schema for combining
-    let right_table_name = right
-        .schema
-        .table_schemas
-        .keys()
-        .next()
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .clone();
-
-    let right_schema = right
-        .schema
-        .table_schemas
-        .get(&right_table_name)
-        .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-        .1
-        .clone();
-
-    // Combine schemas
-    let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+    // Combine schemas using merge to preserve all tables from nested joins
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // Choose build and probe sides (build hash table on smaller table)
     let (build_rows, probe_rows, build_col_indices, probe_col_indices, left_is_build) =

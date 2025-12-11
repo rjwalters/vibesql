@@ -433,30 +433,10 @@ pub(super) fn nested_loop_join(
         // Get column count and right table info once for analysis
         // IMPORTANT: Sum up columns from ALL tables in the left schema,
         // not just the first table, to handle accumulated multi-table joins
-        let left_col_count: usize =
-            left.schema.table_schemas.values().map(|(_, schema)| schema.columns.len()).sum();
+        let left_col_count = left.schema.total_columns;
 
-        let right_table_name = right
-            .schema
-            .table_schemas
-            .keys()
-            .next()
-            .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-            .clone();
-
-        let right_schema = right
-            .schema
-            .table_schemas
-            .get(&right_table_name)
-            .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-            .1
-            .clone();
-
-        // Clone right_table_name before it gets moved into combine()
-        let right_table_name_for_natural = right_table_name.clone();
-
-        let temp_schema =
-            CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+        // Use merge to preserve all tables from nested joins for column resolution
+        let temp_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
         // Phase 3.1: Try ON condition first (preferred for hash join)
         // Now supports multi-column composite keys for better performance
@@ -500,28 +480,12 @@ pub(super) fn nested_loop_join(
                         if let (Some(left_schema), Some(right_schema_orig)) =
                             (left_schema_for_natural, right_schema_for_natural)
                         {
-                            let right_schema_for_removal = CombinedSchema {
-                                table_schemas: vec![(
-                                    right_table_name_for_natural.clone(),
-                                    (
-                                        0,
-                                        right_schema_orig
-                                            .table_schemas
-                                            .values()
-                                            .next()
-                                            .unwrap()
-                                            .1
-                                            .clone(),
-                                    ),
-                                )]
-                                .into_iter()
-                                .collect(),
-                                total_columns: right_schema_orig.total_columns,
-                            };
+                            // Use the original right schema directly to handle nested joins
+                            // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                             result = remove_duplicate_columns_for_natural_join(
                                 result,
                                 &left_schema,
-                                &right_schema_for_removal,
+                                &right_schema_orig,
                             )?;
                         }
                     }
@@ -557,28 +521,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -621,28 +569,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -677,28 +609,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -760,28 +676,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -831,28 +731,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -904,28 +788,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -939,30 +807,10 @@ pub(super) fn nested_loop_join(
     // This optimization is critical for Q13 (customer LEFT JOIN orders)
     if let vibesql_ast::JoinType::LeftOuter = join_type {
         // Get column count and right table info for analysis
-        let left_col_count: usize =
-            left.schema.table_schemas.values().map(|(_, schema)| schema.columns.len()).sum();
+        let left_col_count = left.schema.total_columns;
 
-        let right_table_name = right
-            .schema
-            .table_schemas
-            .keys()
-            .next()
-            .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-            .clone();
-
-        let right_schema = right
-            .schema
-            .table_schemas
-            .get(&right_table_name)
-            .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-            .1
-            .clone();
-
-        // Clone right_table_name before it gets moved into combine()
-        let right_table_name_for_natural = right_table_name.clone();
-
-        let temp_schema =
-            CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+        // Use merge to preserve all tables from nested joins for column resolution
+        let temp_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
         // Try ON condition for hash join with multi-column support
         // Use multi-column analysis to include ALL equi-join conditions in the hash join
@@ -1015,28 +863,12 @@ pub(super) fn nested_loop_join(
                     if let (Some(left_schema), Some(right_schema_orig)) =
                         (left_schema_for_natural, right_schema_for_natural)
                     {
-                        let right_schema_for_removal = CombinedSchema {
-                            table_schemas: vec![(
-                                right_table_name_for_natural.clone(),
-                                (
-                                    0,
-                                    right_schema_orig
-                                        .table_schemas
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .1
-                                        .clone(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                            total_columns: right_schema_orig.total_columns,
-                        };
+                        // Use the original right schema directly to handle nested joins
+                        // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
                             &left_schema,
-                            &right_schema_for_removal,
+                            &right_schema_orig,
                         )?;
                     }
                 }
@@ -1049,27 +881,10 @@ pub(super) fn nested_loop_join(
     // Try to use hash join for SEMI/ANTI JOINs with equi-join conditions
     if matches!(join_type, vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti) {
         // Get column count for analysis
-        let left_col_count: usize =
-            left.schema.table_schemas.values().map(|(_, schema)| schema.columns.len()).sum();
+        let left_col_count = left.schema.total_columns;
 
-        let right_table_name = right
-            .schema
-            .table_schemas
-            .keys()
-            .next()
-            .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-            .clone();
-
-        let right_schema = right
-            .schema
-            .table_schemas
-            .get(&right_table_name)
-            .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-            .1
-            .clone();
-
-        let temp_schema =
-            CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+        // Use merge to preserve all tables from nested joins for column resolution
+        let temp_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
         // Try ON condition first - use analyze_compound_equi_join to handle complex conditions
         // This enables hash join optimization for EXISTS subqueries with additional predicates
@@ -1140,27 +955,10 @@ pub(super) fn nested_loop_join(
     if let vibesql_ast::JoinType::Cross = join_type {
         if !additional_equijoins.is_empty() {
             // Get column count and right table info for analysis
-            let left_col_count: usize =
-                left.schema.table_schemas.values().map(|(_, schema)| schema.columns.len()).sum();
+            let left_col_count = left.schema.total_columns;
 
-            let right_table_name = right
-                .schema
-                .table_schemas
-                .keys()
-                .next()
-                .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-                .clone();
-
-            let right_schema = right
-                .schema
-                .table_schemas
-                .get(&right_table_name)
-                .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
-                .1
-                .clone();
-
-            let temp_schema =
-                CombinedSchema::combine(left.schema.clone(), right_table_name, right_schema);
+            // Use merge to preserve all tables from nested joins for column resolution
+            let temp_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
             // Try WHERE clause equijoins for hash join
             for (idx, equijoin) in additional_equijoins.iter().enumerate() {
