@@ -532,7 +532,8 @@ impl Table {
             if !self.deleted[idx] {
                 let mut cloned = row.clone();
                 // Set row_id for ROWID pseudo-column support (SQLite compatibility)
-                cloned.row_id = Some(idx as u64);
+                // SQLite ROWIDs are 1-indexed, so we add 1 to the physical index
+                cloned.row_id = Some((idx + 1) as u64);
                 result.push(cloned);
             }
         }

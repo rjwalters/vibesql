@@ -95,13 +95,13 @@ fn test_select_rowid() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2);
 
-    // First row should have rowid 0
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(0));
+    // First row should have rowid 1 (SQLite ROWIDs are 1-indexed)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(1));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(10));
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(20));
 
-    // Second row should have rowid 1
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Bigint(1));
+    // Second row should have rowid 2
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Bigint(2));
     assert_eq!(result[1].values[1], vibesql_types::SqlValue::Integer(30));
     assert_eq!(result[1].values[2], vibesql_types::SqlValue::Integer(40));
 }
@@ -158,7 +158,7 @@ fn test_select_underscore_rowid() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(1));
 }
 
 /// Test that oid alias works the same as rowid
@@ -213,7 +213,7 @@ fn test_select_oid() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(1));
 }
 
 /// Test that ROWID is case-insensitive
@@ -268,7 +268,7 @@ fn test_rowid_case_insensitive() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(1));
 }
 
 /// Test that a real column named 'rowid' takes precedence over the pseudo-column
@@ -397,6 +397,6 @@ fn test_rowid_with_table_alias() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(0));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Bigint(1));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(1));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Bigint(2));
 }
