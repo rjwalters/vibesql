@@ -338,6 +338,27 @@ pub struct AnalyzeStmt<'arena> {
 }
 
 // ============================================================================
+// PRAGMA
+// ============================================================================
+
+/// PRAGMA statement (SQLite compatibility - parsed but treated as no-op)
+#[derive(Debug, Clone, PartialEq)]
+pub struct PragmaStmt {
+    pub database: Option<Symbol>,
+    pub name: Symbol,
+    pub value: Option<PragmaValue>,
+}
+
+/// Value for a PRAGMA statement
+#[derive(Debug, Clone, PartialEq)]
+pub enum PragmaValue {
+    Identifier(Symbol),
+    String(Symbol),
+    Number(Symbol),
+    SignedNumber(Symbol),
+}
+
+// ============================================================================
 // EXPLAIN
 // ============================================================================
 
@@ -389,4 +410,7 @@ pub enum Statement<'arena> {
     // Analysis
     Analyze(AnalyzeStmt<'arena>),
     Explain(ExplainStmt<'arena>),
+
+    // SQLite compatibility
+    Pragma(PragmaStmt),
 }

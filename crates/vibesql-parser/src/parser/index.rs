@@ -1,4 +1,4 @@
-//! Parser for CREATE INDEX, DROP INDEX, and REINDEX statements
+//! Parser for CREATE INDEX, DROP INDEX, REINDEX, and PRAGMA statements
 
 use super::{ParseError, Parser};
 use crate::{keywords::Keyword, token::Token};
@@ -630,5 +630,100 @@ impl Parser {
         };
 
         Ok(vibesql_ast::AnalyzeStmt { table_name, columns })
+    }
+
+    /// Parse PRAGMA statement
+    ///
+    /// SQLite-specific statement for database configuration and introspection.
+    /// Syntax variations:
+    /// - PRAGMA pragma_name;                 -- Query pragma value
+    /// - PRAGMA pragma_name = value;         -- Set pragma value
+    /// - PRAGMA pragma_name(value);          -- Set pragma value (function syntax)
+    /// - PRAGMA database.pragma_name;        -- Database-qualified pragma
+    /// - PRAGMA database.pragma_name = value;
+    pub(super) fn parse_pragma_statement(
+        &mut self,
+    ) -> Result<vibesql_ast::PragmaStmt, ParseError> {
+        // Expect PRAGMA keyword
+        self.expect_keyword(Keyword::Pragma)?;
+
+        // Parse the pragma name (may be qualified with database.pragma_name)
+        let first_ident = self.parse_identifier()?;
+
+        // Check for dot (database.pragma_name syntax)
+        let (database, name) = if self.peek() == &Token::Symbol('.') {
+            self.advance(); // consume '.'
+            let pragma_name = self.parse_identifier()?;
+            (Some(first_ident), pragma_name)
+        } else {
+            (None, first_ident)
+        };
+
+        // Check for optional value assignment or function-style argument
+        let value = if self.peek() == &Token::Symbol('=') {
+            self.advance(); // consume '='
+            Some(self.parse_pragma_value()?)
+        } else if self.peek() == &Token::LParen {
+            self.advance(); // consume '('
+            let val = self.parse_pragma_value()?;
+            self.expect_token(Token::RParen)?;
+            Some(val)
+        } else {
+            None
+        };
+
+        Ok(vibesql_ast::PragmaStmt { database, name, value })
+    }
+
+    /// Parse a PRAGMA value (identifier, string, or number)
+    fn parse_pragma_value(&mut self) -> Result<vibesql_ast::PragmaValue, ParseError> {
+        match self.peek().clone() {
+            Token::Identifier(ident) => {
+                self.advance();
+                Ok(vibesql_ast::PragmaValue::Identifier(ident))
+            }
+            Token::Keyword(kw) => {
+                // Allow keywords like ON, OFF, TRUE, FALSE as identifiers
+                self.advance();
+                Ok(vibesql_ast::PragmaValue::Identifier(kw.to_string()))
+            }
+            Token::String(s) => {
+                self.advance();
+                Ok(vibesql_ast::PragmaValue::String(s))
+            }
+            Token::Number(n) => {
+                self.advance();
+                Ok(vibesql_ast::PragmaValue::Number(n))
+            }
+            Token::Symbol('-') => {
+                // Handle negative numbers
+                self.advance(); // consume '-'
+                match self.peek().clone() {
+                    Token::Number(n) => {
+                        self.advance();
+                        Ok(vibesql_ast::PragmaValue::SignedNumber(format!("-{}", n)))
+                    }
+                    _ => Err(ParseError {
+                        message: "Expected number after minus sign in PRAGMA value".to_string(),
+                    }),
+                }
+            }
+            Token::Symbol('+') => {
+                // Handle explicit positive numbers
+                self.advance(); // consume '+'
+                match self.peek().clone() {
+                    Token::Number(n) => {
+                        self.advance();
+                        Ok(vibesql_ast::PragmaValue::Number(n))
+                    }
+                    _ => Err(ParseError {
+                        message: "Expected number after plus sign in PRAGMA value".to_string(),
+                    }),
+                }
+            }
+            _ => Err(ParseError {
+                message: format!("Expected PRAGMA value, found {:?}", self.peek()),
+            }),
+        }
     }
 }

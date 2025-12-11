@@ -12,9 +12,9 @@ use vibesql_ast::arena::{
     ChangeColumnStmt, ColumnConstraint, ColumnConstraintKind, ColumnDef, CommitStmt,
     CreateIndexStmt, CreateViewStmt, DropColumnStmt, DropConstraintStmt, DropIndexStmt,
     DropTableStmt, DropViewStmt, DurabilityHint, Expression, IndexColumn, IndexType,
-    ModifyColumnStmt, OrderDirection, ReferentialAction, ReleaseSavepointStmt, RenameTableStmt,
-    RollbackStmt, RollbackToSavepointStmt, SavepointStmt, Symbol, TableConstraint,
-    TableConstraintKind, TruncateCascadeOption, TruncateTableStmt,
+    ModifyColumnStmt, OrderDirection, PragmaStmt, PragmaValue, ReferentialAction,
+    ReleaseSavepointStmt, RenameTableStmt, RollbackStmt, RollbackToSavepointStmt, SavepointStmt,
+    Symbol, TableConstraint, TableConstraintKind, TruncateCascadeOption, TruncateTableStmt,
 };
 
 use super::ArenaParser;
@@ -967,5 +967,99 @@ impl<'arena> ArenaParser<'arena> {
             }
         }
         Ok(columns)
+    }
+
+    // ========================================================================
+    // PRAGMA Statement
+    // ========================================================================
+
+    /// Parse PRAGMA statement (SQLite compatibility).
+    ///
+    /// Syntax:
+    /// - PRAGMA pragma_name;
+    /// - PRAGMA pragma_name = value;
+    /// - PRAGMA pragma_name(value);
+    /// - PRAGMA database.pragma_name;
+    pub(crate) fn parse_pragma_statement(&mut self) -> Result<PragmaStmt, ParseError> {
+        self.consume_keyword(Keyword::Pragma)?;
+
+        // Parse first identifier (could be database or pragma name)
+        let first_ident = self.parse_arena_identifier()?;
+
+        // Check for dot (database.pragma_name syntax)
+        let (database, name) = if self.try_consume(&Token::Symbol('.')) {
+            let pragma_name = self.parse_arena_identifier()?;
+            (Some(first_ident), pragma_name)
+        } else {
+            (None, first_ident)
+        };
+
+        // Check for optional value assignment or function-style argument
+        let value = if self.try_consume(&Token::Symbol('=')) {
+            Some(self.parse_pragma_value()?)
+        } else if self.try_consume(&Token::LParen) {
+            let val = self.parse_pragma_value()?;
+            self.expect_token(Token::RParen)?;
+            Some(val)
+        } else {
+            None
+        };
+
+        Ok(PragmaStmt { database, name, value })
+    }
+
+    /// Parse a PRAGMA value.
+    fn parse_pragma_value(&mut self) -> Result<PragmaValue, ParseError> {
+        match self.peek().clone() {
+            Token::Identifier(ident) => {
+                self.advance();
+                let sym = self.interner.intern(&ident);
+                Ok(PragmaValue::Identifier(sym))
+            }
+            Token::Keyword(kw) => {
+                self.advance();
+                let sym = self.interner.intern(&kw.to_string());
+                Ok(PragmaValue::Identifier(sym))
+            }
+            Token::String(s) => {
+                self.advance();
+                let sym = self.interner.intern(&s);
+                Ok(PragmaValue::String(sym))
+            }
+            Token::Number(n) => {
+                self.advance();
+                let sym = self.interner.intern(&n);
+                Ok(PragmaValue::Number(sym))
+            }
+            Token::Symbol('-') => {
+                self.advance(); // consume '-'
+                match self.peek().clone() {
+                    Token::Number(n) => {
+                        self.advance();
+                        let sym = self.interner.intern(&format!("-{}", n));
+                        Ok(PragmaValue::SignedNumber(sym))
+                    }
+                    _ => Err(ParseError {
+                        message: "Expected number after minus sign in PRAGMA value".to_string(),
+                    }),
+                }
+            }
+            Token::Symbol('+') => {
+                self.advance(); // consume '+'
+                match self.peek().clone() {
+                    Token::Number(n) => {
+                        self.advance();
+                        let sym = self.interner.intern(&n);
+                        Ok(PragmaValue::Number(sym))
+                    }
+                    _ => Err(ParseError {
+                        message: "Expected number after plus sign in PRAGMA value".to_string(),
+                    }),
+                }
+            }
+            _ => Err(ParseError {
+                message: format!("Expected PRAGMA value, found {:?}", self.peek()),
+            }),
+        }
     }
 }

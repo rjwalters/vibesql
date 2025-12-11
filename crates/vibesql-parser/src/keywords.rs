@@ -322,6 +322,8 @@ pub enum Keyword {
     Lazy,
     Durable,
     Volatile,
+    // SQLite compatibility keywords
+    Pragma,
 }
 
 impl Keyword {
@@ -645,6 +647,8 @@ impl fmt::Display for Keyword {
             Keyword::Lazy => "LAZY",
             Keyword::Durable => "DURABLE",
             Keyword::Volatile => "VOLATILE",
+            // SQLite compatibility keywords
+            Keyword::Pragma => "PRAGMA",
         };
         write!(f, "{}", keyword_str)
     }

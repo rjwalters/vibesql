@@ -275,3 +275,37 @@ pub struct AnalyzeStmt {
     /// Optional column names (only valid when table_name is specified)
     pub columns: Option<Vec<String>>,
 }
+
+/// PRAGMA statement
+///
+/// SQLite-specific statement for database configuration and introspection.
+/// Currently parsed but treated as a no-op for SQLite compatibility.
+///
+/// Syntax variations:
+/// - PRAGMA pragma_name;                 -- Query pragma value
+/// - PRAGMA pragma_name = value;         -- Set pragma value
+/// - PRAGMA pragma_name(value);          -- Set pragma value (function syntax)
+/// - PRAGMA database.pragma_name;        -- Database-qualified pragma
+/// - PRAGMA database.pragma_name = value;
+#[derive(Debug, Clone, PartialEq)]
+pub struct PragmaStmt {
+    /// Optional database/schema name (before the dot)
+    pub database: Option<String>,
+    /// The pragma name
+    pub name: String,
+    /// Optional pragma value (from = value or (value) syntax)
+    pub value: Option<PragmaValue>,
+}
+
+/// Value for a PRAGMA statement
+#[derive(Debug, Clone, PartialEq)]
+pub enum PragmaValue {
+    /// Identifier value (ON, OFF, FULL, etc.)
+    Identifier(String),
+    /// String literal value
+    String(String),
+    /// Numeric value (integer or float)
+    Number(String),
+    /// Signed number (negative numbers)
+    SignedNumber(String),
+}
