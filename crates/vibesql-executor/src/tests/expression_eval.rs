@@ -189,12 +189,12 @@ fn test_eval_division_by_zero() {
 }
 
 #[test]
-fn test_eval_type_mismatch_in_addition() {
+fn test_eval_string_coercion_in_addition() {
     let schema = vibesql_catalog::TableSchema::new("test".to_string(), vec![]);
     let evaluator = ExpressionEvaluator::new(&schema);
     let row = vibesql_storage::Row::new(vec![]);
 
-    // 10 + "hello" = Error
+    // SQLite coerces non-numeric strings to 0 in arithmetic: 10 + "hello" = 10
     let expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         op: vibesql_ast::BinaryOperator::Plus,
@@ -202,8 +202,8 @@ fn test_eval_type_mismatch_in_addition() {
             arcstr::ArcStr::from("hello"),
         ))),
     };
-    let err = evaluator.eval(&expr, &row).unwrap_err();
-    assert!(matches!(err, ExecutorError::TypeMismatch { .. }));
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Integer(10));
 }
 
 #[test]
