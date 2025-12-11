@@ -440,9 +440,41 @@ class TclTestRunner:
 
                 return results, True
 
+            # Track missing tables to detect cascading failures
+            # When a test fails with "Table 'X' not found", subsequent tests
+            # that also fail with the same error are marked as skipped
+            missing_tables: set[str] = set()
+
             # Run each test (setup succeeded)
             for test in parsed.tests:
+                # Check if this test would fail due to a known missing table
+                if missing_tables:
+                    referenced_tables = self._extract_table_references(test.sql)
+                    missing_in_test = referenced_tables & missing_tables
+                    if missing_in_test:
+                        # Skip this test - it depends on a table that wasn't created
+                        table_list = ', '.join(sorted(missing_in_test))
+                        results.append(TestResult(
+                            test_name=test.name,
+                            file_path=file_path,
+                            test_type=test.test_type.value,
+                            status="skipped",
+                            sql=test.sql,
+                            error_message=f"Setup failed: missing table(s) {table_list} not created by earlier test",
+                            line_number=test.line_number,
+                        ))
+                        if self.verbose:
+                            print(f"  ○ {test.name}: skipped (missing table: {table_list})")
+                        continue
+
                 result = self.run_single_test(test, vibesql, file_path)
+
+                # Check if this failure reveals a missing table
+                if result.status == "failed" and result.error_message:
+                    table_name = self._extract_missing_table(result.error_message)
+                    if table_name:
+                        missing_tables.add(table_name)
+
                 results.append(result)
 
                 if self.verbose:
@@ -450,6 +482,41 @@ class TclTestRunner:
                     print(f"  {status_icon} {test.name}: {result.status}")
 
         return results, setup_failed
+
+    def _extract_missing_table(self, error_message: str) -> Optional[str]:
+        """Extract table name from 'Table X not found' error messages."""
+        # Match patterns like "Table 'T1' not found" or "Table 't1' not found"
+        match = re.search(r"Table\s+'([^']+)'\s+not found", error_message, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()  # Normalize to uppercase
+        return None
+
+    def _extract_table_references(self, sql: str) -> set[str]:
+        """Extract table names referenced in a SQL statement."""
+        tables = set()
+        sql_upper = sql.upper()
+
+        # Match FROM clause tables
+        from_matches = re.findall(r'\bFROM\s+([A-Z_][A-Z0-9_]*)', sql_upper)
+        tables.update(from_matches)
+
+        # Match JOIN clause tables
+        join_matches = re.findall(r'\bJOIN\s+([A-Z_][A-Z0-9_]*)', sql_upper)
+        tables.update(join_matches)
+
+        # Match UPDATE table
+        update_matches = re.findall(r'\bUPDATE\s+([A-Z_][A-Z0-9_]*)', sql_upper)
+        tables.update(update_matches)
+
+        # Match DELETE FROM table
+        delete_matches = re.findall(r'\bDELETE\s+FROM\s+([A-Z_][A-Z0-9_]*)', sql_upper)
+        tables.update(delete_matches)
+
+        # Match INSERT INTO table
+        insert_matches = re.findall(r'\bINSERT\s+INTO\s+([A-Z_][A-Z0-9_]*)', sql_upper)
+        tables.update(insert_matches)
+
+        return tables
 
     def run_files(self, file_paths: list[str], parallel: bool = False) -> RunSummary:
         """Run tests from multiple files."""
