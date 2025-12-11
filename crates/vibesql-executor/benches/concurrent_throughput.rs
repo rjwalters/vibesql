@@ -1,8 +1,8 @@
 //! Concurrent Query Throughput Benchmark
 //!
 //! This benchmark measures and validates concurrent read query throughput using
-//! the SharedDatabase infrastructure. It demonstrates that concurrent reads actually
-//! execute in parallel using RwLock.
+//! a shared database with RwLock. It demonstrates that concurrent reads actually
+//! execute in parallel.
 //!
 //! ## Usage
 //!
@@ -36,10 +36,33 @@ use std::{
     time::{Duration, Instant},
 };
 
+use parking_lot::RwLock;
 use tpch::schema::load_vibesql;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
-use vibesql_storage::{Database, SharedDatabase};
+use vibesql_storage::Database;
+
+/// Thread-safe wrapper around Database for concurrent access.
+/// This is a local type alias since this benchmark needs sync RwLock, not async.
+#[derive(Clone)]
+struct SharedDatabase {
+    inner: Arc<RwLock<Database>>,
+}
+
+impl SharedDatabase {
+    fn new(db: Database) -> Self {
+        Self { inner: Arc::new(RwLock::new(db)) }
+    }
+
+    fn read(&self) -> parking_lot::RwLockReadGuard<'_, Database> {
+        self.inner.read()
+    }
+
+    #[allow(dead_code)]
+    fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Database> {
+        self.inner.write()
+    }
+}
 
 /// Test queries for the benchmark - varying complexity levels
 const QUERIES: &[(&str, &str)] = &[

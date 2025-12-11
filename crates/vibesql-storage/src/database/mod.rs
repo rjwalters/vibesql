@@ -13,7 +13,6 @@ mod metadata;
 mod operations;
 mod resource_tracker;
 mod session;
-mod shared;
 
 pub mod indexes;
 pub mod transactions;
@@ -31,5 +30,4 @@ pub use index_ops::{
 pub use indexes::{IndexData, IndexManager, IndexMetadata, OwnedStreamingRangeScan};
 pub use operations::SpatialIndexMetadata as OperationsSpatialIndexMetadata;
 pub use resource_tracker::{IndexBackend, IndexStats, ResourceTracker};
-pub use shared::SharedDatabase;
 pub use transactions::{Savepoint, TransactionChange, TransactionManager, TransactionState};
