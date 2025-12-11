@@ -37,10 +37,16 @@ impl ResultFormatter {
             OutputFormat::Markdown => self.print_markdown(result),
             OutputFormat::Html => self.print_html(result),
             OutputFormat::Raw => {
-                // Raw format: no timing info, just raw values
+                // Raw format: no timing info, no DDL messages, just raw values
+                // This is for scripted/automated use (e.g., TCL test harness)
                 self.print_raw(result);
                 return;
             }
+        }
+
+        // Print DDL messages for non-raw formats (interactive use)
+        if let Some(ref msg) = result.message {
+            println!("{}", msg);
         }
 
         // Print timing if available (not for raw format)
@@ -208,6 +214,7 @@ mod tests {
             ],
             row_count: 2,
             execution_time_ms: None,
+            message: None,
         }
     }
 
@@ -241,8 +248,13 @@ mod tests {
     #[test]
     fn test_empty_result() {
         let formatter = ResultFormatter::new();
-        let result =
-            QueryResult { columns: vec![], rows: vec![], row_count: 0, execution_time_ms: None };
+        let result = QueryResult {
+            columns: vec![],
+            rows: vec![],
+            row_count: 0,
+            execution_time_ms: None,
+            message: None,
+        };
 
         // These should handle empty results gracefully
         formatter.print_markdown(&result);
@@ -271,6 +283,7 @@ mod tests {
             ],
             row_count: 2,
             execution_time_ms: None,
+            message: None,
         };
 
         // Just verify it doesn't panic - output goes to stdout
@@ -282,8 +295,13 @@ mod tests {
     fn test_raw_format_empty_result() {
         let mut formatter = ResultFormatter::new();
         formatter.set_format(OutputFormat::Raw);
-        let result =
-            QueryResult { columns: vec![], rows: vec![], row_count: 0, execution_time_ms: None };
+        let result = QueryResult {
+            columns: vec![],
+            rows: vec![],
+            row_count: 0,
+            execution_time_ms: None,
+            message: None,
+        };
 
         // Should handle empty results gracefully
         formatter.print_raw(&result);

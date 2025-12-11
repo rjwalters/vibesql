@@ -22,6 +22,9 @@ pub struct QueryResult {
     pub columns: Vec<String>,
     pub row_count: usize,
     pub execution_time_ms: Option<f64>,
+    /// Optional informational message from DDL operations (e.g., "Index created successfully").
+    /// This message should be displayed in interactive formats but suppressed in raw format.
+    pub message: Option<String>,
 }
 
 impl SqlExecutor {
@@ -65,6 +68,7 @@ impl SqlExecutor {
             columns: Vec::new(),
             row_count: 0,
             execution_time_ms: None,
+            message: None,
         };
 
         match statement {
@@ -198,7 +202,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::Reindex(reindex_stmt) => {
                 match vibesql_executor::ReindexExecutor::execute(&reindex_stmt, &self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -207,7 +211,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::Analyze(analyze_stmt) => {
                 match vibesql_executor::AnalyzeExecutor::execute(&analyze_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -235,7 +239,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::CreateIndex(index_stmt) => {
                 match vibesql_executor::CreateIndexExecutor::execute(&index_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -244,7 +248,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::DropIndex(drop_stmt) => {
                 match vibesql_executor::DropIndexExecutor::execute(&drop_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -253,7 +257,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::AlterTable(alter_stmt) => {
                 match vibesql_executor::AlterTableExecutor::execute(&alter_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -263,7 +267,7 @@ impl SqlExecutor {
                 match vibesql_executor::BeginTransactionExecutor::execute(&begin_stmt, &mut self.db)
                 {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -272,7 +276,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::Commit(commit_stmt) => {
                 match vibesql_executor::CommitExecutor::execute(&commit_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -281,7 +285,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::Rollback(rollback_stmt) => {
                 match vibesql_executor::RollbackExecutor::execute(&rollback_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -290,7 +294,7 @@ impl SqlExecutor {
             vibesql_ast::Statement::Savepoint(savepoint_stmt) => {
                 match vibesql_executor::SavepointExecutor::execute(&savepoint_stmt, &mut self.db) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -302,7 +306,7 @@ impl SqlExecutor {
                     &mut self.db,
                 ) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -314,7 +318,7 @@ impl SqlExecutor {
                     &mut self.db,
                 ) {
                     Ok(msg) => {
-                        println!("{}", msg);
+                        result.message = Some(msg);
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -344,7 +348,8 @@ impl SqlExecutor {
                     &mut self.db,
                 ) {
                     Ok(()) => {
-                        println!("Assertion '{}' created", create_stmt.assertion_name);
+                        result.message =
+                            Some(format!("Assertion '{}' created", create_stmt.assertion_name));
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -356,7 +361,8 @@ impl SqlExecutor {
                     &mut self.db,
                 ) {
                     Ok(()) => {
-                        println!("Assertion '{}' dropped", drop_stmt.assertion_name);
+                        result.message =
+                            Some(format!("Assertion '{}' dropped", drop_stmt.assertion_name));
                         result.row_count = 0;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -416,6 +422,7 @@ impl SqlExecutor {
             rows,
             row_count,
             execution_time_ms: None,
+            message: None,
         })
     }
 
@@ -444,6 +451,7 @@ impl SqlExecutor {
             rows,
             row_count,
             execution_time_ms: None,
+            message: None,
         })
     }
 
@@ -540,7 +548,7 @@ impl SqlExecutor {
             ]
         };
 
-        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None })
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
     }
 
     /// Execute SHOW INDEX statement
@@ -600,6 +608,7 @@ impl SqlExecutor {
             rows,
             row_count,
             execution_time_ms: None,
+            message: None,
         })
     }
 
@@ -659,6 +668,7 @@ impl SqlExecutor {
             rows: vec![vec![normalized_name, create_sql]],
             row_count: 1,
             execution_time_ms: None,
+            message: None,
         })
     }
 
