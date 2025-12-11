@@ -398,6 +398,9 @@ where
             visit_arena_expression(left, visitor);
             visit_arena_expression(right, visitor);
         }
+        Expression::IsTruthValue { expr: inner, .. } => {
+            visit_arena_expression(inner, visitor);
+        }
         // Leaf nodes - no recursion needed
         Expression::Literal(_)
         | Expression::Placeholder(_)

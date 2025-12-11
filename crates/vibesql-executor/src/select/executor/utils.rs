@@ -31,6 +31,8 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
             expression_references_column(left) || expression_references_column(right)
         }
 
+        vibesql_ast::Expression::IsTruthValue { expr, .. } => expression_references_column(expr),
+
         vibesql_ast::Expression::InList { expr, values, .. } => {
             expression_references_column(expr) || values.iter().any(expression_references_column)
         }

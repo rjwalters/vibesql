@@ -295,6 +295,10 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(right, params);
         }
 
+        Expression::IsTruthValue { expr: inner, .. } => {
+            bind_expression_mut(inner, params);
+        }
+
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
                 bind_expression_mut(op, params);
@@ -663,6 +667,10 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
         Expression::IsDistinctFrom { left, right, .. } => {
             bind_expression_named_mut(left, params);
             bind_expression_named_mut(right, params);
+        }
+
+        Expression::IsTruthValue { expr: inner, .. } => {
+            bind_expression_named_mut(inner, params);
         }
 
         Expression::Case { operand, when_clauses, else_result } => {

@@ -206,6 +206,26 @@ pub fn optimize_expression(
             }
         }
 
+        // IS TRUE/IS FALSE/IS UNKNOWN - try to fold if operand is a literal
+        Expression::IsTruthValue { expr, truth_value, negated } => {
+            let inner_opt = optimize_expression(expr, evaluator)?;
+            if let Expression::Literal(val) = &inner_opt {
+                let result = match truth_value {
+                    vibesql_ast::TruthValue::True => matches!(val, SqlValue::Boolean(true)),
+                    vibesql_ast::TruthValue::False => matches!(val, SqlValue::Boolean(false)),
+                    vibesql_ast::TruthValue::Unknown => matches!(val, SqlValue::Null),
+                };
+                let final_result = if *negated { !result } else { result };
+                Ok(Expression::Literal(SqlValue::Boolean(final_result)))
+            } else {
+                Ok(Expression::IsTruthValue {
+                    expr: Box::new(inner_opt),
+                    truth_value: *truth_value,
+                    negated: *negated,
+                })
+            }
+        }
+
         // Wildcard - cannot optimize
         Expression::Wildcard => Ok(expr.clone()),
 

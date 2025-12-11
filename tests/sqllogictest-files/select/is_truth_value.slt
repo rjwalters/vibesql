@@ -1,0 +1,178 @@
+# IS TRUE / IS FALSE / IS UNKNOWN boolean test predicates (SQL:1999)
+
+# Basic IS TRUE tests
+query B
+SELECT TRUE IS TRUE
+----
+1
+
+query B
+SELECT FALSE IS TRUE
+----
+0
+
+query B
+SELECT NULL IS TRUE
+----
+0
+
+# Basic IS FALSE tests
+query B
+SELECT TRUE IS FALSE
+----
+0
+
+query B
+SELECT FALSE IS FALSE
+----
+1
+
+query B
+SELECT NULL IS FALSE
+----
+0
+
+# Basic IS UNKNOWN tests (UNKNOWN is NULL in boolean context)
+query B
+SELECT TRUE IS UNKNOWN
+----
+0
+
+query B
+SELECT FALSE IS UNKNOWN
+----
+0
+
+query B
+SELECT NULL IS UNKNOWN
+----
+1
+
+# IS NOT TRUE tests
+query B
+SELECT TRUE IS NOT TRUE
+----
+0
+
+query B
+SELECT FALSE IS NOT TRUE
+----
+1
+
+query B
+SELECT NULL IS NOT TRUE
+----
+1
+
+# IS NOT FALSE tests
+query B
+SELECT TRUE IS NOT FALSE
+----
+1
+
+query B
+SELECT FALSE IS NOT FALSE
+----
+0
+
+query B
+SELECT NULL IS NOT FALSE
+----
+1
+
+# IS NOT UNKNOWN tests
+query B
+SELECT TRUE IS NOT UNKNOWN
+----
+1
+
+query B
+SELECT FALSE IS NOT UNKNOWN
+----
+1
+
+query B
+SELECT NULL IS NOT UNKNOWN
+----
+0
+
+# Test with expressions that evaluate to boolean
+query B
+SELECT (1 = 1) IS TRUE
+----
+1
+
+query B
+SELECT (1 = 2) IS TRUE
+----
+0
+
+query B
+SELECT (1 = 2) IS FALSE
+----
+1
+
+query B
+SELECT (1 > 2) IS NOT TRUE
+----
+1
+
+# Test with column values
+statement ok
+CREATE TABLE bool_test (id INTEGER, val BOOLEAN)
+
+statement ok
+INSERT INTO bool_test VALUES (1, TRUE), (2, FALSE), (3, NULL)
+
+query IB rowsort
+SELECT id, val IS TRUE FROM bool_test
+----
+1 1
+2 0
+3 0
+
+query IB rowsort
+SELECT id, val IS FALSE FROM bool_test
+----
+1 0
+2 1
+3 0
+
+query IB rowsort
+SELECT id, val IS UNKNOWN FROM bool_test
+----
+1 0
+2 0
+3 1
+
+query IB rowsort
+SELECT id, val IS NOT TRUE FROM bool_test
+----
+1 0
+2 1
+3 1
+
+# Filter with IS TRUE/FALSE/UNKNOWN
+query I
+SELECT id FROM bool_test WHERE val IS TRUE
+----
+1
+
+query I
+SELECT id FROM bool_test WHERE val IS FALSE
+----
+2
+
+query I
+SELECT id FROM bool_test WHERE val IS UNKNOWN
+----
+3
+
+query I rowsort
+SELECT id FROM bool_test WHERE val IS NOT TRUE
+----
+2
+3
+
+statement ok
+DROP TABLE bool_test

@@ -134,6 +134,8 @@ impl ExpressionHasher {
                 Self::is_deterministic(left) && Self::is_deterministic(right)
             }
 
+            vibesql_ast::Expression::IsTruthValue { expr, .. } => Self::is_deterministic(expr),
+
             vibesql_ast::Expression::Position { substring, string, .. } => {
                 Self::is_deterministic(substring) && Self::is_deterministic(string)
             }
@@ -270,6 +272,12 @@ impl ExpressionHasher {
             vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
                 Self::hash_expression(left, hasher);
                 Self::hash_expression(right, hasher);
+                negated.hash(hasher);
+            }
+
+            vibesql_ast::Expression::IsTruthValue { expr, truth_value, negated } => {
+                Self::hash_expression(expr, hasher);
+                std::mem::discriminant(truth_value).hash(hasher);
                 negated.hash(hasher);
             }
 

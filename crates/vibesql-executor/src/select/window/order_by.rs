@@ -86,6 +86,9 @@ fn collect_window_functions_from_expression(
             collect_window_functions_from_expression(left, window_functions);
             collect_window_functions_from_expression(right, window_functions);
         }
+        Expression::IsTruthValue { expr, .. } => {
+            collect_window_functions_from_expression(expr, window_functions);
+        }
         Expression::Position { substring, string, character_unit: _ } => {
             collect_window_functions_from_expression(substring, window_functions);
             collect_window_functions_from_expression(string, window_functions);

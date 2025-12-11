@@ -360,6 +360,20 @@ impl ToSql for Expression {
                 }
             }
 
+            Expression::IsTruthValue { expr, truth_value, negated } => {
+                let expr_sql = expr.to_sql();
+                let tv_str = match truth_value {
+                    crate::TruthValue::True => "TRUE",
+                    crate::TruthValue::False => "FALSE",
+                    crate::TruthValue::Unknown => "UNKNOWN",
+                };
+                if *negated {
+                    format!("{} IS NOT {}", expr_sql, tv_str)
+                } else {
+                    format!("{} IS {}", expr_sql, tv_str)
+                }
+            }
+
             Expression::Wildcard => "*".to_string(),
 
             Expression::Case { operand, when_clauses, else_result } => {

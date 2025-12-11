@@ -73,7 +73,7 @@ pub use dml::{
 };
 pub use expression::{
     CaseWhen, CharacterUnit, Expression, FrameBound, FrameUnit, FulltextMode, IntervalUnit,
-    PseudoTable, Quantifier, TrimPosition, WindowFrame, WindowFunctionSpec, WindowSpec,
+    PseudoTable, Quantifier, TrimPosition, TruthValue, WindowFrame, WindowFunctionSpec, WindowSpec,
 };
 pub use grant::{GrantStmt, ObjectType, PrivilegeType};
 pub use introspection::{

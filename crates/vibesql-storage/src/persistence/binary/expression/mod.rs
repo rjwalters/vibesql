@@ -25,8 +25,8 @@ use operators::{
 };
 use types::{
     read_character_unit, read_fulltext_mode, read_interval_unit, read_pseudo_table,
-    read_trim_position, write_character_unit, write_fulltext_mode, write_interval_unit,
-    write_pseudo_table, write_trim_position,
+    read_trim_position, read_truth_value, write_character_unit, write_fulltext_mode,
+    write_interval_unit, write_pseudo_table, write_trim_position, write_truth_value,
 };
 use vibesql_ast::Expression;
 use window::{
@@ -74,6 +74,7 @@ enum ExprTag {
     Conjunction = 0x1F,
     Disjunction = 0x20,
     IsDistinctFrom = 0x21,
+    IsTruthValue = 0x22,
 }
 
 impl ExprTag {
@@ -113,6 +114,7 @@ impl ExprTag {
             0x1F => Ok(ExprTag::Conjunction),
             0x20 => Ok(ExprTag::Disjunction),
             0x21 => Ok(ExprTag::IsDistinctFrom),
+            0x22 => Ok(ExprTag::IsTruthValue),
             _ => {
                 Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
             }
@@ -184,6 +186,12 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_tag!(writer, ExprTag::IsDistinctFrom);
             write_expression(writer, left)?;
             write_expression(writer, right)?;
+            write_bool(writer, *negated)?;
+        }
+        Expression::IsTruthValue { expr, truth_value, negated } => {
+            write_tag!(writer, ExprTag::IsTruthValue);
+            write_expression(writer, expr)?;
+            write_truth_value(writer, truth_value)?;
             write_bool(writer, *negated)?;
         }
         Expression::Wildcard => {
@@ -438,6 +446,12 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let right = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
             Ok(Expression::IsDistinctFrom { left, right, negated })
+        }
+        ExprTag::IsTruthValue => {
+            let expr = Box::new(read_expression(reader)?);
+            let truth_value = read_truth_value(reader)?;
+            let negated = read_bool(reader)?;
+            Ok(Expression::IsTruthValue { expr, truth_value, negated })
         }
         ExprTag::Wildcard => Ok(Expression::Wildcard),
         ExprTag::Case => {

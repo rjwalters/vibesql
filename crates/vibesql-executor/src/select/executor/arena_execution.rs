@@ -357,6 +357,7 @@ impl SelectExecutor<'_> {
             ArenaExpression::IsDistinctFrom { left, right, .. } => {
                 self.arena_expr_has_aggregate(left) || self.arena_expr_has_aggregate(right)
             }
+            ArenaExpression::IsTruthValue { expr, .. } => self.arena_expr_has_aggregate(expr),
             ArenaExpression::Conjunction(children) | ArenaExpression::Disjunction(children) => {
                 children.iter().any(|c| self.arena_expr_has_aggregate(c))
             }

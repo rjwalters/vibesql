@@ -28,8 +28,8 @@ use crate::{
     DeleteStmt, Expression, FrameBound, FrameUnit, FromClause, FulltextMode, GroupByClause,
     GroupingElement, GroupingSet, InsertSource, InsertStmt, IntervalUnit, JoinType,
     MixedGroupingItem, OrderByItem, OrderDirection, PseudoTable, Quantifier, SelectItem,
-    SelectStmt, SetOperation, SetOperator, TrimPosition, UpdateStmt, WhereClause, WindowFrame,
-    WindowFunctionSpec, WindowSpec,
+    SelectStmt, SetOperation, SetOperator, TrimPosition, TruthValue, UpdateStmt, WhereClause,
+    WindowFrame, WindowFunctionSpec, WindowSpec,
 };
 
 /// Converter for arena-allocated AST to owned AST.
@@ -141,6 +141,13 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 Expression::IsDistinctFrom {
                     left: Box::new(self.convert_expression(left)),
                     right: Box::new(self.convert_expression(right)),
+                    negated: *negated,
+                }
+            }
+            arena_expr::Expression::IsTruthValue { expr, truth_value, negated } => {
+                Expression::IsTruthValue {
+                    expr: Box::new(self.convert_expression(expr)),
+                    truth_value: (*truth_value).into(),
                     negated: *negated,
                 }
             }
@@ -642,6 +649,16 @@ impl From<arena_expr::Quantifier> for Quantifier {
             arena_expr::Quantifier::All => Quantifier::All,
             arena_expr::Quantifier::Any => Quantifier::Any,
             arena_expr::Quantifier::Some => Quantifier::Some,
+        }
+    }
+}
+
+impl From<arena_expr::TruthValue> for TruthValue {
+    fn from(tv: arena_expr::TruthValue) -> Self {
+        match tv {
+            arena_expr::TruthValue::True => TruthValue::True,
+            arena_expr::TruthValue::False => TruthValue::False,
+            arena_expr::TruthValue::Unknown => TruthValue::Unknown,
         }
     }
 }

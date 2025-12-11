@@ -78,6 +78,7 @@ impl SelectExecutor<'_> {
             | vibesql_ast::Expression::Like { .. }
             | vibesql_ast::Expression::IsNull { .. }
             | vibesql_ast::Expression::IsDistinctFrom { .. }
+            | vibesql_ast::Expression::IsTruthValue { .. }
             | vibesql_ast::Expression::Position { .. }
             | vibesql_ast::Expression::Trim { .. }
             | vibesql_ast::Expression::Extract { .. }

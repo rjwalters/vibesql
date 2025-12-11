@@ -274,6 +274,27 @@ impl CombinedExpressionEvaluator<'_> {
                 self.eval_is_distinct_from(left, right, *negated, row)
             }
 
+            // IS TRUE / IS FALSE / IS UNKNOWN (SQL:1999)
+            vibesql_ast::Expression::IsTruthValue { expr, truth_value, negated } => {
+                let val = self.eval(expr, row)?;
+                // SQL:1999 three-valued logic for IS TRUE/FALSE/UNKNOWN:
+                // - IS TRUE: TRUE if expr is TRUE, FALSE if expr is FALSE or UNKNOWN
+                // - IS FALSE: TRUE if expr is FALSE, FALSE if expr is TRUE or UNKNOWN
+                // - IS UNKNOWN: TRUE if expr is UNKNOWN (NULL), FALSE if expr is TRUE or FALSE
+                // - IS NOT X: negates the result
+                let result = match truth_value {
+                    vibesql_ast::TruthValue::True => {
+                        matches!(val, vibesql_types::SqlValue::Boolean(true))
+                    }
+                    vibesql_ast::TruthValue::False => {
+                        matches!(val, vibesql_types::SqlValue::Boolean(false))
+                    }
+                    vibesql_ast::TruthValue::Unknown => matches!(val, vibesql_types::SqlValue::Null),
+                };
+                let final_result = if *negated { !result } else { result };
+                Ok(vibesql_types::SqlValue::Boolean(final_result))
+            }
+
             // Function expressions - handle scalar functions (not aggregates)
             vibesql_ast::Expression::Function { name, args, character_unit } => {
                 self.eval_function(name, args, character_unit, row)

@@ -254,6 +254,10 @@ fn is_expression_correlated(
                 || is_expression_correlated(right, outer_schema, subquery_tables)
         }
 
+        Expression::IsTruthValue { expr, .. } => {
+            is_expression_correlated(expr, outer_schema, subquery_tables)
+        }
+
         Expression::Case { operand, when_clauses, else_result } => {
             // Check operand
             if let Some(op) = operand {

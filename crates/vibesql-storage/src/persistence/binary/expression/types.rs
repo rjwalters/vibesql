@@ -4,7 +4,7 @@
 //
 // Handles serialization of various SQL types (CharacterUnit, TrimPosition, etc.).
 
-use vibesql_ast::{CharacterUnit, FulltextMode, IntervalUnit, PseudoTable, TrimPosition};
+use vibesql_ast::{CharacterUnit, FulltextMode, IntervalUnit, PseudoTable, TrimPosition, TruthValue};
 
 impl_simple_enum_serialization!(
     CharacterUnit,
@@ -78,5 +78,17 @@ impl_simple_enum_serialization!(
     {
         PseudoTable::Old => 0,
         PseudoTable::New => 1,
+    }
+);
+
+impl_simple_enum_serialization!(
+    TruthValue,
+    write_truth_value,
+    read_truth_value,
+    "truth value",
+    {
+        TruthValue::True => 0,
+        TruthValue::False => 1,
+        TruthValue::Unknown => 2,
     }
 );
