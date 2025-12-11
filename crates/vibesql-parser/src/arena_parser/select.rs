@@ -307,16 +307,31 @@ impl<'arena> ArenaParser<'arena> {
             } else if self.try_consume_keyword(Keyword::Join) {
                 Some(JoinType::Inner)
             } else if self.try_consume(&Token::Comma) {
+                // Comma normally represents CROSS JOIN, but we need to check for
+                // SQLite's legacy syntax: FROM t1, t2 ON condition (treated as INNER JOIN)
                 Some(JoinType::Cross)
             } else {
                 None
             };
 
-            if let Some(jt) = join_type {
+            // Track if this was originally a comma-join (for legacy ON support)
+            let was_comma_join = matches!(join_type, Some(JoinType::Cross))
+                && !matches!(self.peek(), Token::Keyword(Keyword::Natural));
+
+            if let Some(mut jt) = join_type {
                 let natural = self.try_consume_keyword(Keyword::Natural);
                 let right = self.parse_table_reference()?;
 
-                let (condition, using_columns) = if jt != JoinType::Cross && !natural {
+                // For comma-joins, check for legacy ON clause (SQLite compatibility)
+                // If found, treat as INNER JOIN instead of CROSS JOIN
+                let (condition, using_columns) = if was_comma_join && !natural {
+                    if self.try_consume_keyword(Keyword::On) {
+                        jt = JoinType::Inner; // Convert to INNER JOIN
+                        (Some(self.parse_expression()?), None)
+                    } else {
+                        (None, None)
+                    }
+                } else if jt != JoinType::Cross && !natural {
                     if self.try_consume_keyword(Keyword::On) {
                         (Some(self.parse_expression()?), None)
                     } else if self.try_consume_keyword(Keyword::Using) {
