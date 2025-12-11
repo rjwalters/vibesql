@@ -1032,11 +1032,12 @@ fn transform_from_clause<V: ExpressionMutVisitor>(visitor: &mut V, from: FromCla
             alias,
             column_aliases,
         },
-        FromClause::Join { left, right, join_type, condition, natural } => FromClause::Join {
+        FromClause::Join { left, right, join_type, condition, using_columns, natural } => FromClause::Join {
             left: Box::new(transform_from_clause(visitor, *left)),
             right: Box::new(transform_from_clause(visitor, *right)),
             join_type,
             condition: condition.map(|c| transform_expression(visitor, c)),
+            using_columns,
             natural,
         },
         FromClause::Values { rows, alias, column_aliases } => FromClause::Values {

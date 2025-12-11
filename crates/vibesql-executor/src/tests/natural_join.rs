@@ -132,7 +132,8 @@ fn test_natural_join_single_common_column() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
-            natural: true, // NATURAL JOIN
+                using_columns: None,
+                natural: true, // NATURAL JOIN
         }),
         where_clause: None,
         group_by: None,

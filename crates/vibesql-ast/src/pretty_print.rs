@@ -834,7 +834,7 @@ impl ToSql for FromClause {
                 }
                 result
             }
-            FromClause::Join { left, right, join_type, condition, natural } => {
+            FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
                 let mut result = left.to_sql();
 
                 if *natural {
@@ -845,6 +845,10 @@ impl ToSql for FromClause {
 
                 if let Some(cond) = condition {
                     result.push_str(&format!(" ON {}", cond.to_sql()));
+                }
+
+                if let Some(cols) = using_columns {
+                    result.push_str(&format!(" USING ({})", cols.join(", ")));
                 }
 
                 result
@@ -1178,6 +1182,7 @@ mod tests {
                     column: "id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         };
 

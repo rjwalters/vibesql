@@ -93,6 +93,8 @@ pub enum FromClause<'arena> {
         right: &'arena FromClause<'arena>,
         join_type: JoinType,
         condition: Option<Expression<'arena>>,
+        /// USING clause columns - joins on these named columns from both tables
+        using_columns: Option<BumpVec<'arena, Symbol>>,
         natural: bool,
     },
     Subquery {
