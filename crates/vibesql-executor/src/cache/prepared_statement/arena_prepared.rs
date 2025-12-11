@@ -395,6 +395,10 @@ where
         Expression::IsNull { expr: inner, .. } => {
             visit_arena_expression(inner, visitor);
         }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            visit_arena_expression(left, visitor);
+            visit_arena_expression(right, visitor);
+        }
         // Leaf nodes - no recursion needed
         Expression::Literal(_)
         | Expression::Placeholder(_)

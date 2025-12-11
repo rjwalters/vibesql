@@ -78,6 +78,16 @@ pub enum Expression {
         negated: bool, // false = IS NULL, true = IS NOT NULL
     },
 
+    /// IS DISTINCT FROM / IS NOT DISTINCT FROM (SQL:1999)
+    /// NULL-safe comparison operator:
+    /// - `a IS NOT DISTINCT FROM b`: TRUE when both NULL or both equal non-NULL
+    /// - `a IS DISTINCT FROM b`: TRUE when one is NULL and other isn't, or both non-NULL but unequal
+    IsDistinctFrom {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        negated: bool, // false = IS DISTINCT FROM, true = IS NOT DISTINCT FROM
+    },
+
     /// Wildcard (*)
     Wildcard,
 

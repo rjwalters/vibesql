@@ -121,6 +121,20 @@ pub(super) fn rewrite_expression_with_context(
             negated: *negated,
         },
 
+        Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
+            left: Box::new(rewrite_expression_with_context(
+                left,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            right: Box::new(rewrite_expression_with_context(
+                right,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            negated: *negated,
+        },
+
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
             operand: operand.as_ref().map(|e| {
                 Box::new(rewrite_expression_with_context(e, rewrite_subquery_fn, outer_tables))

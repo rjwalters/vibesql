@@ -62,6 +62,10 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
         Expression::IsNull { expr, .. } => {
             extract_column_refs(expr, refs);
         }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            extract_column_refs(left, refs);
+            extract_column_refs(right, refs);
+        }
         Expression::Between { expr, low, high, .. } => {
             extract_column_refs(expr, refs);
             extract_column_refs(low, refs);

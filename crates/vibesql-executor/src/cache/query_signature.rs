@@ -362,6 +362,13 @@ impl QuerySignature {
                 negated.hash(hasher);
             }
 
+            Expression::IsDistinctFrom { left, right, negated } => {
+                "IS_DISTINCT_FROM".hash(hasher);
+                Self::hash_expression(left, hasher);
+                Self::hash_expression(right, hasher);
+                negated.hash(hasher);
+            }
+
             Expression::Wildcard => "WILDCARD".hash(hasher),
 
             Expression::Case { operand, when_clauses, else_result } => {
@@ -758,6 +765,13 @@ impl QuerySignature {
             ArenaExpression::IsNull { expr, negated } => {
                 "IS_NULL".hash(hasher);
                 Self::hash_arena_expression(expr, hasher);
+                negated.hash(hasher);
+            }
+
+            ArenaExpression::IsDistinctFrom { left, right, negated } => {
+                "IS_DISTINCT_FROM".hash(hasher);
+                Self::hash_arena_expression(left, hasher);
+                Self::hash_arena_expression(right, hasher);
                 negated.hash(hasher);
             }
 

@@ -221,6 +221,14 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 Ok(SqlValue::Boolean(if *negated { !is_null } else { is_null }))
             }
 
+            // IS DISTINCT FROM / IS NOT DISTINCT FROM
+            ArenaExpression::IsDistinctFrom { left, right, negated } => {
+                let left_val = self.eval_with_depth(left, row)?;
+                let right_val = self.eval_with_depth(right, row)?;
+                let is_distinct = super::core::values_are_distinct(&left_val, &right_val);
+                Ok(SqlValue::Boolean(if *negated { !is_distinct } else { is_distinct }))
+            }
+
             // Wildcard (*)
             ArenaExpression::Wildcard => Ok(SqlValue::Null),
 

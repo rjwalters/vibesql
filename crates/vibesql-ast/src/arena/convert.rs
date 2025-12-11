@@ -138,6 +138,13 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 expr: Box::new(self.convert_expression(expr)),
                 negated: *negated,
             },
+            arena_expr::Expression::IsDistinctFrom { left, right, negated } => {
+                Expression::IsDistinctFrom {
+                    left: Box::new(self.convert_expression(left)),
+                    right: Box::new(self.convert_expression(right)),
+                    negated: *negated,
+                }
+            }
             arena_expr::Expression::Wildcard => Expression::Wildcard,
             arena_expr::Expression::CurrentDate => Expression::CurrentDate,
             arena_expr::Expression::CurrentTime { precision } => {

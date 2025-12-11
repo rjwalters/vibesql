@@ -83,6 +83,14 @@ pub enum Expression<'arena> {
         negated: bool,
     },
 
+    /// IS DISTINCT FROM / IS NOT DISTINCT FROM (SQL:1999)
+    /// NULL-safe comparison operator.
+    IsDistinctFrom {
+        left: ExprRef<'arena>,
+        right: ExprRef<'arena>,
+        negated: bool, // false = IS DISTINCT FROM, true = IS NOT DISTINCT FROM
+    },
+
     /// Wildcard (*)
     Wildcard,
 

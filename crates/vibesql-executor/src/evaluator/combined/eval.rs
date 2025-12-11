@@ -253,6 +253,11 @@ impl CombinedExpressionEvaluator<'_> {
                 self.eval_is_null(expr, *negated, row)
             }
 
+            // IS DISTINCT FROM / IS NOT DISTINCT FROM (SQL:1999)
+            vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
+                self.eval_is_distinct_from(left, right, *negated, row)
+            }
+
             // Function expressions - handle scalar functions (not aggregates)
             vibesql_ast::Expression::Function { name, args, character_unit } => {
                 self.eval_function(name, args, character_unit, row)

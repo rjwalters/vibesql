@@ -255,6 +255,14 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::IsNull { expr: inner, .. } => walk_expression(visitor, inner),
 
+        Expression::IsDistinctFrom { left, right, .. } => {
+            let result = walk_expression(visitor, left);
+            if result.should_stop() {
+                return VisitResult::Stop;
+            }
+            walk_expression(visitor, right)
+        }
+
         Expression::Wildcard => visitor.visit_wildcard(),
 
         Expression::Case { operand, when_clauses, else_result } => {
@@ -555,6 +563,12 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
         Expression::IsNull { expr: inner, negated } => {
             Expression::IsNull { expr: Box::new(transform_expression(visitor, *inner)), negated }
         }
+
+        Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
+            left: Box::new(transform_expression(visitor, *left)),
+            right: Box::new(transform_expression(visitor, *right)),
+            negated,
+        },
 
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
             operand: operand.map(|op| Box::new(transform_expression(visitor, *op))),

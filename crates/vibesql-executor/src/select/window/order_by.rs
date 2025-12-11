@@ -82,6 +82,10 @@ fn collect_window_functions_from_expression(
         Expression::IsNull { expr, .. } => {
             collect_window_functions_from_expression(expr, window_functions);
         }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            collect_window_functions_from_expression(left, window_functions);
+            collect_window_functions_from_expression(right, window_functions);
+        }
         Expression::Position { substring, string, character_unit: _ } => {
             collect_window_functions_from_expression(substring, window_functions);
             collect_window_functions_from_expression(string, window_functions);

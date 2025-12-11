@@ -26,6 +26,10 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
 
         vibesql_ast::Expression::IsNull { expr, .. } => expression_references_column(expr),
 
+        vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
+            expression_references_column(left) || expression_references_column(right)
+        }
+
         vibesql_ast::Expression::InList { expr, values, .. } => {
             expression_references_column(expr) || values.iter().any(expression_references_column)
         }

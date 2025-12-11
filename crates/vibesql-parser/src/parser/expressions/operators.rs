@@ -370,7 +370,7 @@ impl Parser {
             };
         }
 
-        // Check for IS NULL / IS NOT NULL
+        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM
         if self.peek_keyword(Keyword::Is) {
             self.consume_keyword(Keyword::Is)?;
 
@@ -382,10 +382,21 @@ impl Parser {
                 false
             };
 
-            // Expect NULL
-            self.expect_keyword(Keyword::Null)?;
-
-            left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated };
+            // Check for DISTINCT FROM (SQL:1999) or NULL
+            if self.peek_keyword(Keyword::Distinct) {
+                self.consume_keyword(Keyword::Distinct)?;
+                self.expect_keyword(Keyword::From)?;
+                let right = self.parse_additive_expression()?;
+                left = vibesql_ast::Expression::IsDistinctFrom {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    negated,
+                };
+            } else {
+                // Expect NULL
+                self.expect_keyword(Keyword::Null)?;
+                left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated };
+            }
         }
 
         Ok(left)

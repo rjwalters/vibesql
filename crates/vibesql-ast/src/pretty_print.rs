@@ -353,6 +353,16 @@ impl ToSql for Expression {
                 }
             }
 
+            Expression::IsDistinctFrom { left, right, negated } => {
+                let left_sql = left.to_sql();
+                let right_sql = right.to_sql();
+                if *negated {
+                    format!("{} IS NOT DISTINCT FROM {}", left_sql, right_sql)
+                } else {
+                    format!("{} IS DISTINCT FROM {}", left_sql, right_sql)
+                }
+            }
+
             Expression::Wildcard => "*".to_string(),
 
             Expression::Case { operand, when_clauses, else_result } => {

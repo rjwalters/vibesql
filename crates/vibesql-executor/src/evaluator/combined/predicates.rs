@@ -375,6 +375,43 @@ impl CombinedExpressionEvaluator<'_> {
         Ok(vibesql_types::SqlValue::Boolean(result))
     }
 
+    /// Evaluate IS [NOT] DISTINCT FROM (SQL:1999)
+    /// NULL-safe comparison:
+    /// - `a IS NOT DISTINCT FROM b`: TRUE when both NULL or both equal non-NULL
+    /// - `a IS DISTINCT FROM b`: TRUE when one is NULL and other isn't, or both non-NULL but unequal
+    pub(super) fn eval_is_distinct_from(
+        &self,
+        left: &vibesql_ast::Expression,
+        right: &vibesql_ast::Expression,
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        let left_val = self.eval(left, row)?;
+        let right_val = self.eval(right, row)?;
+
+        let left_null = matches!(left_val, vibesql_types::SqlValue::Null);
+        let right_null = matches!(right_val, vibesql_types::SqlValue::Null);
+
+        // IS DISTINCT FROM semantics:
+        // - Both NULL: NOT distinct (they are considered equal)
+        // - One NULL, one not: distinct
+        // - Both non-NULL: use normal equality comparison
+        let is_distinct = if left_null && right_null {
+            // Both NULL - not distinct
+            false
+        } else if left_null || right_null {
+            // One NULL, one not - distinct
+            true
+        } else {
+            // Both non-NULL - compare values
+            left_val != right_val
+        };
+
+        // IS NOT DISTINCT FROM inverts the result
+        let result = if negated { !is_distinct } else { is_distinct };
+        Ok(vibesql_types::SqlValue::Boolean(result))
+    }
+
     /// Evaluate POSITION expression: POSITION(substring IN string)
     pub(super) fn eval_position(
         &self,

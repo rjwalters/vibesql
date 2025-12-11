@@ -188,6 +188,10 @@ name = "is_null_expressions"
 path = "tests/functions/is_null_expressions.rs"
 
 [[test]]
+name = "is_distinct_from"
+path = "tests/functions/is_distinct_from.rs"
+
+[[test]]
 name = "not_is_null_fix"
 path = "tests/functions/not_is_null_fix.rs"
 

@@ -201,6 +201,10 @@ impl ExpressionMapper {
             Expression::IsNull { expr: e, .. } => {
                 self.walk_expression(e, tables, columns, resolvable);
             }
+            Expression::IsDistinctFrom { left, right, .. } => {
+                self.walk_expression(left, tables, columns, resolvable);
+                self.walk_expression(right, tables, columns, resolvable);
+            }
             Expression::Case { operand, when_clauses, else_result } => {
                 if let Some(op) = operand {
                     self.walk_expression(op, tables, columns, resolvable);

@@ -186,6 +186,26 @@ pub fn optimize_expression(
             }
         }
 
+        // IS DISTINCT FROM/IS NOT DISTINCT FROM - try to fold if both operands are literals
+        Expression::IsDistinctFrom { left, right, negated } => {
+            let left_opt = optimize_expression(left, evaluator)?;
+            let right_opt = optimize_expression(right, evaluator)?;
+
+            if let (Expression::Literal(left_val), Expression::Literal(right_val)) =
+                (&left_opt, &right_opt)
+            {
+                let is_distinct = ExpressionEvaluator::values_are_distinct(left_val, right_val);
+                let result = if *negated { !is_distinct } else { is_distinct };
+                Ok(Expression::Literal(SqlValue::Boolean(result)))
+            } else {
+                Ok(Expression::IsDistinctFrom {
+                    left: Box::new(left_opt),
+                    right: Box::new(right_opt),
+                    negated: *negated,
+                })
+            }
+        }
+
         // Wildcard - cannot optimize
         Expression::Wildcard => Ok(expr.clone()),
 
