@@ -261,3 +261,7 @@ harness = false
 [[bench]]
 name = "morsel_operation_benchmark"
 harness = false
+
+[[bench]]
+name = "nested_loop_parallel"
+harness = false
