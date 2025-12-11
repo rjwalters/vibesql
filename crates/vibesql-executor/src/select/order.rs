@@ -37,10 +37,10 @@ pub(super) fn apply_order_by(
         evaluator.clear_cse_cache();
 
         let mut keys = Vec::new();
-        for order_item in order_by {
+        for (term_index, order_item) in order_by.iter().enumerate() {
             // Check if ORDER BY expression is a SELECT list alias or matches an aliased column
             // Evaluator handles window functions via window_mapping if present
-            let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list);
+            let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list, term_index)?;
             let key_value = evaluator.eval(expr_to_eval.as_ref(), row)?;
             keys.push((key_value, order_item.direction.clone()));
         }
@@ -111,11 +111,70 @@ pub(super) fn apply_order_by(
 ///    alias
 /// 4. Complex expressions containing GROUPING() - recursively resolves sub-expressions
 /// 5. Otherwise - returns the original expression (for expressions not matching aliases)
+///
+/// Returns an error if a numeric column position is out of range (0 or > select_list.len())
 pub(crate) fn resolve_order_by_for_aggregates(
+    order_expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+    term_index: usize, // 0-indexed position of this ORDER BY term
+) -> Result<vibesql_ast::Expression, ExecutorError> {
+    // Validate numeric column positions at the TOP LEVEL ONLY
+    // (nested integer literals like `WHERE x = 0` are not column positions)
+
+    // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
+    if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
+        // Validate the column position
+        if *pos <= 0 || (*pos as usize) > select_list.len() {
+            return Err(ExecutorError::OrderByOutOfRange {
+                term_position: term_index + 1, // Convert to 1-indexed for error message
+                column_number: *pos,
+                select_list_len: select_list.len(),
+            });
+        }
+        let idx = (*pos as usize) - 1;
+        if let vibesql_ast::SelectItem::Expression { expr, alias } = &select_list[idx] {
+            // Return a ColumnRef to the alias name (or derive from expression)
+            let col_name = if let Some(alias_name) = alias {
+                alias_name.clone()
+            } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
+                column.clone()
+            } else {
+                format!("col{}", idx + 1)
+            };
+            return Ok(vibesql_ast::Expression::ColumnRef { table: None, column: col_name });
+        }
+    }
+
+    // Check for negative numeric column position (ORDER BY -1 parsed as UnaryOp { Minus, Integer(1) })
+    if let vibesql_ast::Expression::UnaryOp {
+        op: vibesql_ast::UnaryOperator::Minus,
+        expr,
+    } = order_expr
+    {
+        if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
+            expr.as_ref()
+        {
+            // Negative column positions are always invalid
+            return Err(ExecutorError::OrderByOutOfRange {
+                term_position: term_index + 1,
+                column_number: -*pos,
+                select_list_len: select_list.len(),
+            });
+        }
+    }
+
+    // Delegate to helper that doesn't validate column numbers (for recursive calls)
+    Ok(resolve_order_by_for_aggregates_inner(order_expr, select_list))
+}
+
+/// Internal helper for recursively resolving ORDER BY expressions.
+/// Does NOT validate numeric column positions (validation is done at top level only).
+fn resolve_order_by_for_aggregates_inner(
     order_expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],
 ) -> vibesql_ast::Expression {
     // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
+    // NOTE: At this point we're in a nested expression, so integer literals are NOT column positions
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
         if *pos > 0 && (*pos as usize) <= select_list.len() {
             let idx = (*pos as usize) - 1;
@@ -131,6 +190,8 @@ pub(crate) fn resolve_order_by_for_aggregates(
                 return vibesql_ast::Expression::ColumnRef { table: None, column: col_name };
             }
         }
+        // If not a valid column position, just return the literal as-is
+        return order_expr.clone();
     }
 
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
@@ -188,24 +249,29 @@ pub(crate) fn resolve_order_by_for_aggregates(
     }
 
     // Handle CASE expressions by recursively resolving sub-expressions
+    // Use inner helper for recursion (doesn't validate column numbers)
     if let vibesql_ast::Expression::Case { operand, when_clauses, else_result } = order_expr {
-        let resolved_operand =
-            operand.as_ref().map(|op| Box::new(resolve_order_by_for_aggregates(op, select_list)));
+        let resolved_operand = match operand {
+            Some(op) => Some(Box::new(resolve_order_by_for_aggregates_inner(op, select_list))),
+            None => None,
+        };
 
-        let resolved_when_clauses: Vec<vibesql_ast::CaseWhen> = when_clauses
-            .iter()
-            .map(|clause| vibesql_ast::CaseWhen {
-                conditions: clause
-                    .conditions
-                    .iter()
-                    .map(|cond| resolve_order_by_for_aggregates(cond, select_list))
-                    .collect(),
-                result: resolve_order_by_for_aggregates(&clause.result, select_list),
-            })
-            .collect();
+        let mut resolved_when_clauses: Vec<vibesql_ast::CaseWhen> = Vec::new();
+        for clause in when_clauses {
+            let mut resolved_conditions = Vec::new();
+            for cond in &clause.conditions {
+                resolved_conditions.push(resolve_order_by_for_aggregates_inner(cond, select_list));
+            }
+            resolved_when_clauses.push(vibesql_ast::CaseWhen {
+                conditions: resolved_conditions,
+                result: resolve_order_by_for_aggregates_inner(&clause.result, select_list),
+            });
+        }
 
-        let resolved_else =
-            else_result.as_ref().map(|e| Box::new(resolve_order_by_for_aggregates(e, select_list)));
+        let resolved_else = match else_result {
+            Some(e) => Some(Box::new(resolve_order_by_for_aggregates_inner(e, select_list))),
+            None => None,
+        };
 
         return vibesql_ast::Expression::Case {
             operand: resolved_operand,
@@ -218,8 +284,8 @@ pub(crate) fn resolve_order_by_for_aggregates(
     // Try to match the entire binary expression first (already done above with
     // find_matching_select_expression) If no match, try matching each side separately
     if let vibesql_ast::Expression::BinaryOp { left, op, right } = order_expr {
-        let resolved_left = resolve_order_by_for_aggregates(left, select_list);
-        let resolved_right = resolve_order_by_for_aggregates(right, select_list);
+        let resolved_left = resolve_order_by_for_aggregates_inner(left, select_list);
+        let resolved_right = resolve_order_by_for_aggregates_inner(right, select_list);
 
         return vibesql_ast::Expression::BinaryOp {
             left: Box::new(resolved_left),
@@ -305,18 +371,45 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
 /// 3. Simple column reference that matches an aliased column's original name - returns a ColumnRef
 ///    to the alias
 /// 4. Otherwise - returns the original ORDER BY expression
+///
+/// Returns an error if a numeric column position is out of range (0 or > select_list.len())
 pub(crate) fn resolve_order_by_alias<'a>(
     order_expr: &'a vibesql_ast::Expression,
     select_list: &'a [vibesql_ast::SelectItem],
-) -> Cow<'a, vibesql_ast::Expression> {
+    term_index: usize, // 0-indexed position of this ORDER BY term
+) -> Result<Cow<'a, vibesql_ast::Expression>, ExecutorError> {
     // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
-        if *pos > 0 && (*pos as usize) <= select_list.len() {
-            // Valid column position, return the expression at that position
-            let idx = (*pos as usize) - 1;
-            if let vibesql_ast::SelectItem::Expression { expr, .. } = &select_list[idx] {
-                return Cow::Borrowed(expr);
-            }
+        // Validate the column position
+        if *pos <= 0 || (*pos as usize) > select_list.len() {
+            return Err(ExecutorError::OrderByOutOfRange {
+                term_position: term_index + 1, // Convert to 1-indexed for error message
+                column_number: *pos,
+                select_list_len: select_list.len(),
+            });
+        }
+        // Valid column position, return the expression at that position
+        let idx = (*pos as usize) - 1;
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = &select_list[idx] {
+            return Ok(Cow::Borrowed(expr));
+        }
+    }
+
+    // Check for negative numeric column position (ORDER BY -1 parsed as UnaryOp { Minus, Integer(1) })
+    if let vibesql_ast::Expression::UnaryOp {
+        op: vibesql_ast::UnaryOperator::Minus,
+        expr,
+    } = order_expr
+    {
+        if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
+            expr.as_ref()
+        {
+            // Negative column positions are always invalid
+            return Err(ExecutorError::OrderByOutOfRange {
+                term_position: term_index + 1,
+                column_number: -*pos,
+                select_list_len: select_list.len(),
+            });
         }
     }
 
@@ -327,7 +420,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
             if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
                 if alias_name.eq_ignore_ascii_case(column) {
                     // Found matching alias, use the SELECT list expression
-                    return Cow::Borrowed(expr);
+                    return Ok(Cow::Borrowed(expr));
                 }
             }
         }
@@ -345,17 +438,17 @@ pub(crate) fn resolve_order_by_alias<'a>(
                 if select_col.eq_ignore_ascii_case(column) {
                     // The ORDER BY column matches the original column, but it's aliased
                     // Return a new ColumnRef using the alias name
-                    return Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
                         table: None,
                         column: alias_name.clone(),
-                    });
+                    }));
                 }
             }
         }
     }
 
     // Not an alias or column position, use the original expression
-    Cow::Borrowed(order_expr)
+    Ok(Cow::Borrowed(order_expr))
 }
 
 #[cfg(test)]
