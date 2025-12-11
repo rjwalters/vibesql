@@ -13,8 +13,8 @@ use std::hint::black_box;
 use bytes::BytesMut;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use vibesql_server::{
-    protocol::messages::{BackendMessage, PartialRowUpdate, SubscriptionUpdateType},
-    subscription::{create_partial_row_update, SelectiveColumnConfig},
+    create_partial_row_update, protocol::PartialRowUpdate, BackendMessage, SelectiveColumnConfig,
+    SubscriptionUpdateType,
 };
 
 /// Create a test row with N columns, each containing a string value
