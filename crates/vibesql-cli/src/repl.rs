@@ -7,6 +7,7 @@ use crate::{
     commands::MetaCommand,
     executor::SqlExecutor,
     formatter::{OutputFormat, ResultFormatter},
+    util::is_memory_database,
 };
 
 #[derive(Debug, Clone)]
@@ -22,12 +23,6 @@ pub struct Repl {
     database_path: Option<String>,
     error_history: Vec<ErrorEntry>,
     has_modifications: bool,
-}
-
-/// Check if a database path represents an in-memory database.
-/// SQLite uses ":memory:" as a special value for in-memory databases.
-fn is_memory_database(path: &str) -> bool {
-    path == ":memory:" || path == "file::memory:" || path.starts_with("file::memory:?")
 }
 
 impl Repl {

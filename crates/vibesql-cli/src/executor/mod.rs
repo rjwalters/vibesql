@@ -27,11 +27,7 @@ pub struct QueryResult {
     pub message: Option<String>,
 }
 
-/// Check if a database path represents an in-memory database.
-/// SQLite uses ":memory:" as a special value for in-memory databases.
-fn is_memory_database(path: &str) -> bool {
-    path == ":memory:" || path == "file::memory:" || path.starts_with("file::memory:?")
-}
+use crate::util::is_memory_database;
 
 impl SqlExecutor {
     pub fn new(database: Option<String>) -> anyhow::Result<Self> {
