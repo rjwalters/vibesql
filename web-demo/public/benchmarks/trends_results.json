@@ -1,6 +1,6 @@
 {
-  "generated_at": "2025-12-10T23:21:23.030442",
-  "git_commit": "83593a08",
+  "generated_at": "2025-12-11T00:02:55.185826",
+  "git_commit": "6937182d",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -183,6 +183,17 @@
           "geomean_ms": 17.83,
           "queries_passed": 22,
           "total_queries": 22
+        },
+        {
+          "date": "2025-12-10",
+          "timestamp": "2025-12-10T23:24:54.122561",
+          "commit": "356692f6",
+          "avg_ms": 29.43,
+          "min_ms": 0.63,
+          "max_ms": 123.36,
+          "geomean_ms": 15.23,
+          "queries_passed": 22,
+          "total_queries": 22
         }
       ]
     },
@@ -322,6 +333,17 @@
           "geomean_ms": 17.64,
           "queries_passed": 408,
           "total_queries": 408
+        },
+        {
+          "date": "2025-12-10",
+          "timestamp": "2025-12-10T23:41:07.250987",
+          "commit": "356692f6",
+          "avg_ms": 55.47,
+          "min_ms": 0.03,
+          "max_ms": 668.58,
+          "geomean_ms": 20.07,
+          "queries_passed": 408,
+          "total_queries": 408
         }
       ]
     },
@@ -415,6 +437,13 @@
           "commit": "8f6afec2",
           "tps": 18311.27,
           "latency_us": 95.73
+        },
+        {
+          "date": "2025-12-10",
+          "timestamp": "2025-12-10T23:32:05.620508",
+          "commit": "356692f6",
+          "tps": 19629.17,
+          "latency_us": 87.09
         }
       ]
     },
@@ -597,6 +626,22 @@
             "update_non_index": 0.0021,
             "delete": 0.0034,
             "range_queries": 0.023
+          }
+        },
+        {
+          "date": "2025-12-10",
+          "timestamp": "2025-12-10T23:50:30.952995",
+          "commit": "356692f6",
+          "avg_ms": 0.0064,
+          "min_ms": 0.0008,
+          "max_ms": 0.0223,
+          "workloads": {
+            "point_select": 0.0008,
+            "insert": 0.0052,
+            "update_index": 0.0048,
+            "update_non_index": 0.0021,
+            "delete": 0.003,
+            "range_queries": 0.0223
           }
         }
       ]
