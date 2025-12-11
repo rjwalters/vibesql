@@ -320,3 +320,79 @@ fn test_parse_nested_parenthesized_join_with_using() {
         _ => panic!("Expected SELECT"),
     }
 }
+
+// ========================================================================
+// NATURAL JOIN Tests (#4312)
+// ========================================================================
+
+#[test]
+fn test_parse_natural_join() {
+    let result = Parser::parse_sql("SELECT * FROM t1 NATURAL JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, condition, using_columns, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
+                assert!(*natural);
+                // NATURAL JOIN should have no ON or USING clause
+                assert!(condition.is_none());
+                assert!(using_columns.is_none());
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_natural_left_join() {
+    let result = Parser::parse_sql("SELECT * FROM t1 NATURAL LEFT JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
+                assert!(*natural);
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_natural_cross_join() {
+    // SQLite allows NATURAL CROSS JOIN, treating it as a regular CROSS JOIN
+    // (the NATURAL modifier is effectively ignored)
+    let result = Parser::parse_sql("SELECT * FROM t1 NATURAL CROSS JOIN t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, natural, condition, using_columns, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::Cross);
+                // NATURAL is effectively ignored for CROSS JOIN
+                assert!(!*natural);
+                // CROSS JOIN should have no condition
+                assert!(condition.is_none());
+                assert!(using_columns.is_none());
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_natural_cross_join_complex() {
+    // Test case from issue #4312
+    let result = Parser::parse_sql(
+        "SELECT DISTINCT t1.c0, t3.c0 FROM t2 NATURAL CROSS JOIN t1 RIGHT JOIN t3 ON t1.c0;",
+    );
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+}
