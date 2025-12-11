@@ -8,6 +8,7 @@ mod executor;
 mod formatter;
 mod repl;
 mod script;
+mod util;
 
 use config::Config;
 use formatter::OutputFormat;

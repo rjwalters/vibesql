@@ -27,8 +27,13 @@ pub struct QueryResult {
     pub message: Option<String>,
 }
 
+use crate::util::is_memory_database;
+
 impl SqlExecutor {
     pub fn new(database: Option<String>) -> anyhow::Result<Self> {
+        // Treat :memory: as an in-memory database (no file path)
+        let database = database.filter(|p| !is_memory_database(p));
+
         // Load database from file if provided, otherwise create new in-memory database
         let db = if let Some(db_path) = database {
             // Check if file exists

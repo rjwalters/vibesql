@@ -9,6 +9,7 @@ use crate::{
     commands::MetaCommand,
     executor::SqlExecutor,
     formatter::{OutputFormat, ResultFormatter},
+    util::is_memory_database,
 };
 
 /// Script executor - runs multiple SQL statements from files or stdin
@@ -25,7 +26,8 @@ impl ScriptExecutor {
         verbose: bool,
         format: Option<OutputFormat>,
     ) -> anyhow::Result<Self> {
-        let database_path = database.clone();
+        // Treat :memory: as an in-memory database (no file path for saving)
+        let database_path = database.as_ref().filter(|p| !is_memory_database(p)).cloned();
         let executor = SqlExecutor::new(database)?;
         let mut formatter = ResultFormatter::new();
 
