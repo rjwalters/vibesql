@@ -1191,12 +1191,12 @@ fn generate_using_join_condition(
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: Some(left_col.0.to_string()),
-                column: left_col.1.to_string(),
+                column: left_col.1,
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
                 table: Some(right_col.0.to_string()),
-                column: right_col.1.to_string(),
+                column: right_col.1,
             }),
         };
 
