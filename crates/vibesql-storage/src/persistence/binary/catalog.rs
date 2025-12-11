@@ -518,6 +518,24 @@ pub(super) fn parse_data_type(type_str: &str) -> Result<vibesql_types::DataType,
             let scale = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
             Ok(DataType::Decimal { precision, scale })
         }
+        // Binary/Character large objects
+        "BLOB" => Ok(DataType::BinaryLargeObject),
+        "CLOB" => Ok(DataType::CharacterLargeObject),
+        // Bit types
+        s if s.starts_with("BIT(") => {
+            let len_str = s.trim_start_matches("BIT(").trim_end_matches(')');
+            let length = len_str.parse().ok();
+            Ok(DataType::Bit { length })
+        }
+        "BIT" => Ok(DataType::Bit { length: None }),
+        // Vector type
+        s if s.starts_with("VECTOR(") => {
+            let dim_str = s.trim_start_matches("VECTOR(").trim_end_matches(')');
+            let dimensions = dim_str.parse().unwrap_or(1);
+            Ok(DataType::Vector { dimensions })
+        }
+        // Null type
+        "NULL" => Ok(DataType::Null),
         _ => Err(StorageError::NotImplemented(format!("Unsupported data type: {}", type_str))),
     }
 }

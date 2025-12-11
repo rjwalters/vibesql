@@ -639,6 +639,13 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 Ok(vibesql_types::DataType::Vector { dimensions })
             }
+            // BLOB and CLOB types - SQL:1999 large object types
+            // These need explicit handling to map to BinaryLargeObject/CharacterLargeObject
+            // instead of falling through to UserDefined
+            "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" => {
+                Ok(vibesql_types::DataType::BinaryLargeObject)
+            }
+            "CLOB" => Ok(vibesql_types::DataType::CharacterLargeObject),
             _ => {
                 // Check if this is a known non-standard type that we should support
                 if Self::is_supported_extension_type(&type_upper) {
@@ -671,7 +678,8 @@ impl Parser {
             "YEAR" |
             // MySQL string types
             "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" |
-            "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" |
+            // Note: BLOB/TINYBLOB/MEDIUMBLOB/LONGBLOB are handled explicitly above
+            // to map to BinaryLargeObject instead of UserDefined
             "BINARY" | "VARBINARY" |
             // MySQL JSON type
             "JSON" |
