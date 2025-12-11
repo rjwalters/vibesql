@@ -1055,32 +1055,6 @@ mod tests {
     use vibesql_storage::{Database, Row};
     use vibesql_types::{DataType, SqlValue};
 
-    /// Helper to create a simple FromResult for testing
-    fn create_test_from_result(
-        table_name: &str,
-        columns: Vec<(&str, DataType)>,
-        rows: Vec<Vec<SqlValue>>,
-    ) -> FromResult {
-        let schema = TableSchema::new(
-            table_name.to_string(),
-            columns
-                .iter()
-                .map(|(name, dtype)| {
-                    ColumnSchema::new(
-                        name.to_string(),
-                        dtype.clone(),
-                        true, // nullable
-                    )
-                })
-                .collect(),
-        );
-
-        let combined_schema = CombinedSchema::from_table(table_name.to_string(), schema);
-        let rows = rows.into_iter().map(Row::new).collect();
-
-        FromResult::from_rows(combined_schema, rows)
-    }
-
     /// Create a CombinedSchema for testing
     fn create_combined_schema(
         left_table: &str,
@@ -1253,7 +1227,7 @@ mod tests {
                 .map(|i| {
                     Row::new(vec![
                         SqlValue::Integer(i % 10), // user_id (0-9, repeating)
-                        SqlValue::Integer(i as i64 * 100),
+                        SqlValue::Integer(i * 100),
                     ])
                 })
                 .collect();

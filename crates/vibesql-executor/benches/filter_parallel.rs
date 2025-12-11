@@ -66,6 +66,9 @@ use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
+/// Type alias for predicate functions used in filter benchmarks
+type PredicateFn = Box<dyn Fn(&Row) -> bool + Send + Sync>;
+
 // =============================================================================
 // Configuration
 // =============================================================================
@@ -288,7 +291,7 @@ fn bench_morsel_filter_direct(harness: &Harness) {
             .collect();
 
         // Different predicates with varying selectivities
-        let predicates: Vec<(&str, Box<dyn Fn(&Row) -> bool + Send + Sync>)> = vec![
+        let predicates: Vec<(&str, PredicateFn)> = vec![
             (
                 "50pct_flag",
                 Box::new(|row: &Row| matches!(row.values[3], SqlValue::Integer(1))),

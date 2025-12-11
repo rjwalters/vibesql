@@ -90,10 +90,12 @@ pub enum Expression {
     },
 
     /// IS TRUE / IS FALSE / IS UNKNOWN (SQL:1999)
+    ///
     /// Boolean test predicates:
     /// - `expr IS TRUE`: TRUE when expr evaluates to TRUE
     /// - `expr IS FALSE`: TRUE when expr evaluates to FALSE
     /// - `expr IS UNKNOWN`: TRUE when expr evaluates to NULL (for booleans)
+    ///
     /// Plus negated forms: IS NOT TRUE, IS NOT FALSE, IS NOT UNKNOWN
     IsTruthValue {
         expr: Box<Expression>,
