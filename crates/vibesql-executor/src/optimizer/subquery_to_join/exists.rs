@@ -150,7 +150,7 @@ fn try_convert_simple_exists_to_join(
         join_type,
         condition: Some(rewritten_where),
         using_columns: None,
-                natural: false,
+        natural: false,
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
@@ -267,7 +267,7 @@ fn try_convert_complex_exists_to_join(
         join_type,
         condition: Some(rewritten_join_condition),
         using_columns: None,
-                natural: false,
+        natural: false,
     };
 
     if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {

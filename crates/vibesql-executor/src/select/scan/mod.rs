@@ -149,22 +149,20 @@ where
             condition,
             using_columns,
             natural,
-        } => {
-            join_scan::execute_join(
-                left,
-                right,
-                join_type,
-                condition,
-                using_columns,
-                *natural,
-                cte_results,
-                database,
-                where_clause,
-                outer_row,
-                outer_schema,
-                execute_subquery,
-            )
-        }
+        } => join_scan::execute_join(
+            left,
+            right,
+            join_type,
+            condition,
+            using_columns,
+            *natural,
+            cte_results,
+            database,
+            where_clause,
+            outer_row,
+            outer_schema,
+            execute_subquery,
+        ),
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
             derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
         }

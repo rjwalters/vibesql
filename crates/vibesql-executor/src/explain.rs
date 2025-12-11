@@ -216,7 +216,14 @@ impl ExplainExecutor {
             vibesql_ast::FromClause::Table { name, alias, .. } => {
                 Self::explain_table_scan(name, alias.as_deref(), where_clause, order_by, database)
             }
-            vibesql_ast::FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
+            vibesql_ast::FromClause::Join {
+                left,
+                right,
+                join_type,
+                condition,
+                using_columns,
+                natural,
+            } => {
                 let join_name = match join_type {
                     vibesql_ast::JoinType::Inner => "Inner Join",
                     vibesql_ast::JoinType::LeftOuter => "Left Outer Join",

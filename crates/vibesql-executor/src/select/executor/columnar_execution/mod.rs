@@ -516,12 +516,20 @@ impl SelectExecutor<'_> {
         };
 
         // Extract aggregates from select expressions
-        let mut aggregates =
-            columnar::extract_aggregates(&select_exprs, &schema).unwrap_or_default();
+        // If extract_aggregates returns None, it means there are unsupported expressions
+        // (like UnaryOp, Function, or DISTINCT) that the columnar path can't handle
+        let select_aggregates = columnar::extract_aggregates(&select_exprs, &schema);
+        let has_unsupported_select_aggregates = select_aggregates.is_none();
+        let mut aggregates = select_aggregates.unwrap_or_default();
 
         // Add aggregates from HAVING if not already present
+        let mut has_unsupported_having_aggregates = false;
         if !having_aggregates.is_empty() {
-            if let Some(having_aggs) = columnar::extract_aggregates(&having_aggregates, &schema) {
+            let having_aggs = columnar::extract_aggregates(&having_aggregates, &schema);
+            if having_aggs.is_none() {
+                has_unsupported_having_aggregates = true;
+            }
+            if let Some(having_aggs) = having_aggs {
                 for agg in having_aggs {
                     // Check if aggregate already exists (avoid duplicates)
                     if !aggregates.iter().any(|a| a.source == agg.source && a.op == agg.op) {
@@ -531,10 +539,24 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // For GROUP BY queries with HAVING but no SELECT aggregates, we still need columnar
-        // to compute the HAVING aggregates efficiently (Issue #4168)
+        // Fall back to row-oriented execution if:
+        // 1. No aggregates and no GROUP BY (simple queries)
+        // 2. Unsupported aggregate expressions in SELECT (UnaryOp, Function, DISTINCT, etc.)
+        // 3. Unsupported aggregate expressions in HAVING
         if aggregates.is_empty() && !has_group_by {
-            log::debug!("Native columnar: skipping - no aggregates or unsupported expressions");
+            log::debug!("Native columnar: skipping - no aggregates");
+            return Ok(None);
+        }
+        if has_unsupported_select_aggregates && has_group_by {
+            log::debug!(
+                "Native columnar: skipping - GROUP BY with unsupported aggregate expressions in SELECT"
+            );
+            return Ok(None);
+        }
+        if has_unsupported_having_aggregates {
+            log::debug!(
+                "Native columnar: skipping - unsupported aggregate expressions in HAVING"
+            );
             return Ok(None);
         }
 

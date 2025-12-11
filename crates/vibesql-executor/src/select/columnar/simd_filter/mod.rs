@@ -278,7 +278,7 @@ pub fn simd_create_filter_mask_parallel(
     // Determine chunk size for parallel processing
     // Target: each thread gets at least 10K rows for efficiency
     let num_threads = rayon::current_num_threads();
-    let chunk_size = (row_count / num_threads).max(10_000).min(100_000);
+    let chunk_size = (row_count / num_threads).clamp(10_000, 100_000);
 
     // For very small batches, fall back to sequential
     if row_count < chunk_size * 2 {

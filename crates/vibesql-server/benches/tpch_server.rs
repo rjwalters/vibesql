@@ -244,7 +244,7 @@ fn is_valid_query_filter(s: &str) -> bool {
         && s.split(',').all(|part| {
             let part = part.trim();
             !part.is_empty()
-                && part.starts_with(|c: char| c == 'Q' || c == 'q')
+                && part.starts_with(['Q', 'q'])
                 && part.len() > 1
                 && part[1..].chars().all(|c| c.is_ascii_digit())
         })

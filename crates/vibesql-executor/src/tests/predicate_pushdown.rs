@@ -159,8 +159,8 @@ fn test_multi_table_with_local_predicates() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
-                using_columns: None,
-                natural: false,
+            using_columns: None,
+            natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -307,7 +307,7 @@ fn test_table_local_predicate_with_explicit_join() {
                 }),
             }),
             using_columns: None,
-                natural: false,
+            natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {

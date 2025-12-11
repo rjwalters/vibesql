@@ -640,8 +640,10 @@ mod tests {
     fn test_spill_and_merge() {
         // Use very small memory to force spilling
         let controller = Arc::new(MemoryController::with_budget(4096)); // 4KB
-        let mut config = ExternalSortConfig::default();
-        config.max_run_size = 10; // Very small runs
+        let config = ExternalSortConfig {
+            max_run_size: 10, // Very small runs
+            ..Default::default()
+        };
 
         let mut sorter = ExternalSort::with_config(&controller, config);
 

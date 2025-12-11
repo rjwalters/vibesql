@@ -263,7 +263,7 @@ pub(super) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     // Return as a string of null characters (since VibeSQL doesn't have Blob type)
-    let result: String = std::iter::repeat('\0').take(n).collect();
+    let result = "\0".repeat(n);
     Ok(SqlValue::Varchar(result.into()))
 }
 
@@ -780,7 +780,7 @@ mod tests {
             SqlValue::Varchar("integer".into())
         );
         assert_eq!(
-            typeof_func(&[SqlValue::Numeric(3.14)]).unwrap(),
+            typeof_func(&[SqlValue::Numeric(3.5)]).unwrap(),
             SqlValue::Varchar("real".into())
         );
         assert_eq!(
@@ -797,8 +797,8 @@ mod tests {
     #[test]
     fn test_likely_unlikely_likelihood() {
         let val = SqlValue::Boolean(true);
-        assert_eq!(likely(&[val.clone()]).unwrap(), val);
-        assert_eq!(unlikely(&[val.clone()]).unwrap(), val);
+        assert_eq!(likely(std::slice::from_ref(&val)).unwrap(), val);
+        assert_eq!(unlikely(std::slice::from_ref(&val)).unwrap(), val);
         assert_eq!(likelihood(&[val.clone(), SqlValue::Numeric(0.9)]).unwrap(), val);
     }
 
@@ -920,8 +920,8 @@ mod tests {
 
         // Float
         assert_eq!(
-            printf(&[SqlValue::Varchar("Pi: %f".into()), SqlValue::Numeric(3.14159)]).unwrap(),
-            SqlValue::Varchar("Pi: 3.141590".into())
+            printf(&[SqlValue::Varchar("Value: %f".into()), SqlValue::Numeric(1.5)]).unwrap(),
+            SqlValue::Varchar("Value: 1.500000".into())
         );
 
         // String
@@ -957,7 +957,7 @@ mod tests {
         assert_eq!(toreal(&[SqlValue::Integer(123)]).unwrap(), SqlValue::Real(123.0));
 
         // Float passthrough
-        assert_eq!(toreal(&[SqlValue::Real(3.14)]).unwrap(), SqlValue::Real(3.14));
+        assert_eq!(toreal(&[SqlValue::Real(2.5)]).unwrap(), SqlValue::Real(2.5));
 
         // String to real
         assert_eq!(
@@ -979,7 +979,7 @@ mod tests {
         assert_eq!(toreal(&[SqlValue::Integer(-42)]).unwrap(), SqlValue::Real(-42.0));
 
         // String with whitespace
-        assert_eq!(toreal(&[SqlValue::Varchar("  3.14  ".into())]).unwrap(), SqlValue::Real(3.14));
+        assert_eq!(toreal(&[SqlValue::Varchar("  2.5  ".into())]).unwrap(), SqlValue::Real(2.5));
     }
 
     #[test]
@@ -995,10 +995,7 @@ mod tests {
         assert_eq!(tointeger(&[SqlValue::Real(-3.7)]).unwrap(), SqlValue::Integer(-3));
 
         // String to integer
-        assert_eq!(
-            tointeger(&[SqlValue::Varchar("456".into())]).unwrap(),
-            SqlValue::Integer(456)
-        );
+        assert_eq!(tointeger(&[SqlValue::Varchar("456".into())]).unwrap(), SqlValue::Integer(456));
 
         // String with decimal (truncation)
         assert_eq!(
@@ -1120,7 +1117,7 @@ mod tests {
         );
 
         // Float
-        assert_eq!(quote(&[SqlValue::Numeric(3.14)]).unwrap(), SqlValue::Varchar("3.14".into()));
+        assert_eq!(quote(&[SqlValue::Numeric(2.5)]).unwrap(), SqlValue::Varchar("2.5".into()));
 
         // Boolean
         assert_eq!(quote(&[SqlValue::Boolean(true)]).unwrap(), SqlValue::Varchar("1".into()));
@@ -1136,7 +1133,7 @@ mod tests {
         assert_eq!(intreal(&[SqlValue::Integer(42)]).unwrap(), SqlValue::Integer(42));
 
         // Real passes through
-        assert_eq!(intreal(&[SqlValue::Numeric(3.14)]).unwrap(), SqlValue::Numeric(3.14));
+        assert_eq!(intreal(&[SqlValue::Numeric(2.5)]).unwrap(), SqlValue::Numeric(2.5));
 
         // NULL passes through
         assert_eq!(intreal(&[SqlValue::Null]).unwrap(), SqlValue::Null);

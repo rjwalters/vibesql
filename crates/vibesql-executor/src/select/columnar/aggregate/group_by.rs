@@ -451,7 +451,7 @@ fn compute_group_aggregate_indexed(
                 AggregateOp::Sum => {
                     let sum: i64 = indices
                         .iter()
-                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                         .map(|&i| values[i] as i64)
                         .sum();
                     Ok(SqlValue::Integer(sum))
@@ -459,14 +459,14 @@ fn compute_group_aggregate_indexed(
                 AggregateOp::Avg => {
                     let sum: i64 = indices
                         .iter()
-                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                         .map(|&i| values[i] as i64)
                         .sum();
                     Ok(SqlValue::Double(sum as f64 / count as f64))
                 }
                 AggregateOp::Min => indices
                     .iter()
-                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                     .map(|&i| values[i])
                     .min()
                     .map(|v| SqlValue::Integer(v as i64))
@@ -476,7 +476,7 @@ fn compute_group_aggregate_indexed(
                     }),
                 AggregateOp::Max => indices
                     .iter()
-                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                     .map(|&i| values[i])
                     .max()
                     .map(|v| SqlValue::Integer(v as i64))
@@ -503,7 +503,7 @@ fn compute_group_aggregate_indexed(
                 AggregateOp::Sum => {
                     let sum: f64 = indices
                         .iter()
-                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                         .map(|&i| values[i] as f64)
                         .sum();
                     Ok(SqlValue::Double(sum))
@@ -511,14 +511,14 @@ fn compute_group_aggregate_indexed(
                 AggregateOp::Avg => {
                     let sum: f64 = indices
                         .iter()
-                        .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                        .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                         .map(|&i| values[i] as f64)
                         .sum();
                     Ok(SqlValue::Double(sum / count as f64))
                 }
                 AggregateOp::Min => indices
                     .iter()
-                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                     .map(|&i| values[i])
                     .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .map(|v| SqlValue::Double(v as f64))
@@ -528,7 +528,7 @@ fn compute_group_aggregate_indexed(
                     }),
                 AggregateOp::Max => indices
                     .iter()
-                    .filter(|&&i| null_slice.map_or(true, |ns| !ns[i]))
+                    .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                     .map(|&i| values[i])
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .map(|v| SqlValue::Double(v as f64))

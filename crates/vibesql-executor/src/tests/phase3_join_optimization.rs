@@ -98,7 +98,7 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: None, // NO ON clause - equijoin is in WHERE
             using_columns: None,
-                natural: false,
+            natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -222,8 +222,8 @@ fn test_hash_join_multiple_equijoins_in_where() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
-                using_columns: None,
-                natural: false,
+            using_columns: None,
+            natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -342,8 +342,8 @@ fn test_cascading_joins_with_where_equijoins() {
                     }),
                     join_type: vibesql_ast::JoinType::Inner,
                     condition: None,
-                using_columns: None,
-                natural: false,
+                    using_columns: None,
+                    natural: false,
                 }),
                 right: Box::new(vibesql_ast::FromClause::Table {
                     name: "t3".to_string(),
@@ -362,8 +362,8 @@ fn test_cascading_joins_with_where_equijoins() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
-                using_columns: None,
-                natural: false,
+            using_columns: None,
+            natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
@@ -516,7 +516,7 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
                 }),
             }),
             using_columns: None,
-                natural: false,
+            natural: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -675,7 +675,7 @@ fn test_multi_column_hash_join_composite_keys() {
                 }),
             }),
             using_columns: None,
-                natural: false,
+            natural: false,
         }),
         where_clause: None,
         group_by: None,
@@ -802,7 +802,7 @@ fn test_star_join_select5_pattern() {
                             join_type: vibesql_ast::JoinType::Inner,
                             condition: None, // Star join: conditions in WHERE
                             using_columns: None,
-                natural: false,
+                            natural: false,
                         }),
                         right: Box::new(vibesql_ast::FromClause::Table {
                             name: "t3".to_string(),
@@ -811,8 +811,8 @@ fn test_star_join_select5_pattern() {
                         }),
                         join_type: vibesql_ast::JoinType::Inner,
                         condition: None,
-                using_columns: None,
-                natural: false,
+                        using_columns: None,
+                        natural: false,
                     }),
                     right: Box::new(vibesql_ast::FromClause::Table {
                         name: "t4".to_string(),
@@ -821,8 +821,8 @@ fn test_star_join_select5_pattern() {
                     }),
                     join_type: vibesql_ast::JoinType::Inner,
                     condition: None,
-                using_columns: None,
-                natural: false,
+                    using_columns: None,
+                    natural: false,
                 }),
                 right: Box::new(vibesql_ast::FromClause::Table {
                     name: "t5".to_string(),
@@ -841,8 +841,8 @@ fn test_star_join_select5_pattern() {
             }),
             join_type: vibesql_ast::JoinType::Inner,
             condition: None,
-                using_columns: None,
-                natural: false,
+            using_columns: None,
+            natural: false,
         }),
         // All joins connect to t1 (star pattern)
         where_clause: Some(vibesql_ast::Expression::BinaryOp {

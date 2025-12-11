@@ -773,7 +773,7 @@ fn rebuild_from_clause(tables: &[TableInfo]) -> Option<FromClause> {
             join_type: JoinType::Cross,
             condition: None,
             using_columns: None,
-                natural: false,
+            natural: false,
         };
     }
 

@@ -184,9 +184,8 @@ where
     };
 
     // Use the natural join condition, USING condition, or explicit condition
-    let effective_condition = natural_join_condition
-        .or(using_join_condition)
-        .or_else(|| condition.clone());
+    let effective_condition =
+        natural_join_condition.or(using_join_condition).or_else(|| condition.clone());
 
     // If we have a WHERE clause, use predicate plan to extract equijoin conditions (Phase 1)
     let equijoin_predicates = if let Some(where_expr) = where_clause {
@@ -1158,13 +1157,11 @@ fn generate_using_join_condition(
                     }
                 })
             })
-            .ok_or_else(|| {
-                ExecutorError::ColumnNotFound {
-                    column_name: col_name.clone(),
-                    table_name: "USING clause (left side)".to_string(),
-                    searched_tables: left_schema.table_names(),
-                    available_columns: vec![],
-                }
+            .ok_or_else(|| ExecutorError::ColumnNotFound {
+                column_name: col_name.clone(),
+                table_name: "USING clause (left side)".to_string(),
+                searched_tables: left_schema.table_names(),
+                available_columns: vec![],
             })?;
 
         // Find column in right schema (case-insensitive)
@@ -1180,13 +1177,11 @@ fn generate_using_join_condition(
                     }
                 })
             })
-            .ok_or_else(|| {
-                ExecutorError::ColumnNotFound {
-                    column_name: col_name.clone(),
-                    table_name: "USING clause (right side)".to_string(),
-                    searched_tables: right_schema.table_names(),
-                    available_columns: vec![],
-                }
+            .ok_or_else(|| ExecutorError::ColumnNotFound {
+                column_name: col_name.clone(),
+                table_name: "USING clause (right side)".to_string(),
+                searched_tables: right_schema.table_names(),
+                available_columns: vec![],
             })?;
 
         // Create equality condition with qualified column references

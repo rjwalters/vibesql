@@ -14,7 +14,14 @@ fn test_parse_simple_join() {
         vibesql_ast::Statement::Select(select) => {
             assert!(select.from.is_some());
             match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join { join_type, left, right, condition, natural, .. } => {
+                vibesql_ast::FromClause::Join {
+                    join_type,
+                    left,
+                    right,
+                    condition,
+                    natural,
+                    ..
+                } => {
                     // Default JOIN is INNER JOIN
                     assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
                     assert!(!*natural);
@@ -69,7 +76,14 @@ fn test_parse_comma_separated_from() {
         vibesql_ast::Statement::Select(select) => {
             assert!(select.from.is_some());
             match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join { join_type, left, right, condition, natural, .. } => {
+                vibesql_ast::FromClause::Join {
+                    join_type,
+                    left,
+                    right,
+                    condition,
+                    natural,
+                    ..
+                } => {
                     // Comma should be parsed as CROSS JOIN
                     assert_eq!(*join_type, vibesql_ast::JoinType::Cross);
                     assert!(!*natural);
@@ -191,24 +205,17 @@ fn test_parse_join_using_single_column() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select) => {
-            match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join {
-                    join_type,
-                    using_columns,
-                    natural,
-                    ..
-                } => {
-                    assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
-                    assert!(!*natural);
-                    assert!(using_columns.is_some());
-                    let cols = using_columns.as_ref().unwrap();
-                    assert_eq!(cols.len(), 1);
-                    assert_eq!(cols[0].to_uppercase(), "ID");
-                }
-                _ => panic!("Expected JOIN"),
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, using_columns, natural, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
+                assert!(!*natural);
+                assert!(using_columns.is_some());
+                let cols = using_columns.as_ref().unwrap();
+                assert_eq!(cols.len(), 1);
+                assert_eq!(cols[0].to_uppercase(), "ID");
             }
-        }
+            _ => panic!("Expected JOIN"),
+        },
         _ => panic!("Expected SELECT"),
     }
 }
@@ -220,21 +227,15 @@ fn test_parse_join_using_multiple_columns() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select) => {
-            match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join {
-                    join_type,
-                    using_columns,
-                    ..
-                } => {
-                    assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
-                    assert!(using_columns.is_some());
-                    let cols = using_columns.as_ref().unwrap();
-                    assert_eq!(cols.len(), 3);
-                }
-                _ => panic!("Expected JOIN"),
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, using_columns, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::LeftOuter);
+                assert!(using_columns.is_some());
+                let cols = using_columns.as_ref().unwrap();
+                assert_eq!(cols.len(), 3);
             }
-        }
+            _ => panic!("Expected JOIN"),
+        },
         _ => panic!("Expected SELECT"),
     }
 }
@@ -246,19 +247,13 @@ fn test_parse_full_join_using() {
     let stmt = result.unwrap();
 
     match stmt {
-        vibesql_ast::Statement::Select(select) => {
-            match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join {
-                    join_type,
-                    using_columns,
-                    ..
-                } => {
-                    assert_eq!(*join_type, vibesql_ast::JoinType::FullOuter);
-                    assert!(using_columns.is_some());
-                }
-                _ => panic!("Expected JOIN"),
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, using_columns, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::FullOuter);
+                assert!(using_columns.is_some());
             }
-        }
+            _ => panic!("Expected JOIN"),
+        },
         _ => panic!("Expected SELECT"),
     }
 }
@@ -269,7 +264,8 @@ fn test_parse_full_join_using() {
 
 #[test]
 fn test_parse_parenthesized_join() {
-    let result = Parser::parse_sql("SELECT * FROM t1 JOIN (t2 JOIN t3 ON t2.id = t3.id) ON t1.id = t2.id;");
+    let result =
+        Parser::parse_sql("SELECT * FROM t1 JOIN (t2 JOIN t3 ON t2.id = t3.id) ON t1.id = t2.id;");
     assert!(result.is_ok());
     let stmt = result.unwrap();
 
@@ -307,12 +303,7 @@ fn test_parse_nested_parenthesized_join_with_using() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match select.from.as_ref().unwrap() {
-                vibesql_ast::FromClause::Join {
-                    join_type,
-                    using_columns,
-                    right,
-                    ..
-                } => {
+                vibesql_ast::FromClause::Join { join_type, using_columns, right, .. } => {
                     assert_eq!(*join_type, vibesql_ast::JoinType::FullOuter);
                     assert!(using_columns.is_some());
                     // Right side should be another JOIN

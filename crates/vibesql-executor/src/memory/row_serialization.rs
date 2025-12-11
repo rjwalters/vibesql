@@ -491,7 +491,7 @@ mod tests {
         let row = vibesql_storage::Row::from_vec(vec![
             SqlValue::Integer(42),
             SqlValue::Varchar("test".into()),
-            SqlValue::Double(3.14),
+            SqlValue::Double(2.5),
             SqlValue::Null,
         ]);
 
