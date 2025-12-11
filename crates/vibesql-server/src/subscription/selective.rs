@@ -214,7 +214,7 @@ pub fn create_partial_row_update(
     new_row: &[Option<Vec<u8>>],
     pk_columns: &[usize],
     config: &SelectiveColumnConfig,
-) -> Option<crate::protocol::messages::PartialRowUpdate> {
+) -> Option<crate::protocol::PartialRowUpdate> {
     // Rows must have same number of columns
     if old_row.len() != new_row.len() {
         return None;
@@ -257,7 +257,7 @@ pub fn create_partial_row_update(
     // Convert to u16 for protocol
     let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
 
-    Some(crate::protocol::messages::PartialRowUpdate::new(
+    Some(crate::protocol::PartialRowUpdate::new(
         total_columns as u16,
         &present_columns,
         values,
@@ -282,7 +282,7 @@ pub fn create_partial_row_update_with_metrics(
     pk_columns: &[usize],
     config: &SelectiveColumnConfig,
     metrics: Option<&crate::observability::metrics::ServerMetrics>,
-) -> Option<crate::protocol::messages::PartialRowUpdate> {
+) -> Option<crate::protocol::PartialRowUpdate> {
     // Rows must have same number of columns
     if old_row.len() != new_row.len() {
         if let Some(m) = metrics {
@@ -338,7 +338,7 @@ pub fn create_partial_row_update_with_metrics(
     // Convert to u16 for protocol
     let present_columns: Vec<u16> = included_columns.iter().map(|&idx| idx as u16).collect();
 
-    Some(crate::protocol::messages::PartialRowUpdate::new(
+    Some(crate::protocol::PartialRowUpdate::new(
         total_columns as u16,
         &present_columns,
         values,

@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn test_partial_row_update_column_mask() {
-        use crate::protocol::messages::PartialRowUpdate;
+        use crate::protocol::PartialRowUpdate;
 
         // Test with 10 columns, columns 0, 3, 7 present
         let partial = PartialRowUpdate::new(
@@ -1246,7 +1246,7 @@ mod tests {
 
     #[test]
     fn test_partial_row_update_large_column_count() {
-        use crate::protocol::messages::PartialRowUpdate;
+        use crate::protocol::PartialRowUpdate;
 
         // Test with 20 columns (requires 3 bytes for column mask)
         let partial = PartialRowUpdate::new(
