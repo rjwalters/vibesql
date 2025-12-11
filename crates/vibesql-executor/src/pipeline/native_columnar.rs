@@ -273,6 +273,26 @@ impl ExecutionPipeline for NativeColumnarPipeline {
 
         // Check if there's a GROUP BY with non-empty expressions
         let has_group_by = group_by.is_some_and(|exprs| !exprs.is_empty());
+        let group_by_count = group_by.map_or(0, |exprs| exprs.len());
+
+        // Count non-aggregate expressions in SELECT list (should match GROUP BY columns)
+        let select_non_agg_count = select_items
+            .iter()
+            .filter(|item| {
+                matches!(item, SelectItem::Expression { expr, .. }
+                    if !matches!(expr, Expression::AggregateFunction { .. }))
+            })
+            .count();
+
+        // Issue #4233: columnar_group_by_batch returns [group_keys..., aggregates...] format.
+        // If the SELECT list doesn't include all GROUP BY columns (e.g., SELECT AVG(col) FROM t GROUP BY col),
+        // the result format won't match the SELECT list. Fall back to row-oriented execution.
+        if has_group_by && select_non_agg_count != group_by_count {
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "GROUP BY with SELECT list that doesn't include all group keys not supported in native columnar (SELECT has {} non-aggs, GROUP BY has {} keys)",
+                select_non_agg_count, group_by_count
+            )));
+        }
 
         // Helper to return empty result for GROUP BY with empty input
         // SQL semantics: GROUP BY on empty input returns 0 rows (no groups)

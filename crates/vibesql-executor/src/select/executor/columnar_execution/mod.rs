@@ -578,6 +578,43 @@ impl SelectExecutor<'_> {
                     }
                 }
             }
+
+            // Issue #4233: Validate SELECT list matches [group_keys..., aggregates...] format
+            // columnar_group_by_batch returns rows with all group keys followed by all aggregates.
+            // If the SELECT list doesn't have this exact structure (e.g., only aggregates without
+            // group keys, or different column ordering), we must fall back to row-oriented
+            // execution which applies proper projection.
+            let group_by_exprs = stmt
+                .group_by
+                .as_ref()
+                .and_then(|g| g.as_simple())
+                .map_or(0, |exprs| exprs.len());
+
+            // Count non-aggregate and aggregate expressions in SELECT list
+            let mut select_non_agg_count = 0;
+            let mut select_agg_count = 0;
+            for item in &stmt.select_list {
+                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                    if matches!(expr, Expression::AggregateFunction { .. }) {
+                        select_agg_count += 1;
+                    } else {
+                        select_non_agg_count += 1;
+                    }
+                }
+            }
+
+            // SELECT list must have exactly: all group keys + all aggregates
+            // If SELECT list has different number of non-aggregates than GROUP BY columns,
+            // the projection won't match columnar_group_by_batch output format.
+            if select_non_agg_count != group_by_exprs {
+                log::debug!(
+                    "Native columnar: skipping GROUP BY - SELECT list ({} non-aggs, {} aggs) doesn't match GROUP BY ({} keys)",
+                    select_non_agg_count,
+                    select_agg_count,
+                    group_by_exprs
+                );
+                return Ok(None);
+            }
         }
 
         // Execute using native columnar pipeline

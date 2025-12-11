@@ -716,5 +716,8 @@ fn extract_table_names_from_from(from: &vibesql_ast::FromClause, tables: &mut Ha
             let subquery_tables = extract_table_names(query);
             tables.extend(subquery_tables);
         }
+        vibesql_ast::FromClause::Values { .. } => {
+            // VALUES clause doesn't reference tables
+        }
     }
 }
