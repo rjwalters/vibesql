@@ -131,6 +131,8 @@ pub(super) fn eval_scalar_function(
         "UNICODE" => sqlite_compat::unicode(args),
         "CHAR" => sqlite_compat::char_func(args),
         "PRINTF" => sqlite_compat::printf(args),
+        "TOREAL" => sqlite_compat::toreal(args),
+        "TOINTEGER" => sqlite_compat::tointeger(args),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),
