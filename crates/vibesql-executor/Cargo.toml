@@ -259,7 +259,23 @@ name = "concurrent_throughput"
 harness = false
 
 [[bench]]
-name = "morsel_operation_benchmark"
+name = "filter_parallel"
+harness = false
+
+[[bench]]
+name = "scan_parallel"
+harness = false
+
+[[bench]]
+name = "groupby_parallel"
+harness = false
+
+[[bench]]
+name = "join_probe_parallel"
+harness = false
+
+[[bench]]
+name = "aggregate_parallel"
 harness = false
 
 [[bench]]
