@@ -227,6 +227,10 @@ pub enum ExecutorError {
     CursorNotOpen(String),
     /// Cursor does not support backward movement (not declared with SCROLL)
     CursorNotScrollable(String),
+    /// Assertion constraint violation (SQL:1999 Feature F671/F672)
+    AssertionViolation {
+        assertion_name: String,
+    },
     Other(String),
 }
 
@@ -607,6 +611,9 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::CursorNotScrollable(name) => {
                 write!(f, "{}", vibe_msg!("executor-cursor-not-scrollable", name = name.as_str()))
+            }
+            ExecutorError::AssertionViolation { assertion_name } => {
+                write!(f, "Assertion '{}' violated", assertion_name)
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

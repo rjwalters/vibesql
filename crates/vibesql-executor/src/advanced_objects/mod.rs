@@ -27,7 +27,7 @@ mod types;
 mod views;
 
 // Re-export public API to maintain backward compatibility
-pub use assertions::{execute_create_assertion, execute_drop_assertion};
+pub use assertions::{execute_create_assertion, execute_drop_assertion, AssertionChecker};
 pub use character_sets::{execute_create_character_set, execute_drop_character_set};
 pub use collations::{execute_create_collation, execute_drop_collation};
 pub use functions::{execute_create_function, execute_drop_function};

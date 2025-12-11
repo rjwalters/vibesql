@@ -156,7 +156,13 @@ impl DeleteExecutor {
                     if !has_triggers && !has_referencing_fks {
                         // Use the fast path - no triggers, no FKs, single row PK delete
                         match database.delete_by_pk_fast(&stmt.table_name, &pk_values) {
-                            Ok(deleted) => return Ok(if deleted { 1 } else { 0 }),
+                            Ok(deleted) => {
+                                let count = if deleted { 1 } else { 0 };
+                                // Check all assertions after DELETE completes (SQL:1999 Feature F671/F672)
+                                // This ensures database-wide integrity constraints are maintained
+                                crate::advanced_objects::AssertionChecker::check_all_assertions(database)?;
+                                return Ok(count);
+                            }
                             Err(_) => {
                                 // Fall through to standard path on error
                             }
@@ -355,6 +361,10 @@ impl DeleteExecutor {
             )?;
         }
 
+        // Check all assertions after DELETE completes (SQL:1999 Feature F671/F672)
+        // This ensures database-wide integrity constraints are maintained
+        crate::advanced_objects::AssertionChecker::check_all_assertions(database)?;
+
         Ok(delete_result.deleted_count)
     }
 
@@ -463,6 +473,10 @@ fn execute_truncate(database: &mut Database, table_name: &str) -> Result<usize, 
     if row_count > 0 {
         database.invalidate_columnar_cache(table_name);
     }
+
+    // Check all assertions after DELETE completes (SQL:1999 Feature F671/F672)
+    // This ensures database-wide integrity constraints are maintained
+    crate::advanced_objects::AssertionChecker::check_all_assertions(database)?;
 
     Ok(row_count)
 }

@@ -39,4 +39,9 @@ impl super::super::Catalog {
     pub fn list_assertions(&self) -> Vec<String> {
         self.assertions.keys().cloned().collect()
     }
+
+    /// Get all assertions (for runtime enforcement)
+    pub fn get_all_assertions(&self) -> impl Iterator<Item = &Assertion> {
+        self.assertions.values()
+    }
 }

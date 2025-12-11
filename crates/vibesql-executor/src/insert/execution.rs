@@ -222,6 +222,20 @@ fn execute_insert_internal(
 
     let mut rows_inserted = 0;
 
+    // Check if any assertions exist - needed for rollback support
+    let has_assertions = db.catalog.get_all_assertions().next().is_some();
+
+    // Track row count before inserts for assertion rollback
+    let row_count_before_all = if has_assertions {
+        Some(
+            db.get_table(&stmt.table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
+                .row_count(),
+        )
+    } else {
+        None
+    };
+
     let use_batch_insert = stmt.on_duplicate_key_update.is_none()
         && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
         && !has_insert_triggers;
@@ -371,6 +385,33 @@ fn execute_insert_internal(
     // - Database-level cache: used by Database::get_columnar() for cached access
     if rows_inserted > 0 {
         db.invalidate_columnar_cache(&stmt.table_name);
+    }
+
+    // Check all assertions after INSERT completes (SQL:1999 Feature F671/F672)
+    // This ensures database-wide integrity constraints are maintained
+    if let Err(assertion_error) = crate::advanced_objects::AssertionChecker::check_all_assertions(db)
+    {
+        // Rollback: Delete the rows we just inserted
+        if let Some(start_index) = row_count_before_all {
+            if rows_inserted > 0 {
+                // Delete rows starting from start_index (the rows we inserted)
+                if let Some(table_mut) = db.get_table_mut(&stmt.table_name) {
+                    use std::cell::Cell;
+                    let current_index = Cell::new(0);
+                    // Delete all rows from start_index onwards (the newly inserted rows)
+                    let _ = table_mut.delete_where(|_row| {
+                        let index = current_index.get();
+                        current_index.set(index + 1);
+                        index >= start_index
+                    });
+                }
+
+                // Rebuild indexes since we modified the table (handles compaction)
+                db.rebuild_indexes(&stmt.table_name);
+                db.invalidate_columnar_cache(&stmt.table_name);
+            }
+        }
+        return Err(assertion_error);
     }
 
     Ok(rows_inserted)
