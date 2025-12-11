@@ -117,8 +117,10 @@ impl Parser {
         // Note: MIN/MAX with multiple arguments are scalar functions (like LEAST/GREATEST)
         // while MIN/MAX with a single argument are aggregate functions
         let function_name_upper = first.to_uppercase();
-        let might_be_aggregate =
-            matches!(function_name_upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX");
+        let might_be_aggregate = matches!(
+            function_name_upper.as_str(),
+            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "TOTAL"
+        );
 
         // Parse optional DISTINCT or ALL for potential aggregate functions
         let distinct = if might_be_aggregate {
@@ -191,8 +193,10 @@ impl Parser {
 
         // Determine if this is truly an aggregate function
         // MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
+        // GROUP_CONCAT accepts 1 or 2 arguments (expr, separator)
         let is_aggregate = match function_name_upper.as_str() {
-            "COUNT" | "SUM" | "AVG" => true,
+            "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
+            "GROUP_CONCAT" => args.len() <= 2, // 1 or 2 args
             "MIN" | "MAX" => args.len() <= 1 && !distinct, // multi-arg or DISTINCT with >1 arg = scalar
             _ => false,
         };

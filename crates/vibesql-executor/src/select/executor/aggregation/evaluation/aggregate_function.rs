@@ -83,6 +83,48 @@ pub(super) fn evaluate(
         return Ok(result);
     }
 
+    // Handle GROUP_CONCAT with optional separator (2nd argument)
+    // GROUP_CONCAT(expr) - uses comma separator
+    // GROUP_CONCAT(expr, separator) - uses custom separator
+    if name.to_uppercase() == "GROUP_CONCAT" {
+        let separator = if args.len() == 2 {
+            // Evaluate separator (second argument) - it should be a constant string
+            // Use the first row to evaluate (separator should be the same for all rows)
+            if let Some(first_row) = group_rows.first() {
+                evaluator.clear_cse_cache();
+                let sep_value = evaluator.eval(&args[1], first_row)?;
+                match sep_value {
+                    vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                        s.to_string()
+                    }
+                    vibesql_types::SqlValue::Null => ",".to_string(), // NULL separator = default
+                    other => other.to_string(), // Convert other types to string
+                }
+            } else {
+                ",".to_string() // Empty group, use default
+            }
+        } else if args.len() == 1 {
+            ",".to_string() // Default separator
+        } else {
+            return Err(ExecutorError::UnsupportedExpression(format!(
+                "GROUP_CONCAT expects 1 or 2 arguments, got {}",
+                args.len()
+            )));
+        };
+
+        let mut acc = AggregateAccumulator::new_with_separator(name, distinct, &separator)?;
+
+        for row in group_rows {
+            evaluator.clear_cse_cache();
+            let value = evaluator.eval(&args[0], row)?;
+            acc.accumulate(&value);
+        }
+
+        let result = acc.finalize();
+        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+        return Ok(result);
+    }
+
     // Regular aggregate - evaluate single argument for each row
     if args.len() != 1 {
         return Err(ExecutorError::UnsupportedExpression(format!(
