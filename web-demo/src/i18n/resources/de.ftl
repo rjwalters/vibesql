@@ -392,8 +392,8 @@ bench-tpcc-disc-btree = Zweckgebaute Indexstruktur optimiert für In-Memory-Arbe
 bench-tpcc-disc-prepared = Abfragepläne werden einmal kompiliert und wiederverwendet
 bench-tpcc-disc-scaling-title = Weitere Skalierung
 bench-tpcc-disc-scaling = Aktuelle Ergebnisse sind single-threaded. VibeSQLs Architektur unterstützt Multi-Thread-Transaktionsverarbeitung, und wir erwarten nahezu lineare Skalierung mit der Hinzufügung paralleler Ausführungsunterstützung. Unser Ziel ist 500K+ TPS auf moderner Multi-Core-Hardware.
-bench-tpcc-disc-duckdb-title = Why DuckDB Lags on OLTP
-bench-tpcc-disc-duckdb = DuckDB achieves only ~385 TPS on TPC-C (60x slower than VibeSQL, 12x slower than SQLite). This is expected: DuckDB is an <strong>analytical (OLAP) database</strong> optimized for large batch operations, not single-row transactions. Its columnar storage format excels at scanning millions of rows but adds overhead for point lookups and small updates that dominate OLTP workloads like TPC-C.
+bench-tpcc-disc-duckdb-title = Warum DuckDB bei OLTP zurückbleibt
+bench-tpcc-disc-duckdb = DuckDB erreicht nur ~385 TPS bei TPC-C (60x langsamer als VibeSQL, 12x langsamer als SQLite). Dies ist zu erwarten: DuckDB ist eine <strong>analytische (OLAP) Datenbank</strong>, die für große Batch-Operationen optimiert ist, nicht für Einzelzeilen-Transaktionen. Ihr spaltenorientiertes Speicherformat exzelliert beim Scannen von Millionen Zeilen, verursacht aber Overhead für Punktabfragen und kleine Updates, die OLTP-Arbeitslasten wie TPC-C dominieren.
 
 # Sysbench Eingebettet spezifisch
 bench-sysbench-embedded-name = Sysbench (Eingebettet)
@@ -421,8 +421,8 @@ bench-sysbench-emb-disc-nonindex = Vollständige Tabellenscans für nicht-indizi
 bench-sysbench-emb-disc-deletes = Unsere Tombstone-basierte Löschung hat Bereinigungsoverhead; Kompaktierungsverbesserungen sind geplant
 bench-sysbench-emb-disc-duckdb-title = DuckDB-Vergleich
 bench-sysbench-emb-disc-duckdb = DuckDB ist für analytische Arbeitslasten optimiert, nicht für Mikrooperationen. Seine 100-1000x langsameren Ergebnisse hier spiegeln architektonische Entscheidungen wider (spaltenorientierte Speicherung, vektorisierte Ausführung), die Einzelzeilenlatenz gegen Massendurchsatz eintauschen. VibeSQL zielt auf beide Anwendungsfälle.
-bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
-bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
+bench-sysbench-emb-disc-architecture-title = Architektonische Kompromisse
+bench-sysbench-emb-disc-architecture = VibeSQLs hybride Architektur zielt sowohl auf OLTP- als auch OLAP-Arbeitslasten ab. Unsere B-Tree-Speicherung bietet SQLite-wettbewerbsfähige Punktabfrageleistung, während die spaltenorientierte Ausführung analytische Abfragen effizient verarbeitet. Dies unterscheidet sich von reinen OLAP-Datenbanken wie DuckDB, die ausschließlich für Massenoperationen optimieren und dabei Einzelzeilen-Latenz opfern.
 
 # Sysbench Server spezifisch
 bench-sysbench-server-name = Sysbench (Server)
