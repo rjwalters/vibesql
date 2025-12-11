@@ -25,6 +25,7 @@ use super::protocol::{send_subscription_data, send_subscription_error};
 use super::selective::{rows_to_wire_format, try_send_selective_updates};
 
 /// Send a subscription update (either delta or full)
+#[allow(clippy::too_many_arguments)]
 pub async fn send_subscription_update(
     session: &mut Session,
     config: &Arc<Config>,

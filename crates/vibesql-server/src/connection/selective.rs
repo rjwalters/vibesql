@@ -37,6 +37,7 @@ pub fn rows_to_wire_format(rows: &[Row]) -> Vec<Vec<Option<Vec<u8>>>> {
 /// - Row counts match (updates only, not inserts/deletes)
 /// - Rows can be matched by primary key
 /// - Changed columns ratio is within threshold
+#[allow(clippy::too_many_arguments)]
 pub async fn try_send_selective_updates(
     subscription_manager: &Arc<SubscriptionManager>,
     config: &Arc<Config>,

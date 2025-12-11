@@ -42,6 +42,7 @@ impl ColumnRef {
         }
     }
 
+    #[allow(dead_code)]
     pub fn qualified(table: &str, column: &str) -> Self {
         Self {
             table: Some(table.to_lowercase()),
@@ -49,6 +50,7 @@ impl ColumnRef {
         }
     }
 
+    #[allow(dead_code)]
     pub fn unqualified(column: &str) -> Self {
         Self { table: None, column: column.to_lowercase() }
     }
