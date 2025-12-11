@@ -844,10 +844,13 @@ impl<'arena> ArenaParser<'arena> {
         self.advance(); // consume function name
         self.expect_token(Token::LParen)?;
 
-        // Check for aggregate functions with DISTINCT
-        let is_aggregate = matches!(name_upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX");
+        // Check if this might be an aggregate function (before we know argument count)
+        // Note: MIN/MAX with multiple arguments are scalar functions (like LEAST/GREATEST)
+        // while MIN/MAX with a single argument are aggregate functions
+        let might_be_aggregate =
+            matches!(name_upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX");
 
-        if is_aggregate {
+        if might_be_aggregate {
             let distinct = self.try_consume_keyword(Keyword::Distinct);
             self.try_consume_keyword(Keyword::All); // ALL is default
 
@@ -864,11 +867,30 @@ impl<'arena> ArenaParser<'arena> {
                 return self.parse_window_function(name_sym, args);
             }
 
-            return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::AggregateFunction {
-                name: name_sym,
-                distinct,
-                args,
-            })));
+            // Determine if this is truly an aggregate function
+            // MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
+            let is_aggregate = match name_upper.as_str() {
+                "COUNT" | "SUM" | "AVG" => true,
+                "MIN" | "MAX" => args.len() <= 1 && !distinct,
+                _ => false,
+            };
+
+            if is_aggregate {
+                return Ok(Expression::Extended(
+                    self.arena.alloc(ExtendedExpr::AggregateFunction {
+                        name: name_sym,
+                        distinct,
+                        args,
+                    }),
+                ));
+            } else {
+                // Multi-argument MIN/MAX - treat as scalar function
+                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Function {
+                    name: name_sym,
+                    args,
+                    character_unit: None,
+                })));
+            }
         }
 
         // Regular function

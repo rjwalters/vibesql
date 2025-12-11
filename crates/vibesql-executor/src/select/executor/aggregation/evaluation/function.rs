@@ -23,7 +23,14 @@ pub(super) fn evaluate(
     };
 
     // Check if this is actually an aggregate function (backwards compatibility)
-    if matches!(name.to_uppercase().as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX") {
+    // Note: MIN/MAX with >1 argument are scalar functions (SQLite compatibility)
+    let name_upper = name.to_uppercase();
+    let is_aggregate = match name_upper.as_str() {
+        "COUNT" | "SUM" | "AVG" => true,
+        "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
+        _ => false,
+    };
+    if is_aggregate {
         // Convert to AggregateFunction variant and evaluate
         let agg_expr = vibesql_ast::Expression::AggregateFunction {
             name: name.clone(),

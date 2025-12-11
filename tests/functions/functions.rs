@@ -157,3 +157,139 @@ fn test_e2e_coalesce_and_nullif() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].values[0], SqlValue::Null, "NULLIF('Alice', 'Alice') should return NULL");
 }
+
+// ========================================================================
+// SQLite-compatible scalar MIN/MAX Tests (multi-argument form)
+// ========================================================================
+
+#[test]
+fn test_e2e_scalar_min_max() {
+    // Test SQLite-compatible multi-argument MIN/MAX functions
+    let schema = TableSchema::new(
+        "TEST1".to_string(),
+        vec![
+            ColumnSchema::new("F1".to_string(), DataType::Integer, false),
+            ColumnSchema::new("F2".to_string(), DataType::Integer, false),
+        ],
+    );
+
+    let mut db = Database::new();
+    db.create_table(schema).unwrap();
+
+    db.insert_row("TEST1", Row::new(vec![SqlValue::Integer(11), SqlValue::Integer(22)])).unwrap();
+    db.insert_row("TEST1", Row::new(vec![SqlValue::Integer(33), SqlValue::Integer(44)])).unwrap();
+
+    // Test 1: Basic scalar MIN with literals
+    let results = execute_select(&db, "SELECT min(11, 22)").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(11), "min(11, 22) should return 11");
+
+    // Test 2: Basic scalar MAX with literals
+    let results = execute_select(&db, "SELECT max(11, 22)").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(22), "max(11, 22) should return 22");
+
+    // Test 3: Scalar MIN/MAX with three arguments
+    let results = execute_select(&db, "SELECT min(1, 2, 3)").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(1), "min(1, 2, 3) should return 1");
+
+    let results = execute_select(&db, "SELECT max(1, 2, 3)").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(3), "max(1, 2, 3) should return 3");
+
+    // Test 4: Scalar MIN/MAX with floating point values
+    // Note: Numeric literals like 1.1 are parsed as Numeric, not Double
+    let results = execute_select(&db, "SELECT min(1.1, 2.2)").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Numeric(1.1), "min(1.1, 2.2) should return 1.1");
+
+    let results = execute_select(&db, "SELECT max(1.1, 2.2)").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Numeric(2.2), "max(1.1, 2.2) should return 2.2");
+
+    // Test 5: Scalar MIN/MAX with column references
+    let results = execute_select(&db, "SELECT min(f1, f2) FROM test1").unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].values[0], SqlValue::Integer(11), "min(11, 22) should return 11");
+    assert_eq!(results[1].values[0], SqlValue::Integer(33), "min(33, 44) should return 33");
+
+    let results = execute_select(&db, "SELECT max(f1, f2) FROM test1").unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].values[0], SqlValue::Integer(22), "max(11, 22) should return 22");
+    assert_eq!(results[1].values[0], SqlValue::Integer(44), "max(33, 44) should return 44");
+
+    // Test 6: Combined *, min, max in SELECT
+    let results = execute_select(&db, "SELECT *, min(f1, f2), max(f1, f2) FROM test1").unwrap();
+    assert_eq!(results.len(), 2);
+    // Row 1: f1=11, f2=22, min=11, max=22
+    assert_eq!(results[0].values[0], SqlValue::Integer(11));
+    assert_eq!(results[0].values[1], SqlValue::Integer(22));
+    assert_eq!(results[0].values[2], SqlValue::Integer(11));
+    assert_eq!(results[0].values[3], SqlValue::Integer(22));
+    // Row 2: f1=33, f2=44, min=33, max=44
+    assert_eq!(results[1].values[0], SqlValue::Integer(33));
+    assert_eq!(results[1].values[1], SqlValue::Integer(44));
+    assert_eq!(results[1].values[2], SqlValue::Integer(33));
+    assert_eq!(results[1].values[3], SqlValue::Integer(44));
+
+    // Test 7: Single-argument MIN/MAX should still work as aggregate
+    let results = execute_select(&db, "SELECT min(f1) FROM test1").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(11), "min(f1) aggregate should return 11");
+
+    let results = execute_select(&db, "SELECT max(f1) FROM test1").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(33), "max(f1) aggregate should return 33");
+}
+
+#[test]
+fn test_e2e_scalar_min_max_null_semantics() {
+    // Test SQLite NULL semantics: scalar min/max return NULL if ANY argument is NULL
+    let schema = TableSchema::new(
+        "NULLTEST".to_string(),
+        vec![
+            ColumnSchema::new("A".to_string(), DataType::Integer, true),
+            ColumnSchema::new("B".to_string(), DataType::Integer, true),
+        ],
+    );
+
+    let mut db = Database::new();
+    db.create_table(schema).unwrap();
+
+    db.insert_row("NULLTEST", Row::new(vec![SqlValue::Integer(1), SqlValue::Null])).unwrap();
+    db.insert_row("NULLTEST", Row::new(vec![SqlValue::Null, SqlValue::Integer(2)])).unwrap();
+    db.insert_row("NULLTEST", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(4)])).unwrap();
+
+    // Test 1: Scalar MIN with NULL argument returns NULL
+    let results = execute_select(&db, "SELECT min(a, b) FROM nulltest WHERE a = 1").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Null, "min(1, NULL) should return NULL");
+
+    let results = execute_select(&db, "SELECT min(a, b) FROM nulltest WHERE b = 2").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Null, "min(NULL, 2) should return NULL");
+
+    // Test 2: Scalar MAX with NULL argument returns NULL
+    let results = execute_select(&db, "SELECT max(a, b) FROM nulltest WHERE a = 1").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Null, "max(1, NULL) should return NULL");
+
+    // Test 3: Scalar MIN/MAX without NULLs works normally
+    let results = execute_select(&db, "SELECT min(a, b) FROM nulltest WHERE a = 3").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(3), "min(3, 4) should return 3");
+
+    let results = execute_select(&db, "SELECT max(a, b) FROM nulltest WHERE a = 3").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(4), "max(3, 4) should return 4");
+
+    // Test 4: Aggregate MIN/MAX should skip NULLs (different behavior)
+    let results = execute_select(&db, "SELECT min(a) FROM nulltest").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(1), "Aggregate min should skip NULLs");
+
+    let results = execute_select(&db, "SELECT max(b) FROM nulltest").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].values[0], SqlValue::Integer(4), "Aggregate max should skip NULLs");
+}

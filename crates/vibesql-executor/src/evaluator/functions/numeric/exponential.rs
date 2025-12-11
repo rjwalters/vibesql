@@ -12,6 +12,8 @@ pub fn numeric_to_f64(val: &SqlValue) -> Result<f64, ExecutorError> {
         SqlValue::Integer(n) => Ok(*n as f64),
         SqlValue::Bigint(n) => Ok(*n as f64),
         SqlValue::Smallint(n) => Ok(*n as f64),
+        SqlValue::Unsigned(n) => Ok(*n as f64),
+        SqlValue::Numeric(f) => Ok(*f),
         SqlValue::Float(f) => Ok(*f as f64),
         SqlValue::Double(f) => Ok(*f),
         SqlValue::Real(f) => Ok(*f as f64),
