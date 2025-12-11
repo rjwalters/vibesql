@@ -15,6 +15,7 @@ use super::{cte::CteResult, join::FromResult};
 use crate::errors::ExecutorError;
 
 // Strategy modules
+pub(crate) mod bloom_context;
 mod derived;
 pub(crate) mod index_scan;
 mod join_scan;
