@@ -20,6 +20,7 @@
 //! This reduces rows from 54 columns to 14 columns, cutting memory and CPU overhead
 //! by ~74% for GROUP BY evaluation.
 
+
 use std::collections::HashSet;
 
 use vibesql_ast::{Expression, GroupByClause, GroupingElement, MixedGroupingItem, SelectItem};

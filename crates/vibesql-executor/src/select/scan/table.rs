@@ -915,10 +915,10 @@ pub(crate) fn execute_table_scan_with_bloom(
                     }
 
                     // WHERE predicate check
-                    match evaluator.eval(&combined_where, row) {
-                        Ok(vibesql_types::SqlValue::Boolean(true)) => true,
-                        _ => false,
-                    }
+                    matches!(
+                        evaluator.eval(&combined_where, row),
+                        Ok(vibesql_types::SqlValue::Boolean(true))
+                    )
                 })
                 .map(|(_, row)| row.clone())
                 .collect()

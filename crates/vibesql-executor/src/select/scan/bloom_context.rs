@@ -44,6 +44,7 @@ impl BloomFilterScanContext {
 
     /// Check if a value might be in the filter
     #[inline]
+    #[allow(dead_code)] // Infrastructure for future Bloom filter scan optimization
     pub fn might_contain(&self, value: &SqlValue) -> bool {
         let hash = hash_value(value);
         self.filter.might_contain_hash(hash)

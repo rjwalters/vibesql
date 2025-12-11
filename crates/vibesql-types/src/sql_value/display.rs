@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(format_f64(1.0), "1.0");
         assert_eq!(format_f64(2.0), "2.0");
         assert_eq!(format_f64(0.0), "0.0");
-        assert_eq!(format_f64(3.14159), "3.14159");
+        assert_eq!(format_f64(3.14158), "3.14158");
         assert_eq!(format_f64(0.5), "0.5");
         assert_eq!(format_f64(100.0), "100.0");
         assert_eq!(format_f64(-4373.0), "-4373.0");
@@ -144,7 +144,7 @@ mod tests {
         assert_eq!(format_f32(2.2f32), "2.2");
         assert_eq!(format_f32(1.0f32), "1.0");
         assert_eq!(format_f32(0.0f32), "0.0");
-        assert_eq!(format_f32(3.14159f32), "3.14159");
+        assert_eq!(format_f32(3.14158f32), "3.14158");
         assert_eq!(format_f32(0.5f32), "0.5");
         assert_eq!(format_f32(100.0f32), "100.0");
         assert_eq!(format_f32(-4373.0f32), "-4373.0");

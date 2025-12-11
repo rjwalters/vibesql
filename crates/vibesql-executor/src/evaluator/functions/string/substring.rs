@@ -18,9 +18,9 @@ pub(in crate::evaluator::functions) fn substring(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() < 2 || args.len() > 3 {
-        return Err(ExecutorError::UnsupportedFeature(format!(
-            "wrong number of arguments to function substr()"
-        )));
+        return Err(ExecutorError::UnsupportedFeature(
+            "wrong number of arguments to function substr()".to_string(),
+        ));
     }
 
     let string_val = &args[0];

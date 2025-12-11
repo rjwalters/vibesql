@@ -1212,6 +1212,7 @@ const BLOOM_FILTER_MIN_ACCUMULATED_ROWS: usize = 10;
 
 /// Minimum number of rows in the table to scan for Bloom filter pre-filtering to be worthwhile.
 /// Below this threshold, scanning all rows is fast enough.
+#[allow(dead_code)] // Planned for future scan-time Bloom filter optimization
 const BLOOM_FILTER_MIN_SCAN_ROWS: usize = 1000;
 
 /// Find the join condition that connects the new table to the accumulated tables.
