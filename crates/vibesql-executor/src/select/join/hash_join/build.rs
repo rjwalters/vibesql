@@ -253,6 +253,8 @@ pub(crate) fn build_hash_table_composite_parallel(
 ) -> AHashMap<CompositeKey, Vec<usize>> {
     let parallel_config = ParallelConfig::global();
     let morsel_config = global_config();
+    // Use join-build-specific morsel size
+    let morsel_size = morsel_config.join_build_size;
 
     // Use sequential fallback for small inputs
     if !parallel_config.should_parallelize_join(build_rows.len()) {
@@ -260,12 +262,12 @@ pub(crate) fn build_hash_table_composite_parallel(
     }
 
     // Also fall back to sequential if below morsel threshold
-    if build_rows.len() < morsel_config.morsel_size {
+    if build_rows.len() < morsel_size {
         return build_hash_table_composite_sequential(build_rows, build_col_indices);
     }
 
     // Create morsels
-    let morsels = create_build_morsels(build_rows.len(), morsel_config.morsel_size);
+    let morsels = create_build_morsels(build_rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     if morsel_build_debug_enabled() {
@@ -273,7 +275,7 @@ pub(crate) fn build_hash_table_composite_parallel(
             "[MORSEL_BUILD] Composite: {} morsels for {} rows (size={})",
             morsel_count,
             build_rows.len(),
-            morsel_config.morsel_size
+            morsel_size
         );
     }
 
@@ -385,6 +387,8 @@ pub(crate) fn build_hash_table_parallel(
     {
         let parallel_config = ParallelConfig::global();
         let morsel_config = global_config();
+        // Use join-build-specific morsel size
+        let morsel_size = morsel_config.join_build_size;
 
         // Use sequential fallback for small inputs
         if !parallel_config.should_parallelize_join(build_rows.len()) {
@@ -392,12 +396,12 @@ pub(crate) fn build_hash_table_parallel(
         }
 
         // Also fall back to sequential if below morsel threshold
-        if build_rows.len() < morsel_config.morsel_size {
+        if build_rows.len() < morsel_size {
             return build_hash_table_sequential(build_rows, build_col_idx);
         }
 
         // Create morsels
-        let morsels = create_build_morsels(build_rows.len(), morsel_config.morsel_size);
+        let morsels = create_build_morsels(build_rows.len(), morsel_size);
         let morsel_count = morsels.len();
 
         if morsel_build_debug_enabled() {
@@ -405,7 +409,7 @@ pub(crate) fn build_hash_table_parallel(
                 "[MORSEL_BUILD] Single-key: {} morsels for {} rows (size={})",
                 morsel_count,
                 build_rows.len(),
-                morsel_config.morsel_size
+                morsel_size
             );
         }
 
