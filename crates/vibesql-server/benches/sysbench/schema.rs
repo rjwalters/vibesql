@@ -20,8 +20,6 @@ pub const INSERT_SQL: &str = "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?,
 pub const INSERT_SQL_NUMBERED: &str =
     "INSERT INTO sbtest1 (id, k, c, padding) VALUES (?1, ?2, ?3, ?4)";
 
-use vibesql_storage::Database as VibeDB;
-
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "mysql")]
@@ -30,6 +28,7 @@ use mysql::prelude::*;
 use mysql::{Pool, PooledConn};
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use vibesql_storage::Database as VibeDB;
 
 // =============================================================================
 // Database Loaders

@@ -52,12 +52,18 @@ impl DeleteExecutor {
     /// // Insert rows
     /// db.insert_row(
     ///     "users",
-    ///     vibesql_storage::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
+    ///     vibesql_storage::Row::new(vec![
+    ///         SqlValue::Integer(1),
+    ///         SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+    ///     ]),
     /// )
     /// .unwrap();
     /// db.insert_row(
     ///     "users",
-    ///     vibesql_storage::Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+    ///     vibesql_storage::Row::new(vec![
+    ///         SqlValue::Integer(2),
+    ///         SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+    ///     ]),
     /// )
     /// .unwrap();
     ///
@@ -139,28 +145,39 @@ impl DeleteExecutor {
                     // Check if we can use the super-fast path (no triggers, no FKs)
                     let has_triggers = database
                         .catalog
-                        .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Delete))
+                        .get_triggers_for_table(
+                            &stmt.table_name,
+                            Some(vibesql_ast::TriggerEvent::Delete),
+                        )
                         .next()
                         .is_some();
 
                     // Fast check: if this table has no PK, FKs can't reference it
                     let has_pk = schema.get_primary_key_indices().is_some();
-                    let has_referencing_fks = has_pk && database.catalog.list_tables().iter().any(|t| {
-                        database
-                            .catalog
-                            .get_table(t)
-                            .map(|s| s.foreign_keys.iter().any(|fk| fk.parent_table.eq_ignore_ascii_case(&stmt.table_name)))
-                            .unwrap_or(false)
-                    });
+                    let has_referencing_fks = has_pk
+                        && database.catalog.list_tables().iter().any(|t| {
+                            database
+                                .catalog
+                                .get_table(t)
+                                .map(|s| {
+                                    s.foreign_keys.iter().any(|fk| {
+                                        fk.parent_table.eq_ignore_ascii_case(&stmt.table_name)
+                                    })
+                                })
+                                .unwrap_or(false)
+                        });
 
                     if !has_triggers && !has_referencing_fks {
                         // Use the fast path - no triggers, no FKs, single row PK delete
                         match database.delete_by_pk_fast(&stmt.table_name, &pk_values) {
                             Ok(deleted) => {
                                 let count = if deleted { 1 } else { 0 };
-                                // Check all assertions after DELETE completes (SQL:1999 Feature F671/F672)
-                                // This ensures database-wide integrity constraints are maintained
-                                crate::advanced_objects::AssertionChecker::check_all_assertions(database)?;
+                                // Check all assertions after DELETE completes (SQL:1999 Feature
+                                // F671/F672) This ensures
+                                // database-wide integrity constraints are maintained
+                                crate::advanced_objects::AssertionChecker::check_all_assertions(
+                                    database,
+                                )?;
                                 return Ok(count);
                             }
                             Err(_) => {
@@ -262,8 +279,8 @@ impl DeleteExecutor {
             }
         }
 
-        // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger context
-        // (Statement-level triggers don't fire for deletes within trigger bodies)
+        // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger
+        // context (Statement-level triggers don't fire for deletes within trigger bodies)
         if has_delete_triggers && trigger_context.is_none() {
             crate::TriggerFirer::execute_before_statement_triggers(
                 database,
@@ -305,10 +322,8 @@ impl DeleteExecutor {
 
         // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)
         // where d=deletes, m=indexes
-        let rows_refs: Vec<(usize, &vibesql_storage::Row)> = rows_and_indices_to_delete
-            .iter()
-            .map(|(idx, row)| (*idx, row))
-            .collect();
+        let rows_refs: Vec<(usize, &vibesql_storage::Row)> =
+            rows_and_indices_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
         database.batch_update_indexes_for_delete(&stmt.table_name, &rows_refs);
 
         // Step 5b: Actually delete the rows using fast path (no table scan needed)
@@ -319,9 +334,9 @@ impl DeleteExecutor {
         // Use delete_by_indices_batch for O(d) instead of O(n) where d = deletes
         // The batch version pre-computes schema lookups for internal hash indexes,
         // reducing overhead by ~30-40% for multi-row deletes.
-        // User-defined index entries have already been removed by batch_update_indexes_for_delete above.
-        // Note: If >50% of rows are deleted, compaction triggers and row indices change.
-        // When compaction occurs, we must rebuild user-defined indexes.
+        // User-defined index entries have already been removed by batch_update_indexes_for_delete
+        // above. Note: If >50% of rows are deleted, compaction triggers and row indices
+        // change. When compaction occurs, we must rebuild user-defined indexes.
         let delete_result = table_mut.delete_by_indices_batch(&deleted_indices);
 
         // If compaction occurred, rebuild user-defined indexes since all row indices changed
@@ -351,8 +366,8 @@ impl DeleteExecutor {
             }
         }
 
-        // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger context
-        // (Statement-level triggers don't fire for deletes within trigger bodies)
+        // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger
+        // context (Statement-level triggers don't fire for deletes within trigger bodies)
         if has_delete_triggers && trigger_context.is_none() {
             crate::TriggerFirer::execute_after_statement_triggers(
                 database,

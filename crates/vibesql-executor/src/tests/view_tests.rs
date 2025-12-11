@@ -2,9 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{advanced_objects, CreateTableExecutor, InsertExecutor, SelectExecutor};
     use vibesql_parser::Parser;
     use vibesql_storage::Database;
+
+    use crate::{advanced_objects, CreateTableExecutor, InsertExecutor, SelectExecutor};
 
     fn create_test_db() -> Database {
         let mut db = Database::new();

@@ -1,5 +1,6 @@
-use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use super::*;
 
 /// Counter for generating unique derived table aliases when none is provided.
 /// SQLite allows derived tables without aliases, unlike SQL:1999 which requires them.
@@ -13,32 +14,44 @@ impl Parser {
 
         // Check for JOINs or commas (left-associative)
         while self.is_join_keyword() || self.peek() == &Token::Comma {
-            let (join_type, right, condition, natural) = if self.peek() == &Token::Comma {
-                // Comma represents CROSS JOIN
-                self.advance(); // Consume comma
-                let right = self.parse_table_reference()?;
-                (vibesql_ast::JoinType::Cross, right, None, false)
-            } else {
-                let (join_type, natural) = self.parse_join_type()?;
-
-                // Parse right table reference
-                let right = self.parse_table_reference()?;
-
-                // Parse ON condition (comes after table reference)
-                // NATURAL JOIN should not have an ON clause
-                let condition = if self.peek_keyword(Keyword::On) {
-                    if natural {
-                        return Err(ParseError {
-                            message: "NATURAL JOIN cannot have an ON clause".to_string(),
-                        });
-                    }
-                    self.consume_keyword(Keyword::On)?;
-                    Some(self.parse_expression()?)
+            let (join_type, right, condition, using_columns, natural) =
+                if self.peek() == &Token::Comma {
+                    // Comma represents CROSS JOIN
+                    self.advance(); // Consume comma
+                    let right = self.parse_table_reference()?;
+                    (vibesql_ast::JoinType::Cross, right, None, None, false)
                 } else {
-                    None
+                    let (join_type, natural) = self.parse_join_type()?;
+
+                    // Parse right table reference
+                    let right = self.parse_table_reference()?;
+
+                    // Parse ON condition or USING clause (comes after table reference)
+                    // NATURAL JOIN should not have an ON or USING clause
+                    let (condition, using_columns) = if self.peek_keyword(Keyword::On) {
+                        if natural {
+                            return Err(ParseError {
+                                message: "NATURAL JOIN cannot have an ON clause".to_string(),
+                            });
+                        }
+                        self.consume_keyword(Keyword::On)?;
+                        (Some(self.parse_expression()?), None)
+                    } else if self.peek_keyword(Keyword::Using) {
+                        if natural {
+                            return Err(ParseError {
+                                message: "NATURAL JOIN cannot have a USING clause".to_string(),
+                            });
+                        }
+                        self.consume_keyword(Keyword::Using)?;
+                        self.expect_token(Token::LParen)?;
+                        let columns = self.parse_comma_separated_list(|p| p.parse_identifier())?;
+                        self.expect_token(Token::RParen)?;
+                        (None, Some(columns))
+                    } else {
+                        (None, None)
+                    };
+                    (join_type, right, condition, using_columns, natural)
                 };
-                (join_type, right, condition, natural)
-            };
 
             // Build JOIN node
             left = vibesql_ast::FromClause::Join {
@@ -46,6 +59,7 @@ impl Parser {
                 right: Box::new(right),
                 join_type,
                 condition,
+                using_columns,
                 natural,
             };
         }
@@ -55,7 +69,9 @@ impl Parser {
 
     /// Parse VALUES clause rows: VALUES(1,2), (3,4), ...
     /// Returns Vec<Vec<Expression>> where each inner vec is a row
-    pub(crate) fn parse_values_rows(&mut self) -> Result<Vec<Vec<vibesql_ast::Expression>>, ParseError> {
+    pub(crate) fn parse_values_rows(
+        &mut self,
+    ) -> Result<Vec<Vec<vibesql_ast::Expression>>, ParseError> {
         self.expect_keyword(Keyword::Values)?;
         let mut rows = Vec::new();
         loop {
@@ -80,7 +96,8 @@ impl Parser {
                 // Parenthesized expression: could be a subquery, VALUES, or a JOIN expression
                 self.advance(); // Consume '('
 
-                // Check if this is a subquery (starts with SELECT), VALUES, or a table reference/JOIN
+                // Check if this is a subquery (starts with SELECT), VALUES, or a table
+                // reference/JOIN
                 let result = if self.peek_keyword(Keyword::Select) {
                     // Parse the SELECT statement (subquery)
                     let query = Box::new(self.parse_select_statement()?);

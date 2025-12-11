@@ -46,7 +46,8 @@
 //! - `SYSBENCH_TABLE_SIZE` - Number of rows (default: 10000)
 //! - `SYSBENCH_DURATION_SECS` - Benchmark duration in seconds (default: 30)
 //! - `SYSBENCH_WARMUP_SECS` - Warmup duration in seconds (default: 5)
-//! - `MYSQL_URL` - MySQL connection string (optional, e.g., mysql://user:pass@localhost:3306/sysbench)
+//! - `MYSQL_URL` - MySQL connection string (optional, e.g.,
+//!   mysql://user:pass@localhost:3306/sysbench)
 //!
 //! ## Workload Types
 //!
@@ -62,20 +63,11 @@
 
 mod sysbench;
 
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
-use std::env;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use sysbench::schema::load_vibesql;
-use vibesql_ast::{Assignment, DeleteStmt, Expression, SelectStmt, UpdateStmt, WhereClause};
-use vibesql_executor::{DeleteExecutor, InsertExecutor, SelectExecutor, UpdateExecutor};
-use vibesql_parser::Parser;
-use vibesql_storage::Database as VibeDB;
-use vibesql_types::SqlValue;
-
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
+use std::{
+    env,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
@@ -83,8 +75,18 @@ use duckdb::Connection as DuckDBConn;
 use mysql::prelude::*;
 #[cfg(feature = "mysql")]
 use mysql::PooledConn;
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use sysbench::schema::load_vibesql;
+use vibesql_ast::{Assignment, DeleteStmt, Expression, SelectStmt, UpdateStmt, WhereClause};
+use vibesql_executor::{DeleteExecutor, InsertExecutor, SelectExecutor, UpdateExecutor};
+use vibesql_parser::Parser;
+use vibesql_storage::Database as VibeDB;
+use vibesql_types::SqlValue;
 
 /// Default table size for sysbench tests
 const DEFAULT_TABLE_SIZE: usize = 10_000;
@@ -1207,22 +1209,10 @@ fn run_range_benchmark<E: SysbenchExecutor>(
             executor.name(),
             query_count
         );
-        eprintln!(
-            "    simple_range:   {:.2} us",
-            simple_time_us as f64 / query_count as f64
-        );
-        eprintln!(
-            "    sum_range:      {:.2} us",
-            sum_time_us as f64 / query_count as f64
-        );
-        eprintln!(
-            "    order_range:    {:.2} us",
-            order_time_us as f64 / query_count as f64
-        );
-        eprintln!(
-            "    distinct_range: {:.2} us",
-            distinct_time_us as f64 / query_count as f64
-        );
+        eprintln!("    simple_range:   {:.2} us", simple_time_us as f64 / query_count as f64);
+        eprintln!("    sum_range:      {:.2} us", sum_time_us as f64 / query_count as f64);
+        eprintln!("    order_range:    {:.2} us", order_time_us as f64 / query_count as f64);
+        eprintln!("    distinct_range: {:.2} us", distinct_time_us as f64 / query_count as f64);
     }
 
     let avg_latency_us =
@@ -1258,7 +1248,11 @@ fn print_results(results: &[WorkloadResults], db_name: &str) {
         };
         eprintln!(
             "{:<20} {:>8} {:>12} {:>12.2} us {:>12.0}",
-            result.workload_name, client_str, result.operations, result.avg_latency_us, result.ops_per_second
+            result.workload_name,
+            client_str,
+            result.operations,
+            result.avg_latency_us,
+            result.ops_per_second
         );
     }
 }
@@ -1286,7 +1280,11 @@ fn print_parallel_results(
             };
             eprintln!(
                 "{:<20} {:>8} {:>12} {:>12.2} us {:>12.0}",
-                result.workload_name, client_str, result.operations, result.avg_latency_us, result.ops_per_second
+                result.workload_name,
+                client_str,
+                result.operations,
+                result.avg_latency_us,
+                result.ops_per_second
             );
         }
         eprintln!("{:-<20} {:->8} {:->12} {:->15} {:->12}", "", "", "", "", "");
@@ -1295,7 +1293,11 @@ fn print_parallel_results(
     // Always print aggregate
     eprintln!(
         "{:<20} {:>8} {:>12} {:>12.2} us {:>12.0}",
-        aggregate.workload_name, "TOTAL", aggregate.operations, aggregate.avg_latency_us, aggregate.ops_per_second
+        aggregate.workload_name,
+        "TOTAL",
+        aggregate.operations,
+        aggregate.avg_latency_us,
+        aggregate.ops_per_second
     );
 }
 
@@ -1401,7 +1403,10 @@ fn main() {
         match WorkloadType::from_str(user_args[0]) {
             Some(t) => t,
             None => {
-                eprintln!("Error: Unknown workload type '{}'. Run with --help for usage.", user_args[0]);
+                eprintln!(
+                    "Error: Unknown workload type '{}'. Run with --help for usage.",
+                    user_args[0]
+                );
                 std::process::exit(1);
             }
         }
@@ -1432,7 +1437,7 @@ fn main() {
 
     // Helper to run a single-client benchmark
     let run_single_client_benchmark = |workload: WorkloadType,
-                                        queries: &PreparedQueries|
+                                       queries: &PreparedQueries|
      -> WorkloadResults {
         let mut db = load_vibesql(table_size);
         let mut executor = VibesqlExecutor::new(&mut db, queries);
@@ -1462,8 +1467,8 @@ fn main() {
     // Helper to run multi-client parallel benchmark
     #[cfg(feature = "parallel")]
     let run_parallel_benchmark = |workload: WorkloadType,
-                                   queries: &Arc<PreparedQueries>,
-                                   client_count: usize|
+                                  queries: &Arc<PreparedQueries>,
+                                  client_count: usize|
      -> (Vec<WorkloadResults>, WorkloadResults) {
         let client_results: Vec<WorkloadResults> = (0..client_count)
             .into_par_iter()
@@ -1530,8 +1535,8 @@ fn main() {
     // Non-parallel fallback
     #[cfg(not(feature = "parallel"))]
     let run_parallel_benchmark = |workload: WorkloadType,
-                                   queries: &Arc<PreparedQueries>,
-                                   client_count: usize|
+                                  queries: &Arc<PreparedQueries>,
+                                  client_count: usize|
      -> (Vec<WorkloadResults>, WorkloadResults) {
         // Run sequentially when parallel feature is disabled
         let client_results: Vec<WorkloadResults> = (0..client_count)
@@ -1601,7 +1606,8 @@ fn main() {
             vec![run_single_client_benchmark(workload, &queries)]
         } else {
             // Multi-client: parallel execution
-            let (client_results, aggregate) = run_parallel_benchmark(workload, &queries, client_count);
+            let (client_results, aggregate) =
+                run_parallel_benchmark(workload, &queries, client_count);
             print_parallel_results(&client_results, &aggregate, "VibeSQL", show_per_client);
             vec![aggregate]
         }
@@ -1679,9 +1685,14 @@ fn main() {
                 WorkloadType::UpdateIndex => {
                     run_update_index_benchmark(&mut executor, table_size, duration, warmup, None, 1)
                 }
-                WorkloadType::UpdateNonIndex => {
-                    run_update_non_index_benchmark(&mut executor, table_size, duration, warmup, None, 1)
-                }
+                WorkloadType::UpdateNonIndex => run_update_non_index_benchmark(
+                    &mut executor,
+                    table_size,
+                    duration,
+                    warmup,
+                    None,
+                    1,
+                ),
                 WorkloadType::Delete => {
                     run_delete_benchmark(&mut executor, table_size, duration, warmup, None, 1)
                 }
@@ -1694,7 +1705,9 @@ fn main() {
 
         // Helper to run SQLite multi-client parallel benchmark
         #[cfg(feature = "parallel")]
-        let run_sqlite_parallel = |workload: WorkloadType, client_count: usize| -> (Vec<WorkloadResults>, WorkloadResults) {
+        let run_sqlite_parallel = |workload: WorkloadType,
+                                   client_count: usize|
+         -> (Vec<WorkloadResults>, WorkloadResults) {
             let client_results: Vec<WorkloadResults> = (0..client_count)
                 .into_par_iter()
                 .map(|client_id| {
@@ -1702,22 +1715,50 @@ fn main() {
                     let mut executor = SqliteExecutor::new(&conn);
                     match workload {
                         WorkloadType::PointSelect => run_point_select_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::Insert => run_insert_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateIndex => run_update_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateNonIndex => run_update_non_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Delete => run_delete_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Range => run_range_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::All => unreachable!(),
                     }
@@ -1728,29 +1769,59 @@ fn main() {
         };
 
         #[cfg(not(feature = "parallel"))]
-        let run_sqlite_parallel = |workload: WorkloadType, client_count: usize| -> (Vec<WorkloadResults>, WorkloadResults) {
+        let run_sqlite_parallel = |workload: WorkloadType,
+                                   client_count: usize|
+         -> (Vec<WorkloadResults>, WorkloadResults) {
             let client_results: Vec<WorkloadResults> = (0..client_count)
                 .map(|client_id| {
                     let conn = load_sqlite(table_size);
                     let mut executor = SqliteExecutor::new(&conn);
                     match workload {
                         WorkloadType::PointSelect => run_point_select_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::Insert => run_insert_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateIndex => run_update_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateNonIndex => run_update_non_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Delete => run_delete_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Range => run_range_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::All => unreachable!(),
                     }
@@ -1774,8 +1845,12 @@ fn main() {
         match workload_type {
             WorkloadType::All => {
                 for wl in &[
-                    WorkloadType::PointSelect, WorkloadType::Insert, WorkloadType::UpdateIndex,
-                    WorkloadType::UpdateNonIndex, WorkloadType::Delete, WorkloadType::Range,
+                    WorkloadType::PointSelect,
+                    WorkloadType::Insert,
+                    WorkloadType::UpdateIndex,
+                    WorkloadType::UpdateNonIndex,
+                    WorkloadType::Delete,
+                    WorkloadType::Range,
                 ] {
                     sqlite_results.extend(run_sqlite_workload(*wl));
                 }
@@ -1815,9 +1890,14 @@ fn main() {
                 WorkloadType::UpdateIndex => {
                     run_update_index_benchmark(&mut executor, table_size, duration, warmup, None, 1)
                 }
-                WorkloadType::UpdateNonIndex => {
-                    run_update_non_index_benchmark(&mut executor, table_size, duration, warmup, None, 1)
-                }
+                WorkloadType::UpdateNonIndex => run_update_non_index_benchmark(
+                    &mut executor,
+                    table_size,
+                    duration,
+                    warmup,
+                    None,
+                    1,
+                ),
                 WorkloadType::Delete => {
                     run_delete_benchmark(&mut executor, table_size, duration, warmup, None, 1)
                 }
@@ -1830,7 +1910,9 @@ fn main() {
 
         // Helper to run DuckDB multi-client parallel benchmark
         #[cfg(feature = "parallel")]
-        let run_duckdb_parallel = |workload: WorkloadType, client_count: usize| -> (Vec<WorkloadResults>, WorkloadResults) {
+        let run_duckdb_parallel = |workload: WorkloadType,
+                                   client_count: usize|
+         -> (Vec<WorkloadResults>, WorkloadResults) {
             let client_results: Vec<WorkloadResults> = (0..client_count)
                 .into_par_iter()
                 .map(|client_id| {
@@ -1838,22 +1920,50 @@ fn main() {
                     let mut executor = DuckdbExecutor::new(&conn);
                     match workload {
                         WorkloadType::PointSelect => run_point_select_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::Insert => run_insert_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateIndex => run_update_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateNonIndex => run_update_non_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Delete => run_delete_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Range => run_range_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::All => unreachable!(),
                     }
@@ -1864,29 +1974,59 @@ fn main() {
         };
 
         #[cfg(not(feature = "parallel"))]
-        let run_duckdb_parallel = |workload: WorkloadType, client_count: usize| -> (Vec<WorkloadResults>, WorkloadResults) {
+        let run_duckdb_parallel = |workload: WorkloadType,
+                                   client_count: usize|
+         -> (Vec<WorkloadResults>, WorkloadResults) {
             let client_results: Vec<WorkloadResults> = (0..client_count)
                 .map(|client_id| {
                     let conn = load_duckdb(table_size);
                     let mut executor = DuckdbExecutor::new(&conn);
                     match workload {
                         WorkloadType::PointSelect => run_point_select_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::Insert => run_insert_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateIndex => run_update_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::UpdateNonIndex => run_update_non_index_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Delete => run_delete_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id), client_count,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
+                            client_count,
                         ),
                         WorkloadType::Range => run_range_benchmark(
-                            &mut executor, table_size, duration, warmup, Some(client_id),
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            Some(client_id),
                         ),
                         WorkloadType::All => unreachable!(),
                     }
@@ -1910,8 +2050,12 @@ fn main() {
         match workload_type {
             WorkloadType::All => {
                 for wl in &[
-                    WorkloadType::PointSelect, WorkloadType::Insert, WorkloadType::UpdateIndex,
-                    WorkloadType::UpdateNonIndex, WorkloadType::Delete, WorkloadType::Range,
+                    WorkloadType::PointSelect,
+                    WorkloadType::Insert,
+                    WorkloadType::UpdateIndex,
+                    WorkloadType::UpdateNonIndex,
+                    WorkloadType::Delete,
+                    WorkloadType::Range,
                 ] {
                     duckdb_results.extend(run_duckdb_workload(*wl));
                 }
@@ -1938,7 +2082,10 @@ fn main() {
 
             // Warn when parallel mode is enabled but MySQL runs single-threaded
             if client_count > 1 {
-                eprintln!("\n⚠️  WARNING: Parallel mode enabled (SYSBENCH_CLIENTS={})", client_count);
+                eprintln!(
+                    "\n⚠️  WARNING: Parallel mode enabled (SYSBENCH_CLIENTS={})",
+                    client_count
+                );
                 eprintln!("⚠️  MySQL runs single-threaded - results not directly comparable");
                 eprintln!("⚠️  MySQL would require connection pooling for parallel clients");
             }
@@ -1950,68 +2097,124 @@ fn main() {
                 match workload_type {
                     WorkloadType::PointSelect => {
                         mysql_results.push(run_point_select_benchmark(
-                            &mut executor, table_size, duration, warmup, None,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
                         ));
                     }
                     WorkloadType::Insert => {
                         mysql_results.push(run_insert_benchmark(
-                            &mut executor, table_size, duration, warmup, None, 1,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
+                            1,
                         ));
                     }
                     WorkloadType::UpdateIndex => {
                         mysql_results.push(run_update_index_benchmark(
-                            &mut executor, table_size, duration, warmup, None, 1,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
+                            1,
                         ));
                     }
                     WorkloadType::UpdateNonIndex => {
                         mysql_results.push(run_update_non_index_benchmark(
-                            &mut executor, table_size, duration, warmup, None, 1,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
+                            1,
                         ));
                     }
                     WorkloadType::Delete => {
                         mysql_results.push(run_delete_benchmark(
-                            &mut executor, table_size, duration, warmup, None, 1,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
+                            1,
                         ));
                     }
                     WorkloadType::Range => {
                         mysql_results.push(run_range_benchmark(
-                            &mut executor, table_size, duration, warmup, None,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
                         ));
                     }
                     WorkloadType::All => {
                         mysql_results.push(run_point_select_benchmark(
-                            &mut executor, table_size, duration, warmup, None,
+                            &mut executor,
+                            table_size,
+                            duration,
+                            warmup,
+                            None,
                         ));
                         drop(executor);
 
                         if let Some(mut conn2) = load_mysql(table_size) {
                             let mut executor2 = MysqlExecutor::new(&mut conn2);
                             mysql_results.push(run_insert_benchmark(
-                                &mut executor2, table_size, duration, warmup, None, 1,
+                                &mut executor2,
+                                table_size,
+                                duration,
+                                warmup,
+                                None,
+                                1,
                             ));
                         }
 
                         if let Some(mut conn3) = load_mysql(table_size) {
                             let mut executor3 = MysqlExecutor::new(&mut conn3);
                             mysql_results.push(run_update_index_benchmark(
-                                &mut executor3, table_size, duration, warmup, None, 1,
+                                &mut executor3,
+                                table_size,
+                                duration,
+                                warmup,
+                                None,
+                                1,
                             ));
                             mysql_results.push(run_update_non_index_benchmark(
-                                &mut executor3, table_size, duration, warmup, None, 1,
+                                &mut executor3,
+                                table_size,
+                                duration,
+                                warmup,
+                                None,
+                                1,
                             ));
                         }
 
                         if let Some(mut conn4) = load_mysql(table_size) {
                             let mut executor4 = MysqlExecutor::new(&mut conn4);
                             mysql_results.push(run_delete_benchmark(
-                                &mut executor4, table_size, duration, warmup, None, 1,
+                                &mut executor4,
+                                table_size,
+                                duration,
+                                warmup,
+                                None,
+                                1,
                             ));
                         }
 
                         if let Some(mut conn5) = load_mysql(table_size) {
                             let mut executor5 = MysqlExecutor::new(&mut conn5);
                             mysql_results.push(run_range_benchmark(
-                                &mut executor5, table_size, duration, warmup, None,
+                                &mut executor5,
+                                table_size,
+                                duration,
+                                warmup,
+                                None,
                             ));
                         }
                     }

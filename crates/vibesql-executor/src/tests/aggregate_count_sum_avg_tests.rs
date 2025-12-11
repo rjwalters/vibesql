@@ -639,7 +639,9 @@ fn test_count_star_in_simple_case_expression() {
                     conditions: vec![vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Integer(3),
                     )],
-                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three"))),
+                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                        arcstr::ArcStr::from("three"),
+                    )),
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("other")),
@@ -662,7 +664,10 @@ fn test_count_star_in_simple_case_expression() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("three"))
+    );
 }
 
 #[test]
@@ -707,7 +712,9 @@ fn test_count_star_in_searched_case_expression() {
                             vibesql_types::SqlValue::Integer(2),
                         )),
                     }],
-                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("many"))),
+                    result: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                        arcstr::ArcStr::from("many"),
+                    )),
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("few")),

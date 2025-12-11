@@ -54,9 +54,8 @@ fn hash_sql_value(value: &vibesql_types::SqlValue) -> u64 {
 ///
 /// Algorithm:
 /// 1. Build phase: Materialize right side into hash table AND Bloom filter (one-time cost)
-/// 2. Probe phase: For each left row:
-///    a. Check Bloom filter - if negative, skip immediately (no hash lookup)
-///    b. If Bloom filter positive, do actual hash table lookup
+/// 2. Probe phase: For each left row: a. Check Bloom filter - if negative, skip immediately (no
+///    hash lookup) b. If Bloom filter positive, do actual hash table lookup
 ///
 /// Performance: O(N + M) where N=left rows, M=right rows
 /// For selective joins, Bloom filter reduces constant factor significantly.
@@ -136,7 +135,8 @@ impl<L: RowIterator> HashJoinIterator<L> {
         let combined_schema =
             CombinedSchema::combine(left.schema().clone(), right_table_name, right_schema);
 
-        // Use default timeout context (proper propagation from SelectExecutor is a future improvement)
+        // Use default timeout context (proper propagation from SelectExecutor is a future
+        // improvement)
         let timeout_ctx = TimeoutContext::new_default();
 
         // Build phase: Create hash table from right side
@@ -287,11 +287,12 @@ impl<L: RowIterator> RowIterator for HashJoinIterator<L> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::select::TableScanIterator;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
+    use crate::select::TableScanIterator;
 
     /// Helper to create a simple FromResult for testing
     fn create_test_from_result(

@@ -11,10 +11,12 @@
 
 mod tpch;
 
-use std::env;
-use std::time::{Duration, Instant};
-use tpch::queries::*;
-use tpch::schema::load_vibesql;
+use std::{
+    env,
+    time::{Duration, Instant},
+};
+
+use tpch::{queries::*, schema::load_vibesql};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 

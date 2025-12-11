@@ -51,13 +51,7 @@
 //! Fact Tables:
 //! - inventory: Inventory levels
 
-use super::data::{
-    TPCDSData, BRANDS, BUY_POTENTIALS, CATEGORIES, CLASSES, CREDIT_RATINGS, DEP_COUNTS,
-    EDUCATION_STATUS, GENDERS, INCOME_BANDS, ITEM_COLORS, ITEM_SIZES, MARITAL_STATUS, STATES,
-    VEHICLE_COUNTS,
-};
-use vibesql_storage::Database as VibeDB;
-use vibesql_types::Date;
+use std::str::FromStr;
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
@@ -67,8 +61,14 @@ use mysql::prelude::*;
 use mysql::{Pool, PooledConn};
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use vibesql_storage::Database as VibeDB;
+use vibesql_types::Date;
 
-use std::str::FromStr;
+use super::data::{
+    TPCDSData, BRANDS, BUY_POTENTIALS, CATEGORIES, CLASSES, CREDIT_RATINGS, DEP_COUNTS,
+    EDUCATION_STATUS, GENDERS, INCOME_BANDS, ITEM_COLORS, ITEM_SIZES, MARITAL_STATUS, STATES,
+    VEHICLE_COUNTS,
+};
 
 // =============================================================================
 // Database Loaders
@@ -91,7 +91,6 @@ pub fn load_vibesql(scale_factor: f64) -> VibeDB {
     std::io::stderr().flush().ok();
     create_tpcds_schema_vibesql(&mut db);
     eprintln!("done");
-
 
     // Load dimension tables first (fact tables reference them)
     eprint!("  Loading date_dim ({} rows)... ", data.date_dim_count);
@@ -312,7 +311,6 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 
     create_tpcds_schema_duckdb(&conn);
 
-
     // Phase 1 tables (core dimension and fact tables)
     load_date_dim_duckdb(&conn, &mut data);
     load_time_dim_duckdb(&conn, &mut data);
@@ -353,8 +351,9 @@ pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
 /// Returns None if MYSQL_URL is not set or connection fails
 #[cfg(feature = "mysql")]
 pub fn load_mysql(scale_factor: f64) -> Option<PooledConn> {
-    use mysql::prelude::Queryable;
     use std::io::Write;
+
+    use mysql::prelude::Queryable;
 
     let url = std::env::var("MYSQL_URL").ok()?;
     let pool = Pool::new(url.as_str()).ok()?;
@@ -3938,7 +3937,10 @@ fn load_item_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(arcstr::ArcStr::from(i_item_id)),
             SqlValue::Date(Date::from_str("1998-01-01").unwrap()), // i_rec_start_date
             SqlValue::Null,                                        // i_rec_end_date
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("{} {} item", CATEGORIES[category_idx], CLASSES[class_idx]))),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                "{} {} item",
+                CATEGORIES[category_idx], CLASSES[class_idx]
+            ))),
             SqlValue::Numeric(current_price),
             SqlValue::Numeric(wholesale_cost),
             SqlValue::Integer((brand_idx + 1) as i64),
@@ -4221,17 +4223,17 @@ fn load_promotion_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(data.random_i32(1, 10) as i64),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Promo {}", i))),
             // Match DuckDB's deterministic channel pattern
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])),       // p_channel_dmail
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), // p_channel_email
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])),       // p_channel_catalog
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), // p_channel_tv
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])),       // p_channel_radio
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), // p_channel_press
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])),       // p_channel_event
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), // p_channel_demo
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])), // p_channel_dmail
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), /* p_channel_email */
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])), // p_channel_catalog
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), /* p_channel_tv */
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])), // p_channel_radio
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), /* p_channel_press */
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])), // p_channel_event
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[(i + 1) % 2].to_string())), /* p_channel_demo */
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Details for promo {}", i))),
             SqlValue::Varchar(arcstr::ArcStr::from(purposes[i % 3])),
-            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])),       // p_discount_active
+            SqlValue::Varchar(arcstr::ArcStr::from(channels[i % 2])), // p_discount_active
         ]);
         rows.push(row);
     }
@@ -4257,8 +4259,9 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Varchar(arcstr::ArcStr::from(w_warehouse_id)),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Warehouse {}", i))),
             SqlValue::Integer(data.random_i32(50000, 500000) as i64), // sq_ft
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("{}", data.random_i32(1, 9999)))), // Match DuckDB: 1-9999
-            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(40))),                 // Match DuckDB: max 40
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("{}", data.random_i32(1, 9999)))), /* Match DuckDB: 1-9999 */
+            SqlValue::Varchar(arcstr::ArcStr::from(data.random_varchar(40))), /* Match DuckDB:
+                                                                               * max 40 */
             SqlValue::Varchar(arcstr::ArcStr::from("Street")),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Suite {}", data.random_i32(100, 999)))),
             SqlValue::Varchar(arcstr::ArcStr::from(data.random_city())),
@@ -4277,9 +4280,10 @@ fn load_warehouse_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 }
 
 fn load_ship_mode_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
-    use super::data::SHIP_MODES;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    use super::data::SHIP_MODES;
 
     let carriers = ["FedEx", "UPS", "USPS", "DHL", "Freight"];
     let types = ["EXPRESS", "REGULAR", "OVERNIGHT", "LIBRARY", "TWO DAY"];
@@ -4309,9 +4313,10 @@ fn load_ship_mode_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
 }
 
 fn load_reason_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
-    use super::data::REASONS;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    use super::data::REASONS;
 
     let count = data.reason_count.min(REASONS.len());
     let mut rows = Vec::with_capacity(count);
@@ -4467,13 +4472,13 @@ fn load_web_page_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(arcstr::ArcStr::from(wp_web_page_id)),
-            SqlValue::Null,       // wp_rec_start_date_sk
-            SqlValue::Null,       // wp_rec_end_date_sk
+            SqlValue::Null, // wp_rec_start_date_sk
+            SqlValue::Null, // wp_rec_end_date_sk
             SqlValue::Integer(creation_date_sk as i64),
             SqlValue::Integer(access_date_sk as i64),
-            SqlValue::Varchar(arcstr::ArcStr::from(if i % 2 == 0 { "Y" } else { "N" })), // wp_autogen_flag
+            SqlValue::Varchar(arcstr::ArcStr::from(if i % 2 == 0 { "Y" } else { "N" })), /* wp_autogen_flag */
             SqlValue::Integer(((i % data.customer_count) + 1) as i64), // wp_customer_sk
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("http://www.example.com/page{}", i))), // wp_url
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("http://www.example.com/page{}", i))), /* wp_url */
             SqlValue::Varchar(arcstr::ArcStr::from(page_types[type_idx])),
             SqlValue::Integer(char_count as i64),
             SqlValue::Integer(link_count as i64),
@@ -4515,20 +4520,20 @@ fn load_web_site_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
         let row = Row::new(vec![
             SqlValue::Integer(i as i64),
             SqlValue::Varchar(arcstr::ArcStr::from(web_site_id)),
-            SqlValue::Null,       // web_rec_start_date_sk
-            SqlValue::Null,       // web_rec_end_date_sk
+            SqlValue::Null, // web_rec_start_date_sk
+            SqlValue::Null, // web_rec_end_date_sk
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Site {}", i))), // web_name
             SqlValue::Integer(open_date_sk as i64),
-            SqlValue::Null,       // web_close_date_sk
+            SqlValue::Null,                                    // web_close_date_sk
             SqlValue::Varchar(arcstr::ArcStr::from("medium")), // web_class
             SqlValue::Varchar(arcstr::ArcStr::from(manager)),
             SqlValue::Integer(((i % 6) + 1) as i64), // web_mkt_id
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("Market Class {}", i % 10))), // web_mkt_class
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("Market description for site {}", i))), // web_mkt_desc
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Market Class {}", i % 10))), /* web_mkt_class */
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("Market description for site {}", i))), /* web_mkt_desc */
             SqlValue::Varchar(arcstr::ArcStr::from(market_manager)),
             SqlValue::Integer(((i % 3) + 1) as i64), // web_company_id
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Company {}", (i % 3) + 1))),
-            SqlValue::Varchar(arcstr::ArcStr::from(format!("{}", street_number))), // web_street_number
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("{}", street_number))), /* web_street_number */
             SqlValue::Varchar(arcstr::ArcStr::from(street_name)),
             SqlValue::Varchar(arcstr::ArcStr::from("Street")),
             SqlValue::Varchar(arcstr::ArcStr::from(format!("Suite {}", suite_number))),
@@ -4677,11 +4682,11 @@ fn load_catalog_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(cr_refunded_customer_sk as i64),
             SqlValue::Integer((i % 1920 + 1) as i64), // cr_refunded_cdemo_sk
             SqlValue::Integer((i % 7200 + 1) as i64), // cr_refunded_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // cr_refunded_addr_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), /* cr_refunded_addr_sk */
             SqlValue::Integer(cr_returning_customer_sk as i64),
             SqlValue::Integer((i % 1920 + 1) as i64), // cr_returning_cdemo_sk
             SqlValue::Integer((i % 7200 + 1) as i64), // cr_returning_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // cr_returning_addr_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), /* cr_returning_addr_sk */
             SqlValue::Integer((i % 6 + 1) as i64),                             // cr_call_center_sk
             SqlValue::Integer(cr_catalog_page_sk as i64),
             SqlValue::Integer(cr_ship_mode_sk as i64),
@@ -4836,11 +4841,11 @@ fn load_web_returns_vibesql(db: &mut VibeDB, data: &mut TPCDSData) {
             SqlValue::Integer(wr_refunded_customer_sk as i64),
             SqlValue::Integer((i % 1920 + 1) as i64), // wr_refunded_cdemo_sk
             SqlValue::Integer((i % 7200 + 1) as i64), // wr_refunded_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // wr_refunded_addr_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), /* wr_refunded_addr_sk */
             SqlValue::Integer(wr_returning_customer_sk as i64),
             SqlValue::Integer((i % 1920 + 1) as i64), // wr_returning_cdemo_sk
             SqlValue::Integer((i % 7200 + 1) as i64), // wr_returning_hdemo_sk
-            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), // wr_returning_addr_sk
+            SqlValue::Integer(((i % data.customer_address_count) + 1) as i64), /* wr_returning_addr_sk */
             SqlValue::Integer(wr_web_page_sk as i64),
             SqlValue::Integer(wr_reason_sk as i64),
             SqlValue::Integer(wr_order_number as i64),

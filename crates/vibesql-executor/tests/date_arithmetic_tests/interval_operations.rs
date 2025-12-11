@@ -11,7 +11,9 @@ fn test_extract_year() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("YEAR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("YEAR"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-03-15".parse().unwrap(),
             )),
@@ -29,7 +31,9 @@ fn test_extract_month() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MONTH"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("MONTH"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-03-15".parse().unwrap(),
             )),
@@ -47,7 +51,9 @@ fn test_extract_day() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("DAY"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("DAY"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-03-15".parse().unwrap(),
             )),

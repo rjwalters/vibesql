@@ -620,7 +620,9 @@ fn json_value_to_sql(
             Ok(SqlValue::Character(arcstr::ArcStr::from(s.as_str())))
         }
         (serde_json::Value::String(s), DataType::Varchar { .. })
-        | (serde_json::Value::String(s), DataType::Name) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.as_str()))),
+        | (serde_json::Value::String(s), DataType::Name) => {
+            Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.as_str())))
+        }
         (serde_json::Value::Bool(b), DataType::Boolean) => Ok(SqlValue::Boolean(*b)),
         (serde_json::Value::String(s), DataType::Date) => s
             .parse()

@@ -2,9 +2,10 @@
 //!
 //! Extract coordinates and metadata from geometries.
 
+use vibesql_types::SqlValue;
+
 use super::{sql_value_to_geometry, Geometry};
 use crate::errors::ExecutorError;
-use vibesql_types::SqlValue;
 
 /// ST_X(point) - Get X coordinate from POINT
 pub fn st_x(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {

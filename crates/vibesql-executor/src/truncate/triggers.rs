@@ -2,8 +2,7 @@
 
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::truncate_validation::has_delete_triggers;
+use crate::{errors::ExecutorError, truncate_validation::has_delete_triggers};
 
 /// Validate that a table has no DELETE triggers
 ///

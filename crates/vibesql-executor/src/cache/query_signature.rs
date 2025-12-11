@@ -9,14 +9,16 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use vibesql_ast::arena::{
-    Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
-    FromClause as ArenaFromClause, GroupByClause as ArenaGroupByClause,
-    GroupingElement as ArenaGroupingElement, GroupingSet as ArenaGroupingSet,
-    MixedGroupingItem as ArenaMixedGroupingItem, SelectItem as ArenaSelectItem,
-    SelectStmt as ArenaSelectStmt, WindowFunctionSpec as ArenaWindowFunctionSpec,
+use vibesql_ast::{
+    arena::{
+        Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
+        FromClause as ArenaFromClause, GroupByClause as ArenaGroupByClause,
+        GroupingElement as ArenaGroupingElement, GroupingSet as ArenaGroupingSet,
+        MixedGroupingItem as ArenaMixedGroupingItem, SelectItem as ArenaSelectItem,
+        SelectStmt as ArenaSelectStmt, WindowFunctionSpec as ArenaWindowFunctionSpec,
+    },
+    Expression, Statement,
 };
-use vibesql_ast::{Expression, Statement};
 
 /// Unique identifier for a query based on its structure
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

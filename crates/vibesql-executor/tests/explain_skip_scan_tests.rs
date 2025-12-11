@@ -89,7 +89,8 @@ fn create_skip_scan_test_db() -> Database {
 
     // Create composite index on (region, sale_date)
     // This index is suitable for skip-scan when querying by sale_date alone
-    // API signature: create_index(index_name: String, table_name: String, unique: bool, columns: Vec<IndexColumn>)
+    // API signature: create_index(index_name: String, table_name: String, unique: bool, columns:
+    // Vec<IndexColumn>)
     db.create_index(
         "idx_region_date".to_string(),
         "sales".to_string(),
@@ -153,10 +154,7 @@ fn test_explain_text_format() {
     // Basic structure check
     assert!(output.contains("Select"), "Expected Select in output");
     // Table name is normalized to uppercase by the parser
-    assert!(
-        output.contains("sales") || output.contains("SALES"),
-        "Expected table name in output"
-    );
+    assert!(output.contains("sales") || output.contains("SALES"), "Expected table name in output");
 }
 
 #[test]
@@ -179,11 +177,7 @@ fn test_explain_shows_row_estimates() {
 
     // Row estimates may not always be shown (depends on whether statistics are available)
     // This test verifies the basic output structure
-    assert!(
-        output.contains("Scan"),
-        "Expected scan operation in output:\n{}",
-        output
-    );
+    assert!(output.contains("Scan"), "Expected scan operation in output:\n{}", output);
     // If row estimates are shown, they should be formatted correctly
     if output.contains("rows=") {
         assert!(
@@ -215,11 +209,7 @@ fn test_explain_index_scan_shows_index_name() {
 
     // If using index, should show the index name
     if output.contains("Index Scan") {
-        assert!(
-            output.contains("Using index:"),
-            "Index Scan should show index name:\n{}",
-            output
-        );
+        assert!(output.contains("Using index:"), "Index Scan should show index name:\n{}", output);
     }
 }
 
@@ -246,21 +236,13 @@ fn test_explain_skip_scan_format_when_applicable() {
 
     // If skip-scan is chosen, verify its format
     if output.contains("Skip Scan") {
-        assert!(
-            output.contains("Using index:"),
-            "Skip Scan should show index name:\n{}",
-            output
-        );
+        assert!(output.contains("Using index:"), "Skip Scan should show index name:\n{}", output);
         assert!(
             output.contains("Skip columns:"),
             "Skip Scan should show skip columns:\n{}",
             output
         );
-        assert!(
-            output.contains("cardinality:"),
-            "Skip Scan should show cardinality:\n{}",
-            output
-        );
+        assert!(output.contains("cardinality:"), "Skip Scan should show cardinality:\n{}", output);
         assert!(
             output.contains("Filter column:"),
             "Skip Scan should show filter column:\n{}",

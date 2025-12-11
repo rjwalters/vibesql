@@ -41,8 +41,8 @@ mod values;
 /// - This allows skipping expensive sorting in the SELECT executor
 ///
 /// The LIMIT clause is passed for early termination optimization (#3253):
-/// - When ORDER BY is satisfied by an index and no post-filter needed,
-///   the index scan can stop early after fetching LIMIT rows
+/// - When ORDER BY is satisfied by an index and no post-filter needed, the index scan can stop
+///   early after fetching LIMIT rows
 /// - This transforms O(all_matching_rows) to O(LIMIT)
 ///
 /// Join reordering optimization (enabled by default):
@@ -128,33 +128,41 @@ where
 
     // Fall back to standard execution (recursive left-deep joins)
     match from {
-        vibesql_ast::FromClause::Table { name, alias, column_aliases } => table::execute_table_scan(
-            name,
-            alias.as_ref(),
-            column_aliases.as_ref(),
-            cte_results,
-            database,
-            where_clause,
-            order_by,
-            limit,
-            outer_row,
-            outer_schema,
-        ),
-        vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
-            join_scan::execute_join(
-                left,
-                right,
-                join_type,
-                condition,
-                *natural,
+        vibesql_ast::FromClause::Table { name, alias, column_aliases } => {
+            table::execute_table_scan(
+                name,
+                alias.as_ref(),
+                column_aliases.as_ref(),
                 cte_results,
                 database,
                 where_clause,
+                order_by,
+                limit,
                 outer_row,
                 outer_schema,
-                execute_subquery,
             )
         }
+        vibesql_ast::FromClause::Join {
+            left,
+            right,
+            join_type,
+            condition,
+            using_columns,
+            natural,
+        } => join_scan::execute_join(
+            left,
+            right,
+            join_type,
+            condition,
+            using_columns,
+            *natural,
+            cte_results,
+            database,
+            where_clause,
+            outer_row,
+            outer_schema,
+            execute_subquery,
+        ),
         vibesql_ast::FromClause::Subquery { query, alias, column_aliases } => {
             derived::execute_derived_table(query, alias, column_aliases.as_ref(), execute_subquery)
         }

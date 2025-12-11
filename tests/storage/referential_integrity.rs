@@ -739,7 +739,11 @@ fn test_self_referential_table() {
     // Insert employees: CEO (no manager), Manager (reports to CEO), Employee (reports to Manager)
     db.insert_row(
         "EMPLOYEE",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Varchar(StringValue::from("CEO"))]),
+        Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Null,
+            SqlValue::Varchar(StringValue::from("CEO")),
+        ]),
     )
     .unwrap();
     db.insert_row(

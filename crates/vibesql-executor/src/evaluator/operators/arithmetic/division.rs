@@ -2,9 +2,8 @@
 
 use vibesql_types::{SqlValue, TypeBehavior, ValueType};
 
-use crate::errors::ExecutorError;
-
 use super::coerce_numeric_values;
+use crate::errors::ExecutorError;
 
 pub struct Division;
 

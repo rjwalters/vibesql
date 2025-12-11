@@ -2,8 +2,10 @@
 
 use bumpalo::collections::Vec as BumpVec;
 
-use super::expression::{Expression, OrderByItem};
-use super::interner::Symbol;
+use super::{
+    expression::{Expression, OrderByItem},
+    interner::Symbol,
+};
 
 /// Common Table Expression (CTE) definition
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +95,8 @@ pub enum FromClause<'arena> {
         right: &'arena FromClause<'arena>,
         join_type: JoinType,
         condition: Option<Expression<'arena>>,
+        /// USING clause columns - joins on these named columns from both tables
+        using_columns: Option<BumpVec<'arena, Symbol>>,
         natural: bool,
     },
     Subquery {

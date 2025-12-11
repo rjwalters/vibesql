@@ -13,6 +13,7 @@ fn test_tpcds_schema_loads_without_type_mismatch() {
     // This is a compile-time verification that the types are correct.
 
     use std::str::FromStr;
+
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::{Database, Row};
     use vibesql_types::{DataType, Date, SqlValue};
@@ -71,6 +72,7 @@ fn test_tpcds_schema_loads_without_type_mismatch() {
 #[test]
 fn test_web_site_date_columns() {
     use std::str::FromStr;
+
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::{Database, Row};
     use vibesql_types::{DataType, Date, SqlValue};

@@ -7,8 +7,10 @@
 
 use vibesql_types::SqlValue;
 
-use crate::database::indexes::index_metadata::{acquire_btree_lock, IndexData};
-use crate::database::indexes::value_normalization::normalize_for_comparison;
+use crate::database::indexes::{
+    index_metadata::{acquire_btree_lock, IndexData},
+    value_normalization::normalize_for_comparison,
+};
 
 impl IndexData {
     /// Skip-scan: Lookup rows matching a non-prefix column filter
@@ -41,7 +43,11 @@ impl IndexData {
     /// - k = matching rows
     ///
     /// This is beneficial when prefix_cardinality is low and the filter is selective.
-    pub fn skip_scan_equality(&self, filter_column_idx: usize, filter_value: &SqlValue) -> Vec<usize> {
+    pub fn skip_scan_equality(
+        &self,
+        filter_column_idx: usize,
+        filter_value: &SqlValue,
+    ) -> Vec<usize> {
         if filter_column_idx == 0 {
             // Not a skip-scan - use regular prefix lookup
             return self.prefix_multi_lookup(std::slice::from_ref(filter_value));
@@ -74,21 +80,15 @@ impl IndexData {
 
                 matching_rows
             }
-            IndexData::DiskBacked { btree, .. } => {
-                match acquire_btree_lock(btree) {
-                    Ok(guard) => {
-                        guard.skip_scan_equality(filter_column_idx, &normalized_filter)
-                            .unwrap_or_else(|_| vec![])
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "BTreeIndex lock acquisition failed in skip_scan_equality: {}",
-                            e
-                        );
-                        vec![]
-                    }
+            IndexData::DiskBacked { btree, .. } => match acquire_btree_lock(btree) {
+                Ok(guard) => guard
+                    .skip_scan_equality(filter_column_idx, &normalized_filter)
+                    .unwrap_or_else(|_| vec![]),
+                Err(e) => {
+                    log::warn!("BTreeIndex lock acquisition failed in skip_scan_equality: {}", e);
+                    vec![]
                 }
-            }
+            },
             IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
                 // Vector indexes don't support skip-scan
                 vec![]
@@ -173,27 +173,21 @@ impl IndexData {
 
                 matching_rows
             }
-            IndexData::DiskBacked { btree, .. } => {
-                match acquire_btree_lock(btree) {
-                    Ok(guard) => {
-                        guard.skip_scan_range(
-                            filter_column_idx,
-                            normalized_lower.as_ref(),
-                            inclusive_lower,
-                            normalized_upper.as_ref(),
-                            inclusive_upper,
-                        )
-                        .unwrap_or_else(|_| vec![])
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "BTreeIndex lock acquisition failed in skip_scan_range: {}",
-                            e
-                        );
-                        vec![]
-                    }
+            IndexData::DiskBacked { btree, .. } => match acquire_btree_lock(btree) {
+                Ok(guard) => guard
+                    .skip_scan_range(
+                        filter_column_idx,
+                        normalized_lower.as_ref(),
+                        inclusive_lower,
+                        normalized_upper.as_ref(),
+                        inclusive_upper,
+                    )
+                    .unwrap_or_else(|_| vec![]),
+                Err(e) => {
+                    log::warn!("BTreeIndex lock acquisition failed in skip_scan_range: {}", e);
+                    vec![]
                 }
-            }
+            },
             IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
                 // Vector indexes don't support skip-scan
                 vec![]

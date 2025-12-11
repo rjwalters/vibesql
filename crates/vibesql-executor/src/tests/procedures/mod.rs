@@ -1,12 +1,11 @@
 //! Tests for stored procedure and function functionality
 
-use super::common::setup_users_table as setup_test_table;
 use vibesql_ast::*;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
-use crate::advanced_objects;
-use crate::errors::ExecutorError;
+use super::common::setup_users_table as setup_test_table;
+use crate::{advanced_objects, errors::ExecutorError};
 
 // Test fixtures and helpers to reduce duplication
 

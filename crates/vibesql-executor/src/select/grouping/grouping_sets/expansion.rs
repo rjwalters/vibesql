@@ -3,9 +3,9 @@
 //! This module handles expanding SQL:1999 OLAP grouping constructs
 //! into concrete sets of GROUP BY expressions.
 
-use super::expression_utils::expressions_equal;
-use super::ResolvedGroupingSet;
 use vibesql_ast::{Expression, GroupByClause, GroupingElement, GroupingSet, MixedGroupingItem};
+
+use super::{expression_utils::expressions_equal, ResolvedGroupingSet};
 
 /// Expand a GROUP BY clause into a list of resolved grouping sets
 pub fn expand_group_by_clause(clause: &GroupByClause) -> Vec<ResolvedGroupingSet> {

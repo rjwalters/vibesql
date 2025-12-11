@@ -5,17 +5,20 @@
 //!
 //! ## Current Limitations
 //!
-//! - **Metrics**: Only total execution time is currently collected. Per-query metrics
-//!   would require custom instrumentation of the sqllogictest Runner.
-//! - **Glob Patterns**: Multiple test file support via glob patterns is deferred to a
-//!   future enhancement. Currently only single test files are supported.
+//! - **Metrics**: Only total execution time is currently collected. Per-query metrics would require
+//!   custom instrumentation of the sqllogictest Runner.
+//! - **Glob Patterns**: Multiple test file support via glob patterns is deferred to a future
+//!   enhancement. Currently only single test files are supported.
 //! - **Parallel Execution**: Concurrent testing of multiple files is not yet implemented.
+
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use md5::{Digest, Md5};
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
-use std::path::Path;
-use std::time::{Duration, Instant};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;

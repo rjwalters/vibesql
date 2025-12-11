@@ -11,9 +11,11 @@ use std::collections::HashSet;
 
 use tokio::sync::mpsc;
 
-use super::config::{SubscriptionConfig, SubscriptionRetryPolicy};
-use super::delta::PartialRowDelta;
-use super::selective::SelectiveColumnConfig;
+use super::{
+    config::{SubscriptionConfig, SubscriptionRetryPolicy},
+    delta::PartialRowDelta,
+    selective::SelectiveColumnConfig,
+};
 
 // ============================================================================
 // Subscription ID

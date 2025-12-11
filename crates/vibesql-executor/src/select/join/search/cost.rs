@@ -8,8 +8,10 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use super::context::JoinOrderContext;
-use super::state::{CascadingFilterState, JoinCost};
+use super::{
+    context::JoinOrderContext,
+    state::{CascadingFilterState, JoinCost},
+};
 
 impl JoinOrderContext {
     /// Extract base table cardinalities (before any filters applied)
@@ -18,7 +20,8 @@ impl JoinOrderContext {
     /// the original table size and the filtered size to compute filter selectivity.
     ///
     /// # Parameters
-    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g.,
+    ///   "nation")
     pub(super) fn extract_base_cardinalities(
         analyzer: &crate::select::join::reorder::JoinOrderAnalyzer,
         database: &vibesql_storage::Database,
@@ -43,13 +46,15 @@ impl JoinOrderContext {
         cardinalities
     }
 
-    /// Extract table cardinalities from actual table statistics, adjusted by WHERE clause selectivity
+    /// Extract table cardinalities from actual table statistics, adjusted by WHERE clause
+    /// selectivity
     ///
     /// Uses real row counts from database tables and applies selectivity estimation
     /// for WHERE clause predicates that filter specific tables.
     ///
     /// # Parameters
-    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g.,
+    ///   "nation")
     pub(super) fn extract_cardinalities_with_selectivity(
         analyzer: &crate::select::join::reorder::JoinOrderAnalyzer,
         database: &vibesql_storage::Database,
@@ -133,7 +138,8 @@ impl JoinOrderContext {
     /// Using MAX prevents catastrophic underestimation of result cardinality.
     ///
     /// # Parameters
-    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation")
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g.,
+    ///   "nation")
     pub(super) fn compute_edge_selectivities(
         edges: &[super::super::reorder::JoinEdge],
         database: &vibesql_storage::Database,
@@ -281,11 +287,8 @@ impl JoinOrderContext {
             // Update reverse direction
             let reverse_key = (right_table.clone(), left_table.clone());
             let current_rev: f64 = combined_selectivities.get(&reverse_key).copied().unwrap_or(0.0);
-            let new_selectivity_rev = if current_rev == 0.0 {
-                selectivity
-            } else {
-                current_rev.max(selectivity)
-            };
+            let new_selectivity_rev =
+                if current_rev == 0.0 { selectivity } else { current_rev.max(selectivity) };
             combined_selectivities.insert(reverse_key, new_selectivity_rev);
 
             // Debug logging for composite keys
@@ -341,7 +344,8 @@ impl JoinOrderContext {
                 // SEMI/ANTI joins: output is at most left_cardinality (existence check)
                 // For SEMI: each left row appears at most once (1 if match exists, 0 otherwise)
                 // For ANTI: each left row appears at most once (1 if no match, 0 otherwise)
-                // The selectivity represents the fraction of left rows that match (SEMI) or don't match (ANTI)
+                // The selectivity represents the fraction of left rows that match (SEMI) or don't
+                // match (ANTI)
                 std::cmp::max(
                     1,
                     std::cmp::min(
@@ -780,7 +784,8 @@ mod tests {
     #[test]
     fn test_compute_pk_fk_selectivity() {
         // PK-FK: left is PK (customer), right is FK (orders)
-        // customer.c_custkey (PK, 150K unique) = orders.o_custkey (FK, 100K unique out of 1.5M rows)
+        // customer.c_custkey (PK, 150K unique) = orders.o_custkey (FK, 100K unique out of 1.5M
+        // rows)
         let selectivity = compute_pk_fk_selectivity(
             150_000,   // left_ndv (customer PK)
             100_000,   // right_ndv (orders FK)

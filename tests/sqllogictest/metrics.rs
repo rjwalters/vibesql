@@ -4,8 +4,9 @@
 //! metrics during sqllogictest execution. Metrics can be collected for any AsyncDB
 //! implementation (vibesql, SQLite, etc.) and exported to JSON for analysis.
 
-use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
 
 /// Detailed metrics for a single SQL query execution
 #[allow(dead_code)]
@@ -235,8 +236,9 @@ impl Default for MemoryTracker {
 // Custom serde serialization for Duration (since Duration doesn't implement Serialize by default)
 #[allow(dead_code)]
 mod duration_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     #[allow(dead_code)]
     pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
@@ -258,8 +260,9 @@ mod duration_serde {
 
 #[allow(dead_code)]
 mod vec_duration_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     #[allow(dead_code)]
     pub fn serialize<S>(durations: &[Duration], serializer: S) -> Result<S::Ok, S::Error>

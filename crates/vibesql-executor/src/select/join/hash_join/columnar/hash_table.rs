@@ -10,9 +10,10 @@
 //! structure. During probe, the Bloom filter can quickly reject keys that are
 //! definitely not in the table, avoiding expensive hash table lookups.
 
-use crate::errors::ExecutorError;
-use crate::select::columnar::ColumnArray;
-use crate::select::join::BloomFilter;
+use crate::{
+    errors::ExecutorError,
+    select::{columnar::ColumnArray, join::BloomFilter},
+};
 
 /// Minimum number of build-side rows to enable Bloom filter optimization.
 const BLOOM_FILTER_MIN_ROWS: usize = 100;

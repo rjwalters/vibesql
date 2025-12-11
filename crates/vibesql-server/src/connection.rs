@@ -1,31 +1,43 @@
-use crate::auth::PasswordStore;
-use crate::config::Config;
-use crate::observability::ObservabilityProvider;
-use crate::protocol::{
-    BackendMessage, FieldDescription, FrontendMessage, SelectiveUpdatesConfig, SubscriptionUpdateType, TransactionStatus,
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
 };
-use crate::registry::DatabaseRegistry;
-use crate::session::{ExecutionResult, Session};
-use crate::protocol::PartialRowUpdate;
-use crate::subscription::{
-    compute_delta_with_pk, create_partial_row_update, detect_pk_columns_from_stmt,
-    extract_table_refs, filter::SubscriptionFilter, hash_rows, SelectiveColumnConfig,
-    SubscriptionId, SubscriptionManager, SubscriptionUpdate,
-};
-use crate::Row;
+
 use anyhow::Result;
 use bytes::BytesMut;
-use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::TcpStream;
-use tokio::sync::broadcast;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
+    sync::broadcast,
+};
 use tracing::{debug, error, info, warn};
 use vibesql_executor::cache::table_extractor;
+
+use crate::{
+    auth::PasswordStore,
+    config::Config,
+    observability::ObservabilityProvider,
+    protocol::{
+        BackendMessage, FieldDescription, FrontendMessage, PartialRowUpdate,
+        SelectiveUpdatesConfig, SubscriptionUpdateType, TransactionStatus,
+    },
+    registry::DatabaseRegistry,
+    session::{ExecutionResult, Session},
+    subscription::{
+        compute_delta_with_pk, create_partial_row_update, detect_pk_columns_from_stmt,
+        extract_table_refs, filter::SubscriptionFilter, hash_rows, SelectiveColumnConfig,
+        SubscriptionId, SubscriptionManager, SubscriptionUpdate,
+    },
+    Row,
+};
 
 /// Notification sent when a mutation affects tables
 /// This is broadcast to all connections so they can notify their subscriptions
@@ -316,7 +328,8 @@ impl ConnectionHandler {
                 match self.handle_client_message(msg).await? {
                     ClientMessageResult::Continue => {}
                     ClientMessageResult::Terminate => {
-                        let (total, selective_eligible) = self.subscription_manager
+                        let (total, selective_eligible) = self
+                            .subscription_manager
                             .unsubscribe_all_for_connection(&self.connection_id);
                         if let Some(metrics) = self.observability.metrics() {
                             for _ in 0..total {
@@ -377,8 +390,8 @@ impl ConnectionHandler {
         }
 
         // Clean up subscriptions when connection closes
-        let (total, selective_eligible) = self.subscription_manager
-            .unsubscribe_all_for_connection(&self.connection_id);
+        let (total, selective_eligible) =
+            self.subscription_manager.unsubscribe_all_for_connection(&self.connection_id);
         if let Some(metrics) = self.observability.metrics() {
             for _ in 0..total {
                 metrics.decrement_subscriptions_active();
@@ -401,14 +414,18 @@ impl ConnectionHandler {
             }
 
             FrontendMessage::Subscribe { query, params, filter, selective_updates_config } => {
-                debug!("Subscribe: {} (filter: {:?}, selective_config: {:?})", query, filter, selective_updates_config);
+                debug!(
+                    "Subscribe: {} (filter: {:?}, selective_config: {:?})",
+                    query, filter, selective_updates_config
+                );
                 self.handle_subscribe(&query, params, filter, selective_updates_config).await?;
                 Ok(ClientMessageResult::Continue)
             }
 
             FrontendMessage::Unsubscribe { subscription_id } => {
                 debug!("Unsubscribe: {:?}", subscription_id);
-                let was_selective_eligible = self.subscription_manager.unsubscribe_by_wire_id(&subscription_id);
+                let was_selective_eligible =
+                    self.subscription_manager.unsubscribe_by_wire_id(&subscription_id);
                 if was_selective_eligible {
                     if let Some(metrics) = self.observability.metrics() {
                         metrics.decrement_selective_eligible();
@@ -440,14 +457,19 @@ impl ConnectionHandler {
     #[allow(clippy::type_complexity)]
     async fn handle_cross_connection_notification(&mut self, affected_tables: &HashSet<String>) {
         // Collect subscriptions for THIS connection that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
-            affected_tables
-                .iter()
-                .flat_map(|table| {
-                    self.subscription_manager
-                        .get_affected_subscriptions_for_connection(table, &self.connection_id)
-                })
-                .collect();
+        let subscriptions_to_update: Vec<(
+            [u8; 16],
+            String,
+            u64,
+            Option<Vec<Row>>,
+            Option<String>,
+        )> = affected_tables
+            .iter()
+            .flat_map(|table| {
+                self.subscription_manager
+                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
+            })
+            .collect();
 
         if subscriptions_to_update.is_empty() {
             return;
@@ -504,11 +526,7 @@ impl ConnectionHandler {
                         if let Some(ref old_rows) = last_result {
                             // First, try selective column updates (0xF7) using effective config
                             if self
-                                .try_send_selective_updates(
-                                    &subscription_id,
-                                    old_rows,
-                                    &new_rows,
-                                )
+                                .try_send_selective_updates(&subscription_id, old_rows, &new_rows)
                                 .await
                             {
                                 // Selective updates sent successfully - update stored result
@@ -534,10 +552,7 @@ impl ConnectionHandler {
                                 if let Err(e) =
                                     self.send_delta_updates(&subscription_id, &delta).await
                                 {
-                                    warn!(
-                                        "Failed to send cross-connection delta update: {}",
-                                        e
-                                    );
+                                    warn!("Failed to send cross-connection delta update: {}", e);
                                 }
 
                                 // Log delta statistics
@@ -604,7 +619,10 @@ impl ConnectionHandler {
                     Err(e) => {
                         // Query failed - send error to subscriber
                         if let Err(send_err) = self
-                            .send_subscription_error(&subscription_id, &format!("Query error: {}", e))
+                            .send_subscription_error(
+                                &subscription_id,
+                                &format!("Query error: {}", e),
+                            )
                             .await
                         {
                             warn!("Failed to send subscription error: {}", send_err);
@@ -708,9 +726,7 @@ impl ConnectionHandler {
     /// Convert rows to wire format for sending over the protocol
     fn rows_to_wire_format(rows: &[Row]) -> Vec<Vec<Option<Vec<u8>>>> {
         rows.iter()
-            .map(|row| {
-                row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect()
-            })
+            .map(|row| row.values.iter().map(|v| Some(v.to_string().as_bytes().to_vec())).collect())
             .collect()
     }
 
@@ -799,27 +815,22 @@ impl ConnectionHandler {
                     create_partial_row_update(old_row, new_row, pk_columns, &selective_config)
                 {
                     // Record column ratio for successful partial updates
-                    let changed_count = old_row
-                        .iter()
-                        .zip(new_row.iter())
-                        .filter(|(o, n)| o != n)
-                        .count();
+                    let changed_count =
+                        old_row.iter().zip(new_row.iter()).filter(|(o, n)| o != n).count();
                     if let Some(metrics) = self.observability.metrics() {
                         metrics.record_selective_update_column_ratio(changed_count, new_row.len());
                     }
                     partial_updates.push(partial);
                 } else {
                     // Check if this was due to threshold exceeded (too many columns changed)
-                    let changed_count = old_row
-                        .iter()
-                        .zip(new_row.iter())
-                        .filter(|(o, n)| o != n)
-                        .count();
+                    let changed_count =
+                        old_row.iter().zip(new_row.iter()).filter(|(o, n)| o != n).count();
                     if changed_count > 0 {
                         let ratio = changed_count as f64 / new_row.len() as f64;
                         // Record column ratio for analysis (helps tuning threshold)
                         if let Some(metrics) = self.observability.metrics() {
-                            metrics.record_selective_update_column_ratio(changed_count, new_row.len());
+                            metrics
+                                .record_selective_update_column_ratio(changed_count, new_row.len());
                         }
                         if ratio > selective_config.max_changed_columns_ratio {
                             threshold_exceeded_count += 1;
@@ -847,13 +858,13 @@ impl ConnectionHandler {
         if threshold_exceeded_count > 0 {
             debug!(
                 "Selective update: {} rows exceeded change threshold for subscription {:?}",
-                threshold_exceeded_count,
-                subscription_id
+                threshold_exceeded_count, subscription_id
             );
             if let Some(metrics) = self.observability.metrics() {
                 for _ in 0..threshold_exceeded_count {
                     metrics.record_partial_update_fallback("threshold_exceeded");
-                    metrics.record_selective_update_decision("sent_full", Some("threshold_exceeded"));
+                    metrics
+                        .record_selective_update_decision("sent_full", Some("threshold_exceeded"));
                 }
             }
         }
@@ -926,10 +937,7 @@ impl ConnectionHandler {
             metrics.record_partial_update_sent();
         }
 
-        debug!(
-            "Sent selective column update (0xF7) for subscription {:?}",
-            subscription_id
-        );
+        debug!("Sent selective column update (0xF7) for subscription {:?}", subscription_id);
         true
     }
 
@@ -1039,7 +1047,8 @@ impl ConnectionHandler {
         let parsed = match vibesql_parser::Parser::parse_sql(query) {
             Ok(stmt) => stmt,
             Err(e) => {
-                // Send subscription error with a dummy subscription ID (query failed before registration)
+                // Send subscription error with a dummy subscription ID (query failed before
+                // registration)
                 let error_id = [0u8; 16];
                 self.send_subscription_error(&error_id, &format!("Parse error: {}", e)).await?;
                 return Ok(());
@@ -1068,8 +1077,7 @@ impl ConnectionHandler {
         if pk_detection.confident {
             debug!(
                 "PK detection confident for subscription: pk_columns={:?}, tables={:?}",
-                pk_detection.pk_column_indices,
-                pk_detection.tables
+                pk_detection.pk_column_indices, pk_detection.tables
             );
         } else {
             debug!(
@@ -1117,7 +1125,8 @@ impl ConnectionHandler {
             table_dependencies.clone(),
             filter.clone(),
         ) {
-            // Send subscription error with a dummy subscription ID (subscription failed before registration)
+            // Send subscription error with a dummy subscription ID (subscription failed before
+            // registration)
             let error_id = [0u8; 16];
             self.send_subscription_error(&error_id, &format!("{}", e)).await?;
             return Ok(());
@@ -1130,11 +1139,12 @@ impl ConnectionHandler {
 
         // Store detected PK columns in the subscription for selective updates
         // Track selective-eligible subscriptions in metrics
-        let newly_eligible = self.subscription_manager.update_pk_columns_with_eligibility_by_wire_id(
-            &wire_subscription_id,
-            pk_detection.pk_column_indices.clone(),
-            pk_detection.confident,
-        );
+        let newly_eligible =
+            self.subscription_manager.update_pk_columns_with_eligibility_by_wire_id(
+                &wire_subscription_id,
+                pk_detection.pk_column_indices.clone(),
+                pk_detection.confident,
+            );
         if newly_eligible {
             if let Some(metrics) = self.observability.metrics() {
                 metrics.increment_selective_eligible();
@@ -1158,10 +1168,8 @@ impl ConnectionHandler {
                     .unwrap_or(server_config.max_changed_columns_ratio),
             };
 
-            self.subscription_manager.set_selective_updates_override_by_wire_id(
-                &wire_subscription_id,
-                override_config,
-            );
+            self.subscription_manager
+                .set_selective_updates_override_by_wire_id(&wire_subscription_id, override_config);
         }
 
         // Execute the query to get initial data
@@ -1209,7 +1217,8 @@ impl ConnectionHandler {
             }
             Ok(_) => {
                 // Non-SELECT query - send error and remove subscription
-                let was_selective_eligible = self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                let was_selective_eligible =
+                    self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
                 if was_selective_eligible {
                     if let Some(metrics) = self.observability.metrics() {
                         metrics.decrement_selective_eligible();
@@ -1223,14 +1232,18 @@ impl ConnectionHandler {
             }
             Err(e) => {
                 // Query execution failed - remove subscription and send error
-                let was_selective_eligible = self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
+                let was_selective_eligible =
+                    self.subscription_manager.unsubscribe_by_wire_id(&wire_subscription_id);
                 if was_selective_eligible {
                     if let Some(metrics) = self.observability.metrics() {
                         metrics.decrement_selective_eligible();
                     }
                 }
-                self.send_subscription_error(&wire_subscription_id, &format!("Execution error: {}", e))
-                    .await?;
+                self.send_subscription_error(
+                    &wire_subscription_id,
+                    &format!("Execution error: {}", e),
+                )
+                .await?;
             }
         }
 
@@ -1260,14 +1273,19 @@ impl ConnectionHandler {
         }
 
         // Collect subscriptions for THIS connection that need updating
-        let subscriptions_to_update: Vec<([u8; 16], String, u64, Option<Vec<Row>>, Option<String>)> =
-            affected_tables
-                .iter()
-                .flat_map(|table| {
-                    self.subscription_manager
-                        .get_affected_subscriptions_for_connection(table, &self.connection_id)
-                })
-                .collect();
+        let subscriptions_to_update: Vec<(
+            [u8; 16],
+            String,
+            u64,
+            Option<Vec<Row>>,
+            Option<String>,
+        )> = affected_tables
+            .iter()
+            .flat_map(|table| {
+                self.subscription_manager
+                    .get_affected_subscriptions_for_connection(table, &self.connection_id)
+            })
+            .collect();
 
         if subscriptions_to_update.is_empty() {
             return;
@@ -1324,11 +1342,7 @@ impl ConnectionHandler {
                         if let Some(ref old_rows) = last_result {
                             // First, try selective column updates (0xF7) using effective config
                             if self
-                                .try_send_selective_updates(
-                                    &subscription_id,
-                                    old_rows,
-                                    &new_rows,
-                                )
+                                .try_send_selective_updates(&subscription_id, old_rows, &new_rows)
                                 .await
                             {
                                 // Selective updates sent successfully - update stored result
@@ -1416,7 +1430,10 @@ impl ConnectionHandler {
                     Err(e) => {
                         // Query failed - send error to subscriber
                         if let Err(send_err) = self
-                            .send_subscription_error(&subscription_id, &format!("Query error: {}", e))
+                            .send_subscription_error(
+                                &subscription_id,
+                                &format!("Query error: {}", e),
+                            )
                             .await
                         {
                             warn!("Failed to send subscription error: {}", send_err);

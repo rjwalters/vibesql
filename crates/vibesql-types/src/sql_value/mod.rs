@@ -90,7 +90,8 @@ impl SqlValue {
             SqlValue::Float(_) => DataType::Float { precision: 53 }, // Default to double precision
             SqlValue::Real(_) => DataType::Real,
             SqlValue::Double(_) => DataType::DoublePrecision,
-            SqlValue::Character(s) => DataType::Character { length: s.len() },  // Arc<str> has len()
+            SqlValue::Character(s) => DataType::Character { length: s.len() }, /* Arc<str> has */
+            // len()
             SqlValue::Varchar(_) => DataType::Varchar { max_length: None }, /* Unknown/unlimited */
             // length
             SqlValue::Boolean(_) => DataType::Boolean,
@@ -120,7 +121,7 @@ impl SqlValue {
         // Add heap allocation size for variable-length types
         match self {
             SqlValue::Character(s) | SqlValue::Varchar(s) => {
-// StringValue: base + string length
+                // StringValue: base + string length
                 // Note: ArcStr strings ≤22 bytes use SSO (no heap)
                 // but we still count the string length for accounting purposes
                 base_size + s.len()

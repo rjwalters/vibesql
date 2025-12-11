@@ -6,12 +6,10 @@
 //!
 //! See `simd_ops.rs` for documentation on why the 4-accumulator pattern is used.
 
-use super::aggregate::AggregateOp;
-use super::scan::ColumnarScan;
-use super::simd_ops;
-use crate::errors::ExecutorError;
-use crate::select::vectorized::DEFAULT_BATCH_SIZE;
 use vibesql_types::SqlValue;
+
+use super::{aggregate::AggregateOp, scan::ColumnarScan, simd_ops};
+use crate::{errors::ExecutorError, select::vectorized::DEFAULT_BATCH_SIZE};
 
 // Re-export optimized SIMD operations from simd_ops module
 // DO NOT replace these with .iter().sum() - see simd_ops.rs for why
@@ -344,8 +342,9 @@ pub fn can_use_simd_for_column(scan: &ColumnarScan, column_idx: usize) -> Option
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::Row;
+
+    use super::*;
 
     #[test]
     fn test_simd_aggregate_i64_sum() {

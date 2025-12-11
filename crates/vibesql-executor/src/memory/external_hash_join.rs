@@ -10,15 +10,19 @@
 //! When memory is exhausted, partitions are spilled to disk and processed
 //! one at a time during the final join phase.
 
-use std::io::{self, Read};
-use std::sync::Arc;
+use std::{
+    io::{self, Read},
+    sync::Arc,
+};
 
 use ahash::AHashMap;
 use vibesql_types::SqlValue;
 
-use super::controller::{MemoryController, MemoryReservation};
-use super::row_serialization::{deserialize_value, serialize_value};
-use super::spill::SpillFile;
+use super::{
+    controller::{MemoryController, MemoryReservation},
+    row_serialization::{deserialize_value, serialize_value},
+    spill::SpillFile,
+};
 
 /// Configuration for external hash join
 #[derive(Debug, Clone)]
@@ -31,10 +35,7 @@ pub struct ExternalHashJoinConfig {
 
 impl Default for ExternalHashJoinConfig {
     fn default() -> Self {
-        Self {
-            num_partitions: 64,
-            max_rows_per_partition: 10_000,
-        }
+        Self { num_partitions: 64, max_rows_per_partition: 10_000 }
     }
 }
 
@@ -136,10 +137,7 @@ impl ExternalHashJoin {
         probe_key_indices: Vec<usize>,
         join_type: JoinType,
     ) -> Self {
-        assert!(
-            config.num_partitions.is_power_of_two(),
-            "num_partitions must be power of 2"
-        );
+        assert!(config.num_partitions.is_power_of_two(), "num_partitions must be power of 2");
         assert_eq!(
             build_key_indices.len(),
             probe_key_indices.len(),
@@ -232,9 +230,7 @@ impl ExternalHashJoin {
             .collect();
 
         // For inner joins, skip NULL keys. For outer joins, we need them.
-        if self.join_type == JoinType::Inner
-            && key_values.iter().any(|v| v == &SqlValue::Null)
-        {
+        if self.join_type == JoinType::Inner && key_values.iter().any(|v| v == &SqlValue::Null) {
             return Ok(());
         }
 
@@ -301,8 +297,7 @@ impl ExternalHashJoin {
         }
 
         let temp_dir = self.reservation.temp_directory().clone();
-        let mut spill_file =
-            SpillFile::with_suffix(&temp_dir, &format!("build_part_{}", idx))?;
+        let mut spill_file = SpillFile::with_suffix(&temp_dir, &format!("build_part_{}", idx))?;
 
         // Write existing rows to spill file
         let rows = std::mem::take(&mut partition.rows);
@@ -327,10 +322,7 @@ impl ExternalHashJoin {
         row: &[SqlValue],
     ) -> io::Result<()> {
         let partition = &mut self.build_partitions[idx];
-        let spill_file = partition
-            .spill_file
-            .as_mut()
-            .expect("spill file should exist");
+        let spill_file = partition.spill_file.as_mut().expect("spill file should exist");
 
         write_keyed_row(spill_file, key_values, row)?;
         spill_file.flush()?;
@@ -363,8 +355,7 @@ impl ExternalHashJoin {
         }
 
         let temp_dir = self.reservation.temp_directory().clone();
-        let mut spill_file =
-            SpillFile::with_suffix(&temp_dir, &format!("probe_part_{}", idx))?;
+        let mut spill_file = SpillFile::with_suffix(&temp_dir, &format!("probe_part_{}", idx))?;
 
         // Write existing rows to spill file
         let rows = std::mem::take(&mut partition.rows);
@@ -389,10 +380,7 @@ impl ExternalHashJoin {
         row: &[SqlValue],
     ) -> io::Result<()> {
         let partition = &mut self.probe_partitions[idx];
-        let spill_file = partition
-            .spill_file
-            .as_mut()
-            .expect("spill file should exist");
+        let spill_file = partition.spill_file.as_mut().expect("spill file should exist");
 
         write_keyed_row(spill_file, key_values, row)?;
         spill_file.flush()?;
@@ -417,28 +405,20 @@ impl ExternalHashJoin {
 
         // Process each partition
         for partition_idx in 0..self.build_partitions.len() {
-            let partition_results =
-                self.process_partition(partition_idx)?;
+            let partition_results = self.process_partition(partition_idx)?;
             results.extend(partition_results);
         }
 
-        Ok(HashJoinResultIterator {
-            results: results.into_iter(),
-            _reservation: self.reservation,
-        })
+        Ok(HashJoinResultIterator { results: results.into_iter(), _reservation: self.reservation })
     }
 
     /// Process a single partition
-    fn process_partition(
-        &mut self,
-        partition_idx: usize,
-    ) -> io::Result<Vec<Vec<SqlValue>>> {
+    fn process_partition(&mut self, partition_idx: usize) -> io::Result<Vec<Vec<SqlValue>>> {
         // Load build side into hash table
         let build_rows = self.load_build_partition(partition_idx)?;
 
         // Build hash table
-        let mut hash_table: AHashMap<Vec<SqlValue>, Vec<Vec<SqlValue>>> =
-            AHashMap::new();
+        let mut hash_table: AHashMap<Vec<SqlValue>, Vec<Vec<SqlValue>>> = AHashMap::new();
         for (key, row) in build_rows {
             hash_table.entry(key).or_default().push(row);
         }
@@ -464,12 +444,7 @@ impl ExternalHashJoin {
             JoinType::LeftOuter => {
                 // Use stored width or fall back to hash table if available
                 let build_row_width = self.build_row_width.unwrap_or_else(|| {
-                    hash_table
-                        .values()
-                        .next()
-                        .and_then(|v| v.first())
-                        .map(|r| r.len())
-                        .unwrap_or(0)
+                    hash_table.values().next().and_then(|v| v.first()).map(|r| r.len()).unwrap_or(0)
                 });
 
                 for (key, probe_row) in probe_rows {
@@ -492,9 +467,9 @@ impl ExternalHashJoin {
                 let mut matched: std::collections::HashSet<usize> =
                     std::collections::HashSet::new();
                 // Use stored width or fall back to probe rows if available
-                let probe_row_width = self.probe_row_width.unwrap_or_else(|| {
-                    probe_rows.first().map(|(_, r)| r.len()).unwrap_or(0)
-                });
+                let probe_row_width = self
+                    .probe_row_width
+                    .unwrap_or_else(|| probe_rows.first().map(|(_, r)| r.len()).unwrap_or(0));
 
                 // First pass: find matches
                 let build_rows_vec: Vec<_> = hash_table
@@ -590,7 +565,11 @@ impl ExternalHashJoin {
 }
 
 /// Write a keyed row to a spill file
-fn write_keyed_row(spill_file: &mut SpillFile, key: &[SqlValue], row: &[SqlValue]) -> io::Result<()> {
+fn write_keyed_row(
+    spill_file: &mut SpillFile,
+    key: &[SqlValue],
+    row: &[SqlValue],
+) -> io::Result<()> {
     // Write key length
     let key_len = key.len() as u16;
     spill_file.write_all(&key_len.to_le_bytes())?;
@@ -617,7 +596,9 @@ fn write_keyed_row(spill_file: &mut SpillFile, key: &[SqlValue], row: &[SqlValue
 }
 
 /// Read a keyed row from a spill file
-fn read_keyed_row(spill_file: &mut SpillFile) -> io::Result<Option<(Vec<SqlValue>, Vec<SqlValue>)>> {
+fn read_keyed_row(
+    spill_file: &mut SpillFile,
+) -> io::Result<Option<(Vec<SqlValue>, Vec<SqlValue>)>> {
     // Read key length
     let mut len_buf = [0u8; 2];
     match spill_file.read_exact(&mut len_buf) {
@@ -771,10 +752,7 @@ mod tests {
     #[test]
     fn test_inner_join_basic() {
         let controller = make_test_controller();
-        let config = ExternalHashJoinConfig {
-            num_partitions: 4,
-            max_rows_per_partition: 100,
-        };
+        let config = ExternalHashJoinConfig { num_partitions: 4, max_rows_per_partition: 100 };
 
         let mut join = ExternalHashJoin::new(
             controller,
@@ -785,20 +763,14 @@ mod tests {
         );
 
         // Build side: (id, name)
-        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("Alice".into())])
-            .unwrap();
-        join.add_build_row(&[SqlValue::Integer(2), SqlValue::Varchar("Bob".into())])
-            .unwrap();
-        join.add_build_row(&[SqlValue::Integer(3), SqlValue::Varchar("Charlie".into())])
-            .unwrap();
+        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("Alice".into())]).unwrap();
+        join.add_build_row(&[SqlValue::Integer(2), SqlValue::Varchar("Bob".into())]).unwrap();
+        join.add_build_row(&[SqlValue::Integer(3), SqlValue::Varchar("Charlie".into())]).unwrap();
 
         // Probe side: (id, city)
-        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("NYC".into())])
-            .unwrap();
-        join.add_probe_row(&[SqlValue::Integer(2), SqlValue::Varchar("LA".into())])
-            .unwrap();
-        join.add_probe_row(&[SqlValue::Integer(4), SqlValue::Varchar("Chicago".into())])
-            .unwrap(); // No match
+        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("NYC".into())]).unwrap();
+        join.add_probe_row(&[SqlValue::Integer(2), SqlValue::Varchar("LA".into())]).unwrap();
+        join.add_probe_row(&[SqlValue::Integer(4), SqlValue::Varchar("Chicago".into())]).unwrap(); // No match
 
         let results: Vec<_> = join.finish().unwrap().map(|r| r.unwrap()).collect();
 
@@ -806,16 +778,12 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         // Verify Alice, NYC match
-        let alice_match = results
-            .iter()
-            .find(|r| r[1] == SqlValue::Varchar("Alice".into()));
+        let alice_match = results.iter().find(|r| r[1] == SqlValue::Varchar("Alice".into()));
         assert!(alice_match.is_some());
         assert_eq!(alice_match.unwrap()[3], SqlValue::Varchar("NYC".into()));
 
         // Verify Bob, LA match
-        let bob_match = results
-            .iter()
-            .find(|r| r[1] == SqlValue::Varchar("Bob".into()));
+        let bob_match = results.iter().find(|r| r[1] == SqlValue::Varchar("Bob".into()));
         assert!(bob_match.is_some());
         assert_eq!(bob_match.unwrap()[3], SqlValue::Varchar("LA".into()));
     }
@@ -823,28 +791,17 @@ mod tests {
     #[test]
     fn test_left_outer_join() {
         let controller = make_test_controller();
-        let config = ExternalHashJoinConfig {
-            num_partitions: 4,
-            max_rows_per_partition: 100,
-        };
+        let config = ExternalHashJoinConfig { num_partitions: 4, max_rows_per_partition: 100 };
 
-        let mut join = ExternalHashJoin::new(
-            controller,
-            config,
-            vec![0],
-            vec![0],
-            JoinType::LeftOuter,
-        );
+        let mut join =
+            ExternalHashJoin::new(controller, config, vec![0], vec![0], JoinType::LeftOuter);
 
         // Build side
-        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("A".into())])
-            .unwrap();
+        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("A".into())]).unwrap();
 
         // Probe side (left table in left outer)
-        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("X".into())])
-            .unwrap();
-        join.add_probe_row(&[SqlValue::Integer(2), SqlValue::Varchar("Y".into())])
-            .unwrap(); // No match
+        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("X".into())]).unwrap();
+        join.add_probe_row(&[SqlValue::Integer(2), SqlValue::Varchar("Y".into())]).unwrap(); // No match
 
         let results: Vec<_> = join.finish().unwrap().map(|r| r.unwrap()).collect();
 
@@ -861,10 +818,7 @@ mod tests {
     #[test]
     fn test_multi_key_join() {
         let controller = make_test_controller();
-        let config = ExternalHashJoinConfig {
-            num_partitions: 4,
-            max_rows_per_partition: 100,
-        };
+        let config = ExternalHashJoinConfig { num_partitions: 4, max_rows_per_partition: 100 };
 
         let mut join = ExternalHashJoin::new(
             controller,
@@ -913,30 +867,17 @@ mod tests {
     #[test]
     fn test_null_handling() {
         let controller = make_test_controller();
-        let config = ExternalHashJoinConfig {
-            num_partitions: 4,
-            max_rows_per_partition: 100,
-        };
+        let config = ExternalHashJoinConfig { num_partitions: 4, max_rows_per_partition: 100 };
 
-        let mut join = ExternalHashJoin::new(
-            controller,
-            config,
-            vec![0],
-            vec![0],
-            JoinType::Inner,
-        );
+        let mut join = ExternalHashJoin::new(controller, config, vec![0], vec![0], JoinType::Inner);
 
         // Build with NULL key
-        join.add_build_row(&[SqlValue::Null, SqlValue::Varchar("A".into())])
-            .unwrap();
-        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("B".into())])
-            .unwrap();
+        join.add_build_row(&[SqlValue::Null, SqlValue::Varchar("A".into())]).unwrap();
+        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("B".into())]).unwrap();
 
         // Probe with NULL key
-        join.add_probe_row(&[SqlValue::Null, SqlValue::Varchar("X".into())])
-            .unwrap();
-        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("Y".into())])
-            .unwrap();
+        join.add_probe_row(&[SqlValue::Null, SqlValue::Varchar("X".into())]).unwrap();
+        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("Y".into())]).unwrap();
 
         let results: Vec<_> = join.finish().unwrap().map(|r| r.unwrap()).collect();
 
@@ -950,13 +891,7 @@ mod tests {
         let controller = make_test_controller();
         let config = ExternalHashJoinConfig::default();
 
-        let join = ExternalHashJoin::new(
-            controller,
-            config,
-            vec![0],
-            vec![0],
-            JoinType::Inner,
-        );
+        let join = ExternalHashJoin::new(controller, config, vec![0], vec![0], JoinType::Inner);
 
         let results: Vec<_> = join.finish().unwrap().map(|r| r.unwrap()).collect();
         assert!(results.is_empty());
@@ -965,25 +900,14 @@ mod tests {
     #[test]
     fn test_many_partitions() {
         let controller = make_test_controller();
-        let config = ExternalHashJoinConfig {
-            num_partitions: 16,
-            max_rows_per_partition: 10,
-        };
+        let config = ExternalHashJoinConfig { num_partitions: 16, max_rows_per_partition: 10 };
 
-        let mut join = ExternalHashJoin::new(
-            controller,
-            config,
-            vec![0],
-            vec![0],
-            JoinType::Inner,
-        );
+        let mut join = ExternalHashJoin::new(controller, config, vec![0], vec![0], JoinType::Inner);
 
         // Add many rows to test partitioning
         for i in 0..100 {
-            join.add_build_row(&[SqlValue::Integer(i), SqlValue::Integer(i * 10)])
-                .unwrap();
-            join.add_probe_row(&[SqlValue::Integer(i), SqlValue::Integer(i * 100)])
-                .unwrap();
+            join.add_build_row(&[SqlValue::Integer(i), SqlValue::Integer(i * 10)]).unwrap();
+            join.add_probe_row(&[SqlValue::Integer(i), SqlValue::Integer(i * 100)]).unwrap();
         }
 
         let results: Vec<_> = join.finish().unwrap().map(|r| r.unwrap()).collect();
@@ -995,30 +919,17 @@ mod tests {
     #[test]
     fn test_duplicate_keys() {
         let controller = make_test_controller();
-        let config = ExternalHashJoinConfig {
-            num_partitions: 4,
-            max_rows_per_partition: 100,
-        };
+        let config = ExternalHashJoinConfig { num_partitions: 4, max_rows_per_partition: 100 };
 
-        let mut join = ExternalHashJoin::new(
-            controller,
-            config,
-            vec![0],
-            vec![0],
-            JoinType::Inner,
-        );
+        let mut join = ExternalHashJoin::new(controller, config, vec![0], vec![0], JoinType::Inner);
 
         // Build with duplicate keys
-        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("A".into())])
-            .unwrap();
-        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("B".into())])
-            .unwrap();
+        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("A".into())]).unwrap();
+        join.add_build_row(&[SqlValue::Integer(1), SqlValue::Varchar("B".into())]).unwrap();
 
         // Probe with duplicate keys
-        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("X".into())])
-            .unwrap();
-        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("Y".into())])
-            .unwrap();
+        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("X".into())]).unwrap();
+        join.add_probe_row(&[SqlValue::Integer(1), SqlValue::Varchar("Y".into())]).unwrap();
 
         let results: Vec<_> = join.finish().unwrap().map(|r| r.unwrap()).collect();
 

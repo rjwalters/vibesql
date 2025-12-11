@@ -57,7 +57,6 @@ pub mod strategy;
 
 use hints::extract_query_hint;
 use patterns::has_analytical_pattern;
-
 // Re-export strategy types for external use
 pub use strategy::{choose_execution_strategy, ExecutionStrategy, StrategyContext};
 
@@ -121,11 +120,12 @@ pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{
         BinaryOperator, Expression, FromClause, GroupByClause, JoinType, SelectItem, SelectStmt,
     };
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_row_oriented_for_point_lookup() {
@@ -281,6 +281,7 @@ mod tests {
                         }),
                         join_type: JoinType::Inner,
                         condition: None,
+                        using_columns: None,
                         natural: false,
                     }),
                     right: Box::new(FromClause::Table {
@@ -290,6 +291,7 @@ mod tests {
                     }),
                     join_type: JoinType::Inner,
                     condition: None,
+                    using_columns: None,
                     natural: false,
                 }),
                 right: Box::new(FromClause::Table {
@@ -299,6 +301,7 @@ mod tests {
                 }),
                 join_type: JoinType::Inner,
                 condition: None,
+                using_columns: None,
                 natural: false,
             }),
             where_clause: None,

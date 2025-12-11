@@ -46,26 +46,24 @@
 
 mod sysbench;
 
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
-use std::env;
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use sysbench::SysbenchData;
-use tokio::net::TcpListener;
-use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
-
-// PostgreSQL wire protocol client
-use tokio_postgres::{Client, NoTls};
+use std::{
+    env,
+    net::SocketAddr,
+    sync::{atomic::AtomicUsize, Arc},
+    time::{Duration, Instant},
+};
 
 // MySQL client (optional)
 #[cfg(feature = "mysql")]
 use mysql::prelude::*;
 #[cfg(feature = "mysql")]
 use mysql::{Pool, PooledConn};
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
+use sysbench::SysbenchData;
+use tokio::{net::TcpListener, runtime::Runtime, sync::oneshot};
+// PostgreSQL wire protocol client
+use tokio_postgres::{Client, NoTls};
 
 /// Default table size for sysbench tests
 const DEFAULT_TABLE_SIZE: usize = 10000;
@@ -85,11 +83,13 @@ async fn start_vibesql_server(
     port: u16,
     shutdown_signal: oneshot::Receiver<()>,
 ) -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
-    use vibesql_server::config::{AuthConfig, Config, LoggingConfig, ServerConfig};
-    use vibesql_server::connection::ConnectionHandler;
-    use vibesql_server::observability::ObservabilityProvider;
-    use vibesql_server::registry::DatabaseRegistry;
-    use vibesql_server::subscription::SubscriptionManager;
+    use vibesql_server::{
+        config::{AuthConfig, Config, LoggingConfig, ServerConfig},
+        connection::ConnectionHandler,
+        observability::ObservabilityProvider,
+        registry::DatabaseRegistry,
+        subscription::SubscriptionManager,
+    };
 
     // Create minimal configuration for benchmark
     let config = Config {
@@ -277,10 +277,7 @@ impl PostgresExecutor {
         let sql = format!("SELECT c FROM sbtest1 WHERE id = {}", id);
         let msgs = self.client.simple_query(&sql).await?;
         // Count data rows in the response
-        Ok(msgs
-            .iter()
-            .filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_)))
-            .count())
+        Ok(msgs.iter().filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_))).count())
     }
 
     async fn insert(&self, id: i64, k: i64, c: &str, pad: &str) {
@@ -1378,17 +1375,15 @@ fn main() {
 
         match workload_type {
             WorkloadType::PointSelect => {
-                results.push(
-                    run_point_select_postgres(&executor, table_size, duration, warmup).await,
-                );
+                results
+                    .push(run_point_select_postgres(&executor, table_size, duration, warmup).await);
             }
             WorkloadType::Insert => {
                 results.push(run_insert_postgres(&executor, table_size, duration, warmup).await);
             }
             WorkloadType::UpdateIndex => {
-                results.push(
-                    run_update_index_postgres(&executor, table_size, duration, warmup).await,
-                );
+                results
+                    .push(run_update_index_postgres(&executor, table_size, duration, warmup).await);
             }
             WorkloadType::UpdateNonIndex => {
                 results.push(
@@ -1402,13 +1397,11 @@ fn main() {
                 results.push(run_range_postgres(&executor, table_size, duration, warmup).await);
             }
             WorkloadType::All => {
-                results.push(
-                    run_point_select_postgres(&executor, table_size, duration, warmup).await,
-                );
+                results
+                    .push(run_point_select_postgres(&executor, table_size, duration, warmup).await);
                 results.push(run_insert_postgres(&executor, table_size, duration, warmup).await);
-                results.push(
-                    run_update_index_postgres(&executor, table_size, duration, warmup).await,
-                );
+                results
+                    .push(run_update_index_postgres(&executor, table_size, duration, warmup).await);
                 results.push(
                     run_update_non_index_postgres(&executor, table_size, duration, warmup).await,
                 );
@@ -1500,7 +1493,8 @@ fn main() {
                         ));
 
                         // Reload for insert benchmark
-                        if let Some(mut executor2) = MysqlExecutor::connect(&mysql_url, table_size) {
+                        if let Some(mut executor2) = MysqlExecutor::connect(&mysql_url, table_size)
+                        {
                             mysql_results.push(run_insert_mysql(
                                 &mut executor2,
                                 table_size,
@@ -1510,7 +1504,8 @@ fn main() {
                         }
 
                         // Reload for update benchmarks
-                        if let Some(mut executor3) = MysqlExecutor::connect(&mysql_url, table_size) {
+                        if let Some(mut executor3) = MysqlExecutor::connect(&mysql_url, table_size)
+                        {
                             mysql_results.push(run_update_index_mysql(
                                 &mut executor3,
                                 table_size,
@@ -1526,7 +1521,8 @@ fn main() {
                         }
 
                         // Reload for range benchmark
-                        if let Some(mut executor4) = MysqlExecutor::connect(&mysql_url, table_size) {
+                        if let Some(mut executor4) = MysqlExecutor::connect(&mysql_url, table_size)
+                        {
                             mysql_results.push(run_range_mysql(
                                 &mut executor4,
                                 table_size,

@@ -4,8 +4,10 @@
 
 use vibesql_types::SqlValue;
 
-use super::index_metadata::{acquire_btree_lock, IndexData};
-use super::value_normalization::{normalize_cow, normalize_for_comparison};
+use super::{
+    index_metadata::{acquire_btree_lock, IndexData},
+    value_normalization::{normalize_cow, normalize_for_comparison},
+};
 
 impl IndexData {
     /// Optimized single-key lookup - avoids Vec allocation for common single-column index case.
@@ -284,10 +286,8 @@ impl IndexData {
 
                 // For disk-backed, we need Vec<Vec<SqlValue>> for the API
                 // but we still use normalize_cow to reduce cloning
-                let keys: Vec<Vec<SqlValue>> = unique_values
-                    .iter()
-                    .map(|v| vec![normalize_cow(v).into_owned()])
-                    .collect();
+                let keys: Vec<Vec<SqlValue>> =
+                    unique_values.iter().map(|v| vec![normalize_cow(v).into_owned()]).collect();
 
                 // Safely acquire lock and call BTreeIndex::multi_lookup
                 match acquire_btree_lock(btree) {
@@ -342,10 +342,11 @@ impl IndexData {
                 }))
             }
             IndexData::DiskBacked { .. } => {
-                // BTreeIndex doesn't currently expose an API for iterating over (key, row_ids) pairs
-                // This would require adding a scan API that preserves key groupings
-                // For now, return empty iterator since this method is rarely used
-                // Callers should use values() for full scans or lookup()/multi_lookup() for point queries
+                // BTreeIndex doesn't currently expose an API for iterating over (key, row_ids)
+                // pairs This would require adding a scan API that preserves key
+                // groupings For now, return empty iterator since this method is
+                // rarely used Callers should use values() for full scans or
+                // lookup()/multi_lookup() for point queries
                 log::warn!("DiskBacked iter() is not yet implemented - use values() instead");
                 Box::new(std::iter::empty())
             }
@@ -393,8 +394,9 @@ impl IndexData {
                     Ok(guard) => {
                         match guard.range_scan(None, None, true, true) {
                             Ok(all_row_ids) => {
-                                // Group row_ids by their appearance (BTree returns them in key order)
-                                // For full scan, we just need all row IDs, so wrap in a single Vec
+                                // Group row_ids by their appearance (BTree returns them in key
+                                // order) For full scan, we just
+                                // need all row IDs, so wrap in a single Vec
                                 Box::new(std::iter::once(all_row_ids))
                             }
                             Err(e) => {

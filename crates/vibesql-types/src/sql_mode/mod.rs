@@ -8,12 +8,10 @@ mod strings;
 pub mod types;
 
 pub use config::MySqlModeFlags;
-
-// Re-export string types and traits
-pub use strings::{Collation, StringBehavior};
-
 // Re-export operator types and traits
 pub use operators::{ConcatOperator, DivisionBehavior, OperatorBehavior};
+// Re-export string types and traits
+pub use strings::{Collation, StringBehavior};
 
 /// SQL compatibility mode
 ///
@@ -103,7 +101,8 @@ impl std::str::FromStr for SqlMode {
 /// Parse MySQL comma-separated mode flags
 ///
 /// This handles strings like:
-/// - "STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+/// - "STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,
+///   NO_ENGINE_SUBSTITUTION"
 /// - ",STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,..." (leading comma from REPLACE() removing first mode)
 /// - "STRICT_TRANS_TABLES," (trailing comma)
 /// - "MODE1,,MODE2" (empty segments)
@@ -284,8 +283,10 @@ mod tests {
 
     #[test]
     fn test_division_behavior() {
-        use crate::sql_mode::types::{TypeBehavior, ValueType};
-        use crate::SqlValue;
+        use crate::{
+            sql_mode::types::{TypeBehavior, ValueType},
+            SqlValue,
+        };
 
         let mysql_mode = SqlMode::MySQL { flags: MySqlModeFlags::default() };
         // MySQL returns Numeric for division

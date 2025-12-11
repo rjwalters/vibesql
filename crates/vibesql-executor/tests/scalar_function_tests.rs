@@ -173,9 +173,15 @@ fn test_concat_function() {
     let expr = vibesql_ast::Expression::Function {
         name: "CONCAT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(" "))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("World"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from(" "),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("World"),
+            )),
         ],
         character_unit: None,
     };
@@ -190,7 +196,9 @@ fn test_concat_with_integer() {
     let expr = vibesql_ast::Expression::Function {
         name: "CONCAT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("ID:"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("ID:"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42)),
         ],
         character_unit: None,
@@ -205,7 +213,9 @@ fn test_length_function() {
 
     let expr = vibesql_ast::Expression::Function {
         name: "LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("Hello"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -219,13 +229,18 @@ fn test_position_function() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("lo"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("lo"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
         ],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Integer(4)); // 'lo' starts at position 4 (1-indexed)
+    assert_eq!(result, vibesql_types::SqlValue::Integer(4)); // 'lo' starts at position 4
+                                                             // (1-indexed)
 }
 
 #[test]
@@ -235,8 +250,12 @@ fn test_position_not_found() {
     let expr = vibesql_ast::Expression::Function {
         name: "POSITION".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("xyz"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("xyz"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
         ],
         character_unit: None,
     };
@@ -251,9 +270,15 @@ fn test_replace_function() {
     let expr = vibesql_ast::Expression::Function {
         name: "REPLACE".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello World"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("World"))),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Rust"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello World"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("World"),
+            )),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Rust"),
+            )),
         ],
         character_unit: None,
     };
@@ -267,7 +292,9 @@ fn test_reverse_function() {
 
     let expr = vibesql_ast::Expression::Function {
         name: "REVERSE".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("Hello"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -281,7 +308,9 @@ fn test_left_function() {
     let expr = vibesql_ast::Expression::Function {
         name: "LEFT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
@@ -297,7 +326,9 @@ fn test_right_function() {
     let expr = vibesql_ast::Expression::Function {
         name: "RIGHT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
         character_unit: None,
@@ -328,7 +359,9 @@ fn test_concat_with_null() {
     let expr = vibesql_ast::Expression::Function {
         name: "CONCAT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
         ],
         character_unit: None,
@@ -356,7 +389,9 @@ fn test_octet_length_ascii() {
 
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("foo")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("foo"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -369,7 +404,9 @@ fn test_octet_length_empty_string() {
 
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(""),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -383,7 +420,9 @@ fn test_octet_length_multibyte() {
     // Emoji is 4 bytes in UTF-8
     let expr = vibesql_ast::Expression::Function {
         name: "OCTET_LENGTH".to_string(),
-        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("🦀")))],
+        args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("🦀"),
+        ))],
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -433,7 +472,9 @@ fn test_upper_left_nested() {
         args: vec![vibesql_ast::Expression::Function {
             name: "LEFT".to_string(),
             args: vec![
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("hello"),
+                )),
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
             ],
             character_unit: None,

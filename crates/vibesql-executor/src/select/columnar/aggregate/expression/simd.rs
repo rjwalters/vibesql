@@ -7,13 +7,12 @@
 //! The SIMD path provides 4-8x performance improvement for large datasets
 //! (>= 100 rows) compared to row-by-row evaluation.
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::super::AggregateOp;
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Try to compute aggregate using SIMD-accelerated evaluation
 ///
@@ -61,8 +60,10 @@ pub fn try_simd_aggregate(
 
 /// Aggregate SUM using Arrow compute kernels
 fn aggregate_sum(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, ExecutorError> {
-    use arrow::array::{Float64Array, Int64Array};
-    use arrow::compute::sum;
+    use arrow::{
+        array::{Float64Array, Int64Array},
+        compute::sum,
+    };
 
     match result_array.data_type() {
         arrow::datatypes::DataType::Int64 => {
@@ -126,8 +127,10 @@ fn aggregate_avg(
 
 /// Aggregate MIN using Arrow compute kernels
 fn aggregate_min(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, ExecutorError> {
-    use arrow::array::{Float64Array, Int64Array};
-    use arrow::compute::min;
+    use arrow::{
+        array::{Float64Array, Int64Array},
+        compute::min,
+    };
 
     match result_array.data_type() {
         arrow::datatypes::DataType::Int64 => {
@@ -165,8 +168,10 @@ fn aggregate_min(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
 
 /// Aggregate MAX using Arrow compute kernels
 fn aggregate_max(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, ExecutorError> {
-    use arrow::array::{Float64Array, Int64Array};
-    use arrow::compute::max;
+    use arrow::{
+        array::{Float64Array, Int64Array},
+        compute::max,
+    };
 
     match result_array.data_type() {
         arrow::datatypes::DataType::Int64 => {

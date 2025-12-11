@@ -5,18 +5,25 @@
 //! an intermediate optimization layer between scalar row-by-row evaluation
 //! and full SIMD processing.
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
-use crate::select::vectorized::DEFAULT_BATCH_SIZE;
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::evaluator::{eval_simple_expr, sql_value_to_f64};
-use super::simd::try_simd_aggregate;
-use crate::select::columnar::aggregate::functions::compare_for_min_max;
-use crate::select::columnar::aggregate::AggregateOp;
-use crate::select::columnar::scan::ColumnarScan;
+use super::{
+    evaluator::{eval_simple_expr, sql_value_to_f64},
+    simd::try_simd_aggregate,
+};
+use crate::{
+    errors::ExecutorError,
+    schema::CombinedSchema,
+    select::{
+        columnar::{
+            aggregate::{functions::compare_for_min_max, AggregateOp},
+            scan::ColumnarScan,
+        },
+        vectorized::DEFAULT_BATCH_SIZE,
+    },
+};
 
 /// Threshold for using SIMD acceleration (same as vectorized filter threshold)
 const SIMD_THRESHOLD: usize = 100;

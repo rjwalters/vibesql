@@ -6,14 +6,16 @@
 //! - LOOP (infinite loop with LEAVE)
 //! - REPEAT/UNTIL loops
 
-use crate::errors::ExecutorError;
-use crate::procedural::{ControlFlow, ExecutionContext};
 use vibesql_ast::ProceduralStatement;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
 // Use the evaluate_expression function from the executor module
 use super::executor::evaluate_expression;
+use crate::{
+    errors::ExecutorError,
+    procedural::{ControlFlow, ExecutionContext},
+};
 
 /// Execute IF statement
 pub fn execute_if(
@@ -115,7 +117,8 @@ pub fn execute_loop(
                 ControlFlow::Continue => {}
                 ControlFlow::Return(_) => return Ok(flow),
                 ControlFlow::Leave(_) => return Ok(ControlFlow::Continue), // Exit loop
-                ControlFlow::Iterate(_) => break, // Continue to next iteration
+                ControlFlow::Iterate(_) => break,                          /* Continue to next
+                                                                             * iteration */
             }
         }
     }

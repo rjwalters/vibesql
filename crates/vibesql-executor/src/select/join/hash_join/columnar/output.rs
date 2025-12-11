@@ -5,8 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::errors::ExecutorError;
-use crate::select::columnar::{ColumnArray, ColumnarBatch};
+use crate::{
+    errors::ExecutorError,
+    select::columnar::{ColumnArray, ColumnarBatch},
+};
 
 /// Result of a columnar hash join probe phase
 pub struct JoinIndices {

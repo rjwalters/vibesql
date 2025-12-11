@@ -25,10 +25,10 @@ pub use observability::ObservabilityProvider;
 pub use protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
+pub use registry::{DatabaseRegistry, SharedDatabase};
 pub use scheduler::{
     ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig,
 };
-pub use registry::{DatabaseRegistry, SharedDatabase};
 pub use session::{Column, ExecutionResult, Row, Session};
 pub use subscription::{
     create_partial_row_update, extract_table_dependencies, extract_table_refs,

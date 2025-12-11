@@ -3,8 +3,9 @@
 #[path = "../sqllogictest/mod.rs"]
 mod sqllogictest;
 
-use sqllogictest::metrics::{BenchmarkMetrics, MemoryTracker, QueryStopwatch};
 use std::time::Duration;
+
+use sqllogictest::metrics::{BenchmarkMetrics, MemoryTracker, QueryStopwatch};
 
 #[test]
 fn test_benchmark_metrics_creation() {

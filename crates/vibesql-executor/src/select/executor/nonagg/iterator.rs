@@ -110,7 +110,8 @@ impl SelectExecutor<'_> {
                     // WHERE TRUE - no filtering needed, keep current iterator
                 }
                 crate::optimizer::WhereOptimization::Optimized(expr) => {
-                    // Apply optimized WHERE clause - use the evaluator that has outer context if present
+                    // Apply optimized WHERE clause - use the evaluator that has outer context if
+                    // present
                     iterator = Box::new(FilterIterator::new(
                         iterator,
                         expr,
@@ -118,7 +119,8 @@ impl SelectExecutor<'_> {
                     ));
                 }
                 crate::optimizer::WhereOptimization::Unchanged(Some(expr)) => {
-                    // Apply original WHERE clause - use the evaluator that has outer context if present
+                    // Apply original WHERE clause - use the evaluator that has outer context if
+                    // present
                     iterator = Box::new(FilterIterator::new(
                         iterator,
                         expr.clone(),
@@ -165,8 +167,9 @@ impl SelectExecutor<'_> {
 
             #[cfg(feature = "parallel")]
             {
-                use crate::select::parallel::ParallelConfig;
                 use rayon::prelude::*;
+
+                use crate::select::parallel::ParallelConfig;
 
                 // Use parallel sorting for larger datasets
                 let should_parallel =

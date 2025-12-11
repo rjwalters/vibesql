@@ -22,12 +22,8 @@ pub(crate) enum IndexScanChoice {
         sorted_columns: Option<Vec<(String, vibesql_ast::OrderDirection)>>,
     },
     /// Skip-scan using non-prefix column filter
-    SkipScan {
-        index_name: String,
-        skip_scan_info: SkipScanInfo,
-    },
+    SkipScan { index_name: String, skip_scan_info: SkipScanInfo },
 }
-
 
 /// Check if any ORDER BY column is nullable
 ///
@@ -722,7 +718,8 @@ pub(crate) fn estimate_selectivity(
                             return col_stats.estimate_range_selectivity(value, op_str);
                         }
                     }
-                    // For placeholder parameters, use a conservative 0.25 (assume filtering ~75% of rows)
+                    // For placeholder parameters, use a conservative 0.25 (assume filtering ~75% of
+                    // rows)
                     if (is_column_reference(left, column_name) && is_literal(right))
                         || (is_literal(left) && is_column_reference(right, column_name))
                     {
@@ -837,9 +834,10 @@ pub(crate) fn select_index_scan_method(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::BinaryOperator;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_expression_filters_column_simple() {
@@ -865,7 +863,9 @@ mod tests {
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef { table: None, column: "city".to_string() }),
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Boston")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Boston",
+                )))),
             }),
         };
 

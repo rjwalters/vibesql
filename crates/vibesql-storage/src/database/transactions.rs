@@ -4,8 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::wal::TransactionDurability;
-use crate::{Row, StorageError, Table};
+use crate::{wal::TransactionDurability, Row, StorageError, Table};
 
 /// A single change made during a transaction
 #[derive(Debug, Clone)]

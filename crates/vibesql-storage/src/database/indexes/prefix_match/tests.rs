@@ -3,10 +3,12 @@
 // ============================================================================
 
 use std::collections::BTreeMap;
+
 use vibesql_types::SqlValue;
 
-use crate::database::indexes::index_metadata::IndexData;
-use crate::database::indexes::value_normalization::normalize_for_comparison;
+use crate::database::indexes::{
+    index_metadata::IndexData, value_normalization::normalize_for_comparison,
+};
 
 /// Helper to create an InMemory IndexData with test data
 /// Note: Keys are normalized to match how real indexes store data
@@ -83,10 +85,8 @@ fn test_prefix_scan_no_match() {
 
 #[test]
 fn test_prefix_scan_single_row() {
-    let index = create_test_index_data(vec![(
-        vec![SqlValue::Integer(1), SqlValue::Integer(10)],
-        vec![0],
-    )]);
+    let index =
+        create_test_index_data(vec![(vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0])]);
 
     let results = index.prefix_scan(&[SqlValue::Integer(1)]);
     assert_eq!(results, vec![0]);
@@ -125,17 +125,12 @@ fn test_prefix_scan_empty_prefix() {
 #[test]
 fn test_prefix_scan_prefix_longer_than_key() {
     // Index has 2-column keys, but we search with 3-column prefix
-    let index = create_test_index_data(vec![(
-        vec![SqlValue::Integer(1), SqlValue::Integer(10)],
-        vec![0],
-    )]);
+    let index =
+        create_test_index_data(vec![(vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0])]);
 
     // Prefix longer than key cannot match
-    let results = index.prefix_scan(&[
-        SqlValue::Integer(1),
-        SqlValue::Integer(10),
-        SqlValue::Integer(100),
-    ]);
+    let results =
+        index.prefix_scan(&[SqlValue::Integer(1), SqlValue::Integer(10), SqlValue::Integer(100)]);
     assert!(results.is_empty());
 }
 
@@ -265,10 +260,8 @@ fn test_prefix_scan_batch_some_empty() {
 
 #[test]
 fn test_prefix_scan_batch_all_empty() {
-    let index = create_test_index_data(vec![(
-        vec![SqlValue::Integer(1), SqlValue::Integer(1)],
-        vec![0],
-    )]);
+    let index =
+        create_test_index_data(vec![(vec![SqlValue::Integer(1), SqlValue::Integer(1)], vec![0])]);
 
     let prefixes = vec![
         vec![SqlValue::Integer(2), SqlValue::Integer(1)],
@@ -281,10 +274,8 @@ fn test_prefix_scan_batch_all_empty() {
 
 #[test]
 fn test_prefix_scan_batch_empty_input() {
-    let index = create_test_index_data(vec![(
-        vec![SqlValue::Integer(1), SqlValue::Integer(1)],
-        vec![0],
-    )]);
+    let index =
+        create_test_index_data(vec![(vec![SqlValue::Integer(1), SqlValue::Integer(1)], vec![0])]);
 
     let results = index.prefix_scan_batch(&[]);
     assert!(results.is_empty());
@@ -547,10 +538,8 @@ fn test_prefix_scan_limit_tpcc_order_status() {
 
 #[test]
 fn test_prefix_scan_limit_empty_result() {
-    let index = create_test_index_data(vec![(
-        vec![SqlValue::Integer(1), SqlValue::Integer(10)],
-        vec![0],
-    )]);
+    let index =
+        create_test_index_data(vec![(vec![SqlValue::Integer(1), SqlValue::Integer(10)], vec![0])]);
 
     // No match
     let results = index.prefix_scan_limit(&[SqlValue::Integer(2)], Some(5), true);
@@ -579,38 +568,23 @@ fn test_get_distinct_first_column_values() {
     // Index on (region, date) with 3 regions
     let index = create_test_index_data(vec![
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("East")),
-                SqlValue::Integer(20240101),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("East")), SqlValue::Integer(20240101)],
             vec![0],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("East")),
-                SqlValue::Integer(20240102),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("East")), SqlValue::Integer(20240102)],
             vec![1],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("West")),
-                SqlValue::Integer(20240101),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("West")), SqlValue::Integer(20240101)],
             vec![2],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("West")),
-                SqlValue::Integer(20240103),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("West")), SqlValue::Integer(20240103)],
             vec![3],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("North")),
-                SqlValue::Integer(20240102),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("North")), SqlValue::Integer(20240102)],
             vec![4],
         ),
     ]);
@@ -627,31 +601,19 @@ fn test_skip_scan_equality_basic() {
     // Index on (region, date) - query: WHERE date = 20240101
     let index = create_test_index_data(vec![
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("East")),
-                SqlValue::Integer(20240101),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("East")), SqlValue::Integer(20240101)],
             vec![0],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("East")),
-                SqlValue::Integer(20240102),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("East")), SqlValue::Integer(20240102)],
             vec![1],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("West")),
-                SqlValue::Integer(20240101),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("West")), SqlValue::Integer(20240101)],
             vec![2],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("West")),
-                SqlValue::Integer(20240103),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("West")), SqlValue::Integer(20240103)],
             vec![3],
         ),
     ]);
@@ -682,47 +644,23 @@ fn test_skip_scan_range_basic() {
     // Index on (category, price) - query: WHERE price BETWEEN 10 AND 20
     let index = create_test_index_data(vec![
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
-                SqlValue::Integer(5),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("Electronics")), SqlValue::Integer(5)],
             vec![0],
         ),
         (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("Electronics")),
-                SqlValue::Integer(15),
-            ],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("Electronics")), SqlValue::Integer(15)],
             vec![1],
         ),
-        (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("Books")),
-                SqlValue::Integer(8),
-            ],
-            vec![2],
-        ),
-        (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("Books")),
-                SqlValue::Integer(12),
-            ],
-            vec![3],
-        ),
-        (
-            vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("Books")),
-                SqlValue::Integer(25),
-            ],
-            vec![4],
-        ),
+        (vec![SqlValue::Varchar(arcstr::ArcStr::from("Books")), SqlValue::Integer(8)], vec![2]),
+        (vec![SqlValue::Varchar(arcstr::ArcStr::from("Books")), SqlValue::Integer(12)], vec![3]),
+        (vec![SqlValue::Varchar(arcstr::ArcStr::from("Books")), SqlValue::Integer(25)], vec![4]),
     ]);
 
     // Skip-scan for price BETWEEN 10 AND 20 (column index 1)
     let results = index.skip_scan_range(
         1,
         Some(&SqlValue::Integer(10)),
-        true,  // inclusive lower
+        true, // inclusive lower
         Some(&SqlValue::Integer(20)),
         true, // inclusive upper
     );
@@ -783,11 +721,8 @@ fn test_skip_scan_tpcc_like_scenario() {
     for w_id in 1..=3 {
         for d_id in 1..=10 {
             for o_id in 1..=5 {
-                let key = vec![
-                    SqlValue::Integer(w_id),
-                    SqlValue::Integer(d_id),
-                    SqlValue::Integer(o_id),
-                ];
+                let key =
+                    vec![SqlValue::Integer(w_id), SqlValue::Integer(d_id), SqlValue::Integer(o_id)];
                 entries.push((key, vec![row_idx]));
                 row_idx += 1;
             }

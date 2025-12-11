@@ -58,6 +58,8 @@ mod join_helpers;
 
 use std::collections::HashMap;
 
+use vibesql_ast::Expression;
+
 use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
@@ -65,7 +67,6 @@ use crate::{
     schema::CombinedSchema,
     select::{columnar, cte::CteResult},
 };
-use vibesql_ast::Expression;
 
 /// Collect aggregate function expressions from an expression tree.
 ///
@@ -377,13 +378,14 @@ impl SelectExecutor<'_> {
         // Extract table name and alias if this is a simple single-table scan
         // Issue #4111: We need both the table name (for database lookup) and the alias
         // (for schema key, since queries reference columns using the alias)
-        let (table_name, table_alias) = match join_helpers::extract_table_name_and_alias(from_clause) {
-            Some((name, alias)) => (name, alias),
-            None => {
-                log::debug!("Native columnar: skipping - not a simple single-table query");
-                return Ok(None);
-            }
-        };
+        let (table_name, table_alias) =
+            match join_helpers::extract_table_name_and_alias(from_clause) {
+                Some((name, alias)) => (name, alias),
+                None => {
+                    log::debug!("Native columnar: skipping - not a simple single-table query");
+                    return Ok(None);
+                }
+            };
 
         // Check if adaptive execution model recommends columnar
         match choose_execution_model(stmt) {
@@ -401,9 +403,9 @@ impl SelectExecutor<'_> {
         };
 
         // Build schema for this table
-        // Issue #4111: Use the alias as the schema key if one is provided, otherwise use table name.
-        // This ensures queries like `SELECT J.I_CURRENT_PRICE FROM item J` can resolve J.I_CURRENT_PRICE
-        // against the schema key "J" (not "item").
+        // Issue #4111: Use the alias as the schema key if one is provided, otherwise use table
+        // name. This ensures queries like `SELECT J.I_CURRENT_PRICE FROM item J` can
+        // resolve J.I_CURRENT_PRICE against the schema key "J" (not "item").
         let schema_key = table_alias.unwrap_or_else(|| table_name.clone());
         let schema = CombinedSchema::from_table(schema_key, table.schema.clone());
 
@@ -484,14 +486,16 @@ impl SelectExecutor<'_> {
         };
 
         // Extract select expressions
-        // For GROUP BY queries, filter to only aggregate functions (GROUP BY columns are handled separately)
+        // For GROUP BY queries, filter to only aggregate functions (GROUP BY columns are handled
+        // separately)
         let has_group_by = stmt.group_by.is_some();
         let select_exprs: Vec<_> = stmt
             .select_list
             .iter()
             .filter_map(|item| match item {
                 vibesql_ast::SelectItem::Expression { expr, .. } => {
-                    // For GROUP BY queries, skip non-aggregate expressions (they're GROUP BY columns)
+                    // For GROUP BY queries, skip non-aggregate expressions (they're GROUP BY
+                    // columns)
                     if has_group_by && !matches!(expr, Expression::AggregateFunction { .. }) {
                         None
                     } else {
@@ -512,11 +516,20 @@ impl SelectExecutor<'_> {
         };
 
         // Extract aggregates from select expressions
-        let mut aggregates = columnar::extract_aggregates(&select_exprs, &schema).unwrap_or_default();
+        // If extract_aggregates returns None, it means there are unsupported expressions
+        // (like UnaryOp, Function, or DISTINCT) that the columnar path can't handle
+        let select_aggregates = columnar::extract_aggregates(&select_exprs, &schema);
+        let has_unsupported_select_aggregates = select_aggregates.is_none();
+        let mut aggregates = select_aggregates.unwrap_or_default();
 
         // Add aggregates from HAVING if not already present
+        let mut has_unsupported_having_aggregates = false;
         if !having_aggregates.is_empty() {
-            if let Some(having_aggs) = columnar::extract_aggregates(&having_aggregates, &schema) {
+            let having_aggs = columnar::extract_aggregates(&having_aggregates, &schema);
+            if having_aggs.is_none() {
+                has_unsupported_having_aggregates = true;
+            }
+            if let Some(having_aggs) = having_aggs {
                 for agg in having_aggs {
                     // Check if aggregate already exists (avoid duplicates)
                     if !aggregates.iter().any(|a| a.source == agg.source && a.op == agg.op) {
@@ -526,10 +539,24 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // For GROUP BY queries with HAVING but no SELECT aggregates, we still need columnar
-        // to compute the HAVING aggregates efficiently (Issue #4168)
+        // Fall back to row-oriented execution if:
+        // 1. No aggregates and no GROUP BY (simple queries)
+        // 2. Unsupported aggregate expressions in SELECT (UnaryOp, Function, DISTINCT, etc.)
+        // 3. Unsupported aggregate expressions in HAVING
         if aggregates.is_empty() && !has_group_by {
-            log::debug!("Native columnar: skipping - no aggregates or unsupported expressions");
+            log::debug!("Native columnar: skipping - no aggregates");
+            return Ok(None);
+        }
+        if has_unsupported_select_aggregates && has_group_by {
+            log::debug!(
+                "Native columnar: skipping - GROUP BY with unsupported aggregate expressions in SELECT"
+            );
+            return Ok(None);
+        }
+        if has_unsupported_having_aggregates {
+            log::debug!(
+                "Native columnar: skipping - unsupported aggregate expressions in HAVING"
+            );
             return Ok(None);
         }
 
@@ -579,11 +606,12 @@ impl SelectExecutor<'_> {
                 }
             }
 
-            // Issue #4233, #4236: Validate SELECT list matches [group_keys..., aggregates...] format
-            // columnar_group_by_batch returns rows with all group keys followed by all aggregates.
-            // If the SELECT list doesn't have this exact structure (e.g., only aggregates without
-            // group keys, or different column ordering), we must fall back to row-oriented
-            // execution which applies proper projection.
+            // Issue #4233, #4236: Validate SELECT list matches [group_keys..., aggregates...]
+            // format columnar_group_by_batch returns rows with all group keys followed
+            // by all aggregates. If the SELECT list doesn't have this exact structure
+            // (e.g., only aggregates without group keys, or different column ordering),
+            // we must fall back to row-oriented execution which applies proper
+            // projection.
             //
             // IMPORTANT: Each non-aggregate SELECT expression must be IDENTICAL to a GROUP BY
             // expression. Expressions like `col1 * 11` where `col1` is the GROUP BY key are NOT
@@ -645,17 +673,18 @@ impl SelectExecutor<'_> {
         let result = if has_group_by {
             // GROUP BY path: Use hash-based grouping
             // Catch unsupported feature errors and fall back to row-oriented execution
-            let group_by_result = match self
-                .execute_columnar_group_by(stmt, &batch, &predicates, &aggregates, &schema)
-            {
+            let group_by_result = match self.execute_columnar_group_by(
+                stmt,
+                &batch,
+                &predicates,
+                &aggregates,
+                &schema,
+            ) {
                 Ok(rows) => rows,
                 Err(ExecutorError::Other(msg))
                     if msg.contains("not supported in columnar path") =>
                 {
-                    log::debug!(
-                        "Native columnar: GROUP BY falling back to row-oriented: {}",
-                        msg
-                    );
+                    log::debug!("Native columnar: GROUP BY falling back to row-oriented: {}", msg);
                     return Ok(None);
                 }
                 Err(e) => return Err(e),

@@ -236,9 +236,15 @@ fn test_last_insert_rowid_multi_row_insert() {
         table_name: "items".to_string(),
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![
-            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("item1")))],
-            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("item2")))],
-            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("item3")))],
+            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "item1",
+            )))],
+            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "item2",
+            )))],
+            vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "item3",
+            )))],
         ]),
         conflict_clause: None,
         on_duplicate_key_update: None,

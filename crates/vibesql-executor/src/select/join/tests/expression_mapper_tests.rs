@@ -1,8 +1,10 @@
-use super::super::expression_mapper::*;
 use std::collections::HashSet;
+
 use vibesql_ast::{self, Expression};
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
+
+use super::super::expression_mapper::*;
 
 fn create_test_schema(name: &str, columns: Vec<(&str, DataType)>) -> TableSchema {
     let cols =

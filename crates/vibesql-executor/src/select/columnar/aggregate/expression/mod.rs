@@ -27,16 +27,14 @@ mod vectorized;
 #[cfg(test)]
 mod tests;
 
-use crate::schema::CombinedSchema;
+// Re-export public API
+pub(super) use batch::compute_batch_expression_aggregate;
+pub use batch::{evaluate_expression_to_column, evaluate_expression_with_cached_column};
+pub(super) use vectorized::compute_expression_aggregate;
 use vibesql_ast::Expression;
 
 use super::{AggregateOp, AggregateSource, AggregateSpec};
-
-// Re-export public API
-pub(super) use batch::compute_batch_expression_aggregate;
-pub use batch::evaluate_expression_to_column;
-pub use batch::evaluate_expression_with_cached_column;
-pub(super) use vectorized::compute_expression_aggregate;
+use crate::schema::CombinedSchema;
 
 /// Extract aggregate operations from AST expressions
 ///
@@ -100,7 +98,8 @@ pub fn extract_aggregates(
                     continue;
                 }
 
-                // Handle COUNT(*) with wildcard argument (Expression::Wildcard or ColumnRef { column: "*" })
+                // Handle COUNT(*) with wildcard argument (Expression::Wildcard or ColumnRef {
+                // column: "*" })
                 if op == AggregateOp::Count && args.len() == 1 {
                     match &args[0] {
                         Expression::Wildcard => {

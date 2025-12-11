@@ -13,8 +13,9 @@
 //! not absolute time. The optimizer uses these costs to compare different
 //! execution strategies and choose the most efficient one.
 
-use super::{ColumnStatistics, TableStatistics};
 use vibesql_types::DataType;
+
+use super::{ColumnStatistics, TableStatistics};
 
 /// Cost estimator for access methods (scans, index lookups) and DML operations
 ///
@@ -47,7 +48,6 @@ pub struct CostEstimator {
     // ============================================================================
     // DML Cost Parameters
     // ============================================================================
-
     /// Base cost of inserting a single row (default: 0.1)
     /// Includes row storage and basic overhead
     pub insert_tuple_cost: f64,
@@ -83,7 +83,6 @@ pub struct CostEstimator {
     // ============================================================================
     // WAL Cost Parameters (derived from TPC-C profiling #3862)
     // ============================================================================
-
     /// Cost of writing a single WAL entry per row (default: 0.12)
     /// Based on profiling showing WAL as 56% of DELETE operation time.
     /// WAL entries include: operation type, row data, and metadata.
@@ -161,7 +160,11 @@ pub fn estimate_type_size(data_type: &DataType) -> usize {
         DataType::Real => 4,
         DataType::DoublePrecision => 8,
         DataType::Float { precision } => {
-            if *precision <= 24 { 4 } else { 8 }
+            if *precision <= 24 {
+                4
+            } else {
+                8
+            }
         }
 
         // Character types
@@ -174,7 +177,7 @@ pub fn estimate_type_size(data_type: &DataType) -> usize {
             }
         }
         DataType::CharacterLargeObject => 64, // CLOB: heuristic average
-        DataType::Name => 32, // NAME type: typically short identifiers
+        DataType::Name => 32,                 // NAME type: typically short identifiers
 
         // Date/time types
         DataType::Date => 4,
@@ -187,7 +190,7 @@ pub fn estimate_type_size(data_type: &DataType) -> usize {
         DataType::Bit { length } => {
             match length {
                 Some(len) => (*len).div_ceil(8), // Convert bits to bytes
-                None => 1, // Default BIT(1)
+                None => 1,                       // Default BIT(1)
             }
         }
 
@@ -424,11 +427,8 @@ impl CostEstimator {
         let prefix_cardinality = prefix_col_stats.n_distinct as f64;
 
         // Rows per prefix value (assuming uniform distribution)
-        let rows_per_prefix = if prefix_cardinality > 0.0 {
-            total_rows / prefix_cardinality
-        } else {
-            total_rows
-        };
+        let rows_per_prefix =
+            if prefix_cardinality > 0.0 { total_rows / prefix_cardinality } else { total_rows };
 
         // Expected rows matching filter within each prefix group
         let matching_rows_per_prefix = rows_per_prefix * filter_selectivity;
@@ -440,7 +440,8 @@ impl CostEstimator {
 
         // 2. Index scan cost within each prefix group
         // We scan index entries proportional to matching rows
-        let index_scan_cost = prefix_cardinality * matching_rows_per_prefix * self.cpu_index_tuple_cost;
+        let index_scan_cost =
+            prefix_cardinality * matching_rows_per_prefix * self.cpu_index_tuple_cost;
 
         // 3. Table fetch cost: estimate pages accessed for matched rows
         // For skip-scan, the rows are scattered across different prefix groups,
@@ -475,7 +476,8 @@ impl CostEstimator {
         prefix_col_stats: &ColumnStatistics,
         filter_selectivity: f64,
     ) -> bool {
-        let skip_scan_cost = self.estimate_skip_scan_cost(table_stats, prefix_col_stats, filter_selectivity);
+        let skip_scan_cost =
+            self.estimate_skip_scan_cost(table_stats, prefix_col_stats, filter_selectivity);
         let table_scan_cost = self.estimate_table_scan(table_stats);
         skip_scan_cost < table_scan_cost
     }
@@ -518,7 +520,11 @@ impl CostEstimator {
 
         // For single column, delegate to existing method
         if prefix_col_stats.len() == 1 {
-            return self.estimate_skip_scan_cost(table_stats, prefix_col_stats[0], filter_selectivity);
+            return self.estimate_skip_scan_cost(
+                table_stats,
+                prefix_col_stats[0],
+                filter_selectivity,
+            );
         }
 
         let total_rows = table_stats.row_count as f64;
@@ -526,14 +532,12 @@ impl CostEstimator {
         // Calculate combined cardinality for N prefix columns
         // Worst case: product of all distinct values (independent columns)
         // We apply a correlation factor to account for columns that are likely correlated
-        let combined_cardinality = self.estimate_combined_prefix_cardinality(prefix_col_stats, total_rows);
+        let combined_cardinality =
+            self.estimate_combined_prefix_cardinality(prefix_col_stats, total_rows);
 
         // Rows per prefix combination (assuming uniform distribution)
-        let rows_per_prefix = if combined_cardinality > 0.0 {
-            total_rows / combined_cardinality
-        } else {
-            total_rows
-        };
+        let rows_per_prefix =
+            if combined_cardinality > 0.0 { total_rows / combined_cardinality } else { total_rows };
 
         // Expected rows matching filter within each prefix group
         let matching_rows_per_prefix = rows_per_prefix * filter_selectivity;
@@ -543,7 +547,8 @@ impl CostEstimator {
         let seek_cost = combined_cardinality * self.random_page_cost;
 
         // 2. Index scan cost within each prefix group
-        let index_scan_cost = combined_cardinality * matching_rows_per_prefix * self.cpu_index_tuple_cost;
+        let index_scan_cost =
+            combined_cardinality * matching_rows_per_prefix * self.cpu_index_tuple_cost;
 
         // 3. Table fetch cost: estimate pages accessed for matched rows
         let total_matching_rows = total_rows * filter_selectivity;
@@ -684,8 +689,8 @@ impl CostEstimator {
     /// * `row_count` - Number of rows to update
     /// * `table_stats` - Statistics for the target table
     /// * `index_info` - Information about table indexes
-    /// * `indexes_affected_ratio` - Fraction of indexes affected by column changes (0.0 to 1.0)
-    ///   Use 1.0 if all indexed columns might change, or a lower value for selective updates
+    /// * `indexes_affected_ratio` - Fraction of indexes affected by column changes (0.0 to 1.0) Use
+    ///   1.0 if all indexed columns might change, or a lower value for selective updates
     ///
     /// # Example
     /// ```text
@@ -807,10 +812,10 @@ impl CostEstimator {
             // - Rebuild hash indexes: proportional to remaining rows
             // - User-defined indexes rebuilt at database level (not counted here)
             let remaining_rows = (total_rows - new_deleted).max(0.0);
-            let rebuild_cost = remaining_rows * self.cpu_tuple_cost * self.compaction_cost_multiplier;
-            let hash_rebuild_cost = remaining_rows
-                * index_info.hash_index_count as f64
-                * self.hash_index_update_cost;
+            let rebuild_cost =
+                remaining_rows * self.cpu_tuple_cost * self.compaction_cost_multiplier;
+            let hash_rebuild_cost =
+                remaining_rows * index_info.hash_index_count as f64 * self.hash_index_update_cost;
             rebuild_cost + hash_rebuild_cost
         } else {
             0.0
@@ -899,10 +904,11 @@ impl AccessMethod {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::Row;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
+    use crate::Row;
 
     fn create_test_table_stats(row_count: usize) -> TableStatistics {
         let schema = TableSchema::new(
@@ -1514,10 +1520,8 @@ mod tests {
         let table_stats = create_test_table_stats(1000);
 
         // 2-column table: INTEGER + VARCHAR(50) = 4 + 25 + 8 = 37 bytes (min 64)
-        let small_row_size = estimate_row_size(&[
-            DataType::Integer,
-            DataType::Varchar { max_length: Some(50) },
-        ]);
+        let small_row_size =
+            estimate_row_size(&[DataType::Integer, DataType::Varchar { max_length: Some(50) }]);
         assert_eq!(small_row_size, 64); // min row size
 
         // 50-column table: mix of types, much larger
@@ -1551,11 +1555,7 @@ mod tests {
 
         // The factor should be significant (large row is ~9.5x base, but capped at 10x)
         let factor = large_info.wal_size_factor() / small_info.wal_size_factor();
-        assert!(
-            factor >= 9.0,
-            "WAL size factor ratio ({}) should be at least 9x",
-            factor
-        );
+        assert!(factor >= 9.0, "WAL size factor ratio ({}) should be at least 9x", factor);
     }
 
     // ============================================================================
@@ -1823,8 +1823,11 @@ mod tests {
 
         let cost_1_col =
             estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[&col1_stats], 0.01);
-        let cost_2_col = estimator
-            .estimate_skip_scan_cost_multi_column(&table_stats, &[&col1_stats, &col2_stats], 0.01);
+        let cost_2_col = estimator.estimate_skip_scan_cost_multi_column(
+            &table_stats,
+            &[&col1_stats, &col2_stats],
+            0.01,
+        );
         let cost_3_col = estimator.estimate_skip_scan_cost_multi_column(
             &table_stats,
             &[&col1_stats, &col2_stats, &col3_stats],
@@ -1852,7 +1855,8 @@ mod tests {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(1000);
 
-        // High cardinality columns (if independent, would produce 10*100*500 = 500,000 combinations)
+        // High cardinality columns (if independent, would produce 10*100*500 = 500,000
+        // combinations)
         let col1_stats = ColumnStatistics {
             n_distinct: 10,
             null_count: 0,
@@ -1917,8 +1921,7 @@ mod tests {
         let estimator = CostEstimator::default();
         let table_stats = create_test_table_stats(10000);
 
-        let cost_empty =
-            estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[], 0.01);
+        let cost_empty = estimator.estimate_skip_scan_cost_multi_column(&table_stats, &[], 0.01);
         let table_scan_cost = estimator.estimate_table_scan(&table_stats);
 
         assert!(
@@ -1992,7 +1995,8 @@ mod tests {
             histogram: None,
         };
 
-        let cardinality_1 = estimator.estimate_combined_prefix_cardinality(&[&col1_stats], total_rows);
+        let cardinality_1 =
+            estimator.estimate_combined_prefix_cardinality(&[&col1_stats], total_rows);
         assert!(
             (cardinality_1 - 10.0).abs() < 0.01,
             "Single column cardinality should match n_distinct: {}",
@@ -2030,10 +2034,8 @@ mod tests {
             histogram: None,
         };
 
-        let cardinality_capped = estimator.estimate_combined_prefix_cardinality(
-            &[&col_high_stats, &col_high_stats],
-            total_rows,
-        );
+        let cardinality_capped = estimator
+            .estimate_combined_prefix_cardinality(&[&col_high_stats, &col_high_stats], total_rows);
         assert!(
             cardinality_capped <= total_rows,
             "Combined cardinality ({}) should be capped at total_rows ({})",

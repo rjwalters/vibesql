@@ -1,8 +1,10 @@
 //! Predicate extraction and analysis for join reordering
 
-use super::utils::resolve_column_with_fallback;
 use std::collections::{HashMap, HashSet};
+
 use vibesql_ast::{BinaryOperator, Expression};
+
+use super::utils::resolve_column_with_fallback;
 
 /// Check if an expression contains any column reference (for CTE fallback)
 fn expr_has_column(expr: &Expression) -> bool {
@@ -346,7 +348,10 @@ pub(super) fn extract_where_equijoins_with_schema(
             // Flattened AND (Conjunction): recurse into all children
             Expression::Conjunction(children) => {
                 if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                    eprintln!("[JOIN_REORDER] Processing Conjunction with {} children", children.len());
+                    eprintln!(
+                        "[JOIN_REORDER] Processing Conjunction with {} children",
+                        children.len()
+                    );
                 }
                 for child in children {
                     extract_recursive(child, tables, column_to_table, equijoins);
@@ -355,7 +360,10 @@ pub(super) fn extract_where_equijoins_with_schema(
             // Flattened OR (Disjunction): extract common equijoins from all branches
             Expression::Disjunction(children) => {
                 if std::env::var("JOIN_REORDER_VERBOSE").is_ok() {
-                    eprintln!("[JOIN_REORDER] Processing Disjunction with {} branches", children.len());
+                    eprintln!(
+                        "[JOIN_REORDER] Processing Disjunction with {} branches",
+                        children.len()
+                    );
                 }
 
                 // Extract equijoins from each branch
@@ -461,7 +469,8 @@ pub(super) fn extract_where_equijoins_with_schema(
                     }
                 } else {
                     // Check for arithmetic equijoins like `col1 = col2 +/- constant`
-                    // This enables hash join optimization for derived tables with arithmetic conditions
+                    // This enables hash join optimization for derived tables with arithmetic
+                    // conditions
                     let left_has_column = expr_has_column(left);
                     let right_has_column = expr_has_column(right);
 

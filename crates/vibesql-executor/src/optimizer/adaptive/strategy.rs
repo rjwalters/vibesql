@@ -22,8 +22,10 @@ use std::collections::HashMap;
 
 use vibesql_ast::{FromClause, SelectStmt};
 
-use super::patterns::has_analytical_pattern;
-use super::query::{has_aggregate_functions, has_group_by, is_single_table};
+use super::{
+    patterns::has_analytical_pattern,
+    query::{has_aggregate_functions, has_group_by, is_single_table},
+};
 use crate::select::cte::CteResult;
 
 /// Comprehensive execution strategy selection
@@ -324,9 +326,10 @@ fn make_row_oriented(stmt: &SelectStmt, reason: StrategyReason) -> ExecutionStra
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{BinaryOperator, Expression, GroupByClause, SelectItem};
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn make_simple_table_query(table: &str) -> SelectStmt {
         SelectStmt {

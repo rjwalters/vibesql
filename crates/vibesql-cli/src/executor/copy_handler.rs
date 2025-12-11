@@ -1,9 +1,8 @@
+use super::{validation, SqlExecutor};
 use crate::{
     commands::{CopyDirection, CopyFormat},
     data_io::DataIO,
 };
-
-use super::{validation, SqlExecutor};
 
 impl SqlExecutor {
     pub fn handle_copy(

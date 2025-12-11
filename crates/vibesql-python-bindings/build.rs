@@ -1,5 +1,4 @@
-use std::env;
-use std::process::Command;
+use std::{env, process::Command};
 
 fn main() {
     // Only configure linking when building as a cdylib (Python extension)

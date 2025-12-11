@@ -4,10 +4,12 @@
 
 use vibesql_types::SqlValue;
 
-use super::index_metadata::{acquire_btree_lock, IndexData};
-use super::range_bounds::{calculate_next_value, smart_increment_value, try_increment_sqlvalue};
-use super::streaming::OwnedStreamingRangeScan;
-use super::value_normalization::normalize_for_comparison;
+use super::{
+    index_metadata::{acquire_btree_lock, IndexData},
+    range_bounds::{calculate_next_value, smart_increment_value, try_increment_sqlvalue},
+    streaming::OwnedStreamingRangeScan,
+    value_normalization::normalize_for_comparison,
+};
 
 impl IndexData {
     /// Scan index for rows matching range predicate
@@ -44,8 +46,8 @@ impl IndexData {
                 let normalized_end = end.map(normalize_for_comparison);
 
                 // Special handling for prefix matching on multi-column indexes
-                // This handles both equality queries (start == end) and range queries (start != end)
-                // on the first column of multi-column indexes.
+                // This handles both equality queries (start == end) and range queries (start !=
+                // end) on the first column of multi-column indexes.
                 //
                 // The key insight: For multi-column indexes, we can't use single-element keys
                 // like [value] because the index stores composite keys like [col1_val, col2_val].
@@ -53,8 +55,9 @@ impl IndexData {
                 if let (Some(start_val), Some(end_val)) = (&normalized_start, &normalized_end) {
                     // Equality check (prefix matching for multi-column IN clauses)
                     if start_val == end_val && inclusive_start && inclusive_end {
-                        // Prefix matching using efficient BTreeMap::range() - O(log n + k) instead of O(n)
-                        // Strategy: Start iteration at [target_value] and continue while first column matches
+                        // Prefix matching using efficient BTreeMap::range() - O(log n + k) instead
+                        // of O(n) Strategy: Start iteration at
+                        // [target_value] and continue while first column matches
                         //
                         // For example, to find all rows where column `a` = 10 in index (a, b):
                         //   Start: Bound::Included([10])
@@ -106,8 +109,9 @@ impl IndexData {
                 }
 
                 // Special handling for range queries that might use multi-column indexes
-                // If we have both start and end bounds, we need to handle multi-column indexes specially
-                // by checking if keys in the map have multiple elements (indicating multi-column index)
+                // If we have both start and end bounds, we need to handle multi-column indexes
+                // specially by checking if keys in the map have multiple elements
+                // (indicating multi-column index)
                 if normalized_start.is_some() || normalized_end.is_some() {
                     // Peek at first key to determine if this is a multi-column index
                     // Multi-column indexes have keys with > 1 element
@@ -144,8 +148,9 @@ impl IndexData {
                             None => Bound::Unbounded,
                         };
 
-                        // Calculate upper bound efficiently instead of using Unbounded + manual checking
-                        // For multi-column indexes, we need an upper bound that stops after all keys
+                        // Calculate upper bound efficiently instead of using Unbounded + manual
+                        // checking For multi-column indexes, we need an
+                        // upper bound that stops after all keys
                         // starting with end_val (if inclusive) or before them (if exclusive)
                         let end_key = normalized_end.as_ref().and_then(|v| {
                             if inclusive_end {
@@ -165,8 +170,9 @@ impl IndexData {
                         };
 
                         // Edge case: Check for invalid range (both bounds excluded at same value)
-                        // This can happen with multi-column indexes when start == end and both exclusive
-                        // Example: col > 5 AND col < 5 would create Excluded([5]) .. Excluded([5]) → panic
+                        // This can happen with multi-column indexes when start == end and both
+                        // exclusive Example: col > 5 AND col < 5 would
+                        // create Excluded([5]) .. Excluded([5]) → panic
                         // BTreeMap::range() panics on this case, so we return empty result instead
                         if let (Bound::Excluded(start_slice), Bound::Excluded(end_slice)) =
                             (&start_bound, &end_bound)
@@ -311,11 +317,13 @@ impl IndexData {
                     }
                 } else {
                     // Standard range scan for single-column indexes or actual range queries
-                    // NOTE: We apply the smart increment fix conservatively for exclusive start bounds
-                    // to handle potential multi-column cases. This is safe for single-column indexes too.
+                    // NOTE: We apply the smart increment fix conservatively for exclusive start
+                    // bounds to handle potential multi-column cases. This is
+                    // safe for single-column indexes too.
 
-                    // For exclusive start bounds with multi-column indexes, we need to increment the value
-                    // to avoid missing rows. Apply smart_increment_value to choose the right strategy.
+                    // For exclusive start bounds with multi-column indexes, we need to increment
+                    // the value to avoid missing rows. Apply
+                    // smart_increment_value to choose the right strategy.
                     let (start_key, final_inclusive_start) =
                         if let Some(start_val) = normalized_start.as_ref() {
                             if inclusive_start {

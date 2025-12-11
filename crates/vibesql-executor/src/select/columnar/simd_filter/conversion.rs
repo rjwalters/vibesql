@@ -3,8 +3,9 @@
 //! This module provides functions to convert SqlValue types to native numeric types
 //! that can be used in SIMD-accelerated comparisons.
 
-use super::super::filter::parse_date_string;
 use vibesql_types::SqlValue;
+
+use super::super::filter::parse_date_string;
 
 /// Convert SqlValue to f64 for numeric comparisons
 pub fn value_to_f64(value: &SqlValue) -> Option<f64> {

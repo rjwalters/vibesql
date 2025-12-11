@@ -14,10 +14,11 @@
 #![allow(clippy::redundant_guards)]
 //! - Direct memory access to column values
 
-use crate::{errors::ExecutorError, schema::CombinedSchema};
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
+
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// A compiled simple predicate for fast evaluation
 #[derive(Debug, Clone)]
@@ -182,8 +183,10 @@ impl CompiledOrClause {
             _ => {
                 // Try to compile this branch as an AND-chain
                 if std::env::var("OR_COMPILE_DEBUG").is_ok() {
-                    eprintln!("[OR_EXTRACT] Trying to compile branch as AND-chain: {:?}",
-                        format!("{:?}", expr).chars().take(200).collect::<String>());
+                    eprintln!(
+                        "[OR_EXTRACT] Trying to compile branch as AND-chain: {:?}",
+                        format!("{:?}", expr).chars().take(200).collect::<String>()
+                    );
                 }
                 let compiled = CompiledWhereClause::try_compile(expr, schema);
                 if compiled.is_none() {
@@ -365,11 +368,7 @@ impl CompiledWhereClause {
             return false;
         }
 
-        predicates.push(CompiledPredicate::InList {
-            column_idx,
-            values: literal_values,
-            negated,
-        });
+        predicates.push(CompiledPredicate::InList { column_idx, values: literal_values, negated });
 
         true
     }
@@ -612,8 +611,9 @@ impl CompiledWhereClause {
         op: ComparisonOp,
     ) -> Result<bool, ExecutorError> {
         // Use the existing operator registry for correctness
-        use crate::evaluator::operators::OperatorRegistry;
         use vibesql_ast::BinaryOperator;
+
+        use crate::evaluator::operators::OperatorRegistry;
 
         let ast_op = match op {
             ComparisonOp::Equal => BinaryOperator::Equal,
@@ -693,9 +693,10 @@ impl CompiledWhereClause {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn make_test_schema() -> CombinedSchema {
         let schema = TableSchema::new(
@@ -789,18 +790,18 @@ mod tests {
 
         // Test row that matches
         let row = Row::from_vec(vec![
-                SqlValue::Integer(20),
-                SqlValue::Double(0.05),
-                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
-            ]);
+            SqlValue::Integer(20),
+            SqlValue::Double(0.05),
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        ]);
         assert!(compiled.evaluate(&row).unwrap());
 
         // Test row that doesn't match
         let row2 = Row::from_vec(vec![
-                SqlValue::Integer(30),
-                SqlValue::Double(0.05),
-                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
-            ]);
+            SqlValue::Integer(30),
+            SqlValue::Double(0.05),
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        ]);
         assert!(!compiled.evaluate(&row2).unwrap());
     }
 
@@ -877,7 +878,8 @@ mod tests {
         let schema = make_test_schema();
 
         // l_discount = 999.99 AND l_quantity < 24
-        // First predicate will fail, second should not be evaluated (but we can't verify this directly)
+        // First predicate will fail, second should not be evaluated (but we can't verify this
+        // directly)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
@@ -902,10 +904,10 @@ mod tests {
 
         // Test row where first predicate fails
         let row = Row::from_vec(vec![
-                SqlValue::Integer(10),  // l_quantity
-                SqlValue::Double(0.05), // l_discount (doesn't match 999.99)
-                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
-            ]);
+            SqlValue::Integer(10),  // l_quantity
+            SqlValue::Double(0.05), // l_discount (doesn't match 999.99)
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        ]);
 
         // Should return false (short-circuit on first predicate)
         assert!(!compiled.evaluate(&row).unwrap());
@@ -926,10 +928,10 @@ mod tests {
 
         // Test row with NULL value
         let row = Row::from_vec(vec![
-                SqlValue::Null, // l_quantity is NULL
-                SqlValue::Double(0.05),
-                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
-            ]);
+            SqlValue::Null, // l_quantity is NULL
+            SqlValue::Double(0.05),
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        ]);
 
         // NULL > 10 should return false (not true, not NULL)
         assert!(!compiled.evaluate(&row).unwrap());
@@ -989,22 +991,23 @@ mod tests {
 
         // Test row in range
         let row_in_range = Row::from_vec(vec![
-                SqlValue::Integer(50),
-                SqlValue::Double(0.05),
-                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
-            ]);
+            SqlValue::Integer(50),
+            SqlValue::Double(0.05),
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        ]);
         assert!(compiled.evaluate(&row_in_range).unwrap());
 
         // Test row out of range
         let row_out_of_range = Row::from_vec(vec![
-                SqlValue::Integer(200),
-                SqlValue::Double(0.05),
-                SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
-            ]);
+            SqlValue::Integer(200),
+            SqlValue::Double(0.05),
+            SqlValue::Varchar(arcstr::ArcStr::from("1994-01-01")),
+        ]);
         assert!(!compiled.evaluate(&row_out_of_range).unwrap());
     }
 
-    /// Creates a schema with two joined tables (lineitem + part) for testing join-related predicates
+    /// Creates a schema with two joined tables (lineitem + part) for testing join-related
+    /// predicates
     fn make_joined_schema() -> CombinedSchema {
         let lineitem = TableSchema::new(
             "lineitem".to_string(),

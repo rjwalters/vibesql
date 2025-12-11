@@ -226,9 +226,10 @@ impl<'a> ExecutionContext<'a> {
 
 #[cfg(test)]
 mod tests {
+    use vibesql_catalog::TableSchema;
+
     use super::*;
     use crate::schema::CombinedSchema;
-    use vibesql_catalog::TableSchema;
 
     /// Builder for creating ExecutionContext from SelectExecutor fields.
     ///

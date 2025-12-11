@@ -1,18 +1,19 @@
 //! Spatial Predicate Functions
 //!
-//! Implements spatial relationship tests between geometries using the DE-9IM (Dimensionally Extended 9-Intersection Model).
-//! Phase 3: Basic spatial predicates with proper DE-9IM semantics.
+//! Implements spatial relationship tests between geometries using the DE-9IM (Dimensionally
+//! Extended 9-Intersection Model). Phase 3: Basic spatial predicates with proper DE-9IM semantics.
 //! Phase 4+: Full DE-9IM support for complex patterns and optimizations.
 
 #![cfg(feature = "spatial")]
 
+use geo::{
+    algorithm::{relate::Relate, Intersects},
+    Contains, Distance, Euclidean, Haversine,
+};
+use vibesql_types::SqlValue;
+
 use super::{sql_value_to_geometry, Geometry};
 use crate::errors::ExecutorError;
-use geo::algorithm::relate::Relate;
-use geo::algorithm::Intersects;
-use geo::Contains;
-use geo::{Distance, Euclidean, Haversine};
-use vibesql_types::SqlValue;
 
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {

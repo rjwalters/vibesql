@@ -1,7 +1,8 @@
 //! DML Cost-Based Optimization
 //!
-//! This module provides cost-based optimization decisions for DML operations (INSERT, UPDATE, DELETE).
-//! It uses the cost estimation infrastructure from vibesql-storage to make runtime decisions about:
+//! This module provides cost-based optimization decisions for DML operations (INSERT, UPDATE,
+//! DELETE). It uses the cost estimation infrastructure from vibesql-storage to make runtime
+//! decisions about:
 //! - Batch sizes for INSERT operations
 //! - Strategy selection for DELETE operations
 //! - Index update optimization for UPDATE operations
@@ -11,9 +12,10 @@
 //! The `DmlOptimizer` provides methods to compute optimization hints based on estimated costs:
 //!
 //! ```rust,no_run
+//! use std::collections::HashSet;
+//!
 //! use vibesql_executor::DmlOptimizer;
 //! use vibesql_storage::Database;
-//! use std::collections::HashSet;
 //!
 //! let db = Database::new();
 //! let optimizer = DmlOptimizer::new(&db, "table_name");
@@ -79,17 +81,9 @@ impl<'a> DmlOptimizer<'a> {
     /// DmlOptimizer instance with cost estimation configured
     pub fn new(db: &'a Database, table_name: &'a str) -> Self {
         let index_info = db.get_table_index_info(table_name);
-        let table_stats = db
-            .get_table(table_name)
-            .and_then(|t| t.get_statistics().cloned());
+        let table_stats = db.get_table(table_name).and_then(|t| t.get_statistics().cloned());
 
-        Self {
-            cost_estimator: CostEstimator::default(),
-            index_info,
-            table_stats,
-            db,
-            table_name,
-        }
+        Self { cost_estimator: CostEstimator::default(), index_info, table_stats, db, table_name }
     }
 
     /// Get or compute table statistics with fallback for missing stats
@@ -108,11 +102,7 @@ impl<'a> DmlOptimizer<'a> {
     /// Create fallback statistics when actual stats are unavailable
     fn create_fallback_stats(&self) -> TableStatistics {
         // Get row count from table if available
-        let row_count = self
-            .db
-            .get_table(self.table_name)
-            .map(|t| t.row_count())
-            .unwrap_or(0);
+        let row_count = self.db.get_table(self.table_name).map(|t| t.row_count()).unwrap_or(0);
 
         // Create minimal statistics with all required fields
         TableStatistics {
@@ -190,8 +180,7 @@ impl<'a> DmlOptimizer<'a> {
 
         // Calculate delete cost
         let stats = self.get_stats_with_fallback();
-        let delete_cost =
-            self.cost_estimator.estimate_delete(rows_to_delete, &stats, index_info);
+        let delete_cost = self.cost_estimator.estimate_delete(rows_to_delete, &stats, index_info);
 
         // Log cost for debugging
         if std::env::var("DML_COST_DEBUG").is_ok() {
@@ -204,7 +193,8 @@ impl<'a> DmlOptimizer<'a> {
         // Chunk if:
         // 1. Many rows AND high deleted ratio (compaction likely)
         // 2. Many rows AND many indexes
-        let high_deleted_ratio = index_info.deleted_ratio > thresholds::HIGH_DELETED_RATIO_THRESHOLD;
+        let high_deleted_ratio =
+            index_info.deleted_ratio > thresholds::HIGH_DELETED_RATIO_THRESHOLD;
         let many_indexes = index_info.btree_index_count >= 3;
 
         high_deleted_ratio || many_indexes
@@ -255,8 +245,7 @@ impl<'a> DmlOptimizer<'a> {
             None => return 0.0,
         };
 
-        let total_indexes =
-            index_info.hash_index_count + index_info.btree_index_count;
+        let total_indexes = index_info.hash_index_count + index_info.btree_index_count;
         if total_indexes == 0 {
             return 0.0;
         }
@@ -272,10 +261,8 @@ impl<'a> DmlOptimizer<'a> {
 
         // Check unique constraints (each is a hash index)
         for unique_cols in &schema.unique_constraints {
-            let unique_indices: Vec<usize> = unique_cols
-                .iter()
-                .filter_map(|name| schema.get_column_index(name))
-                .collect();
+            let unique_indices: Vec<usize> =
+                unique_cols.iter().filter_map(|name| schema.get_column_index(name)).collect();
             if unique_indices.iter().any(|i| changed_columns.contains(i)) {
                 affected_indexes += 1;
             }
@@ -313,9 +300,12 @@ impl<'a> DmlOptimizer<'a> {
         };
 
         let stats = self.get_stats_with_fallback();
-        let cost = self
-            .cost_estimator
-            .estimate_update(row_count, &stats, index_info, indexes_affected_ratio);
+        let cost = self.cost_estimator.estimate_update(
+            row_count,
+            &stats,
+            index_info,
+            indexes_affected_ratio,
+        );
 
         if std::env::var("DML_COST_DEBUG").is_ok() {
             eprintln!(
@@ -335,9 +325,10 @@ impl<'a> DmlOptimizer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn create_test_db_with_table(
         table_name: &str,
@@ -351,7 +342,11 @@ mod tests {
                 table_name.to_string(),
                 vec![
                     ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                    ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+                    ColumnSchema::new(
+                        "name".to_string(),
+                        DataType::Varchar { max_length: Some(100) },
+                        false,
+                    ),
                     ColumnSchema::new("value".to_string(), DataType::Integer, true),
                 ],
                 vec!["id".to_string()],
@@ -361,7 +356,11 @@ mod tests {
                 table_name.to_string(),
                 vec![
                     ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                    ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, false),
+                    ColumnSchema::new(
+                        "name".to_string(),
+                        DataType::Varchar { max_length: Some(100) },
+                        false,
+                    ),
                 ],
             )
         };
@@ -378,7 +377,8 @@ mod tests {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                 }],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         db
@@ -482,9 +482,6 @@ mod tests {
         // Selective update (no indexes affected)
         let selective_cost = optimizer.estimate_update_cost(100, 0.0);
 
-        assert!(
-            full_cost > selective_cost,
-            "Full update should cost more than selective"
-        );
+        assert!(full_cost > selective_cost, "Full update should cost more than selective");
     }
 }

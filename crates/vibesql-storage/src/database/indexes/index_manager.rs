@@ -2,26 +2,23 @@
 // Index Manager - Core coordination and query methods
 // ============================================================================
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use vibesql_types::{DataType, SqlValue};
 
 use super::index_metadata::{acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata};
-use crate::btree::{BTreeIndex, Key};
-use crate::database::{DatabaseConfig, ResourceTracker};
-use crate::page::PageManager;
-use crate::{Row, StorageBackend, StorageError};
-
-#[cfg(not(target_arch = "wasm32"))]
-use crate::NativeStorage;
-
-#[cfg(target_arch = "wasm32")]
-use crate::OpfsStorage;
-
 #[cfg(target_arch = "wasm32")]
 use crate::backend::MemoryStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::NativeStorage;
+#[cfg(target_arch = "wasm32")]
+use crate::OpfsStorage;
+use crate::{
+    btree::{BTreeIndex, Key},
+    database::{DatabaseConfig, ResourceTracker},
+    page::PageManager,
+    Row, StorageBackend, StorageError,
+};
 
 /// Manages user-defined indexes (CREATE INDEX statements)
 ///
@@ -161,7 +158,8 @@ impl IndexManager {
 
         self.indexes.values().any(|metadata| {
             let stored_name_upper = metadata.table_name.to_uppercase();
-            let stored_table_only = stored_name_upper.rsplit('.').next().unwrap_or(&stored_name_upper);
+            let stored_table_only =
+                stored_name_upper.rsplit('.').next().unwrap_or(&stored_name_upper);
             stored_table_only == search_table_only
         })
     }
@@ -194,7 +192,8 @@ impl IndexManager {
             if metadata.table_name == table_name && metadata.unique {
                 if let Some(index_data) = self.index_data.get(index_name) {
                     // Build composite key from the indexed columns
-                    // Apply prefix truncation and normalize numeric types to ensure consistent comparison
+                    // Apply prefix truncation and normalize numeric types to ensure consistent
+                    // comparison
                     let key_values: Vec<SqlValue> = metadata
                         .columns
                         .iter()
@@ -327,7 +326,8 @@ impl IndexManager {
 
                     self.spill_index_to_disk(&coldest.0)?;
 
-                    // Check if we made progress - if memory didn't decrease, break to avoid infinite loop
+                    // Check if we made progress - if memory didn't decrease, break to avoid
+                    // infinite loop
                     let current_memory = self.resource_tracker.memory_used();
                     if current_memory >= last_memory_used {
                         // No progress made (index was already disk-backed or spill failed)

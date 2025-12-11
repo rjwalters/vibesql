@@ -24,7 +24,8 @@ fn execute(db: &mut Database, sql: &str) -> Result<Vec<Vec<SqlValue>>, String> {
     match stmt {
         vibesql_ast::Statement::Select(select_stmt) => {
             let executor = SelectExecutor::new(db);
-            let rows = executor.execute(&select_stmt).map_err(|e| format!("Execution error: {}", e))?;
+            let rows =
+                executor.execute(&select_stmt).map_err(|e| format!("Execution error: {}", e))?;
             Ok(rows.into_iter().map(|r| r.values.into_vec()).collect())
         }
         vibesql_ast::Statement::CreateTable(create_stmt) => {
@@ -40,7 +41,8 @@ fn execute(db: &mut Database, sql: &str) -> Result<Vec<Vec<SqlValue>>, String> {
                 create_idx_stmt.table_name,
                 unique,
                 create_idx_stmt.columns,
-            ).map_err(|e| format!("Create index error: {}", e))?;
+            )
+            .map_err(|e| format!("Create index error: {}", e))?;
             Ok(vec![])
         }
         vibesql_ast::Statement::Insert(insert_stmt) => {
@@ -113,7 +115,8 @@ fn test_issue_3807_index_scan_after_compaction() {
 
     // Index scan (col0 > 0) should return the SAME 3 rows
     // Before the fix, this would return 0 rows due to stale index entries
-    let index_scan_result = execute(&mut db, "SELECT pk, col0 FROM tab1 WHERE col0 > 0 ORDER BY pk").unwrap();
+    let index_scan_result =
+        execute(&mut db, "SELECT pk, col0 FROM tab1 WHERE col0 > 0 ORDER BY pk").unwrap();
     assert_eq!(
         index_scan_result.len(),
         3,
@@ -155,9 +158,11 @@ fn test_issue_3807_pk_delete_path_after_compaction() {
     assert_eq!(table_scan.len(), 3, "Should have 3 rows remaining");
 
     // Index scan (should match table scan)
-    let index_scan = execute(&mut db, "SELECT id, val FROM test_pk WHERE val >= 0 ORDER BY id").unwrap();
+    let index_scan =
+        execute(&mut db, "SELECT id, val FROM test_pk WHERE val >= 0 ORDER BY id").unwrap();
     assert_eq!(
-        index_scan.len(), 3,
+        index_scan.len(),
+        3,
         "Index scan should return 3 rows after compaction from PK delete path"
     );
     assert_eq!(table_scan, index_scan, "Index scan should match table scan");
@@ -182,7 +187,8 @@ fn test_issue_3807_replace_path_after_compaction() {
     // Use REPLACE to update existing rows (this deletes and reinserts)
     // Replace 7 rows - this triggers delete of existing + insert of new
     for pk in [0, 1, 2, 5, 6, 7, 8] {
-        execute(&mut db, &format!("REPLACE INTO test_replace VALUES({}, {})", pk, pk * 100)).unwrap();
+        execute(&mut db, &format!("REPLACE INTO test_replace VALUES({}, {})", pk, pk * 100))
+            .unwrap();
     }
 
     // Now delete those replaced rows to trigger compaction
@@ -190,8 +196,12 @@ fn test_issue_3807_replace_path_after_compaction() {
 
     // Verify index scan works correctly after this complex operation
     let table_scan = execute(&mut db, "SELECT id, val FROM test_replace ORDER BY id").unwrap();
-    let index_scan = execute(&mut db, "SELECT id, val FROM test_replace WHERE val >= 0 ORDER BY id").unwrap();
+    let index_scan =
+        execute(&mut db, "SELECT id, val FROM test_replace WHERE val >= 0 ORDER BY id").unwrap();
 
     assert_eq!(table_scan.len(), 3, "Should have 3 rows");
-    assert_eq!(table_scan, index_scan, "Index scan should match table scan after REPLACE + compaction");
+    assert_eq!(
+        table_scan, index_scan,
+        "Index scan should match table scan after REPLACE + compaction"
+    );
 }

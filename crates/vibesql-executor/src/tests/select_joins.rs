@@ -112,6 +112,7 @@ fn test_inner_join_two_tables() {
                     column: "user_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -238,6 +239,7 @@ fn test_right_outer_join() {
                     column: "user_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -371,6 +373,7 @@ fn test_full_outer_join() {
                     column: "user_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -497,6 +500,7 @@ fn test_cross_join() {
             }),
             join_type: vibesql_ast::JoinType::Cross,
             condition: None, // CROSS JOIN has no condition
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -568,6 +572,7 @@ fn test_cross_join_with_condition_fails() {
                     column: "id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -711,6 +716,7 @@ fn test_inner_join_null_values_dont_match() {
                     column: "y".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -727,5 +733,8 @@ fn test_inner_join_null_values_dont_match() {
     // NULL rows should NOT match each other
     assert_eq!(result.len(), 1, "INNER JOIN should only match non-NULL values");
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("one")));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("matched")));
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("matched"))
+    );
 }

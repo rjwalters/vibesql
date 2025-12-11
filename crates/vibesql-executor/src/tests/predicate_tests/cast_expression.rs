@@ -55,7 +55,9 @@ fn test_cast_varchar_to_integer() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("456")))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("456"),
+                ))),
                 data_type: vibesql_types::DataType::Integer,
             },
             alias: Some("result".to_string()),
@@ -192,7 +194,9 @@ fn test_cast_varchar_to_unsigned() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
-                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("123")))),
+                expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("123"),
+                ))),
                 data_type: vibesql_types::DataType::Unsigned,
             },
             alias: Some("result".to_string()),

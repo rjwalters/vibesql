@@ -20,8 +20,7 @@ use vibesql_catalog::{ColumnSchema, ReferentialAction, SortOrder, TableSchema};
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-use crate::errors::ExecutorError;
-use crate::select::SelectResult;
+use crate::{errors::ExecutorError, select::SelectResult};
 
 /// Check if a table reference is sqlite_master or sqlite_schema
 pub fn is_sqlite_schema_table(table_name: &str) -> bool {
@@ -209,11 +208,8 @@ fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
     }
 
     // Otherwise generate from the view definition
-    let columns_str = view
-        .columns
-        .as_ref()
-        .map(|cols| format!(" ({})", cols.join(", ")))
-        .unwrap_or_default();
+    let columns_str =
+        view.columns.as_ref().map(|cols| format!(" ({})", cols.join(", "))).unwrap_or_default();
 
     // Use the ToSql trait to generate valid SQL from the AST
     use vibesql_ast::pretty_print::ToSql;
@@ -338,8 +334,9 @@ fn format_expression(expr: &vibesql_ast::Expression) -> String {
 
 #[cfg(test)]
 mod tests {
+    use vibesql_catalog::{Catalog, IndexMetadata, IndexType, IndexedColumn};
+
     use super::*;
-    use vibesql_catalog::{Catalog, IndexedColumn, IndexMetadata, IndexType};
 
     #[test]
     fn test_is_sqlite_schema_table() {
@@ -394,9 +391,14 @@ mod tests {
         // Create a simple table
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
         ];
-        let table = TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
+        let table =
+            TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
         catalog.create_table(table).unwrap();
 
         let result = execute_sqlite_schema_query(&catalog).unwrap();
@@ -439,9 +441,14 @@ mod tests {
         // Create a table first
         let columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, false),
+            ColumnSchema::new(
+                "email".to_string(),
+                DataType::Varchar { max_length: Some(255) },
+                false,
+            ),
         ];
-        let table = TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
+        let table =
+            TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
         catalog.create_table(table).unwrap();
 
         // Create an index
@@ -464,9 +471,11 @@ mod tests {
         assert_eq!(result.rows.len(), 2);
 
         // Find the index row
-        let index_row = result.rows.iter().find(|r| {
-            matches!(&r.values[0], SqlValue::Varchar(s) if s.as_str() == "index")
-        }).expect("Should have an index row");
+        let index_row = result
+            .rows
+            .iter()
+            .find(|r| matches!(&r.values[0], SqlValue::Varchar(s) if s.as_str() == "index"))
+            .expect("Should have an index row");
 
         // Check index name
         assert_eq!(index_row.values[1], SqlValue::Varchar(arcstr::ArcStr::from("idx_email")));
@@ -537,7 +546,9 @@ mod tests {
             event: TriggerEvent::Insert,
             granularity: TriggerGranularity::Row,
             when_condition: None,
-            triggered_action: TriggerAction::RawSql(" BEGIN INSERT INTO audit VALUES (NEW.id); END".to_string()),
+            triggered_action: TriggerAction::RawSql(
+                " BEGIN INSERT INTO audit VALUES (NEW.id); END".to_string(),
+            ),
             enabled: true,
         };
 
@@ -581,7 +592,9 @@ mod tests {
             event: TriggerEvent::Delete,
             granularity: TriggerGranularity::Row,
             when_condition: None,
-            triggered_action: TriggerAction::RawSql(" BEGIN DELETE FROM base_table WHERE id = OLD.id; END".to_string()),
+            triggered_action: TriggerAction::RawSql(
+                " BEGIN DELETE FROM base_table WHERE id = OLD.id; END".to_string(),
+            ),
             enabled: true,
         };
 
@@ -619,11 +632,15 @@ mod tests {
             Some(vec!["id".to_string(), "name".to_string()]),
             create_minimal_select_stmt(),
             false,
-            "CREATE VIEW active_users (id, name) AS SELECT id, name FROM users WHERE active = 1".to_string(),
+            "CREATE VIEW active_users (id, name) AS SELECT id, name FROM users WHERE active = 1"
+                .to_string(),
         );
 
         let sql = generate_create_view_sql(&view);
-        assert_eq!(sql, "CREATE VIEW active_users (id, name) AS SELECT id, name FROM users WHERE active = 1");
+        assert_eq!(
+            sql,
+            "CREATE VIEW active_users (id, name) AS SELECT id, name FROM users WHERE active = 1"
+        );
     }
 
     #[test]

@@ -40,10 +40,10 @@ fn create_stock_db() -> Database {
         db.insert_row(
             "stock",
             Row::new(vec![
-                SqlValue::Integer(1),                             // s_w_id
-                SqlValue::Integer(i),                             // s_i_id
-                SqlValue::Integer(5 + (i % 20)),                  // s_quantity
-                SqlValue::Varchar(arcstr::ArcStr::from(format!("Stock data {}", i))),   // s_data
+                SqlValue::Integer(1),                                                 // s_w_id
+                SqlValue::Integer(i),                                                 // s_i_id
+                SqlValue::Integer(5 + (i % 20)),                                      // s_quantity
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("Stock data {}", i))), // s_data
             ]),
         )
         .unwrap();
@@ -54,9 +54,9 @@ fn create_stock_db() -> Database {
         db.insert_row(
             "stock",
             Row::new(vec![
-                SqlValue::Integer(2),                             // s_w_id
-                SqlValue::Integer(i),                             // s_i_id
-                SqlValue::Integer(10 + i),                        // s_quantity (11-15)
+                SqlValue::Integer(2),      // s_w_id
+                SqlValue::Integer(i),      // s_i_id
+                SqlValue::Integer(10 + i), // s_quantity (11-15)
                 SqlValue::Varchar(arcstr::ArcStr::from(format!("Stock data W2-{}", i))),
             ]),
         )
@@ -111,7 +111,8 @@ fn test_covering_index_single_column_select() {
         assert!(!result.is_empty());
 
         // Verify we got the right item IDs
-        let item_ids: Vec<i64> = result.iter()
+        let item_ids: Vec<i64> = result
+            .iter()
             .map(|r| match &r.values[0] {
                 SqlValue::Integer(v) => *v,
                 _ => panic!("Expected integer"),

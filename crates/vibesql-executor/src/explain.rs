@@ -9,12 +9,14 @@
 //! - Estimated row counts (when statistics are available)
 
 use std::fmt::Write;
+
 use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::optimizer::index_planner::IndexPlanner;
-use crate::select::scan::index_scan::cost_based_index_selection;
+use crate::{
+    errors::ExecutorError, optimizer::index_planner::IndexPlanner,
+    select::scan::index_scan::cost_based_index_selection,
+};
 
 /// Represents a single node in the query execution plan
 #[derive(Debug, Clone)]
@@ -214,7 +216,14 @@ impl ExplainExecutor {
             vibesql_ast::FromClause::Table { name, alias, .. } => {
                 Self::explain_table_scan(name, alias.as_deref(), where_clause, order_by, database)
             }
-            vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
+            vibesql_ast::FromClause::Join {
+                left,
+                right,
+                join_type,
+                condition,
+                using_columns,
+                natural,
+            } => {
                 let join_name = match join_type {
                     vibesql_ast::JoinType::Inner => "Inner Join",
                     vibesql_ast::JoinType::LeftOuter => "Left Outer Join",
@@ -233,6 +242,10 @@ impl ExplainExecutor {
 
                 if condition.is_some() {
                     join_node.details.push("Join condition: <on clause>".to_string());
+                }
+
+                if let Some(cols) = using_columns {
+                    join_node.details.push(format!("USING ({})", cols.join(", ")));
                 }
 
                 // Add left child

@@ -3,13 +3,15 @@
 //! Handles resolution of SELECT list aliases and column positions
 //! in GROUP BY clauses, enabling standard SQL alias syntax.
 
-use super::ResolvedGroupingSet;
 use vibesql_ast::Expression;
+
+use super::ResolvedGroupingSet;
 
 /// Resolve GROUP BY expression that might be a SELECT list alias or column position
 ///
 /// Similar to ORDER BY alias resolution, handles three cases:
-/// 1. Numeric literal (e.g., GROUP BY 1, 2, 3) - returns the expression from that position in SELECT list
+/// 1. Numeric literal (e.g., GROUP BY 1, 2, 3) - returns the expression from that position in
+///    SELECT list
 /// 2. Simple column reference that matches a SELECT list alias - returns the SELECT list expression
 /// 3. Otherwise - returns the original GROUP BY expression
 ///
@@ -79,8 +81,9 @@ pub fn resolve_base_expressions_aliases(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::SelectItem;
+
+    use super::*;
 
     fn col(name: &str) -> Expression {
         Expression::ColumnRef { table: None, column: name.to_string() }

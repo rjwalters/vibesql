@@ -117,7 +117,10 @@ mod common {
     pub fn insert_customer(db: &mut Database, table_name: &str, customer_id: i64, status: &str) {
         db.insert_row(
             table_name,
-            Row::new(vec![SqlValue::Integer(customer_id), SqlValue::Varchar(arcstr::ArcStr::from(status))]),
+            Row::new(vec![
+                SqlValue::Integer(customer_id),
+                SqlValue::Varchar(arcstr::ArcStr::from(status)),
+            ]),
         )
         .unwrap();
     }
@@ -358,7 +361,9 @@ mod scalar_subquery {
             .map(|row| {
                 if let SqlValue::Varchar(name) = row.get(1).unwrap() {
                     name.clone()
-                } else { arcstr::ArcStr::from("") }
+                } else {
+                    arcstr::ArcStr::from("")
+                }
             })
             .collect();
         assert!(names.iter().any(|n| n.as_str() == "Bob"));
@@ -586,7 +591,9 @@ mod complex_subquery {
             where_clause: Some(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("inactive")))),
+                right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "inactive",
+                )))),
             }),
             group_by: None,
             having: None,

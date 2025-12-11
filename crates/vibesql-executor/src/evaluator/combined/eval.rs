@@ -80,11 +80,13 @@ impl CombinedExpressionEvaluator<'_> {
                     }
                 }
 
-                // Check procedural context first (variables/parameters take precedence over table columns)
-                // This is only checked when there's no table qualifier, as variables don't have table prefixes
+                // Check procedural context first (variables/parameters take precedence over table
+                // columns) This is only checked when there's no table qualifier, as
+                // variables don't have table prefixes
                 if table.is_none() {
                     if let Some(proc_ctx) = self.procedural_context {
-                        // Try to get value from procedural context (checks variables then parameters)
+                        // Try to get value from procedural context (checks variables then
+                        // parameters)
                         if let Some(value) = proc_ctx.get_value(column) {
                             return Ok(value.clone());
                         }
@@ -111,8 +113,7 @@ impl CombinedExpressionEvaluator<'_> {
                 }
 
                 // Column not found in either schema - collect diagnostic info
-                let searched_tables: Vec<String> =
-                    self.schema.table_names();
+                let searched_tables: Vec<String> = self.schema.table_names();
                 let mut available_columns = Vec::new();
                 for (_start, schema) in self.schema.table_schemas.values() {
                     available_columns.extend(schema.columns.iter().map(|c| c.name.clone()));

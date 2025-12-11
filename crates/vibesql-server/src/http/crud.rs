@@ -47,8 +47,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tracing::{debug, error};
 
-use super::rest::{get_database_name, HttpState};
-use super::types::*;
+use super::{
+    rest::{get_database_name, HttpState},
+    types::*,
+};
 use crate::registry::SharedDatabase;
 
 /// Query parameters for GET collection endpoint

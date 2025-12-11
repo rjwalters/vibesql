@@ -2,12 +2,16 @@
 // Table and Index Operations
 // ============================================================================
 
-use super::indexes::IndexManager;
-use crate::index::{extract_mbr_from_sql_value, SpatialIndex};
-use crate::progress::ProgressTracker;
-use crate::{Row, StorageError, Table};
 use std::collections::HashMap;
+
 use vibesql_ast::IndexColumn;
+
+use super::indexes::IndexManager;
+use crate::{
+    index::{extract_mbr_from_sql_value, SpatialIndex},
+    progress::ProgressTracker,
+    Row, StorageError, Table,
+};
 
 /// Metadata for a spatial index
 #[derive(Debug, Clone)]
@@ -234,11 +238,7 @@ impl Operations {
 
         // Conditionally clone rows only if index updates are needed
         // This avoids expensive cloning during bulk data loading when no indexes exist
-        let rows_for_indexes = if needs_index_updates {
-            Some(rows.clone())
-        } else {
-            None
-        };
+        let rows_for_indexes = if needs_index_updates { Some(rows.clone()) } else { None };
 
         // Use optimized batch insert
         let count = table.insert_batch(rows)?;
@@ -249,11 +249,8 @@ impl Operations {
         // Update user-defined indexes for all inserted rows using batch optimization
         // This pre-computes column indices once per index rather than once per row
         if let Some(rows_ref) = rows_for_indexes {
-            let rows_to_insert: Vec<(usize, &Row)> = rows_ref
-                .iter()
-                .enumerate()
-                .map(|(i, row)| (start_index + i, row))
-                .collect();
+            let rows_to_insert: Vec<(usize, &Row)> =
+                rows_ref.iter().enumerate().map(|(i, row)| (start_index + i, row)).collect();
             self.batch_add_to_indexes_for_insert(catalog, table_name, &rows_to_insert);
         }
 
@@ -464,8 +461,8 @@ impl Operations {
     /// * `old_row` - Row data before the update
     /// * `new_row` - Row data after the update
     /// * `row_index` - Index of the row in the table
-    /// * `changed_columns` - Optional set of column indices that were modified.
-    ///   If provided, indexes that don't involve any changed columns will be skipped.
+    /// * `changed_columns` - Optional set of column indices that were modified. If provided,
+    ///   indexes that don't involve any changed columns will be skipped.
     pub fn update_indexes_for_update(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
@@ -513,8 +510,12 @@ impl Operations {
         row_index: usize,
     ) {
         if let Some(table_schema) = catalog.get_table(table_name) {
-            self.index_manager
-                .update_indexes_for_delete_with_values(table_name, table_schema, values, row_index);
+            self.index_manager.update_indexes_for_delete_with_values(
+                table_name,
+                table_schema,
+                values,
+                row_index,
+            );
         }
 
         self.update_spatial_indexes_for_delete_with_values(catalog, table_name, values, row_index);
@@ -531,7 +532,11 @@ impl Operations {
         rows_to_delete: &[(usize, &Row)],
     ) {
         if let Some(table_schema) = catalog.get_table(table_name) {
-            self.index_manager.batch_update_indexes_for_delete(table_name, table_schema, rows_to_delete);
+            self.index_manager.batch_update_indexes_for_delete(
+                table_name,
+                table_schema,
+                rows_to_delete,
+            );
         }
 
         // Batch update spatial indexes (pre-computes column indices once per index)
@@ -549,7 +554,11 @@ impl Operations {
         rows_to_insert: &[(usize, &Row)],
     ) {
         if let Some(table_schema) = catalog.get_table(table_name) {
-            self.index_manager.batch_add_to_indexes_for_insert(table_name, table_schema, rows_to_insert);
+            self.index_manager.batch_add_to_indexes_for_insert(
+                table_name,
+                table_schema,
+                rows_to_insert,
+            );
         }
 
         // Update spatial indexes in batch
@@ -850,10 +859,8 @@ impl Operations {
         let rows = table.scan();
         let total_rows = rows.len();
         let mut vectors: Vec<(usize, Vec<f64>)> = Vec::new();
-        let mut progress = ProgressTracker::new(
-            format!("Creating HNSW index '{}'", index_name),
-            Some(total_rows),
-        );
+        let mut progress =
+            ProgressTracker::new(format!("Creating HNSW index '{}'", index_name), Some(total_rows));
         for (row_idx, row) in rows.iter().enumerate() {
             if col_idx < row.values.len() {
                 if let vibesql_types::SqlValue::Vector(vec_data) = &row.values[col_idx] {
@@ -1181,8 +1188,9 @@ impl Operations {
 
     /// Batch update spatial indexes for delete operation
     ///
-    /// This is significantly more efficient than calling `update_spatial_indexes_for_delete_with_values`
-    /// in a loop because it pre-computes column indices once per index rather than once per row.
+    /// This is significantly more efficient than calling
+    /// `update_spatial_indexes_for_delete_with_values` in a loop because it pre-computes column
+    /// indices once per index rather than once per row.
     fn batch_update_spatial_indexes_for_delete(
         &mut self,
         catalog: &vibesql_catalog::Catalog,

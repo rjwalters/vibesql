@@ -1,12 +1,11 @@
+use std::{collections::HashMap, fs, path::Path};
+
 use anyhow::{Context, Result};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use md5::{Digest, Md5};
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use tracing::warn;
 
 /// Password store for managing user authentication
@@ -28,7 +27,8 @@ impl PasswordStore {
     /// Password formats supported:
     /// - Argon2 PHC format: `username:$argon2id$v=19$m=...` (recommended, secure storage)
     /// - Cleartext: `username:mysecret` (will be hashed with Argon2 on load)
-    /// - MD5 for wire protocol: `username:{MD5}hash` (for PostgreSQL MD5 wire protocol compatibility)
+    /// - MD5 for wire protocol: `username:{MD5}hash` (for PostgreSQL MD5 wire protocol
+    ///   compatibility)
     ///
     /// Comments start with # and empty lines are ignored.
     ///
@@ -285,6 +285,7 @@ mod tests {
     #[test]
     fn test_load_from_file_argon2() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         let mut file = NamedTempFile::new().unwrap();
@@ -302,6 +303,7 @@ mod tests {
     #[test]
     fn test_load_from_file_md5_format() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         let mut file = NamedTempFile::new().unwrap();
@@ -321,6 +323,7 @@ mod tests {
     #[test]
     fn test_load_from_file_cleartext_gets_hashed() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         let mut file = NamedTempFile::new().unwrap();
@@ -341,6 +344,7 @@ mod tests {
     #[test]
     fn test_load_from_file_invalid_format() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         let mut file = NamedTempFile::new().unwrap();

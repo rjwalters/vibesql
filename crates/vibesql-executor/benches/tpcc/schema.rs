@@ -3,9 +3,6 @@
 //! This module provides schema creation and data loading functions for TPC-C
 //! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB).
 
-use super::data::TPCCData;
-use vibesql_storage::Database as VibeDB;
-
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
 #[cfg(feature = "mysql")]
@@ -14,6 +11,9 @@ use mysql::prelude::*;
 use mysql::{Pool, PooledConn};
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use vibesql_storage::Database as VibeDB;
+
+use super::data::TPCCData;
 
 // =============================================================================
 // Database Loaders
@@ -142,8 +142,7 @@ pub fn get_mysql_pool() -> Option<Pool> {
     let base_opts = Opts::from_url(&url).ok()?;
 
     // Build options with init statement to disable HeatWave secondary engine
-    let opts = OptsBuilder::from_opts(base_opts)
-        .init(vec!["SET SESSION use_secondary_engine=OFF"]);
+    let opts = OptsBuilder::from_opts(base_opts).init(vec!["SET SESSION use_secondary_engine=OFF"]);
 
     Pool::new(opts).ok()
 }
@@ -690,7 +689,9 @@ fn load_orders_vibesql(db: &mut VibeDB, data: &mut TPCCData, d_id: i32, w_id: i3
                 SqlValue::Integer(ol.ol_number as i64),
                 SqlValue::Integer(ol.ol_i_id as i64),
                 SqlValue::Integer(ol.ol_supply_w_id as i64),
-                ol.ol_delivery_d.map(|s| SqlValue::Varchar(arcstr::ArcStr::from(s))).unwrap_or(SqlValue::Null),
+                ol.ol_delivery_d
+                    .map(|s| SqlValue::Varchar(arcstr::ArcStr::from(s)))
+                    .unwrap_or(SqlValue::Null),
                 SqlValue::Integer(ol.ol_quantity as i64),
                 SqlValue::Numeric(ol.ol_amount),
                 SqlValue::Varchar(arcstr::ArcStr::from(ol.ol_dist_info)),

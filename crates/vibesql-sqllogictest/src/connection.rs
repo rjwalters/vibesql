@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-use std::future::IntoFuture;
+use std::{collections::HashMap, future::IntoFuture};
 
-use futures::future::join_all;
-use futures::Future;
+use futures::{future::join_all, Future};
 
 use crate::{AsyncDB, Connection as ConnectionName, DBOutput};
 

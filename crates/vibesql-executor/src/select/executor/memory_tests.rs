@@ -210,6 +210,7 @@ mod integration_tests {
                 }),
                 join_type: vibesql_ast::JoinType::Cross,
                 condition: None,
+                using_columns: None,
                 natural: false,
             }),
             where_clause: None,
@@ -251,6 +252,7 @@ mod integration_tests {
                 condition: Some(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Boolean(true),
                 )),
+                using_columns: None,
                 natural: false,
             }),
             where_clause: None,

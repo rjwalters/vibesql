@@ -3,12 +3,15 @@
 //! This module provides functions for evaluating SQL expressions on columnar
 //! data, including support for aggregate expressions like SUM(col_a * col_b).
 
-use super::super::aggregate::AggregateOp;
-use super::super::batch::{ColumnArray, ColumnarBatch};
-use super::super::simd_ops;
-use crate::errors::ExecutorError;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
+
+use super::super::{
+    aggregate::AggregateOp,
+    batch::{ColumnArray, ColumnarBatch},
+    simd_ops,
+};
+use crate::errors::ExecutorError;
 
 /// Compute an aggregate over an expression on a ColumnarBatch
 ///

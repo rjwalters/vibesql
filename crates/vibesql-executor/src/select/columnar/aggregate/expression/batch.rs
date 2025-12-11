@@ -12,14 +12,19 @@
 //!
 //! ~6-7x speedup for expression aggregates.
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
 use std::sync::Arc;
+
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
 
-use crate::select::columnar::aggregate::AggregateOp;
-use crate::select::columnar::batch::{ColumnArray, ColumnarBatch};
+use crate::{
+    errors::ExecutorError,
+    schema::CombinedSchema,
+    select::columnar::{
+        aggregate::AggregateOp,
+        batch::{ColumnArray, ColumnarBatch},
+    },
+};
 
 /// Compute an aggregate over an expression directly from a ColumnarBatch (no row conversion)
 ///

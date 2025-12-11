@@ -91,9 +91,15 @@ fn test_unary_plus_text() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::UnaryOp {
         op: vibesql_ast::UnaryOperator::Plus,
-        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))),
+        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("hello"),
+        ))),
     };
-    assert_expression_result(&db, expr, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
+    assert_expression_result(
+        &db,
+        expr,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")),
+    );
 }
 
 #[test]
@@ -101,7 +107,9 @@ fn test_unary_minus_invalid_type() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::UnaryOp {
         op: vibesql_ast::UnaryOperator::Minus,
-        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))),
+        expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("hello"),
+        ))),
     };
     assert_type_mismatch(&db, expr);
 }

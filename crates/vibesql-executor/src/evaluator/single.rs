@@ -3,9 +3,11 @@
 //! This module provides the ExpressionEvaluator for evaluating expressions
 //! in the context of a single table schema.
 
-use crate::errors::ExecutorError;
-use lru::LruCache;
 use std::{cell::RefCell, rc::Rc};
+
+use lru::LruCache;
+
+use crate::errors::ExecutorError;
 
 /// Evaluates expressions in the context of a row
 pub struct ExpressionEvaluator<'a> {
@@ -19,12 +21,13 @@ pub struct ExpressionEvaluator<'a> {
     pub(super) procedural_context: Option<&'a crate::procedural::ExecutionContext>,
     /// Current depth in expression tree (for preventing stack overflow)
     pub(super) depth: usize,
-    /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across depth levels)
+    /// CSE cache for common sub-expression elimination with LRU eviction (shared via Rc across
+    /// depth levels)
     pub(super) cse_cache: Rc<RefCell<LruCache<u64, vibesql_types::SqlValue>>>,
     /// Whether CSE is enabled (can be disabled for debugging)
     pub(super) enable_cse: bool,
-    /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value = result rows)
-    /// Shared via Rc across child evaluators within a single statement execution.
+    /// Cache for non-correlated subquery results with LRU eviction (key = subquery hash, value =
+    /// result rows) Shared via Rc across child evaluators within a single statement execution.
     pub(super) subquery_cache: Rc<RefCell<LruCache<u64, Vec<vibesql_storage::Row>>>>,
     /// Row index for ROWID pseudo-column support (SQLite compatibility)
     /// When set, ROWID/_rowid_/oid column references will return this value
@@ -134,7 +137,8 @@ impl<'a> ExpressionEvaluator<'a> {
         }
     }
 
-    /// Create a new expression evaluator with procedural context for stored procedure/function execution
+    /// Create a new expression evaluator with procedural context for stored procedure/function
+    /// execution
     pub fn with_procedural_context(
         schema: &'a vibesql_catalog::TableSchema,
         database: &'a vibesql_storage::Database,

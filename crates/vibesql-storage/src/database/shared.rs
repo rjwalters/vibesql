@@ -5,15 +5,15 @@
 // This module provides a thread-safe wrapper around Database that enables
 // concurrent read queries while maintaining exclusive access for writes.
 
-use super::core::Database;
-use crate::{Row, StorageError};
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-#[cfg(target_arch = "wasm32")]
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use super::core::Database;
+use crate::{Row, StorageError};
 
 /// A thread-safe wrapper around `Database` that enables concurrent read queries.
 ///
@@ -93,9 +93,7 @@ impl SharedDatabase {
     ///
     /// This takes ownership of the Database and wraps it for concurrent access.
     pub fn new(db: Database) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(db)),
-        }
+        Self { inner: Arc::new(RwLock::new(db)) }
     }
 
     /// Acquire a read lock for concurrent read access.
@@ -309,16 +307,21 @@ impl SharedDatabase {
     /// Acquires a write lock internally. More efficient than calling
     /// `insert_row` multiple times.
     #[inline]
-    pub fn insert_rows_batch(&self, table_name: &str, rows: Vec<Row>) -> Result<usize, StorageError> {
+    pub fn insert_rows_batch(
+        &self,
+        table_name: &str,
+        rows: Vec<Row>,
+    ) -> Result<usize, StorageError> {
         self.with_write(|db| db.insert_rows_batch(table_name, rows))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     fn create_test_db() -> SharedDatabase {
         let mut db = Database::new();
@@ -381,9 +384,8 @@ mod tests {
     fn test_shared_database_with_read() {
         let shared_db = create_test_db();
 
-        let count = shared_db.with_read(|db| {
-            db.get_table("users").map(|t| t.row_count()).unwrap_or(0)
-        });
+        let count =
+            shared_db.with_read(|db| db.get_table("users").map(|t| t.row_count()).unwrap_or(0));
 
         assert_eq!(count, 3);
     }
@@ -456,10 +458,8 @@ mod tests {
         assert_eq!(shared_db.table_row_count("nonexistent"), None);
 
         // insert_row
-        let row = Row::new(vec![
-            SqlValue::Integer(4),
-            SqlValue::Varchar(arcstr::ArcStr::from("User 4")),
-        ]);
+        let row =
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from("User 4"))]);
         shared_db.insert_row("users", row).unwrap();
         assert_eq!(shared_db.table_row_count("users"), Some(4));
     }
@@ -467,8 +467,10 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_shared_database_concurrent_reads() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::thread;
+        use std::{
+            sync::atomic::{AtomicUsize, Ordering},
+            thread,
+        };
 
         let shared_db = create_test_db();
         let read_count = Arc::new(AtomicUsize::new(0));

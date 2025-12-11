@@ -380,7 +380,8 @@ impl Parser {
         }
     }
 
-    /// Parse interval unit (DAY, MONTH, YEAR, etc.) or compound units (YEAR TO MONTH, DAY TO SECOND, etc.)
+    /// Parse interval unit (DAY, MONTH, YEAR, etc.) or compound units (YEAR TO MONTH, DAY TO
+    /// SECOND, etc.)
     pub(super) fn parse_interval_unit(&mut self) -> Result<vibesql_ast::IntervalUnit, ParseError> {
         use vibesql_ast::IntervalUnit;
 

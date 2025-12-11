@@ -7,13 +7,13 @@
 //! - Recursion depth limiting
 //! - Read-only enforcement
 
-use crate::errors::ExecutorError;
-use crate::procedural::ExecutionContext;
 use vibesql_ast::Expression;
 use vibesql_catalog::{Function, FunctionBody};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
+
+use crate::{errors::ExecutorError, procedural::ExecutionContext};
 
 /// Execute a user-defined function
 ///
@@ -96,7 +96,8 @@ fn execute_simple_return(
     let sql_trimmed = sql.trim();
 
     // For simple RETURN functions, we need to parse and execute the RETURN statement
-    // Since there's no Statement::Procedural variant, we'll need to evaluate the expression directly
+    // Since there's no Statement::Procedural variant, we'll need to evaluate the expression
+    // directly
 
     // Extract the expression after RETURN keyword
     let return_upper = "RETURN";
@@ -183,9 +184,10 @@ impl ExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::FunctionParam;
     use vibesql_types::DataType;
+
+    use super::*;
 
     #[test]
     fn test_simple_return_function() {

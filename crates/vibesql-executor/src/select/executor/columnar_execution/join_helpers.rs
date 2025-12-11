@@ -5,8 +5,9 @@
 
 use std::collections::HashMap;
 
-use crate::{errors::ExecutorError, schema::CombinedSchema, select::columnar};
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType};
+
+use crate::{errors::ExecutorError, schema::CombinedSchema, select::columnar};
 
 /// Check if a FROM clause only contains INNER or CROSS joins
 ///
@@ -266,7 +267,9 @@ pub(super) fn extract_single_table_name(from_clause: &FromClause) -> Option<Stri
 /// # Issue #4111
 /// The alias (if present) must be used as the schema key, since queries reference
 /// columns using the alias (e.g., `J.I_CURRENT_PRICE` in `FROM item J`).
-pub(super) fn extract_table_name_and_alias(from_clause: &FromClause) -> Option<(String, Option<String>)> {
+pub(super) fn extract_table_name_and_alias(
+    from_clause: &FromClause,
+) -> Option<(String, Option<String>)> {
     match from_clause {
         FromClause::Table { name, alias, .. } => Some((name.clone(), alias.clone())),
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path

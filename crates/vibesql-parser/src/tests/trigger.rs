@@ -203,7 +203,8 @@ fn test_create_trigger_missing_action() {
 fn test_create_trigger_body_preserved_as_valid_sql() {
     use vibesql_ast::TriggerAction;
 
-    let sql = "CREATE TRIGGER my_trigger AFTER INSERT ON my_table FOR EACH ROW BEGIN SELECT 1; END;";
+    let sql =
+        "CREATE TRIGGER my_trigger AFTER INSERT ON my_table FOR EACH ROW BEGIN SELECT 1; END;";
     let result = Parser::parse_sql(sql);
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 

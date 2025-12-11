@@ -39,7 +39,7 @@ pub enum ValueType {
 /// # Examples
 ///
 /// ```
-/// use vibesql_types::{SqlMode, SqlValue, MySqlModeFlags, TypeBehavior, ValueType};
+/// use vibesql_types::{MySqlModeFlags, SqlMode, SqlValue, TypeBehavior, ValueType};
 ///
 /// let mysql_mode = SqlMode::MySQL { flags: MySqlModeFlags::default() };
 /// let sqlite_mode = SqlMode::SQLite;
@@ -128,7 +128,7 @@ pub trait TypeBehavior {
 fn is_float_value(value: &SqlValue) -> bool {
     matches!(
         value,
-        SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) // Numeric is stored as f64, treated as float-like in SQLite
+        SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) /* Numeric is stored as f64, treated as float-like in SQLite */
     )
 }
 

@@ -177,7 +177,8 @@ impl Histogram {
         0.0
     }
 
-    /// Estimate selectivity for range predicate: col > value, col >= value, col < value, col <= value
+    /// Estimate selectivity for range predicate: col > value, col >= value, col < value, col <=
+    /// value
     pub fn estimate_range_selectivity(&self, operator: &str, value: &SqlValue) -> f64 {
         if self.buckets.is_empty() {
             return 0.0;
@@ -273,8 +274,9 @@ impl Histogram {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_histogram_equal_depth() {

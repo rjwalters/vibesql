@@ -6,8 +6,9 @@
 //! - VARCHAR - INTERVAL binary operations
 //! - DATE_ADD/DATE_SUB with INTERVAL syntax and VARCHAR dates
 
-use crate::common::create_test_evaluator;
 use vibesql_types::{Interval, SqlValue};
+
+use crate::common::create_test_evaluator;
 
 // ==================== DATEDIFF COERCION TESTS ====================
 
@@ -87,7 +88,9 @@ fn test_varchar_plus_interval() {
 
     // '2024-01-01' + INTERVAL '5' DAY
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01")))),
+        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-01-01",
+        )))),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
             "5 DAY".to_string(),
@@ -117,7 +120,9 @@ fn test_interval_plus_varchar_commutative() {
             "5 DAY".to_string(),
         )))),
         op: vibesql_ast::BinaryOperator::Plus,
-        right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01")))),
+        right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-01-01",
+        )))),
     };
 
     let result = evaluator.eval(&expr, &row).unwrap();
@@ -139,7 +144,9 @@ fn test_varchar_minus_interval() {
 
     // '2024-01-10' - INTERVAL '5' DAY
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-10")))),
+        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-01-10",
+        )))),
         op: vibesql_ast::BinaryOperator::Minus,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
             "5 DAY".to_string(),
@@ -169,7 +176,9 @@ fn test_interval_minus_varchar_error() {
             "5 DAY".to_string(),
         )))),
         op: vibesql_ast::BinaryOperator::Minus,
-        right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-01")))),
+        right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-01-01",
+        )))),
     };
 
     let result = evaluator.eval(&expr, &row);
@@ -199,7 +208,9 @@ fn test_varchar_plus_interval_month() {
 
     // '2024-01-31' + INTERVAL '1' MONTH
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-31")))),
+        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-01-31",
+        )))),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
             "1 MONTH".to_string(),
@@ -339,7 +350,9 @@ fn test_varchar_leap_year_date() {
 
     // '2024-02-29' + INTERVAL '1' YEAR (should handle leap year correctly)
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-02-29")))),
+        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-02-29",
+        )))),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
             "1 YEAR".to_string(),
@@ -365,7 +378,9 @@ fn test_varchar_year_boundary() {
 
     // '2024-12-31' + INTERVAL '1' DAY
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-12-31")))),
+        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-12-31",
+        )))),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
             "1 DAY".to_string(),
@@ -392,7 +407,9 @@ fn test_varchar_minus_interval_as_negative() {
     // '2024-01-10' - INTERVAL '5' DAY (expressing negative as subtraction)
     // This is the preferred way to express "subtract 5 days"
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("2024-01-10")))),
+        left: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+            "2024-01-10",
+        )))),
         op: vibesql_ast::BinaryOperator::Minus,
         right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Interval(Interval::new(
             "5 DAY".to_string(),

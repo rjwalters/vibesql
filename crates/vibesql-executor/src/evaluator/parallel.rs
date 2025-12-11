@@ -4,12 +4,13 @@
 //! including component extraction and reconstruction for thread-safe execution.
 
 #[cfg(feature = "parallel")]
+use std::collections::HashMap;
+
+#[cfg(feature = "parallel")]
 use crate::{
     schema::CombinedSchema,
     select::{cte::CteResult, WindowFunctionKey},
 };
-#[cfg(feature = "parallel")]
-use std::collections::HashMap;
 
 /// Components returned by get_parallel_components for parallel execution
 ///

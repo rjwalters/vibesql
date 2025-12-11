@@ -181,7 +181,8 @@ impl CreateIndexExecutor {
                 );
                 database.catalog.add_index(index_metadata)?;
 
-                // B-tree index (use unqualified name for storage, database handles qualification internally)
+                // B-tree index (use unqualified name for storage, database handles qualification
+                // internally)
                 database.create_index(
                     index_name.clone(),
                     table_name.clone(),
@@ -230,7 +231,8 @@ impl CreateIndexExecutor {
                     }
                 })?;
 
-                // Extract MBRs from all existing rows (use unqualified name, database handles qualification)
+                // Extract MBRs from all existing rows (use unqualified name, database handles
+                // qualification)
                 let table = database
                     .get_table(&table_name)
                     .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?;
@@ -343,7 +345,8 @@ impl CreateIndexExecutor {
                     vibesql_catalog::IndexType::IVFFlat { metric: catalog_metric, lists: *lists },
                     vec![vibesql_catalog::IndexedColumn {
                         column_name: column_name.clone(),
-                        order: vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
+                        order: vibesql_catalog::SortOrder::Ascending, /* Not meaningful for
+                                                                       * vector indexes */
                         prefix_length: None,
                     }],
                     false, // IVFFlat indexes are never unique
@@ -435,7 +438,8 @@ impl CreateIndexExecutor {
                     },
                     vec![vibesql_catalog::IndexedColumn {
                         column_name: column_name.clone(),
-                        order: vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
+                        order: vibesql_catalog::SortOrder::Ascending, /* Not meaningful for
+                                                                       * vector indexes */
                         prefix_length: None,
                     }],
                     false, // HNSW indexes are never unique
@@ -491,7 +495,7 @@ mod tests {
 
     fn create_test_table(db: &mut Database) {
         let stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "users".to_string(),
             columns: vec![
                 ColumnDef {
@@ -796,7 +800,7 @@ mod tests {
 
     fn create_vector_table(db: &mut Database) {
         let stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: "documents".to_string(),
             columns: vec![
                 ColumnDef {

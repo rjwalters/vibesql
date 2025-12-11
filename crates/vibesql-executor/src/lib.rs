@@ -22,7 +22,6 @@ mod grant;
 pub mod index_ddl;
 pub mod information_schema;
 mod insert;
-pub mod sqlite_schema;
 mod introspection;
 pub mod limits;
 pub mod memory;
@@ -39,6 +38,7 @@ mod schema_ddl;
 pub mod select;
 mod select_into;
 pub mod session;
+pub mod sqlite_schema;
 pub mod timeout;
 mod transaction;
 mod trigger_ddl;
@@ -69,8 +69,7 @@ pub use dml_cost::DmlOptimizer;
 pub use domain_ddl::DomainExecutor;
 pub use drop_table::DropTableExecutor;
 pub use errors::ExecutorError;
-pub use evaluator::clear_in_subquery_cache;
-pub use evaluator::ExpressionEvaluator;
+pub use evaluator::{clear_in_subquery_cache, ExpressionEvaluator};
 pub use explain::{ExplainExecutor, ExplainResult, PlanNode};
 pub use grant::GrantExecutor;
 pub use index_ddl::{
@@ -85,6 +84,8 @@ pub use pipeline::{
     PipelineOutput, RowOrientedPipeline,
 };
 pub use privilege_checker::PrivilegeChecker;
+// Read-only query support for concurrent access
+pub use readonly::{ReadOnlyError, ReadOnlyQuery};
 pub use revoke::RevokeExecutor;
 pub use role_ddl::RoleExecutor;
 pub use schema_ddl::SchemaExecutor;
@@ -102,9 +103,6 @@ pub use truncate_table::TruncateTableExecutor;
 pub use type_ddl::TypeExecutor;
 pub use update::UpdateExecutor;
 pub use view_ddl::ViewExecutor;
-
-// Read-only query support for concurrent access
-pub use readonly::{ReadOnlyError, ReadOnlyQuery};
 
 #[cfg(test)]
 mod tests;

@@ -364,7 +364,11 @@ fn test_delete_with_nested_exists() {
         assert_eq!(users.row_count(), 1);
 
         let remaining_id =
-            if let SqlValue::Integer(id) = users.scan_live().next().unwrap().1.get(0).unwrap() { *id } else { 0 };
+            if let SqlValue::Integer(id) = users.scan_live().next().unwrap().1.get(0).unwrap() {
+                *id
+            } else {
+                0
+            };
         assert_eq!(remaining_id, 2); // Bob remains
     } else {
         panic!("Expected DELETE statement");
@@ -388,8 +392,13 @@ fn test_delete_with_or_exists() {
         let customers = db.get_table("CUSTOMERS").unwrap();
         assert_eq!(customers.row_count(), 1);
 
-        let remaining_id =
-            if let SqlValue::Integer(id) = customers.scan_live().next().unwrap().1.get(0).unwrap() { *id } else { 0 };
+        let remaining_id = if let SqlValue::Integer(id) =
+            customers.scan_live().next().unwrap().1.get(0).unwrap()
+        {
+            *id
+        } else {
+            0
+        };
         assert_eq!(remaining_id, 4); // Diana
     } else {
         panic!("Expected DELETE statement");
@@ -428,7 +437,8 @@ fn test_delete_exists_with_select_multiple_columns() {
     }
 }
 
-/// Test that SELECT queries return only non-deleted rows after deletion bitmap marks rows as deleted.
+/// Test that SELECT queries return only non-deleted rows after deletion bitmap marks rows as
+/// deleted.
 ///
 /// This test verifies the fix for issue #3790:
 /// - DELETE marks rows as deleted in the bitmap (O(1) operation)
@@ -475,16 +485,16 @@ fn test_select_excludes_deleted_rows_after_delete() {
     );
 
     // Verify the remaining customers are Charlie (id=3) and Diana (id=4)
-    let ids: Vec<i64> = rows
-        .iter()
-        .filter_map(|row| {
-            if let SqlValue::Integer(id) = row.get(0).unwrap() {
-                Some(*id)
-            } else {
-                None
-            }
-        })
-        .collect();
+    let ids: Vec<i64> =
+        rows.iter()
+            .filter_map(|row| {
+                if let SqlValue::Integer(id) = row.get(0).unwrap() {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
     assert!(ids.contains(&3), "Charlie (id=3) should be in results");
     assert!(ids.contains(&4), "Diana (id=4) should be in results");

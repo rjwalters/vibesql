@@ -1,7 +1,7 @@
-use crate::evaluator::ExpressionEvaluator;
-use crate::schema::CombinedSchema;
 use vibesql_ast::{BinaryOperator, Expression, UnaryOperator};
 use vibesql_types::{SqlMode, SqlValue};
+
+use crate::{evaluator::ExpressionEvaluator, schema::CombinedSchema};
 
 /// Comparison operator for column-to-column predicates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,11 +73,7 @@ pub enum ColumnPredicate {
 
     /// column1 op column2 (column-to-column comparison)
     /// Used for predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
-    ColumnCompare {
-        left_column_idx: usize,
-        op: CompareOp,
-        right_column_idx: usize,
-    },
+    ColumnCompare { left_column_idx: usize, op: CompareOp, right_column_idx: usize },
 }
 
 impl ColumnPredicate {
@@ -109,10 +105,7 @@ impl ColumnPredicate {
 /// extracted for evaluating the predicates. This enables selective column
 /// extraction optimization - only extracting needed columns instead of all.
 pub fn collect_referenced_columns(predicates: &[ColumnPredicate]) -> Vec<usize> {
-    let mut columns: Vec<usize> = predicates
-        .iter()
-        .flat_map(|p| p.referenced_columns())
-        .collect();
+    let mut columns: Vec<usize> = predicates.iter().flat_map(|p| p.referenced_columns()).collect();
     columns.sort_unstable();
     columns.dedup();
     columns
@@ -141,7 +134,10 @@ pub fn collect_referenced_columns(predicates: &[ColumnPredicate]) -> Vec<usize> 
 /// Column mapping: [14]  (only column 14 was extracted)
 /// Remapped predicates: [Equal { column_idx: 0, value: 'R' }]
 /// ```
-pub fn remap_predicates(predicates: &[ColumnPredicate], column_mapping: &[usize]) -> Vec<ColumnPredicate> {
+pub fn remap_predicates(
+    predicates: &[ColumnPredicate],
+    column_mapping: &[usize],
+) -> Vec<ColumnPredicate> {
     predicates.iter().map(|p| remap_predicate(p, column_mapping)).collect()
 }
 
@@ -154,45 +150,48 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
     };
 
     match predicate {
-        ColumnPredicate::LessThan { column_idx, value } => {
-            ColumnPredicate::LessThan { column_idx: find_new_idx(*column_idx), value: value.clone() }
-        }
-        ColumnPredicate::GreaterThan { column_idx, value } => {
-            ColumnPredicate::GreaterThan { column_idx: find_new_idx(*column_idx), value: value.clone() }
-        }
+        ColumnPredicate::LessThan { column_idx, value } => ColumnPredicate::LessThan {
+            column_idx: find_new_idx(*column_idx),
+            value: value.clone(),
+        },
+        ColumnPredicate::GreaterThan { column_idx, value } => ColumnPredicate::GreaterThan {
+            column_idx: find_new_idx(*column_idx),
+            value: value.clone(),
+        },
         ColumnPredicate::GreaterThanOrEqual { column_idx, value } => {
-            ColumnPredicate::GreaterThanOrEqual { column_idx: find_new_idx(*column_idx), value: value.clone() }
+            ColumnPredicate::GreaterThanOrEqual {
+                column_idx: find_new_idx(*column_idx),
+                value: value.clone(),
+            }
         }
         ColumnPredicate::LessThanOrEqual { column_idx, value } => {
-            ColumnPredicate::LessThanOrEqual { column_idx: find_new_idx(*column_idx), value: value.clone() }
+            ColumnPredicate::LessThanOrEqual {
+                column_idx: find_new_idx(*column_idx),
+                value: value.clone(),
+            }
         }
         ColumnPredicate::Equal { column_idx, value } => {
             ColumnPredicate::Equal { column_idx: find_new_idx(*column_idx), value: value.clone() }
         }
-        ColumnPredicate::NotEqual { column_idx, value } => {
-            ColumnPredicate::NotEqual { column_idx: find_new_idx(*column_idx), value: value.clone() }
-        }
-        ColumnPredicate::Between { column_idx, low, high } => {
-            ColumnPredicate::Between {
-                column_idx: find_new_idx(*column_idx),
-                low: low.clone(),
-                high: high.clone(),
-            }
-        }
-        ColumnPredicate::Like { column_idx, pattern, negated } => {
-            ColumnPredicate::Like {
-                column_idx: find_new_idx(*column_idx),
-                pattern: pattern.clone(),
-                negated: *negated,
-            }
-        }
-        ColumnPredicate::InList { column_idx, values, negated } => {
-            ColumnPredicate::InList {
-                column_idx: find_new_idx(*column_idx),
-                values: values.clone(),
-                negated: *negated,
-            }
-        }
+        ColumnPredicate::NotEqual { column_idx, value } => ColumnPredicate::NotEqual {
+            column_idx: find_new_idx(*column_idx),
+            value: value.clone(),
+        },
+        ColumnPredicate::Between { column_idx, low, high } => ColumnPredicate::Between {
+            column_idx: find_new_idx(*column_idx),
+            low: low.clone(),
+            high: high.clone(),
+        },
+        ColumnPredicate::Like { column_idx, pattern, negated } => ColumnPredicate::Like {
+            column_idx: find_new_idx(*column_idx),
+            pattern: pattern.clone(),
+            negated: *negated,
+        },
+        ColumnPredicate::InList { column_idx, values, negated } => ColumnPredicate::InList {
+            column_idx: find_new_idx(*column_idx),
+            values: values.clone(),
+            negated: *negated,
+        },
         ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } => {
             ColumnPredicate::ColumnCompare {
                 left_column_idx: find_new_idx(*left_column_idx),
@@ -276,8 +275,13 @@ fn try_fold_constant(expr: &Expression) -> Option<SqlValue> {
             let right_val = try_fold_constant(right)?;
 
             // Use the static evaluator with default SQL mode
-            ExpressionEvaluator::eval_binary_op_static(&left_val, op, &right_val, SqlMode::default())
-                .ok()
+            ExpressionEvaluator::eval_binary_op_static(
+                &left_val,
+                op,
+                &right_val,
+                SqlMode::default(),
+            )
+            .ok()
         }
 
         // Unary operations on constants
@@ -369,9 +373,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                 if let Some(value) = try_fold_constant(right) {
                     let column_idx = schema.get_column_index(table.as_deref(), column)?;
                     let predicate = match op {
-                        BinaryOperator::LessThan => {
-                            ColumnPredicate::LessThan { column_idx, value }
-                        }
+                        BinaryOperator::LessThan => ColumnPredicate::LessThan { column_idx, value },
                         BinaryOperator::GreaterThan => {
                             ColumnPredicate::GreaterThan { column_idx, value }
                         }
@@ -382,9 +384,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                             ColumnPredicate::GreaterThanOrEqual { column_idx, value }
                         }
                         BinaryOperator::Equal => ColumnPredicate::Equal { column_idx, value },
-                        BinaryOperator::NotEqual => {
-                            ColumnPredicate::NotEqual { column_idx, value }
-                        }
+                        BinaryOperator::NotEqual => ColumnPredicate::NotEqual { column_idx, value },
                         _ => return None,
                     };
                     return Some(PredicateTree::Leaf(predicate));
@@ -410,9 +410,7 @@ fn extract_tree_recursive(expr: &Expression, schema: &CombinedSchema) -> Option<
                         }
                         BinaryOperator::Equal => ColumnPredicate::Equal { column_idx, value },
                         // NotEqual is symmetric: literal <> column == column <> literal
-                        BinaryOperator::NotEqual => {
-                            ColumnPredicate::NotEqual { column_idx, value }
-                        }
+                        BinaryOperator::NotEqual => ColumnPredicate::NotEqual { column_idx, value },
                         _ => return None,
                     };
                     return Some(PredicateTree::Leaf(predicate));
@@ -719,10 +717,11 @@ fn extract_predicates_recursive(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema::CombinedSchema;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
+    use crate::schema::CombinedSchema;
 
     fn create_test_schema() -> CombinedSchema {
         let schema = TableSchema::new(

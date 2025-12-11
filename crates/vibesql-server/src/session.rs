@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use vibesql_executor::{
@@ -8,8 +7,7 @@ use vibesql_executor::{
 };
 use vibesql_types::SqlValue;
 
-use crate::registry::SharedDatabase;
-use crate::transaction::SessionTransactionManager;
+use crate::{registry::SharedDatabase, transaction::SessionTransactionManager};
 
 /// Session state for a database connection
 pub struct Session {
@@ -292,8 +290,7 @@ impl Session {
             // Write operations require exclusive write lock
             Statement::Insert(insert_stmt) => {
                 let mut db = self.db.write().await;
-                let affected =
-                    vibesql_executor::InsertExecutor::execute(&mut db, insert_stmt)?;
+                let affected = vibesql_executor::InsertExecutor::execute(&mut db, insert_stmt)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&insert_stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: affected })
@@ -301,8 +298,7 @@ impl Session {
 
             Statement::Update(update_stmt) => {
                 let mut db = self.db.write().await;
-                let affected =
-                    vibesql_executor::UpdateExecutor::execute(update_stmt, &mut db)?;
+                let affected = vibesql_executor::UpdateExecutor::execute(update_stmt, &mut db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&update_stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: affected })
@@ -310,8 +306,7 @@ impl Session {
 
             Statement::Delete(delete_stmt) => {
                 let mut db = self.db.write().await;
-                let affected =
-                    vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut db)?;
+                let affected = vibesql_executor::DeleteExecutor::execute(delete_stmt, &mut db)?;
                 // Invalidate cache for modified table
                 self.stmt_cache.invalidate_table(&delete_stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: affected })
@@ -359,8 +354,7 @@ impl Session {
             // ANALYZE updates statistics, requires write lock
             Statement::Analyze(analyze_stmt) => {
                 let mut db = self.db.write().await;
-                let message =
-                    vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut db)?;
+                let message = vibesql_executor::AnalyzeExecutor::execute(analyze_stmt, &mut db)?;
                 // Extract table count from message - the executor returns a message like
                 // "ANALYZE completed - N table(s) analyzed"
                 let tables_analyzed =
@@ -370,21 +364,13 @@ impl Session {
             }
 
             // Session-local operations (no db lock needed)
-            Statement::Prepare(prepare_stmt) => {
-                self.execute_prepare(prepare_stmt)
-            }
+            Statement::Prepare(prepare_stmt) => self.execute_prepare(prepare_stmt),
 
-            Statement::Execute(execute_stmt) => {
-                self.execute_execute(execute_stmt).await
-            }
+            Statement::Execute(execute_stmt) => self.execute_execute(execute_stmt).await,
 
-            Statement::Deallocate(deallocate_stmt) => {
-                self.execute_deallocate(deallocate_stmt)
-            }
+            Statement::Deallocate(deallocate_stmt) => self.execute_deallocate(deallocate_stmt),
 
-            Statement::DeclareCursor(declare_stmt) => {
-                self.execute_declare_cursor(declare_stmt)
-            }
+            Statement::DeclareCursor(declare_stmt) => self.execute_declare_cursor(declare_stmt),
 
             Statement::OpenCursor(open_stmt) => {
                 // OpenCursor needs read access to execute the cursor's query
@@ -394,26 +380,16 @@ impl Session {
                 Ok(ExecutionResult::OpenCursor { cursor_name: open_stmt.cursor_name.clone() })
             }
 
-            Statement::Fetch(fetch_stmt) => {
-                self.execute_fetch(fetch_stmt)
-            }
+            Statement::Fetch(fetch_stmt) => self.execute_fetch(fetch_stmt),
 
-            Statement::CloseCursor(close_stmt) => {
-                self.execute_close_cursor(close_stmt)
-            }
+            Statement::CloseCursor(close_stmt) => self.execute_close_cursor(close_stmt),
 
             // Transaction control
-            Statement::BeginTransaction(_) => {
-                self.begin_transaction().await
-            }
+            Statement::BeginTransaction(_) => self.begin_transaction().await,
 
-            Statement::Commit(_) => {
-                self.commit().await
-            }
+            Statement::Commit(_) => self.commit().await,
 
-            Statement::Rollback(_) => {
-                self.rollback().await
-            }
+            Statement::Rollback(_) => self.rollback().await,
 
             Statement::RollbackToSavepoint(_savepoint_stmt) => {
                 // TODO: Implement savepoints in SessionTransactionManager
@@ -647,9 +623,10 @@ fn evaluate_expression(expr: &vibesql_ast::Expression) -> Result<SqlValue> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::sync::RwLock;
     use vibesql_storage::Database;
+
+    use super::*;
 
     fn create_shared_db() -> SharedDatabase {
         Arc::new(RwLock::new(Database::new()))
@@ -826,16 +803,10 @@ mod tests {
         let mut session2 = Session::new("testdb".to_string(), "user2".to_string(), Arc::clone(&db));
 
         // Create a table through session 1
-        session1
-            .execute("CREATE TABLE shared_test (id INT, value VARCHAR(100))")
-            .await
-            .unwrap();
+        session1.execute("CREATE TABLE shared_test (id INT, value VARCHAR(100))").await.unwrap();
 
         // Insert data through session 1
-        session1
-            .execute("INSERT INTO shared_test VALUES (1, 'from session 1')")
-            .await
-            .unwrap();
+        session1.execute("INSERT INTO shared_test VALUES (1, 'from session 1')").await.unwrap();
 
         // Should be visible through session 2
         let result = session2.execute("SELECT * FROM shared_test").await.unwrap();
@@ -847,10 +818,7 @@ mod tests {
         }
 
         // Insert through session 2
-        session2
-            .execute("INSERT INTO shared_test VALUES (2, 'from session 2')")
-            .await
-            .unwrap();
+        session2.execute("INSERT INTO shared_test VALUES (2, 'from session 2')").await.unwrap();
 
         // Should be visible through session 1
         let result = session1.execute("SELECT * FROM shared_test").await.unwrap();

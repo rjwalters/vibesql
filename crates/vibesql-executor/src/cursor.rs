@@ -16,8 +16,7 @@ use vibesql_ast::{
 };
 use vibesql_storage::{Database, Row};
 
-use crate::errors::ExecutorError;
-use crate::SelectExecutor;
+use crate::{errors::ExecutorError, SelectExecutor};
 
 /// A cursor holding query definition and materialized results
 #[derive(Debug, Clone)]
@@ -263,13 +262,14 @@ impl CursorExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{
         CloseCursorStmt, CursorUpdatability, DeclareCursorStmt, FetchOrientation, FetchStmt,
         FromClause, OpenCursorStmt, SelectItem, SelectStmt,
     };
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     fn create_test_db() -> Database {
         let mut db = Database::new();

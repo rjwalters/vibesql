@@ -83,7 +83,9 @@ init_results_db() {
                 passed INTEGER DEFAULT 0,
                 failed INTEGER DEFAULT 0,
                 skipped INTEGER DEFAULT 0,
-                parse_errors INTEGER DEFAULT 0
+                skipped_setup_failed INTEGER DEFAULT 0,
+                parse_errors INTEGER DEFAULT 0,
+                setup_failures INTEGER DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS tcl_test_results (
@@ -106,6 +108,17 @@ init_results_db() {
             CREATE INDEX IF NOT EXISTS idx_tcl_results_file ON tcl_test_results(file_path);
             CREATE INDEX IF NOT EXISTS idx_tcl_results_status ON tcl_test_results(status);
         "
+    else
+        # Check if we need to migrate the schema (add new columns)
+        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            SELECT skipped_setup_failed FROM tcl_test_runs LIMIT 1
+        " 2>/dev/null || {
+            print_info "Migrating database schema..."
+            "$VIBESQL_BIN" "$RESULTS_DB" -c "
+                ALTER TABLE tcl_test_runs ADD COLUMN skipped_setup_failed INTEGER DEFAULT 0;
+                ALTER TABLE tcl_test_runs ADD COLUMN setup_failures INTEGER DEFAULT 0;
+            " 2>/dev/null || true
+        }
     fi
 }
 
@@ -395,6 +408,8 @@ cmd_status() {
             passed,
             failed,
             skipped,
+            skipped_setup_failed as 'skipped (setup)',
+            setup_failures as 'files w/ setup fail',
             ROUND(100.0 * passed / NULLIF(total_tests - skipped, 0), 1) as pass_rate
         FROM tcl_test_runs
         ORDER BY run_id DESC

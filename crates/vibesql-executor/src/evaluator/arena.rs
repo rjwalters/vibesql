@@ -18,11 +18,13 @@
 //! let result = evaluator.eval(&arena_expr, &row)?;
 //! ```
 
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 
 use ahash::AHasher;
-use std::hash::{Hash, Hasher};
 use vibesql_ast::arena::{
     self as arena_ast, ArenaInterner, Expression as ArenaExpression,
     ExtendedExpr as ArenaExtendedExpr, Symbol,
@@ -30,8 +32,7 @@ use vibesql_ast::arena::{
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Maximum expression evaluation depth to prevent stack overflow.
 const MAX_ARENA_EXPRESSION_DEPTH: usize = 128;
@@ -756,11 +757,12 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bumpalo::Bump;
     use vibesql_ast::arena::ArenaInterner;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn make_schema() -> CombinedSchema {
         let columns = vec![
@@ -782,7 +784,8 @@ mod tests {
         let schema = make_schema();
         let params = vec![];
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
 
         let expr = ArenaExpression::Literal(SqlValue::Integer(42));
         let result = evaluator.eval(&expr, &row).unwrap();
@@ -796,7 +799,8 @@ mod tests {
         let schema = make_schema();
         let params = vec![SqlValue::Integer(100), SqlValue::Varchar(arcstr::ArcStr::from("test"))];
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
 
         // First placeholder (index 0)
         let expr = ArenaExpression::Placeholder(0);
@@ -821,7 +825,8 @@ mod tests {
         let name_sym = interner.intern("NAME");
 
         let evaluator = ArenaExpressionEvaluator::new(&schema, &params, &interner);
-        let row = Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
 
         let expr = ArenaExpression::ColumnRef { table: None, column: id_sym };
         let result = evaluator.eval(&expr, &row).unwrap();

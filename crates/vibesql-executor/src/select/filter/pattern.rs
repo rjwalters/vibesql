@@ -296,9 +296,10 @@ impl PredicatePattern {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn create_test_schema() -> CombinedSchema {
         let columns = vec![

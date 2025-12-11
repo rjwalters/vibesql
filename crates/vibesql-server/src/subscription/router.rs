@@ -1,10 +1,12 @@
 //! Change router that routes storage events to affected subscriptions
 
-use super::SubscriptionId;
 use std::collections::HashMap;
+
 use tokio::sync::mpsc;
 use tracing::warn;
 use vibesql_storage::{ChangeEvent, ChangeEventReceiver};
+
+use super::SubscriptionId;
 
 /// Update notification for a subscription
 #[derive(Debug, Clone)]
@@ -156,8 +158,9 @@ impl ChangeRouter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::change_event_channel;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_register_subscription() {

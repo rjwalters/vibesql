@@ -24,6 +24,11 @@ pub mod statistics;
 pub mod table;
 pub mod wal;
 
+// Platform-specific exports
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::{NativeFile, NativeStorage};
+#[cfg(target_arch = "wasm32")]
+pub use backend::{OpfsFile, OpfsStorage};
 pub use backend::{StorageBackend, StorageFile};
 pub use blob::{BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService};
 pub use buffer::{BufferPool, BufferPoolStats};
@@ -52,13 +57,6 @@ pub use wal::{
     TransactionDurability, WalEntry, WalOp, WalOpTag,
 };
 
-// Platform-specific exports
-#[cfg(not(target_arch = "wasm32"))]
-pub use backend::{NativeFile, NativeStorage};
-
-#[cfg(target_arch = "wasm32")]
-pub use backend::{OpfsFile, OpfsStorage};
-
 #[cfg(test)]
 mod tests {
     use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -86,8 +84,10 @@ mod tests {
 
         // Insert some rows
         for i in 0..10 {
-            let row =
-                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("User {}", i)))]);
+            let row = Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("User {}", i))),
+            ]);
             table.insert(row).unwrap();
         }
 
@@ -96,8 +96,10 @@ mod tests {
         assert_eq!(table.primary_key_index().as_ref().unwrap().len(), 10);
 
         // Try to insert duplicate - should work at table level (constraint check is in executor)
-        let duplicate_row =
-            Row::new(vec![SqlValue::Integer(0), SqlValue::Varchar(arcstr::ArcStr::from("Duplicate User"))]);
+        let duplicate_row = Row::new(vec![
+            SqlValue::Integer(0),
+            SqlValue::Varchar(arcstr::ArcStr::from("Duplicate User")),
+        ]);
         table.insert(duplicate_row).unwrap(); // This succeeds because constraint checking is in
                                               // executor
     }
@@ -121,7 +123,10 @@ mod tests {
 
         // Insert some rows
         for i in 0..5 {
-            let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("SKU{}", i)))]);
+            let row = Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("SKU{}", i))),
+            ]);
             table.insert(row).unwrap();
         }
 
@@ -196,10 +201,16 @@ mod tests {
 
         // Insert initial rows
         table
-            .insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]))
+            .insert(Row::new(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            ]))
             .unwrap();
         table
-            .insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]))
+            .insert(Row::new(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            ]))
             .unwrap();
 
         // Update primary key column
@@ -262,7 +273,10 @@ mod tests {
 
         // Verify unique index was updated
         let row = table.scan().iter().next().unwrap();
-        assert_eq!(row.get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("alice.smith@example.com"))));
+        assert_eq!(
+            row.get(1),
+            Some(&SqlValue::Varchar(arcstr::ArcStr::from("alice.smith@example.com")))
+        );
     }
 
     #[test]

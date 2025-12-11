@@ -5,9 +5,10 @@
 //! - ISO/IEC 13249-3:2016 (SQL/MM Part 3)
 //! - OGC Simple Features for SQL v1.1.1
 
+use std::io::{Cursor, Read};
+
 use super::Geometry;
 use crate::errors::ExecutorError;
-use std::io::{Cursor, Read};
 
 // WKB Geometry Type Codes
 const WKB_POINT: u32 = 1;

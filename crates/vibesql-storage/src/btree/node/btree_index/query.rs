@@ -3,10 +3,11 @@
 //! This module handles key lookups, range scans, and multi-key queries
 //! with full support for non-unique indexes (duplicate keys).
 
+use super::{
+    super::structure::{Key, LeafNode, RowId},
+    BTreeIndex,
+};
 use crate::StorageError;
-
-use super::super::structure::{Key, LeafNode, RowId};
-use super::BTreeIndex;
 
 impl BTreeIndex {
     /// Look up all row IDs for a given key
@@ -413,7 +414,8 @@ impl BTreeIndex {
         loop {
             // Process entries in current leaf in reverse order
             for (key, row_ids) in current_leaf.entries.iter().rev() {
-                // Check if we're before the start key (in reverse, this means we've gone too far back)
+                // Check if we're before the start key (in reverse, this means we've gone too far
+                // back)
                 if let Some(start) = start_key {
                     let cmp = key.cmp(start);
                     if cmp == std::cmp::Ordering::Less {
@@ -604,10 +606,7 @@ impl BTreeIndex {
         &self,
     ) -> Result<Vec<vibesql_types::SqlValue>, StorageError> {
         let prefixes = self.get_distinct_prefix_values(1)?;
-        Ok(prefixes
-            .into_iter()
-            .filter_map(|mut p| p.pop())
-            .collect())
+        Ok(prefixes.into_iter().filter_map(|mut p| p.pop()).collect())
     }
 
     /// Skip-scan equality lookup on a non-prefix column

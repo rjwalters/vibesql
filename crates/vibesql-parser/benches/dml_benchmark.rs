@@ -5,11 +5,11 @@
 //!
 //! Part of Epic #3228 (Parser & Lexer Performance Improvements)
 
+use std::hint::black_box;
+
 use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::hint::black_box;
-use vibesql_parser::arena_parser::ArenaParser;
-use vibesql_parser::Parser;
+use vibesql_parser::{arena_parser::ArenaParser, Parser};
 
 // ============================================================================
 // INSERT Statement Test Cases

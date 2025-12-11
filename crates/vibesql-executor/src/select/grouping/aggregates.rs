@@ -70,11 +70,7 @@ impl AggregateAccumulator {
                 distinct,
                 seen: if distinct { Some(HashSet::new()) } else { None },
             }),
-            "TOTAL" => Ok(AggregateAccumulator::Total {
-                sum: 0.0,
-                distinct,
-                seen,
-            }),
+            "TOTAL" => Ok(AggregateAccumulator::Total { sum: 0.0, distinct, seen }),
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
                 function_name
@@ -522,8 +518,9 @@ fn add_sql_values(
 ) -> vibesql_types::SqlValue {
     // Use the proper arithmetic addition operator that preserves types
     // Integer + Integer → Integer, Float + anything → Float, etc.
-    use crate::evaluator::operators::OperatorRegistry;
     use vibesql_ast::BinaryOperator;
+
+    use crate::evaluator::operators::OperatorRegistry;
 
     match OperatorRegistry::eval_binary_op(
         a,
@@ -650,8 +647,9 @@ pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlVal
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_combine_count() {

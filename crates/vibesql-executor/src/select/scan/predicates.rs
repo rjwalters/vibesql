@@ -8,20 +8,18 @@
 //! WHERE clause decomposition. The plan is computed once at query start and passed through.
 
 use std::collections::HashMap;
-
-use crate::{
-    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::PredicatePlan,
-    schema::CombinedSchema, select::cte::CteResult,
-};
-
 #[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
+use std::sync::Arc;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 #[cfg(feature = "parallel")]
-use std::sync::Arc;
+use crate::select::parallel::ParallelConfig;
+use crate::{
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, optimizer::PredicatePlan,
+    schema::CombinedSchema, select::cte::CteResult,
+};
 
 /// Apply table-local predicates from a pre-computed predicate plan
 ///
@@ -59,7 +57,8 @@ pub(crate) fn apply_table_local_predicates(
 
     // Get predicates ordered by selectivity (most selective first)
     // Falls back to parse order if statistics unavailable
-    let ordered_preds = predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
+    let ordered_preds =
+        predicate_plan.get_table_filters_ordered(table_name, table_stats_owned.as_ref());
 
     // If there are table-local predicates, apply them
     if !ordered_preds.is_empty() {

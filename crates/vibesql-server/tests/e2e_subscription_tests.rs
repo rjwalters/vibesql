@@ -39,7 +39,8 @@ async fn send_subscribe(client: &mut TestClient, query: &str) -> std::io::Result
 }
 
 /// Extract subscription ID from SubscriptionData message bytes
-/// The ID is at bytes 0-16 of the payload (after msg_type byte and length i32 which are not in payload)
+/// The ID is at bytes 0-16 of the payload (after msg_type byte and length i32 which are not in
+/// payload)
 fn extract_subscription_id(messages: &[common::ParsedMessage]) -> Option<[u8; 16]> {
     for msg in messages {
         if msg.msg_type == MSG_SUBSCRIPTION_DATA && msg.payload.len() >= 16 {
@@ -206,9 +207,9 @@ async fn test_update_triggers_subscription_update() {
     let messages = parse_backend_messages(&data);
 
     // Should include SubscriptionData (0xF2) or SubscriptionPartialData (0xF7) with the update
-    let has_subscription_update = messages
-        .iter()
-        .any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA || m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA);
+    let has_subscription_update = messages.iter().any(|m| {
+        m.msg_type == MSG_SUBSCRIPTION_DATA || m.msg_type == MSG_SUBSCRIPTION_PARTIAL_DATA
+    });
     assert!(has_subscription_update, "Expected subscription update after UPDATE");
 
     client.send_terminate().await.expect("Failed to send terminate");
@@ -465,10 +466,7 @@ async fn test_multiple_subscribers_same_query() {
     // to poll and process the broadcast. Use a longer timeout (10s) to handle
     // high-load scenarios where polling may be delayed.
     let data2 = client2
-        .read_until_message_type_timeout(
-            MSG_SUBSCRIPTION_DATA,
-            std::time::Duration::from_secs(10),
-        )
+        .read_until_message_type_timeout(MSG_SUBSCRIPTION_DATA, std::time::Duration::from_secs(10))
         .await
         .expect("Failed to read cross-connection notification");
     let messages2 = parse_backend_messages(&data2);
@@ -663,7 +661,10 @@ fn parse_partial_data_column_mask(messages: &[common::ParsedMessage]) -> Option<
             }
 
             let row_count = i32::from_be_bytes([
-                msg.payload[17], msg.payload[18], msg.payload[19], msg.payload[20]
+                msg.payload[17],
+                msg.payload[18],
+                msg.payload[19],
+                msg.payload[20],
             ]) as usize;
 
             if row_count == 0 {
@@ -722,10 +723,7 @@ async fn test_selective_update_sends_partial_data() {
 
     // Insert initial data
     client
-        .send_query(&format!(
-            "INSERT INTO {} VALUES (1, 'Alice', 'active', 100)",
-            table_name
-        ))
+        .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice', 'active', 100)", table_name))
         .await
         .expect("Failed to insert data");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
@@ -740,10 +738,7 @@ async fn test_selective_update_sends_partial_data() {
 
     // Update ONLY the name column (1 of 4 columns = 25%, within 50% threshold)
     client
-        .send_query(&format!(
-            "UPDATE {} SET name = 'Alicia' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET name = 'Alicia' WHERE id = 1", table_name))
         .await
         .expect("Failed to update data");
 
@@ -773,7 +768,10 @@ async fn test_selective_update_sends_partial_data() {
             // Column 0 (id/PK) should always be present
             assert!(is_column_present_in_mask(&mask, 0), "PK column 0 should be present");
             // Column 1 (name) was changed, should be present
-            assert!(is_column_present_in_mask(&mask, 1), "Changed column 1 (name) should be present");
+            assert!(
+                is_column_present_in_mask(&mask, 1),
+                "Changed column 1 (name) should be present"
+            );
         }
     }
 
@@ -863,7 +861,10 @@ async fn test_delete_sends_full_subscription_data() {
 
     // Insert initial data
     client
-        .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice', 'active'), (2, 'Bob', 'inactive')", table_name))
+        .send_query(&format!(
+            "INSERT INTO {} VALUES (1, 'Alice', 'active'), (2, 'Bob', 'inactive')",
+            table_name
+        ))
         .await
         .expect("Failed to insert data");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
@@ -1043,10 +1044,7 @@ async fn test_strict_partial_data_with_guaranteed_pk_detection() {
 
     // Update ONLY the 'name' column (1 of 5 columns = 20%, well within 50% threshold)
     client
-        .send_query(&format!(
-            "UPDATE {} SET name = 'Alicia' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET name = 'Alicia' WHERE id = 1", table_name))
         .await
         .expect("Failed to update data");
 
@@ -1175,10 +1173,7 @@ async fn test_strict_partial_data_multiple_updates() {
 
     // Update status column for ALL rows (1 of 4 columns = 25%)
     client
-        .send_query(&format!(
-            "UPDATE {} SET status = 'inactive'",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET status = 'inactive'", table_name))
         .await
         .expect("Failed to update data");
 
@@ -1210,16 +1205,10 @@ async fn test_strict_partial_data_multiple_updates() {
         assert_eq!(total_columns, 4, "Table should have 4 columns");
 
         // Column 0 (id/PK) must be present
-        assert!(
-            is_column_present_in_mask(&mask, 0),
-            "PK column 0 (id) must be present"
-        );
+        assert!(is_column_present_in_mask(&mask, 0), "PK column 0 (id) must be present");
 
         // Column 2 (status) was changed
-        assert!(
-            is_column_present_in_mask(&mask, 2),
-            "Changed column 2 (status) should be present"
-        );
+        assert!(is_column_present_in_mask(&mask, 2), "Changed column 2 (status) should be present");
 
         // Columns 1 and 3 were NOT changed
         assert!(
@@ -1310,10 +1299,7 @@ async fn test_cross_connection_selective_update_sends_0xf7() {
 
     // Client1 updates ONLY the 'name' column (1 of 5 columns = 20%, within 50% threshold)
     client1
-        .send_query(&format!(
-            "UPDATE {} SET name = 'Alicia' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET name = 'Alicia' WHERE id = 1", table_name))
         .await
         .expect("Failed to update data");
 
@@ -1333,10 +1319,7 @@ async fn test_cross_connection_selective_update_sends_0xf7() {
         "Client1 should receive 0xF7 for selective update. Messages: {:?}",
         messages1.iter().map(|m| format!("0x{:02X}", m.msg_type)).collect::<Vec<_>>()
     );
-    assert!(
-        !has_full1,
-        "Client1 should NOT receive 0xF2 for selective update"
-    );
+    assert!(!has_full1, "Client1 should NOT receive 0xF2 for selective update");
 
     // Client2: Read cross-connection notification (broadcast path)
     // Use longer timeout for cross-connection which involves async polling
@@ -1358,10 +1341,7 @@ async fn test_cross_connection_selective_update_sends_0xf7() {
         "Client2 should receive 0xF7 via cross-connection broadcast. Messages: {:?}",
         messages2.iter().map(|m| format!("0x{:02X}", m.msg_type)).collect::<Vec<_>>()
     );
-    assert!(
-        !has_full2,
-        "Client2 should NOT receive 0xF2 when selective update is used"
-    );
+    assert!(!has_full2, "Client2 should NOT receive 0xF2 when selective update is used");
 
     // Verify the column mask in client2's 0xF7 message
     if let Some((total_columns, mask)) = parse_partial_data_column_mask(&messages2) {
@@ -1481,10 +1461,7 @@ async fn test_cross_connection_selective_update_multiple_rows() {
 
     // Client1 updates status column for ALL rows (1 of 4 columns = 25%)
     client1
-        .send_query(&format!(
-            "UPDATE {} SET status = 'inactive'",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET status = 'inactive'", table_name))
         .await
         .expect("Failed to update data");
 
@@ -1621,10 +1598,7 @@ async fn test_partial_data_null_value_changes() {
 
     // Update optional_value from 'has_value' to NULL (1 of 5 cols = 20%)
     client
-        .send_query(&format!(
-            "UPDATE {} SET optional_value = NULL WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET optional_value = NULL WHERE id = 1", table_name))
         .await
         .expect("Failed to update to NULL");
 
@@ -1650,15 +1624,15 @@ async fn test_partial_data_null_value_changes() {
         // Column 0 (id/PK) must be present
         assert!(is_column_present_in_mask(&mask, 0), "PK column 0 (id) must be present");
         // Column 2 (optional_value) was changed
-        assert!(is_column_present_in_mask(&mask, 2), "Changed column 2 (optional_value) should be present");
+        assert!(
+            is_column_present_in_mask(&mask, 2),
+            "Changed column 2 (optional_value) should be present"
+        );
     }
 
     // Now update optional_value from NULL back to a non-NULL value
     client
-        .send_query(&format!(
-            "UPDATE {} SET optional_value = 'restored' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET optional_value = 'restored' WHERE id = 1", table_name))
         .await
         .expect("Failed to update from NULL");
 
@@ -1723,10 +1697,7 @@ async fn test_partial_data_verifies_actual_values() {
 
     // Insert initial data: id=1, name='Alice', age=25, status='active', score=100
     client
-        .send_query(&format!(
-            "INSERT INTO {} VALUES (1, 'Alice', 25, 'active', 100)",
-            table_name
-        ))
+        .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice', 25, 'active', 100)", table_name))
         .await
         .expect("Failed to insert data");
     let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
@@ -1741,10 +1712,7 @@ async fn test_partial_data_verifies_actual_values() {
 
     // Update name from 'Alice' to 'Bob' (1 of 5 cols = 20%)
     client
-        .send_query(&format!(
-            "UPDATE {} SET name = 'Bob' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET name = 'Bob' WHERE id = 1", table_name))
         .await
         .expect("Failed to update name");
 
@@ -1787,7 +1755,9 @@ async fn test_partial_data_verifies_actual_values() {
 
 /// Helper to parse actual values from a SubscriptionPartialData message
 /// Returns (column_index -> value_string, set of present columns)
-fn parse_partial_data_values(msg: &common::ParsedMessage) -> Option<(std::collections::HashMap<u16, String>, std::collections::HashSet<u16>)> {
+fn parse_partial_data_values(
+    msg: &common::ParsedMessage,
+) -> Option<(std::collections::HashMap<u16, String>, std::collections::HashSet<u16>)> {
     if msg.msg_type != MSG_SUBSCRIPTION_PARTIAL_DATA || msg.payload.len() < 21 {
         return None;
     }
@@ -1798,9 +1768,9 @@ fn parse_partial_data_values(msg: &common::ParsedMessage) -> Option<(std::collec
         return None;
     }
 
-    let row_count = i32::from_be_bytes([
-        msg.payload[17], msg.payload[18], msg.payload[19], msg.payload[20]
-    ]) as usize;
+    let row_count =
+        i32::from_be_bytes([msg.payload[17], msg.payload[18], msg.payload[19], msg.payload[20]])
+            as usize;
 
     if row_count == 0 {
         return None;
@@ -1844,7 +1814,10 @@ fn parse_partial_data_values(msg: &common::ParsedMessage) -> Option<(std::collec
         }
 
         let value_len = i32::from_be_bytes([
-            msg.payload[pos], msg.payload[pos + 1], msg.payload[pos + 2], msg.payload[pos + 3]
+            msg.payload[pos],
+            msg.payload[pos + 1],
+            msg.payload[pos + 2],
+            msg.payload[pos + 3],
         ]);
         pos += 4;
 
@@ -1936,10 +1909,7 @@ async fn test_e2e_subscription_partial_update_client_state() {
     // ====== SCENARIO 1: Update single column (login_count) ======
     // 1 of 6 columns = ~17% < 50% threshold
     client
-        .send_query(&format!(
-            "UPDATE {} SET login_count = 11 WHERE user_id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET login_count = 11 WHERE user_id = 1", table_name))
         .await
         .expect("Failed to update login_count");
 
@@ -1970,7 +1940,11 @@ async fn test_e2e_subscription_partial_update_client_state() {
 
         // login_count (column 4) should be present with new value
         assert!(present1.contains(&4), "Scenario 1: login_count column should be present");
-        assert_eq!(values1.get(&4), Some(&"11".to_string()), "Scenario 1: login_count should be 11");
+        assert_eq!(
+            values1.get(&4),
+            Some(&"11".to_string()),
+            "Scenario 1: login_count should be 11"
+        );
 
         // Other columns should NOT be present
         assert!(!present1.contains(&1), "Scenario 1: username should NOT be present");
@@ -2031,10 +2005,8 @@ async fn test_e2e_subscription_partial_update_client_state() {
         .await
         .expect("Failed to select final state");
 
-    let final_data = client
-        .read_until_message_type(b'Z')
-        .await
-        .expect("Failed to read final SELECT response");
+    let final_data =
+        client.read_until_message_type(b'Z').await.expect("Failed to read final SELECT response");
     let final_messages = parse_backend_messages(&final_data);
 
     // Should have a DataRow with the merged state
@@ -2109,10 +2081,8 @@ async fn test_join_query_falls_back_to_full_data() {
     let join_query = "SELECT u.id, u.name, o.order_id, o.amount \
                       FROM test_join_users u \
                       JOIN test_join_orders o ON u.id = o.user_id";
-    send_subscribe(&mut client, join_query)
-        .await
-        .expect("Failed to send subscribe");
-    
+    send_subscribe(&mut client, join_query).await.expect("Failed to send subscribe");
+
     // Should receive initial subscription data
     let initial_data = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
@@ -2178,9 +2148,7 @@ async fn test_cte_query_falls_back_to_full_data() {
                         SELECT id, amount, status FROM test_cte_orders WHERE amount > 50
                      )
                      SELECT * FROM filtered_orders";
-    send_subscribe(&mut client, cte_query)
-        .await
-        .expect("Failed to send subscribe");
+    send_subscribe(&mut client, cte_query).await.expect("Failed to send subscribe");
     let initial_data = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -2245,9 +2213,7 @@ async fn test_subquery_falls_back_to_full_data() {
     let subquery = "SELECT * FROM (
                         SELECT id, category, price FROM test_subq_items WHERE price > 20
                     ) AS filtered";
-    send_subscribe(&mut client, subquery)
-        .await
-        .expect("Failed to send subscribe");
+    send_subscribe(&mut client, subquery).await.expect("Failed to send subscribe");
     let initial_data = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -2310,9 +2276,7 @@ async fn test_table_without_pk_falls_back_to_full_data() {
 
     // Subscribe to document that tables without explicit PKs would require 0xF2 fallback
     let query = "SELECT * FROM test_pk_necessity WHERE category = 'A'";
-    send_subscribe(&mut client, query)
-        .await
-        .expect("Failed to send subscribe");
+    send_subscribe(&mut client, query).await.expect("Failed to send subscribe");
     let initial_data = client
         .read_until_message_type(MSG_SUBSCRIPTION_DATA)
         .await
@@ -2326,7 +2290,9 @@ async fn test_table_without_pk_falls_back_to_full_data() {
     );
 
     // Document: If a table lacks PRIMARY KEY, the system must use 0xF2 for correctness
-    eprintln!("PK requirement documented: Tables without explicit PK must fall back to 0xF2 (full data)");
+    eprintln!(
+        "PK requirement documented: Tables without explicit PK must fall back to 0xF2 (full data)"
+    );
 
     client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
@@ -2399,14 +2365,12 @@ async fn test_cross_connection_exactly_at_threshold_uses_partial_data() {
     // Client1 updates exactly 2 of 4 columns = 50%, AT the threshold
     // Since threshold uses >, 50% <= 50% allows selective update, so 0xF7 is sent
     client1
-        .send_query(&format!(
-            "UPDATE {} SET col1 = 'x', col2 = 'y' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET col1 = 'x', col2 = 'y' WHERE id = 1", table_name))
         .await
         .expect("Failed to update data");
 
-    // Client1 receives same-connection notification (may include SubscriptionData/PartialData before ReadyForQuery)
+    // Client1 receives same-connection notification (may include SubscriptionData/PartialData
+    // before ReadyForQuery)
     let _ = client1
         .read_until_message_type(MSG_READY_FOR_QUERY)
         .await
@@ -2522,14 +2486,12 @@ async fn test_cross_connection_well_below_threshold_uses_partial_data() {
     // Client1 updates 2 of 5 columns = 40%, WELL BELOW the 50% threshold
     // This should trigger 0xF7 (partial data), NOT 0xF2
     client1
-        .send_query(&format!(
-            "UPDATE {} SET col1 = 'x', col2 = 'y' WHERE id = 1",
-            table_name
-        ))
+        .send_query(&format!("UPDATE {} SET col1 = 'x', col2 = 'y' WHERE id = 1", table_name))
         .await
         .expect("Failed to update data");
 
-    // Client1 receives same-connection notification (may include SubscriptionData/PartialData before ReadyForQuery)
+    // Client1 receives same-connection notification (may include SubscriptionData/PartialData
+    // before ReadyForQuery)
     let _ = client1
         .read_until_message_type(MSG_READY_FOR_QUERY)
         .await
@@ -2655,7 +2617,8 @@ async fn test_cross_connection_above_threshold_uses_full_data() {
         .await
         .expect("Failed to update data");
 
-    // Client1 receives same-connection notification (may include SubscriptionData/PartialData before ReadyForQuery)
+    // Client1 receives same-connection notification (may include SubscriptionData/PartialData
+    // before ReadyForQuery)
     let _ = client1
         .read_until_message_type(MSG_READY_FOR_QUERY)
         .await
@@ -2663,10 +2626,7 @@ async fn test_cross_connection_above_threshold_uses_full_data() {
 
     // Client2 receives cross-connection notification with longer timeout
     let data2 = client2
-        .read_until_message_type_timeout(
-            MSG_SUBSCRIPTION_DATA,
-            std::time::Duration::from_secs(10),
-        )
+        .read_until_message_type_timeout(MSG_SUBSCRIPTION_DATA, std::time::Duration::from_secs(10))
         .await
         .expect("Failed to read cross-connection notification");
     let messages2 = parse_backend_messages(&data2);

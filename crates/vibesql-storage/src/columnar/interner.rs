@@ -28,8 +28,7 @@
 //! - **High cardinality (>= threshold)**: Falls back to regular Arc::from allocation
 //! - **Memory**: O(cardinality) for the intern pool
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 /// Default cardinality threshold for string interning.
 ///
@@ -72,14 +71,10 @@ impl StringInterner {
     /// Create a new string interner with the specified cardinality threshold.
     ///
     /// # Arguments
-    /// * `threshold` - Maximum distinct values before disabling interning.
-    ///   Recommended: 32 for typical enum-like columns.
+    /// * `threshold` - Maximum distinct values before disabling interning. Recommended: 32 for
+    ///   typical enum-like columns.
     pub fn new(threshold: usize) -> Self {
-        Self {
-            pool: HashSet::with_capacity(threshold.min(64)),
-            threshold,
-            active: true,
-        }
+        Self { pool: HashSet::with_capacity(threshold.min(64)), threshold, active: true }
     }
 
     /// Intern a string, returning a shared `Arc<str>` reference.

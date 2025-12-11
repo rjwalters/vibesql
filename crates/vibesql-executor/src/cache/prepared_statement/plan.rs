@@ -34,7 +34,10 @@
 //! - Indexes are added/removed
 
 use std::sync::{Arc, OnceLock};
-use vibesql_ast::{DeleteStmt, Expression, FromClause, SelectItem, SelectStmt, Statement, WhereClause};
+
+use vibesql_ast::{
+    DeleteStmt, Expression, FromClause, SelectItem, SelectStmt, Statement, WhereClause,
+};
 
 /// Cached execution plan for a prepared statement
 #[derive(Debug, Clone)]
@@ -93,10 +96,7 @@ pub struct SimpleFastPathPlan {
 impl SimpleFastPathPlan {
     /// Create a new SimpleFastPathPlan with the given table name
     pub fn new(table_name: String) -> Self {
-        Self {
-            table_name,
-            resolved_columns: Arc::new(OnceLock::new()),
-        }
+        Self { table_name, resolved_columns: Arc::new(OnceLock::new()) }
     }
 
     /// Get or initialize the cached column names
@@ -174,7 +174,9 @@ impl PkPointLookupPlan {
         });
 
         // Check if we got a valid resolution (non-empty)
-        self.resolved.get().filter(|r| !r.column_names.is_empty() || matches!(self.projection, ProjectionPlan::Wildcard))
+        self.resolved.get().filter(|r| {
+            !r.column_names.is_empty() || matches!(self.projection, ProjectionPlan::Wildcard)
+        })
     }
 
     /// Check if projection has been resolved
@@ -231,17 +233,19 @@ pub struct PkDeletePlan {
 
 impl PkDeletePlan {
     /// Create a new PkDeletePlan
-    pub fn new(table_name: String, pk_columns: Vec<String>, param_to_pk_col: Vec<(usize, usize)>) -> Self {
-        Self {
-            table_name,
-            pk_columns,
-            param_to_pk_col,
-            fast_path_valid: Arc::new(OnceLock::new()),
-        }
+    pub fn new(
+        table_name: String,
+        pk_columns: Vec<String>,
+        param_to_pk_col: Vec<(usize, usize)>,
+    ) -> Self {
+        Self { table_name, pk_columns, param_to_pk_col, fast_path_valid: Arc::new(OnceLock::new()) }
     }
 
     /// Build the PK values array from parameters
-    pub fn build_pk_values(&self, params: &[vibesql_types::SqlValue]) -> Vec<vibesql_types::SqlValue> {
+    pub fn build_pk_values(
+        &self,
+        params: &[vibesql_types::SqlValue],
+    ) -> Vec<vibesql_types::SqlValue> {
         let mut pk_values = vec![vibesql_types::SqlValue::Null; self.pk_columns.len()];
         for &(param_idx, pk_col_idx) in &self.param_to_pk_col {
             if param_idx < params.len() && pk_col_idx < pk_values.len() {
@@ -283,9 +287,7 @@ fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
     // This caches the result of is_simple_point_query() to avoid recomputing it every execution
     if crate::select::is_simple_point_query(stmt) {
         if let Some(table_name) = extract_single_table_name(stmt) {
-            return CachedPlan::SimpleFastPath(SimpleFastPathPlan::new(
-                table_name.to_uppercase(),
-            ));
+            return CachedPlan::SimpleFastPath(SimpleFastPathPlan::new(table_name.to_uppercase()));
         }
     }
 
@@ -494,8 +496,9 @@ fn extract_column_placeholder_pair(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_parser::Parser;
+
+    use super::*;
 
     fn parse_to_plan(sql: &str) -> CachedPlan {
         let stmt = Parser::parse_sql(sql).unwrap();

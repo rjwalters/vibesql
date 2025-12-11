@@ -10,8 +10,7 @@
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_types::SqlValue;
 
-use super::interner::Symbol;
-use super::SelectStmt;
+use super::{interner::Symbol, SelectStmt};
 use crate::{BinaryOperator, UnaryOperator};
 
 /// Reference to an arena-allocated Expression.

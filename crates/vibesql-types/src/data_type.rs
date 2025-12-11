@@ -361,10 +361,10 @@ impl DataType {
             }
 
             // Date/time types
-            DataType::Date => 4,                    // i32 for days
-            DataType::Time { .. } => 8,             // i64 for nanoseconds
-            DataType::Timestamp { .. } => 8,        // i64 for timestamp
-            DataType::Interval { .. } => 16,        // IntervalValue struct
+            DataType::Date => 4,             // i32 for days
+            DataType::Time { .. } => 8,      // i64 for nanoseconds
+            DataType::Timestamp { .. } => 8, // i64 for timestamp
+            DataType::Interval { .. } => 16, // IntervalValue struct
 
             // Binary types
             DataType::BinaryLargeObject => 1000, // Conservative estimate

@@ -1,7 +1,9 @@
 use vibesql_types::SqlValue;
 
-use crate::database::indexes::{IndexData, IndexManager};
-use crate::database::{DatabaseConfig, SpillPolicy};
+use crate::database::{
+    indexes::{IndexData, IndexManager},
+    DatabaseConfig, SpillPolicy,
+};
 
 #[test]
 fn test_range_scan_preserves_index_order() {
@@ -122,10 +124,11 @@ fn test_disk_backed_index_creation_with_bulk_load() {
     // Test that large indexes can be created successfully.
     // Note: In test builds, DISK_BACKED_THRESHOLD is usize::MAX, so this will
     // create an InMemory index. The DiskBacked path is tested via benchmarks.
-    use crate::Row;
     use vibesql_ast::OrderDirection;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::Row;
 
     // Use unique temp directory to avoid conflicts with other tests
     let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
@@ -169,10 +172,11 @@ fn test_disk_backed_index_creation_with_bulk_load() {
 #[test]
 fn test_in_memory_index_for_small_tables() {
     // Test that in-memory indexes are still used for small tables
-    use crate::Row;
     use vibesql_ast::OrderDirection;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::Row;
 
     let columns = vec![ColumnSchema::new("value".to_string(), DataType::Integer, false)];
     let table_schema = TableSchema::new("small_table".to_string(), columns);
@@ -221,10 +225,11 @@ fn test_in_memory_index_for_small_tables() {
 #[test]
 fn test_budget_enforcement_with_spill_policy() {
     // Test that memory budget is enforced with SpillToDisk policy
-    use crate::Row;
     use vibesql_ast::OrderDirection;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::Row;
 
     // Use unique temp directory to avoid conflicts with other tests
     let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
@@ -287,12 +292,14 @@ fn test_budget_enforcement_with_spill_policy() {
 #[test]
 fn test_lru_eviction_order() {
     // Test that LRU eviction selects the coldest (least recently used) index
-    use crate::Row;
-    use instant::Duration;
     use std::thread;
+
+    use instant::Duration;
     use vibesql_ast::OrderDirection;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::Row;
 
     // Use unique temp directory to avoid conflicts with other tests
     let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
@@ -391,10 +398,11 @@ fn test_lru_eviction_order() {
 #[test]
 fn test_access_tracking() {
     // Test that index accesses are tracked for LRU
-    use crate::Row;
     use vibesql_ast::OrderDirection;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::Row;
 
     let columns = vec![ColumnSchema::new("value".to_string(), DataType::Integer, false)];
     let table_schema = TableSchema::new("test_table".to_string(), columns);
@@ -445,10 +453,11 @@ fn test_access_tracking() {
 #[test]
 fn test_resource_cleanup_on_drop() {
     // Test that resources are freed when indexes are dropped
-    use crate::Row;
     use vibesql_ast::OrderDirection;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::Row;
 
     let columns = vec![ColumnSchema::new("value".to_string(), DataType::Integer, false)];
     let table_schema = TableSchema::new("test_table".to_string(), columns);
@@ -509,11 +518,11 @@ fn test_database_config_presets() {
 fn test_index_scan_after_database_reset() {
     // Reproduces issue #1618: Index scans returning 0 rows after Database::reset()
     // This simulates the sqllogictest runner's database pooling behavior
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::{Database, Row};
 
     // Helper function to run a complete test cycle
     fn run_test_cycle(db: &mut Database, cycle_num: usize) -> Result<(), String> {
@@ -663,12 +672,13 @@ fn test_index_scan_after_database_reset() {
 fn test_thread_local_pool_pattern() {
     // Test that mimics the EXACT thread-local pooling pattern from db_adapter.rs
     // This may better reproduce the sqllogictest runner bug
-    use crate::Database;
-    use crate::Row;
     use std::cell::RefCell;
+
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     thread_local! {
         static TEST_DB_POOL: RefCell<Option<Database>> = const { RefCell::new(None) };
@@ -778,11 +788,11 @@ fn test_thread_local_pool_pattern() {
 #[test]
 fn test_lookup_by_index_single_column() {
     // Test direct index lookup with single-column index
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -835,11 +845,11 @@ fn test_lookup_by_index_single_column() {
 #[test]
 fn test_lookup_one_by_index() {
     // Test lookup_one_by_index which returns just the first row
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -883,11 +893,11 @@ fn test_lookup_one_by_index() {
 #[test]
 fn test_lookup_by_index_composite_key() {
     // Test direct index lookup with composite (multi-column) key
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -986,11 +996,11 @@ fn test_lookup_by_index_composite_key() {
 #[test]
 fn test_lookup_by_index_batch() {
     // Test batch lookup with multiple keys
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1050,11 +1060,11 @@ fn test_lookup_by_index_batch() {
 #[test]
 fn test_lookup_one_by_index_batch() {
     // Test batch lookup returning single rows (for unique indexes)
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1129,11 +1139,11 @@ fn test_lookup_by_index_error_cases() {
 #[test]
 fn test_lookup_by_index_prefix_basic() {
     // Test basic prefix lookup on a multi-column index
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1152,53 +1162,53 @@ fn test_lookup_by_index_prefix_basic() {
     // District 1: orders 101, 102
     table
         .insert(Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(1),
-                SqlValue::Integer(101),
-                SqlValue::Null,
-            ]))
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Integer(101),
+            SqlValue::Null,
+        ]))
         .unwrap();
     table
         .insert(Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(1),
-                SqlValue::Integer(102),
-                SqlValue::Null,
-            ]))
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Integer(102),
+            SqlValue::Null,
+        ]))
         .unwrap();
     // District 2: orders 201, 202, 203
     table
         .insert(Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Integer(201),
-                SqlValue::Null,
-            ]))
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Integer(201),
+            SqlValue::Null,
+        ]))
         .unwrap();
     table
         .insert(Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Integer(202),
-                SqlValue::Null,
-            ]))
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Integer(202),
+            SqlValue::Null,
+        ]))
         .unwrap();
     table
         .insert(Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(2),
-                SqlValue::Integer(203),
-                SqlValue::Null,
-            ]))
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Integer(203),
+            SqlValue::Null,
+        ]))
         .unwrap();
     // District 3: order 301
     table
         .insert(Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Integer(3),
-                SqlValue::Integer(301),
-                SqlValue::Null,
-            ]))
+            SqlValue::Integer(1),
+            SqlValue::Integer(3),
+            SqlValue::Integer(301),
+            SqlValue::Null,
+        ]))
         .unwrap();
 
     // Create composite index on (w_id, d_id, o_id)
@@ -1250,11 +1260,11 @@ fn test_lookup_by_index_prefix_basic() {
 #[test]
 fn test_lookup_by_index_prefix_single_column() {
     // Test prefix lookup with single-column prefix
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1271,20 +1281,40 @@ fn test_lookup_by_index_prefix_single_column() {
     let table = db.get_table_mut("test_data").unwrap();
     // Warehouse 1: 3 rows
     table
-        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(1), SqlValue::Integer(100)]))
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(1),
+            SqlValue::Integer(100),
+        ]))
         .unwrap();
     table
-        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(200)]))
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(2),
+            SqlValue::Integer(200),
+        ]))
         .unwrap();
     table
-        .insert(Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(3), SqlValue::Integer(300)]))
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(3),
+            SqlValue::Integer(300),
+        ]))
         .unwrap();
     // Warehouse 2: 2 rows
     table
-        .insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Integer(400)]))
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(2),
+            SqlValue::Integer(1),
+            SqlValue::Integer(400),
+        ]))
         .unwrap();
     table
-        .insert(Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Integer(2), SqlValue::Integer(500)]))
+        .insert(Row::from_vec(vec![
+            SqlValue::Integer(2),
+            SqlValue::Integer(2),
+            SqlValue::Integer(500),
+        ]))
         .unwrap();
 
     // Create index on (warehouse, district)
@@ -1319,11 +1349,11 @@ fn test_lookup_by_index_prefix_single_column() {
 #[test]
 fn test_lookup_by_index_prefix_no_match() {
     // Test prefix lookup when no rows match
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1368,11 +1398,11 @@ fn test_lookup_by_index_prefix_no_match() {
 #[test]
 fn test_lookup_by_index_prefix_batch_basic() {
     // Test batch prefix lookup on a multi-column index
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1392,10 +1422,10 @@ fn test_lookup_by_index_prefix_batch_basic() {
         for o_id in 1..=d_id {
             table
                 .insert(Row::from_vec(vec![
-                        SqlValue::Integer(1),
-                        SqlValue::Integer(d_id as i64),
-                        SqlValue::Integer(o_id as i64 * 100),
-                    ]))
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id as i64 * 100),
+                ]))
                 .unwrap();
         }
     }
@@ -1443,11 +1473,11 @@ fn test_lookup_by_index_prefix_batch_basic() {
 fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
     // Test the exact TPC-C Delivery transaction pattern:
     // Look up all new orders for all 10 districts in a single batch
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 
@@ -1469,10 +1499,10 @@ fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
         for o_id in 2100..(2100 + d_id) {
             table
                 .insert(Row::from_vec(vec![
-                        SqlValue::Integer(w_id),
-                        SqlValue::Integer(d_id as i64),
-                        SqlValue::Integer(o_id as i64),
-                    ]))
+                    SqlValue::Integer(w_id),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id as i64),
+                ]))
                 .unwrap();
         }
     }
@@ -1546,11 +1576,11 @@ fn test_lookup_by_index_prefix_error_cases() {
 #[test]
 fn test_lookup_by_index_prefix_empty_prefix() {
     // Test prefix lookup with empty prefix
-    use crate::Database;
-    use crate::Row;
     use vibesql_ast::{IndexColumn, OrderDirection};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
+
+    use crate::{Database, Row};
 
     let mut db = Database::new();
 

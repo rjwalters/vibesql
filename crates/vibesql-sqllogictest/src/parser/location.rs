@@ -1,7 +1,6 @@
 //! Location tracking for sqllogictest files.
 
-use std::fmt;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 /// The location in source file.
 #[derive(Debug, PartialEq, Eq, Clone)]

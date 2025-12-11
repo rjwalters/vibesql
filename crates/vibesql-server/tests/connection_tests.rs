@@ -5,8 +5,9 @@
 
 mod common;
 
-use common::{parse_backend_messages, start_test_server, TestClient};
 use std::time::Duration;
+
+use common::{parse_backend_messages, start_test_server, TestClient};
 use tokio::time::timeout;
 
 /// Test basic client connection and handshake

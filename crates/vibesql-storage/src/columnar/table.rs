@@ -5,11 +5,8 @@
 
 use std::collections::HashMap;
 
+use super::{builder::ColumnBuilder, data::ColumnData, types::ColumnTypeClass};
 use crate::Row;
-
-use super::builder::ColumnBuilder;
-use super::data::ColumnData;
-use super::types::ColumnTypeClass;
 
 /// Columnar table storage
 ///

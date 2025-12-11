@@ -30,33 +30,37 @@
 //! - `QUERY_FILTER` - Comma-separated list of queries to run (e.g., "Q1,Q6,Q9")
 //! - `VIBESQL_MEMORY_THRESHOLD` - Memory pressure threshold (default: 80%)
 //! - `MYSQL_URL` - MySQL connection string (optional)
-//! - `ENGINE_FILTER` - Engines to run (default: vibesql,sqlite,duckdb; MySQL excluded)
-//!   Use ENGINE_FILTER=all to include MySQL
+//! - `ENGINE_FILTER` - Engines to run (default: vibesql,sqlite,duckdb; MySQL excluded) Use
+//!   ENGINE_FILTER=all to include MySQL
 
 mod harness;
 mod memory_monitor;
 mod tpcds;
 
-use harness::{BenchConfig, BenchResult, BenchStats, EngineFilter, Harness};
-use memory_monitor::{format_bytes, MemoryMonitor, MemoryPressure};
-use std::env;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use tpcds::memory::hint_memory_release;
-use tpcds::queries::{TPCDS_QUERIES, TPCDS_SANITY_QUERIES};
-use tpcds::schema::*;
-use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
-use vibesql_parser::Parser;
-use vibesql_storage::Database as VibeDB;
+use std::{
+    env,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
+use harness::{BenchConfig, BenchResult, BenchStats, EngineFilter, Harness};
+use memory_monitor::{format_bytes, MemoryMonitor, MemoryPressure};
 #[cfg(feature = "mysql")]
 use mysql::prelude::*;
 #[cfg(feature = "mysql")]
 use mysql::PooledConn;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection as SqliteConn;
+use tpcds::{
+    memory::hint_memory_release,
+    queries::{TPCDS_QUERIES, TPCDS_SANITY_QUERIES},
+    schema::*,
+};
+use vibesql_executor::{clear_in_subquery_cache, SelectExecutor};
+use vibesql_parser::Parser;
+use vibesql_storage::Database as VibeDB;
 
 /// Default scale factor for TPC-DS benchmarks
 const DEFAULT_SCALE_FACTOR: f64 = 0.005;
@@ -70,7 +74,8 @@ const DEFAULT_SCALE_FACTOR: f64 = 0.005;
 /// query execution while remaining fast enough for quick iteration.
 const MIN_SCALE_FACTOR: f64 = 0.005;
 
-/// Queries that use SQL features SQLite doesn't support (ROLLUP, CUBE, STDDEV_SAMP, parenthesized UNION)
+/// Queries that use SQL features SQLite doesn't support (ROLLUP, CUBE, STDDEV_SAMP, parenthesized
+/// UNION)
 #[cfg(feature = "sqlite")]
 fn sqlite_should_skip(query_name: &str) -> bool {
     matches!(
@@ -90,10 +95,7 @@ static MEMORY_MONITOR: std::sync::OnceLock<Mutex<MemoryMonitor>> = std::sync::On
 fn get_memory_monitor() -> &'static Mutex<MemoryMonitor> {
     MEMORY_MONITOR.get_or_init(|| {
         let monitor = MemoryMonitor::new();
-        eprintln!(
-            "Memory monitor initialized (threshold: {:.0}%)",
-            monitor.threshold_percent()
-        );
+        eprintln!("Memory monitor initialized (threshold: {:.0}%)", monitor.threshold_percent());
         Mutex::new(monitor)
     })
 }
@@ -135,9 +137,9 @@ fn get_query_filter() -> Option<Vec<String>> {
         );
     }
 
-    env::var("QUERY_FILTER").ok().map(|s| {
-        s.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect()
-    })
+    env::var("QUERY_FILTER")
+        .ok()
+        .map(|s| s.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect())
 }
 
 /// Get the engine filter for this benchmark

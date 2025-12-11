@@ -4,9 +4,10 @@
 /// For example: (A EXCEPT B) EXCEPT C, not A EXCEPT (B EXCEPT C)
 #[cfg(test)]
 mod tests {
-    use crate::SelectExecutor;
     use vibesql_parser::Parser;
     use vibesql_storage::Database;
+
+    use crate::SelectExecutor;
 
     #[test]
     fn test_except_left_to_right_evaluation() {

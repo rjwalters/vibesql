@@ -9,6 +9,8 @@
 
 #![allow(clippy::ptr_arg)]
 
+use std::collections::HashMap;
+
 #[cfg(feature = "spatial")]
 use super::super::index_optimization::try_spatial_index_optimization;
 use super::{
@@ -35,7 +37,6 @@ use crate::{
         CteResult,
     },
 };
-use std::collections::HashMap;
 
 impl SelectExecutor<'_> {
     /// Execute SELECT without aggregation
@@ -281,7 +282,8 @@ impl SelectExecutor<'_> {
 
             if !already_sorted {
                 // Create evaluator for ORDER BY using consolidated ExecutionContext
-                // Priority: 1) window mapping 2) outer context 3) procedural context 4) database only
+                // Priority: 1) window mapping 2) outer context 3) procedural context 4) database
+                // only
                 let mut ctx = ExecutionContext::new(schema, self.database);
                 if let Some(ref mapping) = window_mapping {
                     ctx = ctx.with_window_mapping(mapping);
@@ -344,8 +346,9 @@ impl SelectExecutor<'_> {
 
         #[cfg(feature = "parallel")]
         {
-            use crate::select::parallel::ParallelConfig;
             use rayon::prelude::*;
+
+            use crate::select::parallel::ParallelConfig;
 
             // Use parallel sorting for larger datasets
             let should_parallel =

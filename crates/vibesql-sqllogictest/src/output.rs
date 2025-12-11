@@ -4,8 +4,7 @@
 
 use itertools::Itertools;
 
-use crate::error_handling::AnyError;
-use crate::ColumnType;
+use crate::{error_handling::AnyError, ColumnType};
 
 /// Output of a record.
 #[derive(Debug, Clone)]
@@ -71,7 +70,8 @@ pub fn default_validator(
     // If ignore marker present, perform fragment-based matching on the full snapshot.
     if contains_ignore_marker {
         // If ignore marker present, perform fragment-based matching on the full snapshot.
-        // The actual results might contain \n, and may not be a normal "row", which is not suitable to normalize.
+        // The actual results might contain \n, and may not be a normal "row", which is not suitable
+        // to normalize.
         let expected_results = expected;
         // Flatten the rows so each column value becomes its own line
         let actual_rows: Vec<String> =

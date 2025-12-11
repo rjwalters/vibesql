@@ -161,9 +161,7 @@ pub(super) fn to_char(
             Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(formatted)))
         }
         vibesql_types::SqlValue::Timestamp(ts) => {
-            use chrono::NaiveDate;
-            use chrono::NaiveDateTime;
-            use chrono::NaiveTime;
+            use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
             // Convert our Timestamp type to NaiveDateTime for formatting
             let naive_date =
                 NaiveDate::from_ymd_opt(ts.date.year, ts.date.month as u32, ts.date.day as u32)

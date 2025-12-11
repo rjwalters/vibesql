@@ -19,23 +19,24 @@ mod conversion;
 mod mask;
 mod string;
 
-use super::batch::{ColumnArray, ColumnarBatch};
-use super::filter::{evaluate_column_compare, ColumnPredicate, CompareOp};
-use super::simd_ops::{self, PackedMask};
-use crate::errors::ExecutorError;
-use vibesql_types::SqlValue;
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
 use comparison::{
     evaluate_predicate_f64_packed, evaluate_predicate_f64_simd, evaluate_predicate_i32_packed,
     evaluate_predicate_i32_simd, evaluate_predicate_i64_packed, evaluate_predicate_i64_simd,
 };
 use mask::apply_filter_mask;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use string::evaluate_predicate_string_batch;
+use vibesql_types::SqlValue;
+
+use super::{
+    batch::{ColumnArray, ColumnarBatch},
+    filter::{evaluate_column_compare, ColumnPredicate, CompareOp},
+    simd_ops::{self, PackedMask},
+};
+use crate::errors::ExecutorError;
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
 
 /// Check if any value in a predicate is NULL
 /// Per SQL standard, any comparison with NULL returns UNKNOWN (treated as false in WHERE)
@@ -277,7 +278,7 @@ pub fn simd_create_filter_mask_parallel(
     // Determine chunk size for parallel processing
     // Target: each thread gets at least 10K rows for efficiency
     let num_threads = rayon::current_num_threads();
-    let chunk_size = (row_count / num_threads).max(10_000).min(100_000);
+    let chunk_size = (row_count / num_threads).clamp(10_000, 100_000);
 
     // For very small batches, fall back to sequential
     if row_count < chunk_size * 2 {
@@ -296,9 +297,7 @@ pub fn simd_create_filter_mask_parallel(
     // Process each range in parallel
     let partial_masks: Vec<Result<Vec<bool>, ExecutorError>> = ranges
         .par_iter()
-        .map(|(start, end)| {
-            evaluate_predicates_for_range(batch, predicates, *start, *end)
-        })
+        .map(|(start, end)| evaluate_predicates_for_range(batch, predicates, *start, *end))
         .collect();
 
     // Combine partial masks into final result
@@ -350,7 +349,14 @@ fn evaluate_predicate_for_range(
 ) -> Result<Vec<bool>, ExecutorError> {
     // Handle ColumnCompare specially
     if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
-        return evaluate_column_compare_range(batch, *left_column_idx, *op, *right_column_idx, start, end);
+        return evaluate_column_compare_range(
+            batch,
+            *left_column_idx,
+            *op,
+            *right_column_idx,
+            start,
+            end,
+        );
     }
 
     let column_idx = match predicate {
@@ -429,37 +435,66 @@ fn evaluate_column_compare_range(
     start: usize,
     end: usize,
 ) -> Result<Vec<bool>, ExecutorError> {
-    let left_column = batch.column(left_column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-        column_index: left_column_idx,
-        batch_columns: batch.column_count(),
-    })?;
+    let left_column =
+        batch.column(left_column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: left_column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
-    let right_column = batch.column(right_column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
-        column_index: right_column_idx,
-        batch_columns: batch.column_count(),
-    })?;
+    let right_column =
+        batch.column(right_column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+            column_index: right_column_idx,
+            batch_columns: batch.column_count(),
+        })?;
 
     match (left_column, right_column) {
-        (ColumnArray::Date(left_values, left_nulls), ColumnArray::Date(right_values, right_nulls)) => {
+        (
+            ColumnArray::Date(left_values, left_nulls),
+            ColumnArray::Date(right_values, right_nulls),
+        ) => {
             let left_slice = &left_values[start..end];
             let right_slice = &right_values[start..end];
             let left_nulls_slice = left_nulls.as_ref().map(|n| &n[start..end]);
             let right_nulls_slice = right_nulls.as_ref().map(|n| &n[start..end]);
-            evaluate_column_compare_i32_range(left_slice, left_nulls_slice, op, right_slice, right_nulls_slice)
+            evaluate_column_compare_i32_range(
+                left_slice,
+                left_nulls_slice,
+                op,
+                right_slice,
+                right_nulls_slice,
+            )
         }
-        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, right_nulls)) => {
+        (
+            ColumnArray::Int64(left_values, left_nulls),
+            ColumnArray::Int64(right_values, right_nulls),
+        ) => {
             let left_slice = &left_values[start..end];
             let right_slice = &right_values[start..end];
             let left_nulls_slice = left_nulls.as_ref().map(|n| &n[start..end]);
             let right_nulls_slice = right_nulls.as_ref().map(|n| &n[start..end]);
-            evaluate_column_compare_i64_range(left_slice, left_nulls_slice, op, right_slice, right_nulls_slice)
+            evaluate_column_compare_i64_range(
+                left_slice,
+                left_nulls_slice,
+                op,
+                right_slice,
+                right_nulls_slice,
+            )
         }
-        (ColumnArray::Float64(left_values, left_nulls), ColumnArray::Float64(right_values, right_nulls)) => {
+        (
+            ColumnArray::Float64(left_values, left_nulls),
+            ColumnArray::Float64(right_values, right_nulls),
+        ) => {
             let left_slice = &left_values[start..end];
             let right_slice = &right_values[start..end];
             let left_nulls_slice = left_nulls.as_ref().map(|n| &n[start..end]);
             let right_nulls_slice = right_nulls.as_ref().map(|n| &n[start..end]);
-            evaluate_column_compare_f64_range(left_slice, left_nulls_slice, op, right_slice, right_nulls_slice)
+            evaluate_column_compare_f64_range(
+                left_slice,
+                left_nulls_slice,
+                op,
+                right_slice,
+                right_nulls_slice,
+            )
         }
         _ => {
             // Scalar fallback
@@ -580,7 +615,8 @@ fn evaluate_predicate_simd_packed(
 
     // Handle ColumnCompare specially - needs two columns
     if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
-        let bool_mask = evaluate_column_compare_simd(batch, *left_column_idx, *op, *right_column_idx)?;
+        let bool_mask =
+            evaluate_column_compare_simd(batch, *left_column_idx, *op, *right_column_idx)?;
         return Ok(PackedMask::from_bool_slice(&bool_mask));
     }
 
@@ -728,48 +764,52 @@ fn evaluate_column_compare_simd(
     // Try SIMD path for matching column types
     match (left_column, right_column) {
         // Date columns (i32) - common case for TPC-H Q4 (l_commitdate < l_receiptdate)
-        (ColumnArray::Date(left_values, left_nulls), ColumnArray::Date(right_values, right_nulls)) => {
-            evaluate_column_compare_i32_simd(
-                left_values,
-                left_nulls.as_ref().map(|n| n.as_slice()),
-                op,
-                right_values,
-                right_nulls.as_ref().map(|n| n.as_slice()),
-            )
-        }
+        (
+            ColumnArray::Date(left_values, left_nulls),
+            ColumnArray::Date(right_values, right_nulls),
+        ) => evaluate_column_compare_i32_simd(
+            left_values,
+            left_nulls.as_ref().map(|n| n.as_slice()),
+            op,
+            right_values,
+            right_nulls.as_ref().map(|n| n.as_slice()),
+        ),
 
         // Int64 columns
-        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, right_nulls)) => {
-            evaluate_column_compare_i64_simd(
-                left_values,
-                left_nulls.as_ref().map(|n| n.as_slice()),
-                op,
-                right_values,
-                right_nulls.as_ref().map(|n| n.as_slice()),
-            )
-        }
+        (
+            ColumnArray::Int64(left_values, left_nulls),
+            ColumnArray::Int64(right_values, right_nulls),
+        ) => evaluate_column_compare_i64_simd(
+            left_values,
+            left_nulls.as_ref().map(|n| n.as_slice()),
+            op,
+            right_values,
+            right_nulls.as_ref().map(|n| n.as_slice()),
+        ),
 
         // Float64 columns
-        (ColumnArray::Float64(left_values, left_nulls), ColumnArray::Float64(right_values, right_nulls)) => {
-            evaluate_column_compare_f64_simd(
-                left_values,
-                left_nulls.as_ref().map(|n| n.as_slice()),
-                op,
-                right_values,
-                right_nulls.as_ref().map(|n| n.as_slice()),
-            )
-        }
+        (
+            ColumnArray::Float64(left_values, left_nulls),
+            ColumnArray::Float64(right_values, right_nulls),
+        ) => evaluate_column_compare_f64_simd(
+            left_values,
+            left_nulls.as_ref().map(|n| n.as_slice()),
+            op,
+            right_values,
+            right_nulls.as_ref().map(|n| n.as_slice()),
+        ),
 
         // Timestamp columns (i64)
-        (ColumnArray::Timestamp(left_values, left_nulls), ColumnArray::Timestamp(right_values, right_nulls)) => {
-            evaluate_column_compare_i64_simd(
-                left_values,
-                left_nulls.as_ref().map(|n| n.as_slice()),
-                op,
-                right_values,
-                right_nulls.as_ref().map(|n| n.as_slice()),
-            )
-        }
+        (
+            ColumnArray::Timestamp(left_values, left_nulls),
+            ColumnArray::Timestamp(right_values, right_nulls),
+        ) => evaluate_column_compare_i64_simd(
+            left_values,
+            left_nulls.as_ref().map(|n| n.as_slice()),
+            op,
+            right_values,
+            right_nulls.as_ref().map(|n| n.as_slice()),
+        ),
 
         // Fallback to scalar evaluation for other types or mismatched types
         _ => {
@@ -1000,8 +1040,9 @@ fn evaluate_predicate_scalar(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::Row;
+
+    use super::*;
 
     #[test]
     fn test_simd_filter_i64() {

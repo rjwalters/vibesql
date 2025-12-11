@@ -5,8 +5,9 @@
 //! transparent to the tests and commits automatically when a non-INSERT statement is
 //! encountered.
 
-use super::super::execution::TestError;
 use vibesql_storage::Database;
+
+use super::super::execution::TestError;
 
 /// INSERT batching manager for optimizing test data loads.
 pub struct BatchingManager {

@@ -17,8 +17,10 @@
 //! - Better suited for dynamic datasets
 //! - Industry standard for production vector search
 
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap, HashSet},
+};
 
 use vibesql_ast::VectorDistanceMetric;
 

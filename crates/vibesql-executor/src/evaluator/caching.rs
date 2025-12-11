@@ -6,10 +6,13 @@
 //!
 //! Caches use LRU eviction and can be configured via environment variables.
 
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    num::NonZeroUsize,
+};
+
 use lru::LruCache;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
 
 /// Default maximum size for CSE cache (entries)
 /// Can be overridden via CSE_CACHE_SIZE environment variable

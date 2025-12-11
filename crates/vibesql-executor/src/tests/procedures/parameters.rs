@@ -125,7 +125,9 @@ fn test_declare_with_default_value() {
             ProceduralStatement::Declare {
                 name: "message".to_string(),
                 data_type: DataType::Varchar { max_length: Some(20) },
-                default_value: Some(Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Hello"))))),
+                default_value: Some(Box::new(Expression::Literal(SqlValue::Varchar(
+                    arcstr::ArcStr::from("Hello"),
+                )))),
             },
         ]),
         sql_security: None,

@@ -27,7 +27,8 @@ impl AnalyzeExecutor {
     ///
     /// - `ANALYZE` with no table: Analyzes all tables in the database
     /// - `ANALYZE table_name`: Analyzes the specified table
-    /// - `ANALYZE table_name (cols)`: Analyzes the specified table (column list is currently advisory)
+    /// - `ANALYZE table_name (cols)`: Analyzes the specified table (column list is currently
+    ///   advisory)
     ///
     /// # Implementation Note
     ///
@@ -85,7 +86,7 @@ mod tests {
 
     fn create_test_table(db: &mut Database, table_name: &str) {
         let stmt = CreateTableStmt {
-        if_not_exists: false,
+            if_not_exists: false,
             table_name: table_name.to_string(),
             columns: vec![
                 ColumnDef {

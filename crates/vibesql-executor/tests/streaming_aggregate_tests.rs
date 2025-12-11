@@ -1,7 +1,7 @@
 //! Integration tests for streaming aggregation fast path (#3815)
 //!
-//! Tests that streaming aggregate queries (e.g., `SELECT SUM(k) FROM sbtest WHERE id BETWEEN ? AND ?`)
-//! return correct aggregate values.
+//! Tests that streaming aggregate queries (e.g., `SELECT SUM(k) FROM sbtest WHERE id BETWEEN ? AND
+//! ?`) return correct aggregate values.
 
 use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor, Session};
 use vibesql_parser::Parser;
@@ -27,18 +27,12 @@ fn setup_test_table() -> Database {
     let mut db = Database::new();
 
     // Create table: sbtest (id INTEGER PRIMARY KEY, k INTEGER, c VARCHAR)
-    execute_sql(
-        &mut db,
-        "CREATE TABLE sbtest (id INTEGER PRIMARY KEY, k INTEGER, c VARCHAR(100))",
-    );
+    execute_sql(&mut db, "CREATE TABLE sbtest (id INTEGER PRIMARY KEY, k INTEGER, c VARCHAR(100))");
 
     // Insert test data: id 1-10 with k = id * 10
     // SUM(k) for id 1-10 = 10 + 20 + 30 + ... + 100 = 550
     for i in 1..=10 {
-        execute_sql(
-            &mut db,
-            &format!("INSERT INTO sbtest VALUES ({}, {}, 'row{}')", i, i * 10, i),
-        );
+        execute_sql(&mut db, &format!("INSERT INTO sbtest VALUES ({}, {}, 'row{}')", i, i * 10, i));
     }
 
     db
@@ -66,11 +60,7 @@ fn test_streaming_aggregate_sum_full_range() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(550),
-        "SUM(k) for id 1-10 should be 550"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(550), "SUM(k) for id 1-10 should be 550");
 }
 
 #[test]
@@ -83,11 +73,7 @@ fn test_streaming_aggregate_sum_partial_range() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(250),
-        "SUM(k) for id 3-7 should be 250"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(250), "SUM(k) for id 3-7 should be 250");
 }
 
 #[test]
@@ -100,11 +86,7 @@ fn test_streaming_aggregate_sum_single_row() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(50),
-        "SUM(k) for id 5-5 should be 50"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(50), "SUM(k) for id 5-5 should be 50");
 }
 
 // =============================================================================
@@ -121,11 +103,7 @@ fn test_streaming_aggregate_count_column() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(10),
-        "COUNT(k) for id 1-10 should be 10"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(10), "COUNT(k) for id 1-10 should be 10");
 }
 
 #[test]
@@ -138,11 +116,7 @@ fn test_streaming_aggregate_count_partial_range() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(5),
-        "COUNT(k) for id 3-7 should be 5"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(5), "COUNT(k) for id 3-7 should be 5");
 }
 
 // =============================================================================
@@ -182,11 +156,7 @@ fn test_streaming_aggregate_min() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(30),
-        "MIN(k) for id 3-7 should be 30"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(30), "MIN(k) for id 3-7 should be 30");
 }
 
 #[test]
@@ -199,11 +169,7 @@ fn test_streaming_aggregate_max() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(70),
-        "MAX(k) for id 3-7 should be 70"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(70), "MAX(k) for id 3-7 should be 70");
 }
 
 // =============================================================================
@@ -216,35 +182,20 @@ fn test_streaming_aggregate_multiple() {
     let executor = SelectExecutor::new(&db);
 
     // Multiple aggregates in one query
-    let stmt =
-        parse_select("SELECT SUM(k), COUNT(k), MIN(k), MAX(k) FROM sbtest WHERE id BETWEEN 1 AND 5");
+    let stmt = parse_select(
+        "SELECT SUM(k), COUNT(k), MIN(k), MAX(k) FROM sbtest WHERE id BETWEEN 1 AND 5",
+    );
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
     // SUM(k) for id 1-5 = 10 + 20 + 30 + 40 + 50 = 150
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(150),
-        "SUM(k) for id 1-5 should be 150"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(150), "SUM(k) for id 1-5 should be 150");
     // COUNT(k) = 5
-    assert_eq!(
-        result[0].values[1],
-        SqlValue::Integer(5),
-        "COUNT(k) for id 1-5 should be 5"
-    );
+    assert_eq!(result[0].values[1], SqlValue::Integer(5), "COUNT(k) for id 1-5 should be 5");
     // MIN(k) = 10
-    assert_eq!(
-        result[0].values[2],
-        SqlValue::Integer(10),
-        "MIN(k) for id 1-5 should be 10"
-    );
+    assert_eq!(result[0].values[2], SqlValue::Integer(10), "MIN(k) for id 1-5 should be 10");
     // MAX(k) = 50
-    assert_eq!(
-        result[0].values[3],
-        SqlValue::Integer(50),
-        "MAX(k) for id 1-5 should be 50"
-    );
+    assert_eq!(result[0].values[3], SqlValue::Integer(50), "MAX(k) for id 1-5 should be 50");
 }
 
 // =============================================================================
@@ -262,11 +213,7 @@ fn test_streaming_aggregate_empty_range() {
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
     // SUM of empty set is NULL
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Null,
-        "SUM of empty set should be NULL"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Null, "SUM of empty set should be NULL");
 }
 
 #[test]
@@ -280,11 +227,7 @@ fn test_streaming_aggregate_count_empty_range() {
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
     // COUNT of empty set is 0
-    assert_eq!(
-        result[0].values[0],
-        SqlValue::Integer(0),
-        "COUNT of empty set should be 0"
-    );
+    assert_eq!(result[0].values[0], SqlValue::Integer(0), "COUNT of empty set should be 0");
 }
 
 // =============================================================================
@@ -297,31 +240,19 @@ fn test_streaming_aggregate_prepared_statement() {
     let session = Session::new(&db);
 
     // Prepare a streaming aggregate query
-    let stmt = session
-        .prepare("SELECT SUM(k) FROM sbtest WHERE id BETWEEN ? AND ?")
-        .unwrap();
+    let stmt = session.prepare("SELECT SUM(k) FROM sbtest WHERE id BETWEEN ? AND ?").unwrap();
 
     // Execute with different parameters
-    let result1 = session
-        .execute_prepared(&stmt, &[SqlValue::Integer(1), SqlValue::Integer(5)])
-        .unwrap();
+    let result1 =
+        session.execute_prepared(&stmt, &[SqlValue::Integer(1), SqlValue::Integer(5)]).unwrap();
     let rows1 = result1.rows().unwrap();
     assert_eq!(rows1.len(), 1);
-    assert_eq!(
-        rows1[0].values[0],
-        SqlValue::Integer(150),
-        "SUM(k) for id 1-5 should be 150"
-    );
+    assert_eq!(rows1[0].values[0], SqlValue::Integer(150), "SUM(k) for id 1-5 should be 150");
 
-    let result2 = session
-        .execute_prepared(&stmt, &[SqlValue::Integer(6), SqlValue::Integer(10)])
-        .unwrap();
+    let result2 =
+        session.execute_prepared(&stmt, &[SqlValue::Integer(6), SqlValue::Integer(10)]).unwrap();
     let rows2 = result2.rows().unwrap();
     assert_eq!(rows2.len(), 1);
     // SUM(k) for id 6-10 = 60 + 70 + 80 + 90 + 100 = 400
-    assert_eq!(
-        rows2[0].values[0],
-        SqlValue::Integer(400),
-        "SUM(k) for id 6-10 should be 400"
-    );
+    assert_eq!(rows2[0].values[0], SqlValue::Integer(400), "SUM(k) for id 6-10 should be 400");
 }

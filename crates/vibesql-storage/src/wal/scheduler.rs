@@ -23,12 +23,15 @@
 //
 // The scheduler runs on a background thread (native) or is polled manually (WASM).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use crate::wal::entry::Lsn;
-use crate::StorageError;
+use crate::{wal::entry::Lsn, StorageError};
 
 /// Default checkpoint interval in seconds
 pub const DEFAULT_CHECKPOINT_INTERVAL_SECS: u64 = 30;
@@ -253,8 +256,10 @@ impl CheckpointTriggerState {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
-    use std::thread::{self, JoinHandle};
+    use std::{
+        sync::mpsc::{self, RecvTimeoutError, SyncSender},
+        thread::{self, JoinHandle},
+    };
 
     use parking_lot::Mutex;
 
@@ -391,9 +396,9 @@ mod native {
         /// Request a manual checkpoint
         pub fn trigger_checkpoint(&self) -> Result<(), StorageError> {
             if let Some(ref sender) = self.sender {
-                sender
-                    .send(CheckpointMessage::TriggerCheckpoint { manual: true })
-                    .map_err(|_| StorageError::IoError("Scheduler thread terminated".to_string()))?;
+                sender.send(CheckpointMessage::TriggerCheckpoint { manual: true }).map_err(
+                    |_| StorageError::IoError("Scheduler thread terminated".to_string()),
+                )?;
             } else {
                 // No background thread, just set the flag
                 self.state.request_checkpoint();
@@ -559,7 +564,6 @@ mod wasm {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{CheckpointCallback, CheckpointScheduler};
-
 #[cfg(target_arch = "wasm32")]
 pub use wasm::CheckpointScheduler;
 

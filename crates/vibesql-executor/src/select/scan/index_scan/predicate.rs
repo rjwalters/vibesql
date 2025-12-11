@@ -122,7 +122,8 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                             });
                         }
                     }
-                    // Check if right side is our column and left side is a literal (flipped comparison)
+                    // Check if right side is our column and left side is a literal (flipped
+                    // comparison)
                     else if is_column_reference(right, column_name) {
                         if let Expression::Literal(value) = left.as_ref() {
                             // NULL comparisons always return no rows - can't optimize with index
@@ -286,8 +287,8 @@ pub(crate) struct PrefixPredicateResult {
 /// this function extracts a prefix of matching columns starting from the first.
 ///
 /// For example, with index `[c_w_id, c_d_id, c_id]`:
-/// - `WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100` returns prefix `[1, 2]`
-///   with covered columns `{c_w_id, c_d_id}`
+/// - `WHERE c_w_id = 1 AND c_d_id = 2 AND c_balance > 100` returns prefix `[1, 2]` with covered
+///   columns `{c_w_id, c_d_id}`
 /// - `WHERE c_w_id = 1 AND c_id = 3` returns prefix `[1]` (c_id skipped, not contiguous)
 ///
 /// # Arguments

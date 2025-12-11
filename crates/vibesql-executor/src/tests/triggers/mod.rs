@@ -8,8 +8,9 @@
 //! - Error handling, rollback, and recursion prevention
 //! - Pseudo-variables (OLD/NEW row references)
 
-use crate::{CreateTableExecutor, SelectExecutor};
 use vibesql_storage::Database;
+
+use crate::{CreateTableExecutor, SelectExecutor};
 
 // Re-export test modules
 mod conditions;

@@ -115,15 +115,16 @@ pub trait StorageBackend: Send + Sync {
 /// It works on all platforms that support std::fs (Linux, macOS, Windows).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native {
-    use std::fs::{File, OpenOptions};
-    use std::io::{Read, Seek, SeekFrom, Write};
-    use std::path::{Path, PathBuf};
+    #[cfg(target_arch = "wasm32")]
+    use std::sync::Mutex;
+    use std::{
+        fs::{File, OpenOptions},
+        io::{Read, Seek, SeekFrom, Write},
+        path::{Path, PathBuf},
+    };
 
     #[cfg(not(target_arch = "wasm32"))]
     use parking_lot::Mutex;
-
-    #[cfg(target_arch = "wasm32")]
-    use std::sync::Mutex;
 
     use super::*;
 

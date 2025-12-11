@@ -10,7 +10,8 @@ impl Parser {
     ///   CREATE [UNIQUE] INDEX [IF NOT EXISTS] index_name ON table_name (column_list)
     ///   CREATE FULLTEXT INDEX [IF NOT EXISTS] index_name ON table_name (column_list)
     ///   CREATE SPATIAL INDEX [IF NOT EXISTS] index_name ON table_name (column_list)
-    ///   CREATE INDEX [IF NOT EXISTS] index_name ON table_name USING ivfflat (column [ops]) [WITH (lists = N)]
+    ///   CREATE INDEX [IF NOT EXISTS] index_name ON table_name USING ivfflat (column [ops]) [WITH
+    /// (lists = N)]
     pub(super) fn parse_create_index_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateIndexStmt, ParseError> {
@@ -121,7 +122,8 @@ impl Parser {
 
     /// Parse IVFFlat index specifics
     ///
-    /// Syntax: USING ivfflat (column [vector_l2_ops|vector_cosine_ops|vector_ip_ops]) [WITH (lists = N)]
+    /// Syntax: USING ivfflat (column [vector_l2_ops|vector_cosine_ops|vector_ip_ops]) [WITH (lists
+    /// = N)]
     fn parse_ivfflat_index(
         &mut self,
         if_not_exists: bool,
@@ -223,7 +225,8 @@ impl Parser {
 
     /// Parse HNSW index specifics
     ///
-    /// Syntax: USING hnsw (column [vector_l2_ops|vector_cosine_ops|vector_ip_ops]) [WITH (m = N, ef_construction = N)]
+    /// Syntax: USING hnsw (column [vector_l2_ops|vector_cosine_ops|vector_ip_ops]) [WITH (m = N,
+    /// ef_construction = N)]
     fn parse_hnsw_index(
         &mut self,
         if_not_exists: bool,

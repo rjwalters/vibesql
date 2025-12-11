@@ -35,27 +35,24 @@
 
 mod tpch;
 
-use std::env;
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::net::TcpListener;
-use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
-use tpch::queries::*;
-use tpch::schema::load_vibesql;
-
-// PostgreSQL wire protocol client
-use tokio_postgres::NoTls;
+use std::{
+    env,
+    net::SocketAddr,
+    sync::{atomic::AtomicUsize, Arc},
+    time::{Duration, Instant},
+};
 
 // MySQL client (optional)
 #[cfg(feature = "mysql")]
 use mysql::prelude::*;
 #[cfg(feature = "mysql")]
 use mysql::Pool;
+use tokio::{net::TcpListener, runtime::Runtime, sync::oneshot};
+// PostgreSQL wire protocol client
+use tokio_postgres::NoTls;
 #[cfg(feature = "mysql")]
 use tpch::schema::load_mysql;
+use tpch::{queries::*, schema::load_vibesql};
 
 /// Default port for vibesql-server (different from sysbench_server to avoid conflicts)
 const DEFAULT_VIBESQL_PORT: u16 = 15433;
@@ -98,11 +95,13 @@ async fn start_vibesql_server_with_db(
     db: vibesql_storage::Database,
     shutdown_signal: oneshot::Receiver<()>,
 ) -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
-    use vibesql_server::config::{AuthConfig, Config, LoggingConfig, ServerConfig};
-    use vibesql_server::connection::ConnectionHandler;
-    use vibesql_server::observability::ObservabilityProvider;
-    use vibesql_server::registry::DatabaseRegistry;
-    use vibesql_server::subscription::SubscriptionManager;
+    use vibesql_server::{
+        config::{AuthConfig, Config, LoggingConfig, ServerConfig},
+        connection::ConnectionHandler,
+        observability::ObservabilityProvider,
+        registry::DatabaseRegistry,
+        subscription::SubscriptionManager,
+    };
 
     // Create minimal configuration for benchmark
     let config = Config {
@@ -207,10 +206,7 @@ impl PostgresExecutor {
 
     async fn query(&self, sql: &str) -> Result<usize, tokio_postgres::Error> {
         let msgs = self.client.simple_query(sql).await?;
-        Ok(msgs
-            .iter()
-            .filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_)))
-            .count())
+        Ok(msgs.iter().filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_))).count())
     }
 }
 
@@ -248,7 +244,7 @@ fn is_valid_query_filter(s: &str) -> bool {
         && s.split(',').all(|part| {
             let part = part.trim();
             !part.is_empty()
-                && part.starts_with(|c: char| c == 'Q' || c == 'q')
+                && part.starts_with(['Q', 'q'])
                 && part.len() > 1
                 && part[1..].chars().all(|c| c.is_ascii_digit())
         })
@@ -267,17 +263,13 @@ fn get_query_filter() -> Option<Vec<String>> {
 
     if let Some(filter) = query_arg {
         return Some(
-            filter
-                .split(',')
-                .map(|s| s.trim().to_uppercase())
-                .filter(|s| !s.is_empty())
-                .collect(),
+            filter.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect(),
         );
     }
 
-    env::var("QUERY_FILTER").ok().map(|s| {
-        s.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect()
-    })
+    env::var("QUERY_FILTER")
+        .ok()
+        .map(|s| s.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect())
 }
 
 fn get_queries_to_run(filter: &Option<Vec<String>>) -> Vec<(&'static str, &'static str)> {
@@ -325,10 +317,7 @@ fn print_comparison(vibesql_results: &[QueryResult], mysql_results: &[QueryResul
     }
 
     eprintln!("\n=== Comparison Summary ===");
-    eprintln!(
-        "{:<8} {:>15} {:>15} {:>12}",
-        "Query", "VibeSQL (ms)", "MySQL (ms)", "Ratio"
-    );
+    eprintln!("{:<8} {:>15} {:>15} {:>12}", "Query", "VibeSQL (ms)", "MySQL (ms)", "Ratio");
     eprintln!("{:-<8} {:->15} {:->15} {:->12}", "", "", "", "");
 
     for vibesql in vibesql_results {

@@ -21,13 +21,15 @@
 //! let result2 = session.execute_prepared(&stmt, &[SqlValue::Integer(2)])?;
 //! ```
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+use std::{
+    num::NonZeroUsize,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use lru::LruCache;
-use std::num::NonZeroUsize;
 use vibesql_ast::Statement;
 use vibesql_types::SqlValue;
 
@@ -38,8 +40,8 @@ mod bind;
 pub mod plan;
 
 pub use plan::{
-    CachedPlan, ColumnProjection, PkDeletePlan, PkPointLookupPlan, ProjectionPlan, ResolvedProjection,
-    SimpleFastPathPlan,
+    CachedPlan, ColumnProjection, PkDeletePlan, PkPointLookupPlan, ProjectionPlan,
+    ResolvedProjection, SimpleFastPathPlan,
 };
 
 /// A prepared statement with cached AST and optional execution plan
@@ -422,8 +424,9 @@ fn parse_with_arena_fallback(sql: &str) -> Result<Statement, vibesql_parser::Par
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::Expression;
+
+    use super::*;
 
     #[test]
     fn test_prepared_statement_no_params() {
@@ -649,8 +652,9 @@ mod tests {
         let stmt = cache.get_or_prepare(sql).unwrap();
         assert_eq!(stmt.param_count(), 2);
 
-        let bound =
-            stmt.bind(&[SqlValue::Varchar(arcstr::ArcStr::from("Charlie")), SqlValue::Integer(42)]).unwrap();
+        let bound = stmt
+            .bind(&[SqlValue::Varchar(arcstr::ArcStr::from("Charlie")), SqlValue::Integer(42)])
+            .unwrap();
         assert!(matches!(bound, Statement::Update(_)));
     }
 

@@ -6,26 +6,29 @@
 //! - Secondary index prefix with ORDER BY + LIMIT
 //! - Covering index scans (index-only scans)
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use vibesql_ast::{Expression, SelectItem, SelectStmt};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::helpers::EqualityResult;
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
-use crate::select::executor::builder::SelectExecutor;
-use crate::select::scan::index_scan::covering::{check_covering_index, try_covering_index_scan};
+use crate::{
+    errors::ExecutorError,
+    schema::CombinedSchema,
+    select::{
+        executor::builder::SelectExecutor,
+        scan::index_scan::covering::{check_covering_index, try_covering_index_scan},
+    },
+};
 
 impl SelectExecutor<'_> {
     /// Try secondary index prefix lookup with ORDER BY and LIMIT optimization
     ///
     /// Returns Some(rows) if we can use the optimized path, None if we need standard path.
     /// This handles queries like:
-    /// `SELECT o_id FROM orders WHERE o_w_id = 1 AND o_d_id = 2 AND o_c_id = 3 ORDER BY o_id DESC LIMIT 1`
-    /// when there's a secondary index on (o_w_id, o_d_id, o_c_id, o_id).
+    /// `SELECT o_id FROM orders WHERE o_w_id = 1 AND o_d_id = 2 AND o_c_id = 3 ORDER BY o_id DESC
+    /// LIMIT 1` when there's a secondary index on (o_w_id, o_d_id, o_c_id, o_id).
     ///
     /// The optimization detects when:
     /// 1. WHERE has equality predicates for first N columns of an index
@@ -212,8 +215,8 @@ impl SelectExecutor<'_> {
     /// Try secondary index lookup path for queries with composite key patterns
     ///
     /// Returns Some(rows) if we can use a secondary index lookup, None if we need standard path.
-    /// This handles queries like `SELECT * FROM customer WHERE c_w_id = 1 AND c_d_id = 2 AND c_last = 'SMITH'`
-    /// when there's a secondary index on (c_w_id, c_d_id, c_last).
+    /// This handles queries like `SELECT * FROM customer WHERE c_w_id = 1 AND c_d_id = 2 AND c_last
+    /// = 'SMITH'` when there's a secondary index on (c_w_id, c_d_id, c_last).
     pub(crate) fn try_secondary_index_lookup_fast(
         &self,
         table_name: &str,

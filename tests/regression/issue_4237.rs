@@ -15,6 +15,7 @@
 //! 2. Skip auto-generated PK indexes (PK_*) to avoid duplicate index creation
 
 use std::fs;
+
 use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -36,7 +37,8 @@ fn execute(db: &mut Database, sql: &str) -> Result<Vec<Vec<SqlValue>>, String> {
             Ok(vec![])
         }
         vibesql_ast::Statement::Insert(insert_stmt) => {
-            InsertExecutor::execute(db, &insert_stmt).map_err(|e| format!("Insert error: {}", e))?;
+            InsertExecutor::execute(db, &insert_stmt)
+                .map_err(|e| format!("Insert error: {}", e))?;
             Ok(vec![])
         }
         _ => Err("Unsupported statement type".to_string()),
@@ -49,7 +51,11 @@ fn test_insert_or_replace_persists_across_sql_dump() {
     // Create database with PRIMARY KEY table
     let mut db = Database::new();
 
-    execute(&mut db, "CREATE TABLE test_files (file_path VARCHAR(500) PRIMARY KEY, status VARCHAR(20) NOT NULL)").unwrap();
+    execute(
+        &mut db,
+        "CREATE TABLE test_files (file_path VARCHAR(500) PRIMARY KEY, status VARCHAR(20) NOT NULL)",
+    )
+    .unwrap();
 
     // First INSERT OR REPLACE
     execute(
@@ -69,10 +75,7 @@ fn test_insert_or_replace_persists_across_sql_dump() {
 
     // Verify the SQL dump contains PRIMARY KEY
     let dump_content = fs::read_to_string(path).unwrap();
-    assert!(
-        dump_content.contains("PRIMARY KEY"),
-        "SQL dump should contain PRIMARY KEY constraint"
-    );
+    assert!(dump_content.contains("PRIMARY KEY"), "SQL dump should contain PRIMARY KEY constraint");
 
     // Reload database from SQL dump (simulates opening existing database file)
     // We need to use the CLI's load_sql_dump functionality here

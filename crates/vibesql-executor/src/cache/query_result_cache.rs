@@ -134,8 +134,9 @@ impl QueryResultCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn make_test_row(values: Vec<SqlValue>) -> Row {
         Row::new(values)
@@ -169,8 +170,14 @@ mod tests {
         let cache = QueryResultCache::new(10);
         let sig = QuerySignature::from_sql("SELECT * FROM users");
         let rows = vec![
-            make_test_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]),
-            make_test_row(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]),
+            make_test_row(vec![
+                SqlValue::Integer(1),
+                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            ]),
+            make_test_row(vec![
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("Bob")),
+            ]),
         ];
         let schema = make_test_schema();
         let mut tables = HashSet::new();

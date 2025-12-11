@@ -4,12 +4,11 @@
 //! Pages are fixed-size blocks (4KB) that form the foundation of persistent storage.
 
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::Mutex;
-
-#[cfg(target_arch = "wasm32")]
-use std::sync::Mutex;
 
 use crate::{StorageBackend, StorageError, StorageFile};
 
@@ -314,6 +313,7 @@ impl PageManager {
 #[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use std::sync::Arc;
+
     use tempfile::TempDir;
 
     use super::*;

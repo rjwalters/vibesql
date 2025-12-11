@@ -1,8 +1,9 @@
 //! Tests for predicate extraction logic
 
-use super::*;
 use vibesql_ast::BinaryOperator;
 use vibesql_types::SqlValue;
+
+use super::*;
 
 #[test]
 fn test_extract_range_predicate_greater_than() {
@@ -287,7 +288,9 @@ fn test_extract_composite_predicates_with_string_values() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef { table: None, column: "department".to_string() }),
-            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Engineering")))),
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                "Engineering",
+            )))),
         }),
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,

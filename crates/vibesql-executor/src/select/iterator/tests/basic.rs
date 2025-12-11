@@ -94,7 +94,8 @@ fn test_filter_iterator_null_is_falsy() {
 #[test]
 fn test_filter_iterator_integer_truthy() {
     let schema = test_schema();
-    let rows = vec![Row::from_vec(vec![SqlValue::Integer(1)]), Row::from_vec(vec![SqlValue::Integer(2)])];
+    let rows =
+        vec![Row::from_vec(vec![SqlValue::Integer(1)]), Row::from_vec(vec![SqlValue::Integer(2)])];
     let scan = TableScanIterator::new(schema.clone(), rows);
 
     // Predicate that returns non-zero integer (truthy)
@@ -238,7 +239,8 @@ fn test_filter_with_column_ref() {
 #[test]
 fn test_projection_iterator_identity() {
     let schema = test_schema();
-    let rows = vec![Row::from_vec(vec![SqlValue::Integer(1)]), Row::from_vec(vec![SqlValue::Integer(2)])];
+    let rows =
+        vec![Row::from_vec(vec![SqlValue::Integer(1)]), Row::from_vec(vec![SqlValue::Integer(2)])];
     let scan = TableScanIterator::new(schema.clone(), rows);
 
     // Identity projection (no-op)
@@ -255,7 +257,8 @@ fn test_projection_iterator_identity() {
 #[test]
 fn test_projection_iterator_transform() {
     let schema = test_schema();
-    let rows = vec![Row::from_vec(vec![SqlValue::Integer(1)]), Row::from_vec(vec![SqlValue::Integer(2)])];
+    let rows =
+        vec![Row::from_vec(vec![SqlValue::Integer(1)]), Row::from_vec(vec![SqlValue::Integer(2)])];
     let scan = TableScanIterator::new(schema.clone(), rows);
 
     // Double each value

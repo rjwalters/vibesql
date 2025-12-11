@@ -8,14 +8,13 @@
 //!
 //! Run with: cargo bench --bench selective_bandwidth_benchmark
 
-use bytes::BytesMut;
 use std::hint::black_box;
 
+use bytes::BytesMut;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-
-use vibesql_server::protocol::messages::{BackendMessage, PartialRowUpdate, SubscriptionUpdateType};
-use vibesql_server::subscription::{
-    create_partial_row_update, SelectiveColumnConfig,
+use vibesql_server::{
+    protocol::messages::{BackendMessage, PartialRowUpdate, SubscriptionUpdateType},
+    subscription::{create_partial_row_update, SelectiveColumnConfig},
 };
 
 /// Create a test row with N columns, each containing a string value
@@ -28,7 +27,10 @@ fn create_row(num_columns: usize, row_id: usize) -> Vec<Option<Vec<u8>>> {
                 format!("{}", row_id)
             } else if col % 3 == 0 {
                 // Every 3rd column is a longer text field
-                format!("field_{}_row_{}_with_some_extra_text_to_simulate_realistic_data", col, row_id)
+                format!(
+                    "field_{}_row_{}_with_some_extra_text_to_simulate_realistic_data",
+                    col, row_id
+                )
             } else {
                 // Other columns are medium length
                 format!("value_{}_{}", col, row_id)
@@ -79,10 +81,8 @@ fn measure_selective_update_size(
     subscription_id: [u8; 16],
 ) -> usize {
     let mut buf = BytesMut::new();
-    let msg = BackendMessage::SubscriptionPartialData {
-        subscription_id,
-        rows: partial_rows.to_vec(),
-    };
+    let msg =
+        BackendMessage::SubscriptionPartialData { subscription_id, rows: partial_rows.to_vec() };
     msg.encode(&mut buf);
     buf.len()
 }
@@ -109,7 +109,10 @@ struct BandwidthResult {
 }
 
 /// Run bandwidth comparison for a given scenario
-fn compare_bandwidth(scenario: &BandwidthScenario, config: &SelectiveColumnConfig) -> BandwidthResult {
+fn compare_bandwidth(
+    scenario: &BandwidthScenario,
+    config: &SelectiveColumnConfig,
+) -> BandwidthResult {
     let subscription_id = [0u8; 16];
     let pk_columns = vec![0usize]; // Column 0 is primary key
 
@@ -118,15 +121,17 @@ fn compare_bandwidth(scenario: &BandwidthScenario, config: &SelectiveColumnConfi
     let modified_row = create_modified_row(&original_row, &scenario.columns_to_change, "_modified");
 
     // Measure full update size
-    let full_update_bytes = measure_full_update_size(std::slice::from_ref(&modified_row), subscription_id);
+    let full_update_bytes =
+        measure_full_update_size(std::slice::from_ref(&modified_row), subscription_id);
 
     // Try to create selective update
-    let (selective_update_bytes, selective_used) =
-        if let Some(partial) = create_partial_row_update(&original_row, &modified_row, &pk_columns, config) {
-            (measure_selective_update_size(&[partial], subscription_id), true)
-        } else {
-            (full_update_bytes, false)
-        };
+    let (selective_update_bytes, selective_used) = if let Some(partial) =
+        create_partial_row_update(&original_row, &modified_row, &pk_columns, config)
+    {
+        (measure_selective_update_size(&[partial], subscription_id), true)
+    } else {
+        (full_update_bytes, false)
+    };
 
     let savings_bytes = full_update_bytes as i64 - selective_update_bytes as i64;
     let savings_percent = if full_update_bytes > 0 {
@@ -152,19 +157,23 @@ fn print_bandwidth_report(results: &[BandwidthResult]) {
     println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════╗");
     println!("║                       SELECTIVE COLUMN UPDATE BANDWIDTH BENCHMARK                                   ║");
     println!("╠════════════════════════════════════════════════════════════════════════════════════════════════════╣");
-    println!("║ {:30} │ {:5} │ {:7} │ {:10} │ {:10} │ {:8} │ {:8} ║",
-             "Scenario", "Cols", "Changed", "Full (B)", "Select (B)", "Savings", "Used?");
+    println!(
+        "║ {:30} │ {:5} │ {:7} │ {:10} │ {:10} │ {:8} │ {:8} ║",
+        "Scenario", "Cols", "Changed", "Full (B)", "Select (B)", "Savings", "Used?"
+    );
     println!("╠════════════════════════════════════════════════════════════════════════════════════════════════════╣");
 
     for result in results {
-        println!("║ {:30} │ {:5} │ {:7} │ {:10} │ {:10} │ {:7.1}% │ {:8} ║",
-                 result.scenario_name,
-                 result.num_columns,
-                 result.columns_changed,
-                 result.full_update_bytes,
-                 result.selective_update_bytes,
-                 result.savings_percent,
-                 if result.selective_used { "Yes" } else { "No (fallback)" });
+        println!(
+            "║ {:30} │ {:5} │ {:7} │ {:10} │ {:10} │ {:7.1}% │ {:8} ║",
+            result.scenario_name,
+            result.num_columns,
+            result.columns_changed,
+            result.full_update_bytes,
+            result.selective_update_bytes,
+            result.savings_percent,
+            if result.selective_used { "Yes" } else { "No (fallback)" }
+        );
     }
 
     println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════╝");
@@ -217,7 +226,6 @@ fn bandwidth_benchmark(c: &mut Criterion) {
             num_columns: 10,
             columns_to_change: (1..10).collect(),
         },
-
         // 20-column table scenarios
         BandwidthScenario {
             name: "20 cols, update 1 col (5%)",
@@ -239,7 +247,6 @@ fn bandwidth_benchmark(c: &mut Criterion) {
             num_columns: 20,
             columns_to_change: (1..16).collect(),
         },
-
         // 50-column table scenarios (wide table)
         BandwidthScenario {
             name: "50 cols, update 1 col (2%)",
@@ -269,10 +276,8 @@ fn bandwidth_benchmark(c: &mut Criterion) {
     ];
 
     // Run all scenarios and collect results
-    let results: Vec<BandwidthResult> = scenarios
-        .iter()
-        .map(|s| compare_bandwidth(s, &config))
-        .collect();
+    let results: Vec<BandwidthResult> =
+        scenarios.iter().map(|s| compare_bandwidth(s, &config)).collect();
 
     // Print the report
     print_bandwidth_report(&results);
@@ -286,28 +291,25 @@ fn bandwidth_benchmark(c: &mut Criterion) {
         let subscription_id = [0u8; 16];
 
         group.throughput(Throughput::Elements(1));
-        group.bench_with_input(
-            BenchmarkId::new("full_row_encode", num_cols),
-            &row,
-            |b, row| {
-                b.iter(|| {
-                    let mut buf = BytesMut::new();
-                    let msg = BackendMessage::SubscriptionData {
-                        subscription_id,
-                        update_type: SubscriptionUpdateType::DeltaUpdate,
-                        rows: vec![black_box(row.clone())],
-                    };
-                    msg.encode(&mut buf);
-                    buf
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("full_row_encode", num_cols), &row, |b, row| {
+            b.iter(|| {
+                let mut buf = BytesMut::new();
+                let msg = BackendMessage::SubscriptionData {
+                    subscription_id,
+                    update_type: SubscriptionUpdateType::DeltaUpdate,
+                    rows: vec![black_box(row.clone())],
+                };
+                msg.encode(&mut buf);
+                buf
+            });
+        });
 
         // Benchmark selective update encoding (updating 1 column)
         let modified_row = create_modified_row(&row, &[1], "_mod");
         let pk_columns = vec![0usize];
 
-        if let Some(partial) = create_partial_row_update(&row, &modified_row, &pk_columns, &config) {
+        if let Some(partial) = create_partial_row_update(&row, &modified_row, &pk_columns, &config)
+        {
             group.bench_with_input(
                 BenchmarkId::new("selective_1col_encode", num_cols),
                 &partial,
@@ -357,7 +359,7 @@ fn column_diff_benchmark(c: &mut Criterion) {
         );
 
         // Benchmark diff with 25% columns changed
-        let quarter_cols: Vec<usize> = (1..=num_cols/4).collect();
+        let quarter_cols: Vec<usize> = (1..=num_cols / 4).collect();
         let modified_quarter = create_modified_row(&original, &quarter_cols, "_mod");
         group.bench_with_input(
             BenchmarkId::new("diff_25pct_cols", num_cols),

@@ -7,14 +7,15 @@
 
 #![allow(dead_code)]
 
-use crate::errors::ExecutorError;
-use arrow::array::{
-    Array, ArrayRef, Date32Array, Float64Array, Int64Array, TimestampMicrosecondArray,
+use arrow::{
+    array::{Array, ArrayRef, Date32Array, Float64Array, Int64Array, TimestampMicrosecondArray},
+    compute::kernels::aggregate::{max, min, sum},
+    datatypes::TimeUnit,
+    record_batch::RecordBatch,
 };
-use arrow::compute::kernels::aggregate::{max, min, sum};
-use arrow::datatypes::TimeUnit;
-use arrow::record_batch::RecordBatch;
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// Aggregate function types supported by SIMD execution
 #[derive(Debug, Clone, PartialEq)]
@@ -317,9 +318,11 @@ pub fn aggregate_batch_simd(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
+
+    use arrow::datatypes::{DataType, Field, Schema};
+
+    use super::*;
 
     #[test]
     fn test_simd_sum_int64() {

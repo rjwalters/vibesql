@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
-use crate::schema::CombinedSchema;
 use vibesql_ast::BinaryOperator;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
 
-use crate::select::columnar::batch::{ColumnArray, ColumnarBatch};
+use crate::{
+    schema::CombinedSchema,
+    select::columnar::batch::{ColumnArray, ColumnarBatch},
+};
 
 fn make_test_schema() -> CombinedSchema {
     let schema = TableSchema::new(
@@ -36,10 +38,11 @@ fn make_test_batch() -> ColumnarBatch {
 
 #[test]
 fn test_batch_expression_aggregate_multiply() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
@@ -65,10 +68,11 @@ fn test_batch_expression_aggregate_multiply() {
 
 #[test]
 fn test_batch_expression_aggregate_avg() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
@@ -94,10 +98,11 @@ fn test_batch_expression_aggregate_avg() {
 
 #[test]
 fn test_batch_expression_aggregate_mixed_types() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
@@ -123,10 +128,11 @@ fn test_batch_expression_aggregate_mixed_types() {
 
 #[test]
 fn test_batch_expression_aggregate_with_literal() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
@@ -152,10 +158,11 @@ fn test_batch_expression_aggregate_with_literal() {
 
 #[test]
 fn test_batch_expression_aggregate_nested() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
@@ -185,10 +192,11 @@ fn test_batch_expression_aggregate_nested() {
 
 #[test]
 fn test_batch_expression_aggregate_min_max() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = make_test_batch();
     let schema = make_test_schema();
@@ -224,10 +232,11 @@ fn test_batch_expression_aggregate_min_max() {
 
 #[test]
 fn test_batch_expression_aggregate_empty_batch() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     let batch = ColumnarBatch::from_columns(
         vec![
@@ -268,10 +277,11 @@ fn test_batch_expression_aggregate_empty_batch() {
 
 #[test]
 fn test_batch_expression_aggregate_with_nulls() {
-    use super::batch::compute_batch_expression_aggregate;
-    use crate::select::columnar::aggregate::AggregateOp;
     use vibesql_ast::Expression;
     use vibesql_types::SqlValue;
+
+    use super::batch::compute_batch_expression_aggregate;
+    use crate::select::columnar::aggregate::AggregateOp;
 
     // Create a batch with some NULL values
     let price_col = ColumnArray::Float64(

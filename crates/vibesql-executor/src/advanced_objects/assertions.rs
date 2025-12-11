@@ -114,11 +114,9 @@ impl AssertionChecker {
         // Check if the result is TRUE
         match result {
             vibesql_types::SqlValue::Boolean(true) => Ok(()),
-            vibesql_types::SqlValue::Boolean(false) => {
-                Err(ExecutorError::AssertionViolation {
-                    assertion_name: assertion_name.to_string(),
-                })
-            }
+            vibesql_types::SqlValue::Boolean(false) => Err(ExecutorError::AssertionViolation {
+                assertion_name: assertion_name.to_string(),
+            }),
             vibesql_types::SqlValue::Null => {
                 // NULL is treated as unknown, which in SQL standard means the assertion passes
                 // (only FALSE triggers a violation)

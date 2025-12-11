@@ -1,8 +1,6 @@
 //! Public API for join order optimization
 
-use super::config::ParallelSearchConfig;
-use super::context::JoinOrderContext;
-use super::reorder::JoinOrderAnalyzer;
+use super::{config::ParallelSearchConfig, context::JoinOrderContext, reorder::JoinOrderAnalyzer};
 use crate::optimizer::aggregate_analysis::AggregateAnalysis;
 
 /// Performs join order optimization via exhaustive search
@@ -31,9 +29,9 @@ impl JoinOrderSearch {
     /// predicates significantly reduce table sizes before joining.
     ///
     /// # Parameters
-    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g., "nation").
-    ///   This is critical for queries with self-joins (like TPC-H Q7 with two nation aliases)
-    ///   to correctly look up table cardinalities and statistics.
+    /// - `alias_to_table`: Maps table aliases (e.g., "n1", "n2") to actual table names (e.g.,
+    ///   "nation"). This is critical for queries with self-joins (like TPC-H Q7 with two nation
+    ///   aliases) to correctly look up table cardinalities and statistics.
     pub fn from_analyzer_with_predicates(
         analyzer: &JoinOrderAnalyzer,
         database: &vibesql_storage::Database,

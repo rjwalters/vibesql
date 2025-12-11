@@ -114,11 +114,8 @@ impl Row {
         let base_overhead = size_of::<Row>();
 
         // If spilled to heap, add the heap allocation size
-        let heap_overhead = if self.values.spilled() {
-            self.values.capacity() * size_of::<SqlValue>()
-        } else {
-            0
-        };
+        let heap_overhead =
+            if self.values.spilled() { self.values.capacity() * size_of::<SqlValue>() } else { 0 };
 
         // Estimate size of each value's heap allocations (e.g., strings)
         let values_heap_size: usize = self.values.iter().map(|v| v.estimated_size_bytes()).sum();
@@ -217,9 +214,9 @@ impl Row {
     ///
     /// # Safety
     ///
-    /// Caller must ensure the value at `idx` is a numeric variant (Integer, Bigint, Smallint, Unsigned, Numeric, Double, Float, or Real).
-    /// Violating this will cause undefined behavior in release builds.
-    /// Debug builds will panic with assertion failure.
+    /// Caller must ensure the value at `idx` is a numeric variant (Integer, Bigint, Smallint,
+    /// Unsigned, Numeric, Double, Float, or Real). Violating this will cause undefined behavior
+    /// in release builds. Debug builds will panic with assertion failure.
     #[inline(always)]
     pub unsafe fn get_numeric_as_f64_unchecked(&self, idx: usize) -> f64 {
         debug_assert!(
@@ -314,8 +311,9 @@ impl Row {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
+
+    use super::*;
 
     #[test]
     fn test_unchecked_accessors_correct_types() {

@@ -6,8 +6,7 @@ use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime};
 use vibesql_types::SqlValue;
 
 use super::extract::{day, hour, minute, month, second, year};
-use crate::errors::ExecutorError;
-use crate::evaluator::coercion::coerce_to_date;
+use crate::{errors::ExecutorError, evaluator::coercion::coerce_to_date};
 
 /// DATEDIFF(date1, date2) - Calculate day difference between two dates
 /// SQL:1999 Core Feature E021-02: Date and time arithmetic
@@ -60,10 +59,10 @@ pub fn datediff(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// Units: 'YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND'
 ///
 /// Supports two syntaxes:
-/// 1. Legacy: `DATE_ADD(date, amount, unit)` - 3 arguments
-///    Example: `DATE_ADD('2024-01-01', 5, 'DAY')`
-/// 2. Standard: `DATE_ADD(date, INTERVAL)` - 2 arguments
-///    Example: `DATE_ADD('2024-01-01', INTERVAL '5' DAY)`
+/// 1. Legacy: `DATE_ADD(date, amount, unit)` - 3 arguments Example: `DATE_ADD('2024-01-01', 5,
+///    'DAY')`
+/// 2. Standard: `DATE_ADD(date, INTERVAL)` - 2 arguments Example: `DATE_ADD('2024-01-01', INTERVAL
+///    '5' DAY)`
 ///
 /// Supports automatic type coercion from VARCHAR to DATE.
 pub fn date_add(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
@@ -165,10 +164,10 @@ pub fn date_add(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// SQL:1999 Core Feature E021-02: Date and time arithmetic
 ///
 /// Supports two syntaxes:
-/// 1. Legacy: `DATE_SUB(date, amount, unit)` - 3 arguments
-///    Example: `DATE_SUB('2024-01-01', 5, 'DAY')`
-/// 2. Standard: `DATE_SUB(date, INTERVAL)` - 2 arguments
-///    Example: `DATE_SUB('2024-01-01', INTERVAL '5' DAY)`
+/// 1. Legacy: `DATE_SUB(date, amount, unit)` - 3 arguments Example: `DATE_SUB('2024-01-01', 5,
+///    'DAY')`
+/// 2. Standard: `DATE_SUB(date, INTERVAL)` - 2 arguments Example: `DATE_SUB('2024-01-01', INTERVAL
+///    '5' DAY)`
 ///
 /// Supports automatic type coercion from VARCHAR to DATE.
 pub fn date_sub(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {

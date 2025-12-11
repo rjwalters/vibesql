@@ -312,8 +312,7 @@ impl SubscriptionManager {
         id: SubscriptionId,
         db: &Database,
     ) -> Result<(), SubscriptionError> {
-        let mut sub_ref =
-            self.subscriptions.get_mut(&id).ok_or(SubscriptionError::NotFound(id))?;
+        let mut sub_ref = self.subscriptions.get_mut(&id).ok_or(SubscriptionError::NotFound(id))?;
 
         let subscription = sub_ref.value_mut();
 

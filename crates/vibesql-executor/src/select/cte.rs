@@ -1,7 +1,6 @@
 //! Common Table Expression (CTE) handling for SELECT queries
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::errors::ExecutorError;
 
@@ -162,7 +161,7 @@ pub(super) fn derive_cte_schema(
 /// Infer data type from a SQL value
 pub(super) fn infer_type_from_value(value: &vibesql_types::SqlValue) -> vibesql_types::DataType {
     match value {
-        vibesql_types::SqlValue::Null => vibesql_types::DataType::Varchar { max_length: Some(255) }, // default
+        vibesql_types::SqlValue::Null => vibesql_types::DataType::Varchar { max_length: Some(255) }, /* default */
         vibesql_types::SqlValue::Integer(_) => vibesql_types::DataType::Integer,
         vibesql_types::SqlValue::Varchar(_) => {
             vibesql_types::DataType::Varchar { max_length: Some(255) }

@@ -38,7 +38,9 @@ fn test_on_duplicate_key_update_basic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Widget"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -48,13 +50,16 @@ fn test_on_duplicate_key_update_basic() {
     let rows = InsertExecutor::execute(&mut db, &initial_stmt).unwrap();
     assert_eq!(rows, 1);
 
-    // Upsert: INSERT INTO products VALUES (1, 'Widget', 20) ON DUPLICATE KEY UPDATE stock = VALUES(stock)
+    // Upsert: INSERT INTO products VALUES (1, 'Widget', 20) ON DUPLICATE KEY UPDATE stock =
+    // VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Widget"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(20)),
         ]]),
         conflict_clause: None,
@@ -89,7 +94,9 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Widget"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,
@@ -104,7 +111,9 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Widget"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(30)),
         ]]),
         conflict_clause: None,
@@ -145,7 +154,9 @@ fn test_on_duplicate_key_update_no_conflict() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Widget"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Widget"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
         ]]),
         conflict_clause: None,

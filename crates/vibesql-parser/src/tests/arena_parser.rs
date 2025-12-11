@@ -4,8 +4,9 @@
 //! strings for identifier comparisons.
 
 use bumpalo::Bump;
-use vibesql_ast::arena::Converter;
-use vibesql_ast::{DeleteStmt, InsertSource, InsertStmt, UpdateStmt, WhereClause};
+use vibesql_ast::{
+    arena::Converter, DeleteStmt, InsertSource, InsertStmt, UpdateStmt, WhereClause,
+};
 
 use crate::arena_parser::ArenaParser;
 

@@ -11,14 +11,14 @@ mod types;
 
 use std::collections::HashMap;
 
-use vibesql_ast::SelectItem;
 // Re-export detection helpers for use by select module
 pub(super) use detection::{expression_has_window_function, has_window_functions};
 // Re-export ORDER BY support functions
 pub(super) use order_by::{collect_order_by_window_functions, evaluate_order_by_window_functions};
-use vibesql_storage::Row;
 // Re-export public types
 pub use types::WindowFunctionKey;
+use vibesql_ast::SelectItem;
+use vibesql_storage::Row;
 
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 

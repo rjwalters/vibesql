@@ -204,24 +204,15 @@ impl<'a> RowIterator for Box<dyn RowIterator + 'a> {
 ///
 /// To fully integrate this into the executor:
 ///
-/// 1. **Modify `execute_from()` signature**:
-///    ```rust
-///    fn execute_from() -> Result<Box<dyn RowIterator>, ExecutorError>
-///    ```
+/// 1. **Modify `execute_from()` signature**: ```rust fn execute_from() -> Result<Box<dyn
+///    RowIterator>, ExecutorError> ```
 ///
-/// 2. **Add materialization decision logic**:
-///    ```rust
-///    fn needs_materialization(stmt: &SelectStmt) -> bool {
-///        stmt.order_by.is_some()
-///            || stmt.distinct
-///            || has_window_functions(&stmt.select_list)
-///            || has_aggregates(&stmt.select_list)
-///    }
-///    ```
+/// 2. **Add materialization decision logic**: ```rust fn needs_materialization(stmt: &SelectStmt)
+///    -> bool { stmt.order_by.is_some() || stmt.distinct || has_window_functions(&stmt.select_list)
+///    || has_aggregates(&stmt.select_list) } ```
 ///
-/// 3. **Hybrid execution in `execute_without_aggregation()`**:
-///    ```rust
-///    let iter = build_query_iterator(from_result)?;
+/// 3. **Hybrid execution in `execute_without_aggregation()`**: ```rust let iter =
+///    build_query_iterator(from_result)?;
 ///
 ///    if needs_materialization(stmt) {
 ///        let rows = iter.collect::<Result<Vec<_>, _>>()?;

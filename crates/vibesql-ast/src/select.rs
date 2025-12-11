@@ -244,6 +244,9 @@ pub enum FromClause {
         right: Box<FromClause>,
         join_type: JoinType,
         condition: Option<Expression>,
+        /// USING clause columns - joins on these named columns from both tables
+        /// Example: `JOIN t2 USING (id, name)` joins on id and name columns
+        using_columns: Option<Vec<String>>,
         /// True for NATURAL JOIN (joins on common column names)
         natural: bool,
     },

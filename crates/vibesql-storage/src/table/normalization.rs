@@ -318,8 +318,9 @@ impl<'a> RowNormalizer<'a> {
                 }
             }
             DataType::Bit { .. } => {
-                // BIT type: For now, accept Varchar or Integer as placeholder until proper BIT type is fully implemented
-                // VARCHAR can hold binary literals like b'1010', INTEGER can hold numeric values
+                // BIT type: For now, accept Varchar or Integer as placeholder until proper BIT type
+                // is fully implemented VARCHAR can hold binary literals like
+                // b'1010', INTEGER can hold numeric values
                 if !matches!(
                     value,
                     SqlValue::Varchar(_)
@@ -441,10 +442,10 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-                SqlValue::Character(arcstr::ArcStr::from("ABC")), // Should be padded to 5
-            ]);
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Character(arcstr::ArcStr::from("ABC")), // Should be padded to 5
+        ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
         assert_eq!(normalized.values[2], SqlValue::Character(arcstr::ArcStr::from("ABC  ")));
@@ -456,10 +457,10 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-                SqlValue::Character(arcstr::ArcStr::from("ABCDEFGH")), // Should be truncated to 5
-            ]);
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Character(arcstr::ArcStr::from("ABCDEFGH")), // Should be truncated to 5
+        ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
         assert_eq!(normalized.values[2], SqlValue::Character(arcstr::ArcStr::from("ABCDE")));
@@ -471,10 +472,10 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-                SqlValue::Null, // id is NOT NULL
-                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-                SqlValue::Character(arcstr::ArcStr::from("ABC")),
-            ]);
+            SqlValue::Null, // id is NOT NULL
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Character(arcstr::ArcStr::from("ABC")),
+        ]);
 
         let result = normalizer.normalize_and_validate(row);
         assert!(result.is_err());
@@ -487,10 +488,10 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("not_an_int")), // Wrong type for id
-                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-                SqlValue::Character(arcstr::ArcStr::from("ABC")),
-            ]);
+            SqlValue::Varchar(arcstr::ArcStr::from("not_an_int")), // Wrong type for id
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Character(arcstr::ArcStr::from("ABC")),
+        ]);
 
         let result = normalizer.normalize_and_validate(row);
         assert!(result.is_err());
@@ -504,10 +505,10 @@ mod tests {
 
         let long_name = "A".repeat(100); // Exceeds max_length of 50
         let row = Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Varchar(arcstr::ArcStr::from(long_name.clone())),
-                SqlValue::Character(arcstr::ArcStr::from("ABC")),
-            ]);
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from(long_name.clone())),
+            SqlValue::Character(arcstr::ArcStr::from("ABC")),
+        ]);
 
         let normalized = normalizer.normalize_and_validate(row).unwrap();
         if let SqlValue::Varchar(name) = &normalized.values[1] {
@@ -523,10 +524,10 @@ mod tests {
         let normalizer = RowNormalizer::new(&schema);
 
         let row = Row::from_vec(vec![
-                SqlValue::Integer(1),
-                SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-                SqlValue::Null, // code is nullable
-            ]);
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+            SqlValue::Null, // code is nullable
+        ]);
 
         let result = normalizer.normalize_and_validate(row);
         assert!(result.is_ok());

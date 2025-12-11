@@ -230,211 +230,211 @@ subqueries-ex-nested = Subconsultas Aninhadas
 # Benchmarks Page
 # =============================================================================
 
-# Section headers
-bench-section-embedded = Embedded
-bench-section-server = Server
-bench-results-title = Benchmark Results
-bench-perf-comparison = Performance Comparison
-bench-methodology-title = Methodology
-bench-analysis-roadmap = Analysis & Roadmap
+# Cabeçalhos de seção
+bench-section-embedded = Embutido
+bench-section-server = Servidor
+bench-results-title = Resultados de Benchmark
+bench-perf-comparison = Comparação de Desempenho
+bench-methodology-title = Metodologia
+bench-analysis-roadmap = Análise e Roadmap
 
-# Summary cards
+# Cartões de resumo
 bench-vs-sqlite = vs SQLite
 bench-vs-duckdb = vs DuckDB
 bench-vs-mysql = vs MySQL
-bench-ops-tested = Operations Tested
-bench-last-updated = Last Updated
-bench-avg-speedup = average speedup
-bench-from-main = from main branch
-bench-loading = Loading...
-bench-na = N/A
-bench-faster = { $value }x faster
-bench-slower = { $value }x slower
+bench-ops-tested = Operações Testadas
+bench-last-updated = Última Atualização
+bench-avg-speedup = aceleração média
+bench-from-main = da branch main
+bench-loading = Carregando...
+bench-na = N/D
+bench-faster = { $value }x mais rápido
+bench-slower = { $value }x mais lento
 bench-speedup = { $value }x
-bench-startup-time-label = startup time
-bench-download-size = download size
-bench-uncompressed = uncompressed
-bench-size-metrics = size metrics
-bench-failed = FAILED
-bench-failed-title = Query failed (timeout or error)
+bench-startup-time-label = tempo de inicialização
+bench-download-size = tamanho do download
+bench-uncompressed = descomprimido
+bench-size-metrics = métricas de tamanho
+bench-failed = FALHOU
+bench-failed-title = Consulta falhou (timeout ou erro)
 bench-no-wasm-data = Nenhum dado WASM disponível
 bench-no-server-data = Nenhum dado de benchmark de servidor Sysbench disponível
 bench-no-server-data-hint = Os benchmarks de servidor requerem a execução do sysbench_server com a comparação MySQL habilitada.
 
 # Table headers
-bench-table-operation = Operation
+bench-table-operation = Operação
 bench-table-vibesql = VibeSQL
 bench-table-vibesql-server = VibeSQL Server
 bench-table-sqlite = SQLite
 bench-table-duckdb = DuckDB
 bench-table-mysql = MySQL
-bench-table-loading = Loading benchmark results...
-bench-vibesql-server-title = VibeSQL via PostgreSQL wire protocol
+bench-table-loading = Carregando resultados de benchmark...
+bench-vibesql-server-title = VibeSQL via protocolo wire PostgreSQL
 
-# Common benchmark terms
+# Termos comuns de benchmark
 bench-hardware = Hardware
-bench-benchmark-framework = Benchmark Framework
-bench-scale-factor = Scale Factor
-bench-data = Data
-bench-databases-tested = Databases Tested
-bench-execution-mode = Execution Mode
-bench-measurement = Measurement
-bench-workload = Workload
-bench-transaction-mix = Transaction Mix
-bench-warehouses = Warehouses
-bench-concurrency = Concurrency
-bench-acid-compliance = ACID Compliance
-bench-mode = Mode
-bench-workload-types = Workload Types
-bench-table-size = Table Size
-bench-index-types = Index Types
-bench-operations = Operations
-bench-databases = Databases
-bench-protocol-overhead = Protocol Overhead
-bench-binary-size = Binary Size
-bench-startup-time = Startup Time
-bench-peak-memory = Peak Memory
-bench-schema = Schema
-bench-query-count = Query Count
-bench-query-types = Query Types
-bench-sql-features = SQL Features
-bench-wasm-size = WASM Size
+bench-benchmark-framework = Framework de Benchmark
+bench-scale-factor = Fator de Escala
+bench-data = Dados
+bench-databases-tested = Bancos de Dados Testados
+bench-execution-mode = Modo de Execução
+bench-measurement = Medição
+bench-workload = Carga de Trabalho
+bench-transaction-mix = Mix de Transações
+bench-warehouses = Armazéns
+bench-concurrency = Concorrência
+bench-acid-compliance = Conformidade ACID
+bench-mode = Modo
+bench-workload-types = Tipos de Carga de Trabalho
+bench-table-size = Tamanho da Tabela
+bench-index-types = Tipos de Índice
+bench-operations = Operações
+bench-databases = Bancos de Dados
+bench-protocol-overhead = Overhead de Protocolo
+bench-binary-size = Tamanho do Binário
+bench-startup-time = Tempo de Inicialização
+bench-peak-memory = Memória de Pico
+bench-schema = Esquema
+bench-query-count = Contagem de Consultas
+bench-query-types = Tipos de Consulta
+bench-sql-features = Recursos SQL
+bench-wasm-size = Tamanho WASM
 bench-wasm-gzip = WASM (gzip)
 bench-wasm-brotli = WASM (brotli)
 
-# TPC-H specific
+# TPC-H específico
 bench-tpch-name = TPC-H
-bench-tpch-title = TPC-H Decision Support Benchmark
-bench-tpch-description = These benchmarks use the industry-standard <strong>TPC-H benchmark suite</strong>, which simulates real-world decision support workloads with complex analytical queries involving aggregations, joins, subqueries, and sorting.
-bench-tpch-ops-label = TPC-H queries
-bench-tpch-note-intro = All benchmarks measure end-to-end query execution time including parsing, planning, execution, and result materialization. This represents <strong>real-world SQL engine performance</strong> for analytical workloads.
-bench-tpch-note-queries = <strong>Note:</strong> TPC-H queries test different aspects of SQL performance: simple aggregations (Q1, Q6), complex joins (Q2-Q5, Q7-Q10), subqueries (Q11-Q15), and advanced analytics (Q16-Q22). Hover over query names in the table above for descriptions.
+bench-tpch-title = Benchmark de Suporte à Decisão TPC-H
+bench-tpch-description = Esses benchmarks usam a suíte de benchmark padrão da indústria <strong>TPC-H</strong>, que simula cargas de trabalho de suporte à decisão do mundo real com consultas analíticas complexas envolvendo agregações, joins, subconsultas e ordenação.
+bench-tpch-ops-label = Consultas TPC-H
+bench-tpch-note-intro = Todos os benchmarks medem o tempo de execução de consulta de ponta a ponta, incluindo análise, planejamento, execução e materialização de resultados. Isso representa o <strong>desempenho real do motor SQL</strong> para cargas de trabalho analíticas.
+bench-tpch-note-queries = <strong>Nota:</strong> As consultas TPC-H testam diferentes aspectos do desempenho SQL: agregações simples (Q1, Q6), joins complexos (Q2-Q5, Q7-Q10), subconsultas (Q11-Q15) e análises avançadas (Q16-Q22). Passe o mouse sobre os nomes das consultas na tabela acima para ver descrições.
 
-# TPC-H Discussion
-bench-tpch-disc-excels-title = Where VibeSQL Excels
-bench-tpch-disc-excels = VibeSQL shows strong performance on <strong>scan-heavy aggregation queries</strong> (Q1, Q6, Q14, Q15, Q20) where our columnar execution engine and SIMD-accelerated aggregations shine. These queries involve filtering large tables and computing aggregates without complex join patterns.
-bench-tpch-disc-targets-title = Current Optimization Targets
-bench-tpch-disc-targets = Multi-way join queries (Q3, Q5, Q7-Q10, Q18, Q19, Q21) currently show SQLite ahead. The primary bottleneck is our hash join implementation, which doesn't yet employ the same level of optimization as SQLite's decades-refined B-tree joins. Specific areas under active development:
-bench-tpch-disc-join-ordering = Improved cardinality estimation for better join order selection
-bench-tpch-disc-hash-sizing = Adaptive hash table growth and spill-to-disk for large joins
-bench-tpch-disc-vectorized = Batch processing in the join inner loop to improve cache utilization
-bench-tpch-disc-inl-joins = Leveraging B-tree indexes when beneficial
-bench-tpch-disc-path-title = Path to Leadership
-bench-tpch-disc-path = VibeSQL's architecture is designed for modern hardware with features like columnar storage, vectorized execution, and lock-free concurrency. As these optimizations mature, we expect VibeSQL to achieve consistent leadership across all TPC-H queries. The fundamental design supports parallelism and SIMD that traditional row-store databases cannot easily retrofit.
+# Discussão TPC-H
+bench-tpch-disc-excels-title = Onde o VibeSQL se Destaca
+bench-tpch-disc-excels = O VibeSQL mostra forte desempenho em <strong>consultas de agregação pesadas em varredura</strong> (Q1, Q6, Q14, Q15, Q20) onde nosso motor de execução colunar e agregações aceleradas por SIMD se destacam. Essas consultas envolvem filtragem de tabelas grandes e cálculo de agregados sem padrões de join complexos.
+bench-tpch-disc-targets-title = Alvos de Otimização Atuais
+bench-tpch-disc-targets = Consultas de join multi-way (Q3, Q5, Q7-Q10, Q18, Q19, Q21) atualmente mostram SQLite à frente. O principal gargalo é nossa implementação de hash join, que ainda não emprega o mesmo nível de otimização dos joins B-tree refinados por décadas do SQLite. Áreas específicas em desenvolvimento ativo:
+bench-tpch-disc-join-ordering = Estimativa de cardinalidade aprimorada para melhor seleção de ordem de join
+bench-tpch-disc-hash-sizing = Crescimento adaptativo de tabela hash e spill-to-disk para joins grandes
+bench-tpch-disc-vectorized = Processamento em lote no loop interno do join para melhorar utilização de cache
+bench-tpch-disc-inl-joins = Aproveitamento de índices B-tree quando benéfico
+bench-tpch-disc-path-title = Caminho para Liderança
+bench-tpch-disc-path = A arquitetura do VibeSQL é projetada para hardware moderno com recursos como armazenamento colunar, execução vetorizada e concorrência livre de locks. Conforme essas otimizações amadurecem, esperamos que o VibeSQL alcance liderança consistente em todas as consultas TPC-H. O design fundamental suporta paralelismo e SIMD que bancos de dados row-store tradicionais não podem facilmente adaptar.
 
-# TPC-H Query Descriptions
-bench-tpch-q1 = Pricing Summary Report - Aggregate pricing with GROUP BY and ORDER BY
-bench-tpch-q2 = Minimum Cost Supplier - 3-table JOIN with ORDER BY and LIMIT
-bench-tpch-q3 = Shipping Priority - 3-table JOIN with aggregation
-bench-tpch-q4 = Order Priority Checking - Correlated EXISTS subquery
-bench-tpch-q5 = Local Supplier Volume - 6-table JOIN with complex filtering
-bench-tpch-q6 = Forecasting Revenue Change - WHERE filters with BETWEEN and SUM
-bench-tpch-q7 = Volume Shipping - 6-table JOIN with SUBSTR and date filtering
-bench-tpch-q8 = National Market Share - 7-table JOIN with CASE expressions
-bench-tpch-q9 = Product Type Profit Measure - 4-table JOIN with aggregation
-bench-tpch-q10 = Returned Item Reporting - 4-table JOIN with TOP-N LIMIT
-bench-tpch-q11 = Important Stock Identification - Subquery in HAVING clause
-bench-tpch-q12 = Shipping Modes Priority - CASE aggregation with date logic
-bench-tpch-q13 = Customer Distribution - LEFT OUTER JOIN with subquery
-bench-tpch-q14 = Promotion Effect - Conditional aggregation with CASE
-bench-tpch-q15 = Top Supplier - Nested subqueries with MAX
-bench-tpch-q16 = Parts/Supplier Relationship - NOT IN subquery with DISTINCT
-bench-tpch-q17 = Small-Quantity-Order Revenue - Correlated subquery in WHERE
-bench-tpch-q18 = Large Volume Customer - GROUP BY with HAVING
-bench-tpch-q19 = Discounted Revenue - Complex OR conditions
-bench-tpch-q20 = Potential Part Promotion - IN subquery with GROUP BY/HAVING
-bench-tpch-q21 = Suppliers Who Kept Orders Waiting - Multi-table EXISTS
-bench-tpch-q22 = Global Sales Opportunity - SUBSTR with NOT EXISTS subquery
+# Descrições de Consultas TPC-H
+bench-tpch-q1 = Relatório Resumo de Preços - Agregação de preços com GROUP BY e ORDER BY
+bench-tpch-q2 = Fornecedor de Menor Custo - JOIN de 3 tabelas com ORDER BY e LIMIT
+bench-tpch-q3 = Prioridade de Envio - JOIN de 3 tabelas com agregação
+bench-tpch-q4 = Verificação de Prioridade de Pedido - Subconsulta EXISTS correlacionada
+bench-tpch-q5 = Volume do Fornecedor Local - JOIN de 6 tabelas com filtragem complexa
+bench-tpch-q6 = Previsão de Mudança de Receita - Filtros WHERE com BETWEEN e SUM
+bench-tpch-q7 = Volume de Envio - JOIN de 6 tabelas com SUBSTR e filtragem de data
+bench-tpch-q8 = Participação no Mercado Nacional - JOIN de 7 tabelas com expressões CASE
+bench-tpch-q9 = Medida de Lucro por Tipo de Produto - JOIN de 4 tabelas com agregação
+bench-tpch-q10 = Relatório de Itens Devolvidos - JOIN de 4 tabelas com TOP-N LIMIT
+bench-tpch-q11 = Identificação de Estoque Importante - Subconsulta em cláusula HAVING
+bench-tpch-q12 = Prioridade de Modos de Envio - Agregação CASE com lógica de data
+bench-tpch-q13 = Distribuição de Clientes - LEFT OUTER JOIN com subconsulta
+bench-tpch-q14 = Efeito de Promoção - Agregação condicional com CASE
+bench-tpch-q15 = Principal Fornecedor - Subconsultas aninhadas com MAX
+bench-tpch-q16 = Relacionamento Peças/Fornecedor - Subconsulta NOT IN com DISTINCT
+bench-tpch-q17 = Receita de Pedidos de Pequena Quantidade - Subconsulta correlacionada em WHERE
+bench-tpch-q18 = Cliente de Grande Volume - GROUP BY com HAVING
+bench-tpch-q19 = Receita com Desconto - Condições OR complexas
+bench-tpch-q20 = Promoção Potencial de Peças - Subconsulta IN com GROUP BY/HAVING
+bench-tpch-q21 = Fornecedores que Atrasaram Pedidos - EXISTS multi-tabela
+bench-tpch-q22 = Oportunidade de Vendas Global - SUBSTR com subconsulta NOT EXISTS
 
-# TPC-DS specific
+# TPC-DS específico
 bench-tpcds-name = TPC-DS
-bench-tpcds-title = TPC-DS Decision Support Benchmark
-bench-tpcds-description = <strong>TPC-DS</strong> is the successor to TPC-H, featuring 99 queries that model a modern decision support system with significantly more complex query patterns including multiple fact tables, snow-flake schema, and advanced SQL features.
-bench-tpcds-ops-label = TPC-DS queries
-bench-tpcds-note-intro = TPC-DS queries are substantially more complex than TPC-H, testing advanced SQL features like window functions, common table expressions (WITH clause), and complex join patterns across multiple fact and dimension tables.
-bench-tpcds-note-remaining = <strong>Note:</strong> Remaining unsupported queries require features like INTERSECT/EXCEPT or specific date arithmetic functions not yet implemented.
+bench-tpcds-title = Benchmark de Suporte à Decisão TPC-DS
+bench-tpcds-description = <strong>TPC-DS</strong> é o sucessor do TPC-H, apresentando 99 consultas que modelam um sistema moderno de suporte à decisão com padrões de consulta significativamente mais complexos, incluindo múltiplas tabelas de fatos, esquema floco de neve e recursos SQL avançados.
+bench-tpcds-ops-label = Consultas TPC-DS
+bench-tpcds-note-intro = As consultas TPC-DS são substancialmente mais complexas que TPC-H, testando recursos SQL avançados como funções de janela, expressões de tabela comuns (cláusula WITH) e padrões de join complexos entre múltiplas tabelas de fatos e dimensões.
+bench-tpcds-note-remaining = <strong>Nota:</strong> As consultas restantes não suportadas requerem recursos como INTERSECT/EXCEPT ou funções específicas de aritmética de datas ainda não implementadas.
 
-# TPC-DS Discussion
-bench-tpcds-disc-coverage-title = SQL:1999 Feature Coverage
-bench-tpcds-disc-coverage = TPC-DS exercises the most demanding SQL features. VibeSQL passes <strong>88 of 99 queries</strong>, demonstrating broad coverage of SQL:1999 including ROLLUP, CUBE, GROUPING(), window functions with complex framing, and recursive CTEs. The remaining queries require INTERSECT/EXCEPT set operations.
-bench-tpcds-disc-optimization-title = Complex Query Optimization
-bench-tpcds-disc-optimization = TPC-DS queries often join 10+ tables with correlated subqueries. Current focus areas:
-bench-tpcds-disc-cte = Intelligent decision between materialized and inline CTEs
-bench-tpcds-disc-decorrelation = Converting correlated subqueries to joins when beneficial
-bench-tpcds-disc-star = Fact-dimension join ordering for analytical patterns
-bench-tpcds-disc-toward-title = Toward 99/99
-bench-tpcds-disc-toward = INTERSECT and EXCEPT are planned additions that will enable the remaining queries. These set operations fit naturally into our existing query algebra and will be implemented as hash-based operators similar to our DISTINCT processing.
+# Discussão TPC-DS
+bench-tpcds-disc-coverage-title = Cobertura de Recursos SQL:1999
+bench-tpcds-disc-coverage = O TPC-DS exercita os recursos SQL mais exigentes. O VibeSQL passa <strong>88 de 99 consultas</strong>, demonstrando ampla cobertura de SQL:1999 incluindo ROLLUP, CUBE, GROUPING(), funções de janela com framing complexo e CTEs recursivos. As consultas restantes requerem operações de conjunto INTERSECT/EXCEPT.
+bench-tpcds-disc-optimization-title = Otimização de Consultas Complexas
+bench-tpcds-disc-optimization = Consultas TPC-DS frequentemente juntam 10+ tabelas com subconsultas correlacionadas. Áreas de foco atuais:
+bench-tpcds-disc-cte = Decisão inteligente entre CTEs materializados e inline
+bench-tpcds-disc-decorrelation = Converter subconsultas correlacionadas em joins quando benéfico
+bench-tpcds-disc-star = Ordenação de joins fato-dimensão para padrões analíticos
+bench-tpcds-disc-toward-title = Rumo a 99/99
+bench-tpcds-disc-toward = INTERSECT e EXCEPT são adições planejadas que habilitarão as consultas restantes. Essas operações de conjunto se encaixam naturalmente em nossa álgebra de consulta existente e serão implementadas como operadores baseados em hash, similares ao nosso processamento DISTINCT.
 
-# TPC-C specific
+# TPC-C específico
 bench-tpcc-name = TPC-C
-bench-tpcc-title = TPC-C Online Transaction Processing Benchmark
-bench-tpcc-description = The <strong>TPC-C benchmark</strong> simulates a complete order-entry environment with a mix of complex transactions including order entry, payment processing, order status queries, delivery processing, and stock level monitoring.
-bench-tpcc-ops-label = TPC-C transactions
-bench-tpcc-note-intro = TPC-C measures transactions per minute (tpmC) and tests the database's ability to handle concurrent transactions with complex business logic. This benchmark is critical for evaluating <strong>transactional workload performance</strong>.
-bench-tpcc-note-results = <strong>Note:</strong> Results show average transaction latency. Lower is better. TPC-C is particularly demanding for write-heavy workloads with strict consistency requirements.
+bench-tpcc-title = Benchmark de Processamento de Transações Online TPC-C
+bench-tpcc-description = O <strong>benchmark TPC-C</strong> simula um ambiente completo de entrada de pedidos com uma mistura de transações complexas incluindo entrada de pedidos, processamento de pagamentos, consultas de status de pedidos, processamento de entregas e monitoramento de nível de estoque.
+bench-tpcc-ops-label = Transações TPC-C
+bench-tpcc-note-intro = O TPC-C mede transações por minuto (tpmC) e testa a capacidade do banco de dados de lidar com transações concorrentes com lógica de negócios complexa. Este benchmark é crítico para avaliar o <strong>desempenho de cargas de trabalho transacionais</strong>.
+bench-tpcc-note-results = <strong>Nota:</strong> Os resultados mostram a latência média de transação. Menor é melhor. O TPC-C é particularmente exigente para cargas de trabalho com escrita intensiva com requisitos estritos de consistência.
 
-# TPC-C Transaction Descriptions
-bench-tpcc-new-order = New Order - Complex transaction with inventory checks and order creation
-bench-tpcc-payment = Payment - Update customer balance and warehouse/district totals
-bench-tpcc-order-status = Order Status - Read-only query for customer order history
-bench-tpcc-delivery = Delivery - Batch processing of pending orders
-bench-tpcc-stock-level = Stock Level - Count items below threshold in recent orders
+# Descrições de Transações TPC-C
+bench-tpcc-new-order = Novo Pedido - Transação complexa com verificações de inventário e criação de pedido
+bench-tpcc-payment = Pagamento - Atualizar saldo do cliente e totais de armazém/distrito
+bench-tpcc-order-status = Status do Pedido - Consulta somente leitura para histórico de pedidos do cliente
+bench-tpcc-delivery = Entrega - Processamento em lote de pedidos pendentes
+bench-tpcc-stock-level = Nível de Estoque - Contar itens abaixo do limite em pedidos recentes
 
-# TPC-C Discussion
-bench-tpcc-disc-faster-title = 42x Faster Than SQLite
-bench-tpcc-disc-faster = VibeSQL achieves <strong>~79,000 transactions per second</strong> compared to SQLite's ~1,900 TPS, a 42x improvement. This dramatic speedup comes from our lock-free MVCC architecture that avoids SQLite's coarse-grained locking on every write operation.
-bench-tpcc-disc-dominates-title = Why VibeSQL Dominates OLTP
-bench-tpcc-disc-lockfree = MVCC allows readers and writers to proceed concurrently without blocking
-bench-tpcc-disc-optimistic = Transactions only conflict at commit time, not during execution
-bench-tpcc-disc-btree = Purpose-built index structure optimized for in-memory workloads
-bench-tpcc-disc-prepared = Query plans are compiled once and reused
-bench-tpcc-disc-scaling-title = Scaling Further
-bench-tpcc-disc-scaling = Current results are single-threaded. VibeSQL's architecture supports multi-threaded transaction processing, and we expect near-linear scaling as we add parallel execution support. Our goal is to achieve 500K+ TPS on modern multi-core hardware.
+# Discussão TPC-C
+bench-tpcc-disc-faster-title = 42x Mais Rápido que SQLite
+bench-tpcc-disc-faster = O VibeSQL alcança <strong>~79.000 transações por segundo</strong> comparado às ~1.900 TPS do SQLite, uma melhoria de 42x. Essa aceleração dramática vem da nossa arquitetura MVCC livre de locks que evita o bloqueio de granularidade grossa do SQLite em cada operação de escrita.
+bench-tpcc-disc-dominates-title = Por que o VibeSQL Domina OLTP
+bench-tpcc-disc-lockfree = MVCC permite que leitores e escritores procedam concorrentemente sem bloqueio
+bench-tpcc-disc-optimistic = Transações só conflitam no momento do commit, não durante a execução
+bench-tpcc-disc-btree = Estrutura de índice construída para propósito específico otimizada para cargas de trabalho em memória
+bench-tpcc-disc-prepared = Planos de consulta são compilados uma vez e reutilizados
+bench-tpcc-disc-scaling-title = Escalando Ainda Mais
+bench-tpcc-disc-scaling = Os resultados atuais são single-threaded. A arquitetura do VibeSQL suporta processamento de transações multi-threaded, e esperamos escalonamento quase linear conforme adicionamos suporte a execução paralela. Nosso objetivo é alcançar 500K+ TPS em hardware multi-core moderno.
 
 # Sysbench Embedded specific
-bench-sysbench-embedded-name = Sysbench (Embedded)
-bench-sysbench-embedded-title = Sysbench Micro-Benchmarks (Embedded)
-bench-sysbench-embedded-description = <strong>Sysbench</strong> provides focused micro-benchmarks that isolate specific database operations. These tests measure raw performance for fundamental operations without the complexity of full transaction workloads.
-bench-sysbench-embedded-ops-label = Sysbench operations
-bench-sysbench-embedded-note = Embedded mode runs the database in-process with zero network overhead, ideal for single-process applications where minimal latency is critical.
+bench-sysbench-embedded-name = Sysbench (Embutido)
+bench-sysbench-embedded-title = Micro-Benchmarks Sysbench (Embutido)
+bench-sysbench-embedded-description = <strong>Sysbench</strong> fornece micro-benchmarks focados que isolam operações específicas de banco de dados. Esses testes medem o desempenho bruto para operações fundamentais sem a complexidade de cargas de trabalho de transação completas.
+bench-sysbench-embedded-ops-label = Operações Sysbench
+bench-sysbench-embedded-note = O modo embutido executa o banco de dados em processo com zero overhead de rede, ideal para aplicações de processo único onde latência mínima é crítica.
 
-# Sysbench Operation Descriptions
-bench-sysbench-point-select = Point Select - Single row lookup by primary key
-bench-sysbench-insert = Insert - Insert new rows into table
-bench-sysbench-update-index = Update Index - Update indexed column (k = k + 1)
-bench-sysbench-update-non-index = Update Non-Index - Update non-indexed column
-bench-sysbench-delete = Delete - Remove rows by primary key
-bench-sysbench-range-queries = Range Queries - Simple, SUM, ORDER BY, and DISTINCT range scans
+# Descrições de Operações Sysbench
+bench-sysbench-point-select = Seleção Pontual - Consulta de linha única por chave primária
+bench-sysbench-insert = Inserção - Inserir novas linhas na tabela
+bench-sysbench-update-index = Atualização de Índice - Atualizar coluna indexada (k = k + 1)
+bench-sysbench-update-non-index = Atualização Sem Índice - Atualizar coluna não indexada
+bench-sysbench-delete = Exclusão - Remover linhas por chave primária
+bench-sysbench-range-queries = Consultas de Intervalo - Varreduras de intervalo simples, SUM, ORDER BY e DISTINCT
 
-# Sysbench Embedded Discussion
-bench-sysbench-emb-disc-point-title = Point Lookups: VibeSQL Leads
-bench-sysbench-emb-disc-point = VibeSQL's direct API achieves <strong>~137ns per point select</strong>, matching SQLite and vastly outperforming DuckDB (~140µs). Our B-tree implementation is optimized for single-row lookups with minimal pointer chasing and cache-friendly node layouts.
-bench-sysbench-emb-disc-index-title = Index Updates: 2x Faster
-bench-sysbench-emb-disc-index = VibeSQL's indexed updates run at <strong>~740ns vs SQLite's ~1.6µs</strong>. Our MVCC design allows in-place index updates without write-ahead logging overhead for each operation.
-bench-sysbench-emb-disc-improve-title = Areas for Improvement
-bench-sysbench-emb-disc-bulk = SQLite's batch insert path is highly optimized; we're adding batched B-tree operations
-bench-sysbench-emb-disc-nonindex = Full table scans for non-indexed columns need predicate pushdown optimization
-bench-sysbench-emb-disc-deletes = Our tombstone-based deletion has cleanup overhead; compaction improvements are planned
-bench-sysbench-emb-disc-duckdb-title = DuckDB Comparison
-bench-sysbench-emb-disc-duckdb = DuckDB is optimized for analytical workloads, not micro-operations. Its 100-1000x slower results here reflect architectural choices (columnar storage, vectorized execution) that trade single-row latency for bulk throughput. VibeSQL targets both use cases.
-bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
-bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
+# Discussão do Sysbench Embutido
+bench-sysbench-emb-disc-point-title = Consultas Pontuais: VibeSQL Lidera
+bench-sysbench-emb-disc-point = A API direta do VibeSQL alcança <strong>~137ns por seleção pontual</strong>, igualando o SQLite e superando amplamente o DuckDB (~140µs). Nossa implementação de B-tree é otimizada para consultas de linha única com mínima perseguição de ponteiros e layouts de nós amigáveis ao cache.
+bench-sysbench-emb-disc-index-title = Atualizações de Índice: 2x Mais Rápido
+bench-sysbench-emb-disc-index = As atualizações indexadas do VibeSQL rodam em <strong>~740ns vs ~1.6µs do SQLite</strong>. Nosso design MVCC permite atualizações de índice in-place sem overhead de log write-ahead para cada operação.
+bench-sysbench-emb-disc-improve-title = Áreas para Melhoria
+bench-sysbench-emb-disc-bulk = O caminho de inserção em lote do SQLite é altamente otimizado; estamos adicionando operações de B-tree em lote
+bench-sysbench-emb-disc-nonindex = Varreduras de tabela completa para colunas não indexadas precisam de otimização de pushdown de predicado
+bench-sysbench-emb-disc-deletes = Nossa exclusão baseada em tombstone tem overhead de limpeza; melhorias de compactação estão planejadas
+bench-sysbench-emb-disc-duckdb-title = Comparação com DuckDB
+bench-sysbench-emb-disc-duckdb = O DuckDB é otimizado para cargas de trabalho analíticas, não para micro-operações. Seus resultados 100-1000x mais lentos aqui refletem escolhas arquiteturais (armazenamento colunar, execução vetorizada) que trocam latência de linha única por throughput em massa. O VibeSQL visa ambos os casos de uso.
+bench-sysbench-emb-disc-architecture-title = Compensações Arquiteturais
+bench-sysbench-emb-disc-architecture = A arquitetura híbrida do VibeSQL visa tanto cargas de trabalho OLTP quanto OLAP. Nosso armazenamento B-tree fornece desempenho de consulta pontual competitivo com SQLite, enquanto a execução colunar lida com consultas analíticas de forma eficiente. Isso difere de bancos de dados OLAP puros como o DuckDB, que otimizam exclusivamente para operações em massa ao custo de latência de linha única.
 
-# Sysbench Server specific
-bench-sysbench-server-name = Sysbench (Server)
-bench-sysbench-server-title = Sysbench Micro-Benchmarks (Server)
-bench-sysbench-server-description = <strong>Sysbench</strong> server benchmarks compare VibeSQL Server (PostgreSQL wire protocol) against MySQL, measuring performance for multi-client database deployments.
-bench-sysbench-server-ops-label = Sysbench operations
-bench-sysbench-server-note = Server mode uses the PostgreSQL wire protocol, enabling multi-client access and compatibility with existing PostgreSQL tooling and drivers.
+# Sysbench Servidor específico
+bench-sysbench-server-name = Sysbench (Servidor)
+bench-sysbench-server-title = Micro-Benchmarks Sysbench (Servidor)
+bench-sysbench-server-description = Os benchmarks de servidor <strong>Sysbench</strong> comparam o VibeSQL Server (protocolo wire PostgreSQL) com o MySQL, medindo o desempenho para implantações de banco de dados multi-cliente.
+bench-sysbench-server-ops-label = Operações Sysbench
+bench-sysbench-server-note = O modo servidor usa o protocolo wire PostgreSQL, permitindo acesso multi-cliente e compatibilidade com ferramentas e drivers PostgreSQL existentes.
 
-# Sysbench Server Discussion
-bench-sysbench-srv-disc-protocol-title = PostgreSQL Wire Protocol
-bench-sysbench-srv-disc-protocol = VibeSQL Server implements the PostgreSQL wire protocol, enabling compatibility with existing PostgreSQL drivers and tools. This adds ~10-50µs of protocol overhead per query compared to embedded mode, but enables multi-client deployments.
-bench-sysbench-srv-disc-mysql-title = MySQL Comparison
-bench-sysbench-srv-disc-mysql = Server benchmarks compare against MySQL to evaluate VibeSQL as a drop-in replacement for traditional client-server databases. Results vary by operation type, with VibeSQL showing advantages in read-heavy workloads.
-bench-sysbench-srv-disc-roadmap-title = Server Roadmap
-bench-sysbench-srv-disc-pooling = Reduce connection establishment overhead for high-throughput scenarios
-bench-sysbench-srv-disc-caching = Server-side caching of query plans across connections
+# Discussão do Sysbench Servidor
+bench-sysbench-srv-disc-protocol-title = Protocolo Wire PostgreSQL
+bench-sysbench-srv-disc-protocol = O VibeSQL Server implementa o protocolo wire PostgreSQL, permitindo compatibilidade com drivers e ferramentas PostgreSQL existentes. Isso adiciona ~10-50µs de overhead de protocolo por consulta comparado ao modo embutido, mas permite implantações multi-cliente.
+bench-sysbench-srv-disc-mysql-title = Comparação com MySQL
+bench-sysbench-srv-disc-mysql = Os benchmarks de servidor comparam com o MySQL para avaliar o VibeSQL como substituto direto para bancos de dados cliente-servidor tradicionais. Os resultados variam por tipo de operação, com o VibeSQL mostrando vantagens em cargas de trabalho com leitura intensiva.
+bench-sysbench-srv-disc-roadmap-title = Roadmap do Servidor
+bench-sysbench-srv-disc-pooling = Reduzir overhead de estabelecimento de conexão para cenários de alto throughput
+bench-sysbench-srv-disc-caching = Cache de planos de consulta no lado do servidor entre conexões
 bench-sysbench-srv-disc-extended = Suporte completo ao protocolo de consulta estendida PostgreSQL para operações em lote
 
 # TPC-H Server específico

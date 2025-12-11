@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use vibesql_ast::{FromClause, SelectItem};
+
 use super::join_helpers::{
     build_combined_schema, extract_equijoin_conditions, extract_join_conditions,
     extract_non_join_predicates, flatten_join_tree_simple, has_cross_join_with_on_condition,
@@ -21,7 +23,6 @@ use crate::{
         join::hash_join::columnar as columnar_join, projection::project_row_combined,
     },
 };
-use vibesql_ast::{FromClause, SelectItem};
 
 impl SelectExecutor<'_> {
     /// Try to execute a multi-table JOIN query using columnar hash join (Phase 4)

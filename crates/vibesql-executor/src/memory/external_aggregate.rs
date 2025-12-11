@@ -2,11 +2,11 @@
 //!
 //! Implements partition-based aggregation with disk spilling:
 //!
-//! 1. **Build Phase**: Hash rows into partitions, accumulate aggregates in memory.
-//!    When memory is exhausted, spill the largest partition to disk.
+//! 1. **Build Phase**: Hash rows into partitions, accumulate aggregates in memory. When memory is
+//!    exhausted, spill the largest partition to disk.
 //!
-//! 2. **Produce Phase**: Emit results from in-memory partitions, then reload and
-//!    process spilled partitions one at a time.
+//! 2. **Produce Phase**: Emit results from in-memory partitions, then reload and process spilled
+//!    partitions one at a time.
 //!
 //! # Algorithm
 //!
@@ -38,16 +38,20 @@
 //! - **Memory tracking**: Per-partition accounting enables targeted spilling
 //! - **Merge semantics**: Uses AggregateAccumulator::combine() for spilled data
 
-use std::collections::HashMap;
-use std::io::{self, Cursor};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    io::{self, Cursor},
+    sync::Arc,
+};
 
 use ahash::AHashMap;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::row_serialization::{deserialize_row, serialize_row};
-use super::{MemoryController, MemoryReservation, SpillFile};
+use super::{
+    row_serialization::{deserialize_row, serialize_row},
+    MemoryController, MemoryReservation, SpillFile,
+};
 use crate::select::grouping::AggregateAccumulator;
 
 /// Configuration for external aggregate
@@ -63,7 +67,7 @@ pub struct ExternalAggregateConfig {
 impl Default for ExternalAggregateConfig {
     fn default() -> Self {
         Self {
-            num_partitions: 64,           // 64 partitions
+            num_partitions: 64,               // 64 partitions
             max_groups_per_partition: 10_000, // 10K groups per partition
         }
     }
@@ -114,7 +118,10 @@ impl Partition {
     }
 
     /// Estimate memory for a group entry
-    fn estimate_group_memory(key_values: &[SqlValue], accumulators: &[AggregateAccumulator]) -> usize {
+    fn estimate_group_memory(
+        key_values: &[SqlValue],
+        accumulators: &[AggregateAccumulator],
+    ) -> usize {
         let key_size: usize = key_values.iter().map(|v| v.estimated_size_bytes()).sum();
         let acc_size = std::mem::size_of_val(accumulators)
             + accumulators.iter().map(estimate_accumulator_memory).sum::<usize>();
@@ -168,7 +175,12 @@ impl ExternalAggregate {
         num_key_columns: usize,
         aggregate_specs: Vec<AggregateSpec>,
     ) -> Self {
-        Self::with_config(controller, num_key_columns, aggregate_specs, ExternalAggregateConfig::default())
+        Self::with_config(
+            controller,
+            num_key_columns,
+            aggregate_specs,
+            ExternalAggregateConfig::default(),
+        )
     }
 
     /// Create with custom configuration
@@ -294,10 +306,8 @@ impl ExternalAggregate {
         // Create spill file if needed
         if partition.spill_file.is_none() {
             let temp_dir = self.reservation.temp_directory();
-            partition.spill_file = Some(SpillFile::with_suffix(
-                temp_dir,
-                &format!("agg_part_{}", partition_idx),
-            )?);
+            partition.spill_file =
+                Some(SpillFile::with_suffix(temp_dir, &format!("agg_part_{}", partition_idx))?);
         }
 
         // Serialize and write row
@@ -647,16 +657,8 @@ mod tests {
     fn test_sum_and_avg() {
         let controller = make_test_controller();
         let specs = vec![
-            AggregateSpec {
-                function_name: "SUM".to_string(),
-                distinct: false,
-                value_index: 0,
-            },
-            AggregateSpec {
-                function_name: "AVG".to_string(),
-                distinct: false,
-                value_index: 0,
-            },
+            AggregateSpec { function_name: "SUM".to_string(), distinct: false, value_index: 0 },
+            AggregateSpec { function_name: "AVG".to_string(), distinct: false, value_index: 0 },
         ];
 
         let mut agg = ExternalAggregate::new(&controller, 1, specs);
@@ -678,16 +680,8 @@ mod tests {
     fn test_min_max() {
         let controller = make_test_controller();
         let specs = vec![
-            AggregateSpec {
-                function_name: "MIN".to_string(),
-                distinct: false,
-                value_index: 0,
-            },
-            AggregateSpec {
-                function_name: "MAX".to_string(),
-                distinct: false,
-                value_index: 0,
-            },
+            AggregateSpec { function_name: "MIN".to_string(), distinct: false, value_index: 0 },
+            AggregateSpec { function_name: "MAX".to_string(), distinct: false, value_index: 0 },
         ];
 
         let mut agg = ExternalAggregate::new(&controller, 1, specs);
@@ -700,7 +694,7 @@ mod tests {
         let results: Vec<_> = agg.finish().unwrap().map(|r| r.unwrap()).collect();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0][1], SqlValue::Integer(5));  // MIN
+        assert_eq!(results[0][1], SqlValue::Integer(5)); // MIN
         assert_eq!(results[0][2], SqlValue::Integer(15)); // MAX
     }
 
@@ -716,25 +710,40 @@ mod tests {
         let mut agg = ExternalAggregate::new(&controller, 2, specs); // 2 key columns
 
         // Group (1, "a"): 2 rows
-        agg.add_row(&[SqlValue::Integer(1), SqlValue::Varchar("a".into()), SqlValue::Integer(100)]).unwrap();
-        agg.add_row(&[SqlValue::Integer(1), SqlValue::Varchar("a".into()), SqlValue::Integer(200)]).unwrap();
+        agg.add_row(&[SqlValue::Integer(1), SqlValue::Varchar("a".into()), SqlValue::Integer(100)])
+            .unwrap();
+        agg.add_row(&[SqlValue::Integer(1), SqlValue::Varchar("a".into()), SqlValue::Integer(200)])
+            .unwrap();
 
         // Group (1, "b"): 1 row
-        agg.add_row(&[SqlValue::Integer(1), SqlValue::Varchar("b".into()), SqlValue::Integer(300)]).unwrap();
+        agg.add_row(&[SqlValue::Integer(1), SqlValue::Varchar("b".into()), SqlValue::Integer(300)])
+            .unwrap();
 
         // Group (2, "a"): 3 rows
-        agg.add_row(&[SqlValue::Integer(2), SqlValue::Varchar("a".into()), SqlValue::Integer(400)]).unwrap();
-        agg.add_row(&[SqlValue::Integer(2), SqlValue::Varchar("a".into()), SqlValue::Integer(500)]).unwrap();
-        agg.add_row(&[SqlValue::Integer(2), SqlValue::Varchar("a".into()), SqlValue::Integer(600)]).unwrap();
+        agg.add_row(&[SqlValue::Integer(2), SqlValue::Varchar("a".into()), SqlValue::Integer(400)])
+            .unwrap();
+        agg.add_row(&[SqlValue::Integer(2), SqlValue::Varchar("a".into()), SqlValue::Integer(500)])
+            .unwrap();
+        agg.add_row(&[SqlValue::Integer(2), SqlValue::Varchar("a".into()), SqlValue::Integer(600)])
+            .unwrap();
 
         let results: Vec<_> = agg.finish().unwrap().map(|r| r.unwrap()).collect();
 
         assert_eq!(results.len(), 3);
 
         // Find and verify each group
-        let g1a = results.iter().find(|r| r[0] == SqlValue::Integer(1) && r[1] == SqlValue::Varchar("a".into())).unwrap();
-        let g1b = results.iter().find(|r| r[0] == SqlValue::Integer(1) && r[1] == SqlValue::Varchar("b".into())).unwrap();
-        let g2a = results.iter().find(|r| r[0] == SqlValue::Integer(2) && r[1] == SqlValue::Varchar("a".into())).unwrap();
+        let g1a = results
+            .iter()
+            .find(|r| r[0] == SqlValue::Integer(1) && r[1] == SqlValue::Varchar("a".into()))
+            .unwrap();
+        let g1b = results
+            .iter()
+            .find(|r| r[0] == SqlValue::Integer(1) && r[1] == SqlValue::Varchar("b".into()))
+            .unwrap();
+        let g2a = results
+            .iter()
+            .find(|r| r[0] == SqlValue::Integer(2) && r[1] == SqlValue::Varchar("a".into()))
+            .unwrap();
 
         assert_eq!(g1a[2], SqlValue::Integer(2)); // COUNT = 2
         assert_eq!(g1b[2], SqlValue::Integer(1)); // COUNT = 1
@@ -745,16 +754,8 @@ mod tests {
     fn test_null_handling() {
         let controller = make_test_controller();
         let specs = vec![
-            AggregateSpec {
-                function_name: "COUNT".to_string(),
-                distinct: false,
-                value_index: 0,
-            },
-            AggregateSpec {
-                function_name: "SUM".to_string(),
-                distinct: false,
-                value_index: 0,
-            },
+            AggregateSpec { function_name: "COUNT".to_string(), distinct: false, value_index: 0 },
+            AggregateSpec { function_name: "SUM".to_string(), distinct: false, value_index: 0 },
         ];
 
         let mut agg = ExternalAggregate::new(&controller, 1, specs);
@@ -768,7 +769,7 @@ mod tests {
         let results: Vec<_> = agg.finish().unwrap().map(|r| r.unwrap()).collect();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0][1], SqlValue::Integer(2));  // COUNT = 2 (NULLs not counted)
+        assert_eq!(results[0][1], SqlValue::Integer(2)); // COUNT = 2 (NULLs not counted)
         assert_eq!(results[0][2], SqlValue::Integer(30)); // SUM = 30 (NULLs ignored)
     }
 

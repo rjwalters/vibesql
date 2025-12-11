@@ -60,7 +60,8 @@ impl ForeignKeyValidator {
     /// Check that no child tables reference a row that is about to be deleted or updated.
     ///
     /// This is called before updating a primary key to ensure referential integrity.
-    /// If foreign keys have ON UPDATE CASCADE, this function will propagate the update to child rows.
+    /// If foreign keys have ON UPDATE CASCADE, this function will propagate the update to child
+    /// rows.
     pub fn check_no_child_references(
         db: &mut Database,
         parent_table_name: &str,
@@ -172,8 +173,9 @@ impl ForeignKeyValidator {
                             cascade_updates.push((table_name.clone(), updated_rows));
                         }
                         vibesql_catalog::ReferentialAction::SetDefault => {
-                            // Set child FK columns to their default values by evaluating expressions
-                            // First, collect default expressions (clone to avoid holding borrow)
+                            // Set child FK columns to their default values by evaluating
+                            // expressions First, collect default
+                            // expressions (clone to avoid holding borrow)
                             let default_exprs: Vec<Option<vibesql_ast::Expression>> = fk
                                 .column_indices
                                 .iter()

@@ -5,8 +5,9 @@
 
 #![allow(clippy::only_used_in_recursion)]
 
-use crate::{errors::CatalogError, table::TableSchema};
 use std::collections::{HashMap, HashSet};
+
+use crate::{errors::CatalogError, table::TableSchema};
 
 impl super::Catalog {
     /// Check for circular foreign key dependencies that would be created by adding this table.
@@ -201,8 +202,9 @@ impl super::Catalog {
         };
 
         // Drop all triggers associated with this table
-        // Per SQL standard (R-37808-62273): triggers are automatically dropped when the table is dropped
-        // Note: We need to normalize trigger table_name for comparison in case-insensitive mode
+        // Per SQL standard (R-37808-62273): triggers are automatically dropped when the table is
+        // dropped Note: We need to normalize trigger table_name for comparison in
+        // case-insensitive mode
         let case_sensitive = self.case_sensitive_identifiers;
         let trigger_names: Vec<String> = self
             .triggers
@@ -263,11 +265,11 @@ impl super::Catalog {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::column::ColumnSchema;
-    use crate::trigger::TriggerDefinition;
     use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
     use vibesql_types::DataType;
+
+    use super::*;
+    use crate::{column::ColumnSchema, trigger::TriggerDefinition};
 
     #[test]
     fn test_drop_table_deletes_triggers_case_insensitive() {

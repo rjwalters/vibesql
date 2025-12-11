@@ -4,12 +4,13 @@
 //! transaction commands (BEGIN, COMMIT, ROLLBACK) and properly
 //! reports transaction status in the wire protocol.
 
-use std::net::TcpListener;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::net::TcpListener as TokioTcpListener;
-use tokio::sync::oneshot;
+use std::{
+    net::TcpListener,
+    sync::{atomic::AtomicUsize, Arc},
+    time::Duration,
+};
+
+use tokio::{net::TcpListener as TokioTcpListener, sync::oneshot};
 use tokio_postgres::{NoTls, SimpleQueryMessage};
 
 /// Test server configuration for integration tests.
@@ -56,11 +57,13 @@ impl Drop for TestServer {
 /// Run a test server instance.
 async fn run_test_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) {
     use tokio::sync::broadcast;
-    use vibesql_server::config::Config;
-    use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
-    use vibesql_server::observability::ObservabilityProvider;
-    use vibesql_server::registry::DatabaseRegistry;
-    use vibesql_server::SubscriptionManager;
+    use vibesql_server::{
+        config::Config,
+        connection::{ConnectionHandler, TableMutationNotification},
+        observability::ObservabilityProvider,
+        registry::DatabaseRegistry,
+        SubscriptionManager,
+    };
 
     let addr = format!("127.0.0.1:{}", port);
     let listener = match TokioTcpListener::bind(&addr).await {
@@ -399,11 +402,7 @@ async fn test_cross_session_visibility() {
         rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
     // With shared database, client2 sees data from client1
-    assert_eq!(
-        data_rows.len(),
-        1,
-        "Client2 should see data from client1 in shared database"
-    );
+    assert_eq!(data_rows.len(), 1, "Client2 should see data from client1 in shared database");
 
     // Client2 can also insert data
     client2
@@ -420,11 +419,7 @@ async fn test_cross_session_visibility() {
     let data_rows: Vec<_> =
         rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
 
-    assert_eq!(
-        data_rows.len(),
-        2,
-        "Client1 should see both rows in shared database"
-    );
+    assert_eq!(data_rows.len(), 2, "Client1 should see both rows in shared database");
 }
 
 /// Test 7: Transaction isolation - uncommitted data not visible to other sessions

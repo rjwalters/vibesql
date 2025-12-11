@@ -1,9 +1,9 @@
 //! Tests for Common Sub-Expression Elimination (CSE)
 
-use crate::errors::ExecutorError;
-use crate::evaluator::ExpressionEvaluator;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::{DataType, SqlValue};
+
+use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
 
 #[test]
 fn test_cse_repeated_arithmetic() -> Result<(), ExecutorError> {
@@ -311,7 +311,9 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
                 column: "first_name".to_string(),
             }),
             op: vibesql_ast::BinaryOperator::Concat,
-            right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(" ")))),
+            right: Box::new(vibesql_ast::Expression::Literal(SqlValue::Varchar(
+                arcstr::ArcStr::from(" "),
+            ))),
         }),
         op: vibesql_ast::BinaryOperator::Concat,
         right: Box::new(vibesql_ast::Expression::ColumnRef {

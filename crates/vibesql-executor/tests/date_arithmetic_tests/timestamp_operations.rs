@@ -33,7 +33,9 @@ fn test_date_add_timestamp_with_time() {
                 "2024-01-15 14:30:00".parse().unwrap(),
             )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HOUR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("HOUR"),
+            )),
         ],
         character_unit: None,
     };
@@ -48,7 +50,9 @@ fn test_extract_hour_from_timestamp() {
     let expr = vibesql_ast::Expression::Function {
         name: "EXTRACT".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("HOUR"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("HOUR"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "2024-03-15 14:30:45".parse().unwrap(),
             )),

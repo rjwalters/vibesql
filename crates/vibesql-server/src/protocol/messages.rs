@@ -1,6 +1,6 @@
+use std::{collections::HashMap, io};
+
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::HashMap;
-use std::io;
 use thiserror::Error;
 
 /// Wire protocol configuration for selective column updates
@@ -165,7 +165,7 @@ pub enum BackendMessage {
     /// Subscription error (0xF3) - subscription error notification
     SubscriptionError { subscription_id: [u8; 16], message: String },
 
-/// Subscription acknowledgment (0xF4) - confirms subscription registration
+    /// Subscription acknowledgment (0xF4) - confirms subscription registration
     /// Sent immediately after a subscription is registered, before initial data
     SubscriptionAck {
         subscription_id: [u8; 16],
@@ -252,7 +252,8 @@ pub enum FrontendMessage {
 
     /// Subscribe message (0xF0) - subscribe to query
     /// The optional filter is a SQL WHERE clause expression applied to subscription updates.
-    /// The optional selective_updates_config allows clients to override server-level selective update settings.
+    /// The optional selective_updates_config allows clients to override server-level selective
+    /// update settings.
     Subscribe {
         query: String,
         params: Vec<Option<Vec<u8>>>,
@@ -434,7 +435,7 @@ impl BackendMessage {
                 put_cstring(buf, message);
             }
 
-BackendMessage::SubscriptionAck { subscription_id, table_count } => {
+            BackendMessage::SubscriptionAck { subscription_id, table_count } => {
                 buf.put_u8(0xF4); // SubscriptionAck
 
                 let len: i32 = 4 + 16 + 2; // length + subscription_id + table_count
@@ -618,7 +619,12 @@ impl FrontendMessage {
                     None // No config field present (backward compatibility)
                 };
 
-                Ok(Some(FrontendMessage::Subscribe { query, params, filter, selective_updates_config }))
+                Ok(Some(FrontendMessage::Subscribe {
+                    query,
+                    params,
+                    filter,
+                    selective_updates_config,
+                }))
             }
 
             0xF1 => {
@@ -959,16 +965,11 @@ mod tests {
         let subscription_id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
         // Create a partial row update with 4 columns, columns 0 and 2 present
-        let partial_row = PartialRowUpdate::new(
-            4,
-            &[0, 2],
-            vec![Some(b"id1".to_vec()), Some(b"value".to_vec())],
-        );
+        let partial_row =
+            PartialRowUpdate::new(4, &[0, 2], vec![Some(b"id1".to_vec()), Some(b"value".to_vec())]);
 
-        let msg = BackendMessage::SubscriptionPartialData {
-            subscription_id,
-            rows: vec![partial_row],
-        };
+        let msg =
+            BackendMessage::SubscriptionPartialData { subscription_id, rows: vec![partial_row] };
         msg.encode(&mut buf);
 
         // Verify message type (0xF7)
@@ -1005,10 +1006,8 @@ mod tests {
             vec![Some(b"1".to_vec()), None], // Column 1 is NULL
         );
 
-        let msg = BackendMessage::SubscriptionPartialData {
-            subscription_id,
-            rows: vec![partial_row],
-        };
+        let msg =
+            BackendMessage::SubscriptionPartialData { subscription_id, rows: vec![partial_row] };
         msg.encode(&mut buf);
 
         assert_eq!(buf[0], 0xF7);
@@ -1022,7 +1021,12 @@ mod tests {
         // Position: 1 (type) + 4 (len) + 16 (id) + 1 (update_type) + 4 (row_count)
         //         + 2 (total_cols) + 1 (bitmap) + 4 (val1_len) + 1 (val1_data) = 34
         let null_pos = 34;
-        let null_len = i32::from_be_bytes([buf[null_pos], buf[null_pos + 1], buf[null_pos + 2], buf[null_pos + 3]]);
+        let null_len = i32::from_be_bytes([
+            buf[null_pos],
+            buf[null_pos + 1],
+            buf[null_pos + 2],
+            buf[null_pos + 3],
+        ]);
         assert_eq!(null_len, -1);
     }
 
@@ -1276,7 +1280,8 @@ mod tests {
         fn test_invalid_utf8_in_startup_user() {
             let mut buf = BytesMut::new();
             // Build a proper startup message with invalid UTF-8 in the username value
-            // Length: 4 (len) + 4 (version) + 5 (user\0) + 3 (invalid UTF-8 + \0) + 1 (final \0) = 17
+            // Length: 4 (len) + 4 (version) + 5 (user\0) + 3 (invalid UTF-8 + \0) + 1 (final \0) =
+            // 17
             buf.put_i32(17);
             buf.put_i32(196608); // Protocol version 3.0
             buf.put_slice(b"user\0");
@@ -1483,35 +1488,35 @@ mod tests {
             // Test parsing Subscribe with all config fields set
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             // Build the message body first to calculate length
             let mut body = BytesMut::new();
-            
+
             // Query
             body.put_slice(b"SELECT * FROM test\0");
-            
+
             // Parameters (no params)
             body.put_i16(0);
-            
+
             // Filter (none)
             body.put_i16(0);
-            
+
             // Selective updates config
             body.put_u8(0x07); // All three flags set (0b111)
             body.put_u8(1); // enabled = true
             body.put_u16(5); // min_changed_columns = 5
             body.put_f64(0.75); // max_changed_columns_ratio = 0.75
-            
+
             // Write length (4 bytes for length field itself + body)
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
+
             let msg = result.unwrap();
             assert!(matches!(msg, Some(FrontendMessage::Subscribe { .. })));
-            
+
             if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = msg {
                 assert!(selective_updates_config.is_some());
                 let config = selective_updates_config.unwrap();
@@ -1528,22 +1533,24 @@ mod tests {
             // Test parsing Subscribe with only enabled flag set
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
-            
+
             body.put_u8(0x01); // Only enabled flag set (0b001)
             body.put_u8(1); // enabled = true
-            
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_some());
                 let config = selective_updates_config.unwrap();
                 assert_eq!(config.enabled, Some(true));
@@ -1559,22 +1566,24 @@ mod tests {
             // Test parsing Subscribe with only min_changed_columns flag set
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
-            
+
             body.put_u8(0x02); // Only min_changed_columns flag set (0b010)
             body.put_u16(10); // min_changed_columns = 10
-            
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_some());
                 let config = selective_updates_config.unwrap();
                 assert_eq!(config.enabled, None);
@@ -1590,22 +1599,24 @@ mod tests {
             // Test parsing Subscribe with only max_changed_columns_ratio flag set
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
-            
+
             body.put_u8(0x04); // Only max_changed_columns_ratio flag set (0b100)
             body.put_f64(0.5); // max_changed_columns_ratio = 0.5
-            
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_some());
                 let config = selective_updates_config.unwrap();
                 assert_eq!(config.enabled, None);
@@ -1621,20 +1632,22 @@ mod tests {
             // Test that config_flags = 0 results in None config
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
             body.put_u8(0x00); // config_flags = 0 (no config)
-            
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_none());
             } else {
                 panic!("Expected Subscribe message");
@@ -1646,20 +1659,22 @@ mod tests {
             // Test backward compatibility: Subscribe without config field present
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
-            // No config field at all
-            
+                             // No config field at all
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_none());
             } else {
                 panic!("Expected Subscribe message");
@@ -1671,22 +1686,24 @@ mod tests {
             // Test parsing with enabled = false
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
-            
+
             body.put_u8(0x01); // enabled flag set
             body.put_u8(0); // enabled = false
-            
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_some());
                 let config = selective_updates_config.unwrap();
                 assert_eq!(config.enabled, Some(false));
@@ -1700,23 +1717,25 @@ mod tests {
             // Test parsing with enabled and min_changed_columns flags
             let mut buf = BytesMut::new();
             buf.put_u8(0xF0); // Subscribe message type
-            
+
             let mut body = BytesMut::new();
             body.put_slice(b"SELECT * FROM test\0");
             body.put_i16(0); // no params
             body.put_i16(0); // no filter
-            
+
             body.put_u8(0x03); // enabled and min_changed_columns flags (0b011)
             body.put_u8(1); // enabled = true
             body.put_u16(3); // min_changed_columns = 3
-            
+
             buf.put_i32((4 + body.len()) as i32);
             buf.put_slice(&body);
-            
+
             let result = FrontendMessage::decode(&mut buf);
             assert!(result.is_ok());
-            
-            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) = result.unwrap() {
+
+            if let Some(FrontendMessage::Subscribe { selective_updates_config, .. }) =
+                result.unwrap()
+            {
                 assert!(selective_updates_config.is_some());
                 let config = selective_updates_config.unwrap();
                 assert_eq!(config.enabled, Some(true));

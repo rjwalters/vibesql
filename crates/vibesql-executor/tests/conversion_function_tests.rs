@@ -40,7 +40,9 @@ fn varchar_lit(value: &str) -> vibesql_ast::Expression {
 
 /// Helper to create a character literal expression
 fn character_lit(value: &str) -> vibesql_ast::Expression {
-    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(value)))
+    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(arcstr::ArcStr::from(
+        value,
+    )))
 }
 
 /// Helper to create a date literal expression

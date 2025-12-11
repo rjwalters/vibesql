@@ -12,11 +12,11 @@ pub mod triggers;
 use vibesql_ast::TruncateTableStmt;
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::privilege_checker::PrivilegeChecker;
-
-use self::constraints::validate_truncate_allowed;
-use self::core::{execute_truncate, execute_truncate_cascade};
+use self::{
+    constraints::validate_truncate_allowed,
+    core::{execute_truncate, execute_truncate_cascade},
+};
+use crate::{errors::ExecutorError, privilege_checker::PrivilegeChecker};
 
 /// Executor for TRUNCATE TABLE statements
 pub struct TruncateTableExecutor;
@@ -69,7 +69,11 @@ impl TruncateTableExecutor {
     /// db.insert_row("users", Row::new(vec![SqlValue::Integer(1)])).unwrap();
     /// db.insert_row("users", Row::new(vec![SqlValue::Integer(2)])).unwrap();
     ///
-    /// let stmt = TruncateTableStmt { table_names: vec!["users".to_string()], if_exists: false, cascade: None };
+    /// let stmt = TruncateTableStmt {
+    ///     table_names: vec!["users".to_string()],
+    ///     if_exists: false,
+    ///     cascade: None,
+    /// };
     ///
     /// let result = TruncateTableExecutor::execute(&stmt, &mut db);
     /// assert_eq!(result.unwrap(), 2); // 2 rows deleted

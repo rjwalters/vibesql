@@ -92,18 +92,9 @@ fn test_insert_invalidates_columnar_cache() {
         .collect();
 
     // The new price 300 should be visible
-    assert!(
-        updated_prices.contains(&300),
-        "New price 300 should exist after INSERT"
-    );
-    assert!(
-        updated_prices.contains(&100),
-        "Existing price 100 should still exist"
-    );
-    assert!(
-        updated_prices.contains(&200),
-        "Existing price 200 should still exist"
-    );
+    assert!(updated_prices.contains(&300), "New price 300 should exist after INSERT");
+    assert!(updated_prices.contains(&100), "Existing price 100 should still exist");
+    assert!(updated_prices.contains(&200), "Existing price 200 should still exist");
 
     // Verify cache was invalidated and re-converted
     let final_stats = db.columnar_cache_stats();
@@ -168,17 +159,23 @@ fn test_multi_row_insert_invalidates_cache() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Product 2"))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Product 2",
+                ))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(200)),
             ],
             vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(3)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Product 3"))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Product 3",
+                ))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(300)),
             ],
             vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(4)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Product 4"))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
+                    "Product 4",
+                ))),
                 vibesql_ast::Expression::Literal(SqlValue::Integer(400)),
             ],
         ]),

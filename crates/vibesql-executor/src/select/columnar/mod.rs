@@ -47,9 +47,10 @@ pub mod simd_filter;
 mod simd_join;
 
 pub use aggregate::{
-    columnar_group_by, columnar_group_by_batch, compute_multiple_aggregates,
-    evaluate_expression_to_column, evaluate_expression_with_cached_column, extract_aggregates,
-    AggregateOp, AggregateSource, AggregateSpec,
+    columnar_group_by, columnar_group_by_batch, compute_aggregates_from_batch,
+    compute_multiple_aggregates, evaluate_expression_to_column,
+    evaluate_expression_with_cached_column, extract_aggregates, AggregateOp, AggregateSource,
+    AggregateSpec,
 };
 pub use batch::{ColumnArray, ColumnarBatch};
 pub use executor::execute_columnar_batch;
@@ -58,9 +59,8 @@ pub use filter::{
     create_filter_bitmap_tree, evaluate_predicate_tree, extract_column_predicates,
     extract_predicate_tree, ColumnPredicate, PredicateTree,
 };
+use log;
 pub use scan::ColumnarScan;
-
-pub use aggregate::compute_aggregates_from_batch;
 pub use simd_aggregate::{can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64};
 pub use simd_filter::{
     simd_create_filter_mask, simd_create_filter_mask_auto, simd_create_filter_mask_packed,
@@ -70,12 +70,10 @@ pub use simd_filter::{
 pub use simd_filter::{simd_create_filter_mask_parallel, simd_filter_batch_parallel};
 pub use simd_join::columnar_hash_join_inner;
 pub use simd_ops::PackedMask;
-
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
-use log;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
+
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Execute a columnar aggregate query with filtering
 ///
@@ -509,8 +507,9 @@ fn compare_values(a: &SqlValue, b: &SqlValue) -> std::cmp::Ordering {
             }
         }
         // NULL handling
-        (SqlValue::Null, _) | (_, SqlValue::Null) => Ordering::Equal, // NULL comparisons are undefined
-        _ => Ordering::Equal,                                         // Incompatible types
+        (SqlValue::Null, _) | (_, SqlValue::Null) => Ordering::Equal, /* NULL comparisons are */
+        // undefined
+        _ => Ordering::Equal, // Incompatible types
     }
 }
 
@@ -623,8 +622,9 @@ pub fn execute_columnar(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::Date;
+
+    use super::*;
 
     /// Test the full columnar pipeline: filter + aggregation
     #[test]
@@ -675,8 +675,8 @@ mod tests {
 
         // Aggregates: SUM(extendedprice), COUNT(*)
         let aggregates = vec![
-            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) }, // SUM(extendedprice)
-            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::Column(0) }, // COUNT(*)
+            AggregateSpec { op: AggregateOp::Sum, source: AggregateSource::Column(1) }, /* SUM(extendedprice) */
+            AggregateSpec { op: AggregateOp::Count, source: AggregateSource::Column(0) }, /* COUNT(*) */
         ];
 
         let result = execute_columnar_aggregate(&rows, &predicates, &aggregates, None).unwrap();
@@ -752,10 +752,11 @@ mod tests {
 
     // AST Integration Tests
 
-    use crate::schema::CombinedSchema;
     use vibesql_ast::{BinaryOperator, Expression};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use crate::schema::CombinedSchema;
 
     fn make_test_schema() -> CombinedSchema {
         let schema = TableSchema::new(

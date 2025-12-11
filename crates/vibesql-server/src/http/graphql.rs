@@ -53,12 +53,10 @@
 //! }
 //! ```
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-
 use vibesql_catalog::TableSchema;
 use vibesql_storage::Database;
 
@@ -379,19 +377,28 @@ fn condition_to_sql(
         ComparisonOp::Contains => {
             let value_str = cond.value.as_str().ok_or("contains requires a string value")?;
             let param_idx = params.len() + 1;
-            params.push(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("%{}%", value_str))));
+            params.push(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                "%{}%",
+                value_str
+            ))));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::StartsWith => {
             let value_str = cond.value.as_str().ok_or("startsWith requires a string value")?;
             let param_idx = params.len() + 1;
-            params.push(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("{}%", value_str))));
+            params.push(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                "{}%",
+                value_str
+            ))));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::EndsWith => {
             let value_str = cond.value.as_str().ok_or("endsWith requires a string value")?;
             let param_idx = params.len() + 1;
-            params.push(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("%{}", value_str))));
+            params.push(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                "%{}",
+                value_str
+            ))));
             Ok(format!("{} LIKE ${}", field, param_idx))
         }
         ComparisonOp::In => {
@@ -1556,8 +1563,9 @@ pub fn get_simple_columns(fields: &[GraphQLField]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::ForeignKeyConstraint;
+
+    use super::*;
 
     #[test]
     fn test_parse_simple_query() {

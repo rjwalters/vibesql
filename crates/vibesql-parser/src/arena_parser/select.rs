@@ -9,9 +9,7 @@ use vibesql_ast::arena::{
 };
 
 use super::ArenaParser;
-use crate::keywords::Keyword;
-use crate::token::Token;
-use crate::ParseError;
+use crate::{keywords::Keyword, token::Token, ParseError};
 
 /// Counter for generating unique derived table aliases when none is provided.
 /// SQLite allows derived tables without aliases, unlike SQL:1999 which requires them.
@@ -212,10 +210,11 @@ impl<'arena> ArenaParser<'arena> {
         let expr = self.parse_expression()?;
 
         // Check for qualified wildcard (table.*)
-        // Note: We compare the symbol directly now, which means we need to intern "*" for comparison
-        // But actually, the Wildcard expression is separate - column reference with "*" becomes Expression::Wildcard
-        // So this check shouldn't match anymore since Expression::ColumnRef won't have "*" as column.
-        // The wildcard case is handled in expression parsing.
+        // Note: We compare the symbol directly now, which means we need to intern "*" for
+        // comparison But actually, the Wildcard expression is separate - column reference
+        // with "*" becomes Expression::Wildcard So this check shouldn't match anymore since
+        // Expression::ColumnRef won't have "*" as column. The wildcard case is handled in
+        // expression parsing.
         if let Expression::ColumnRef { table: Some(t), column: _ } = &expr {
             // Check if it's a qualified wildcard - but this won't happen since
             // we parse table.* as Wildcard expression, not as ColumnRef with "*" column
@@ -316,14 +315,33 @@ impl<'arena> ArenaParser<'arena> {
                 let natural = self.try_consume_keyword(Keyword::Natural);
                 let right = self.parse_table_reference()?;
 
-                let condition = if jt != JoinType::Cross && !natural {
+                let (condition, using_columns) = if jt != JoinType::Cross && !natural {
                     if self.try_consume_keyword(Keyword::On) {
-                        Some(self.parse_expression()?)
+                        (Some(self.parse_expression()?), None)
+                    } else if self.try_consume_keyword(Keyword::Using) {
+                        self.expect_token(Token::LParen)?;
+                        let mut columns = BumpVec::new_in(self.arena);
+                        loop {
+                            if let Token::Identifier(name) = self.peek() {
+                                let name = name.clone();
+                                self.advance();
+                                columns.push(self.intern(&name));
+                            } else {
+                                return Err(ParseError {
+                                    message: "Expected column name in USING clause".to_string(),
+                                });
+                            }
+                            if !self.try_consume(&Token::Comma) {
+                                break;
+                            }
+                        }
+                        self.expect_token(Token::RParen)?;
+                        (None, Some(columns))
                     } else {
-                        None
+                        (None, None)
                     }
                 } else {
-                    None
+                    (None, None)
                 };
 
                 let left_ref = self.arena.alloc(from);
@@ -334,6 +352,7 @@ impl<'arena> ArenaParser<'arena> {
                     right: right_ref,
                     join_type: jt,
                     condition,
+                    using_columns,
                     natural,
                 };
             } else {

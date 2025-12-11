@@ -135,7 +135,10 @@ fn test_case_sensitive_column_names() {
     // Insert a row
     db.insert_row(
         "EMPLOYEES",
-        Row::new(vec![SqlValue::Varchar(StringValue::from("John")), SqlValue::Varchar(StringValue::from("Doe"))]),
+        Row::new(vec![
+            SqlValue::Varchar(StringValue::from("John")),
+            SqlValue::Varchar(StringValue::from("Doe")),
+        ]),
     )
     .unwrap();
 

@@ -4,9 +4,7 @@ use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::arena::{ConflictClause, InsertSource, InsertStmt};
 
 use super::ArenaParser;
-use crate::keywords::Keyword;
-use crate::token::Token;
-use crate::ParseError;
+use crate::{keywords::Keyword, token::Token, ParseError};
 
 impl<'arena> ArenaParser<'arena> {
     /// Parse an INSERT statement (including INSERT OR REPLACE).

@@ -5,11 +5,12 @@
 
 mod common;
 
+use std::io::Write;
+
 use common::{
     parse_backend_messages, start_test_server, start_test_server_with_config,
     test_config_with_password, TestClient,
 };
-use std::io::Write;
 use tempfile::NamedTempFile;
 use vibesql_server::auth::password::hash_password_argon2;
 

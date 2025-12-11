@@ -29,8 +29,7 @@ use foreign_keys::ForeignKeyValidator;
 use row_selector::RowSelector;
 use value_updater::ValueUpdater;
 use vibesql_ast::{BinaryOperator, Expression, UpdateStmt};
-use vibesql_storage::statistics::CostEstimator;
-use vibesql_storage::Database;
+use vibesql_storage::{statistics::CostEstimator, Database};
 
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
@@ -139,7 +138,8 @@ impl UpdateExecutor {
         Self::execute_internal(stmt, database, schema, None, None)
     }
 
-    /// Internal implementation supporting both schema caching, procedural context, and trigger context
+    /// Internal implementation supporting both schema caching, procedural context, and trigger
+    /// context
     fn execute_internal(
         stmt: &UpdateStmt,
         database: &mut Database,
@@ -178,7 +178,11 @@ impl UpdateExecutor {
         // Conditions: no triggers, no procedural context, simple WHERE pk = value, no assertions
         // Skip fast path if assertions exist because we need rollback capability on violation
         let has_assertions = database.catalog.get_all_assertions().next().is_some();
-        if !has_triggers && procedural_context.is_none() && trigger_context.is_none() && !has_assertions {
+        if !has_triggers
+            && procedural_context.is_none()
+            && trigger_context.is_none()
+            && !has_assertions
+        {
             if let Some(result) = Self::try_fast_path_update(stmt, database, schema)? {
                 // Invalidate columnar cache after fast path update
                 if result > 0 {
@@ -223,11 +227,11 @@ impl UpdateExecutor {
         // Estimate DML cost for query analysis and optimization decisions
         if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {
             if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
-                // Get table statistics for cost estimation (use cached if available, or fallback to estimate)
-                let table_stats = table
-                    .get_statistics()
-                    .cloned()
-                    .unwrap_or_else(|| vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count()));
+                // Get table statistics for cost estimation (use cached if available, or fallback to
+                // estimate)
+                let table_stats = table.get_statistics().cloned().unwrap_or_else(|| {
+                    vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count())
+                });
 
                 // Estimate the ratio of indexes affected based on columns being updated
                 // This is a heuristic: assume columns are distributed evenly across indexes
@@ -345,7 +349,8 @@ impl UpdateExecutor {
             let optimizer = DmlOptimizer::new(database, &stmt.table_name);
             let indexes_affected_ratio =
                 optimizer.compute_indexes_affected_ratio(&all_changed_columns, schema);
-            let _update_cost = optimizer.estimate_update_cost(updates.len(), indexes_affected_ratio);
+            let _update_cost =
+                optimizer.estimate_update_cost(updates.len(), indexes_affected_ratio);
 
             // Log optimization insight: selective updates (low affected ratio) are much cheaper
             if std::env::var("DML_COST_DEBUG").is_ok() && indexes_affected_ratio < 1.0 {
@@ -405,11 +410,18 @@ impl UpdateExecutor {
         // Now update user-defined indexes after releasing table borrow
         // Pass changed_columns to skip indexes that don't involve any modified columns
         // Clone for rollback support if assertions exist
-        let index_updates_for_rollback: Vec<_> = index_updates.iter()
+        let index_updates_for_rollback: Vec<_> = index_updates
+            .iter()
             .map(|(idx, old, _new, changed)| (*idx, old.clone(), changed.clone()))
             .collect();
         for (index, old_row, new_row, changed_columns) in index_updates {
-            database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, index, Some(&changed_columns));
+            database.update_indexes_for_update(
+                &stmt.table_name,
+                &old_row,
+                &new_row,
+                index,
+                Some(&changed_columns),
+            );
         }
 
         // Invalidate the database-level columnar cache since table data changed.
@@ -432,12 +444,15 @@ impl UpdateExecutor {
 
         // Check all assertions after UPDATE completes (SQL:1999 Feature F671/F672)
         // This ensures database-wide integrity constraints are maintained
-        if let Err(assertion_error) = crate::advanced_objects::AssertionChecker::check_all_assertions(database) {
+        if let Err(assertion_error) =
+            crate::advanced_objects::AssertionChecker::check_all_assertions(database)
+        {
             // Assertion violated - rollback the update by restoring old values
             if let Some(table_mut) = database.get_table_mut(&stmt.table_name) {
                 for (index, old_row, changed_columns) in &index_updates_for_rollback {
                     // Restore the old row values for changed columns
-                    let _ = table_mut.update_row_selective(*index, old_row.clone(), changed_columns);
+                    let _ =
+                        table_mut.update_row_selective(*index, old_row.clone(), changed_columns);
                 }
             }
             // Also invalidate cache after rollback
@@ -604,7 +619,13 @@ impl UpdateExecutor {
 
         // Update user-defined indexes FIRST (while we still have both row references)
         // Pass changed_columns to skip indexes that don't involve any modified columns
-        database.update_indexes_for_update(&stmt.table_name, &old_row, &new_row, row_index, Some(&changed_columns));
+        database.update_indexes_for_update(
+            &stmt.table_name,
+            &old_row,
+            &new_row,
+            row_index,
+            Some(&changed_columns),
+        );
 
         // Apply the update directly (transfers ownership of new_row, no clone needed)
         let table_mut = database
@@ -650,10 +671,7 @@ impl UpdateExecutor {
             };
 
             // Check column is not in PK
-            let is_pk_col = pk_indices
-                .as_ref()
-                .map(|pk| pk.contains(&col_index))
-                .unwrap_or(false);
+            let is_pk_col = pk_indices.as_ref().map(|pk| pk.contains(&col_index)).unwrap_or(false);
             if is_pk_col {
                 return Ok(None); // PK update needs full validation
             }

@@ -1,17 +1,20 @@
 //! Core parsing functions for sqllogictest.
 
-use itertools::Itertools;
 use std::path::Path;
 
-use super::directive_parser::{Condition, Connection, Control, ControlItem, ResultMode, SortMode};
-use super::error_parser::ExpectedError;
-use super::location::Location;
-use super::record_parser::{
-    parse_lines, parse_multiline_error, parse_multiple_result, QueryExpect, StatementExpect,
+use itertools::Itertools;
+
+use super::{
+    directive_parser::{Condition, Connection, Control, ControlItem, ResultMode, SortMode},
+    error_parser::ExpectedError,
+    location::Location,
+    record_parser::{
+        parse_lines, parse_multiline_error, parse_multiple_result, QueryExpect, StatementExpect,
+    },
+    records::{Injected, Record},
+    retry_parser::parse_retry_config,
+    ParseError, ParseErrorKind,
 };
-use super::records::{Injected, Record};
-use super::retry_parser::parse_retry_config;
-use super::{ParseError, ParseErrorKind};
 use crate::ColumnType;
 
 const RESULTS_DELIMITER: &str = "----";
@@ -117,7 +120,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     ["error", res @ ..] => {
                         if res.len() == 4 && res[0] == "retry" && res[2] == "backoff" {
                             // `statement error retry <num> backoff <duration>`
-                            // To keep syntax simple, let's assume the error message must be multiline.
+                            // To keep syntax simple, let's assume the error message must be
+                            // multiline.
                             (StatementExpect::Error(ExpectedError::Empty), res)
                         } else {
                             let error = ExpectedError::parse_inline_tokens(res)
@@ -165,7 +169,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                     ["error", res @ ..] => {
                         if res.len() == 4 && res[0] == "retry" && res[2] == "backoff" {
                             // `query error retry <num> backoff <duration>`
-                            // To keep syntax simple, let's assume the error message must be multiline.
+                            // To keep syntax simple, let's assume the error message must be
+                            // multiline.
                             (QueryExpect::Error(ExpectedError::Empty), res)
                         } else {
                             let error = ExpectedError::parse_inline_tokens(res)
@@ -174,7 +179,8 @@ fn parse_inner<T: ColumnType>(loc: &Location, script: &str) -> Result<Vec<Record
                         }
                     }
                     [type_str, res @ ..] => {
-                        // query <type-string> [<sort-mode>] [<label>] [retry <attempts> backoff <backoff>]
+                        // query <type-string> [<sort-mode>] [<label>] [retry <attempts> backoff
+                        // <backoff>]
                         let types = type_str
                             .chars()
                             .map(|ch| {
@@ -343,8 +349,7 @@ fn parse_file_inner<T: ColumnType>(loc: Location) -> Result<Vec<Record<T>>, Pars
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directive_parser::Condition;
-    use crate::DefaultColumnType;
+    use crate::{directive_parser::Condition, DefaultColumnType};
 
     #[test]
     fn test_skipif_with_inline_comment() {

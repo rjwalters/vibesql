@@ -1,9 +1,10 @@
+use std::fmt;
+
 /// Blob storage identifier
 ///
 /// Unique identifier for stored blobs, based on UUID v4.
 /// Can be converted to/from string paths for storage backends.
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use uuid::Uuid;
 
 /// Unique identifier for a blob

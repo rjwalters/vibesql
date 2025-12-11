@@ -32,7 +32,9 @@ fn test_match_against_natural_language_single_column() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
             vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MySQL Database Guide")),
-            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn about MySQL database management")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "Learn about MySQL database management",
+            )),
         ]),
     )
     .unwrap();
@@ -41,7 +43,9 @@ fn test_match_against_natural_language_single_column() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
             vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("MySQL Tutorial")),
-            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn MySQL database management")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "Learn MySQL database management",
+            )),
         ]),
     )
     .unwrap();
@@ -99,7 +103,9 @@ fn test_match_against_multiple_columns() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(1),
             vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Database Guide")),
-            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Learn SQL and database concepts")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "Learn SQL and database concepts",
+            )),
         ]),
     )
     .unwrap();
@@ -108,7 +114,9 @@ fn test_match_against_multiple_columns() {
         vibesql_storage::Row::new(vec![
             vibesql_types::SqlValue::Integer(2),
             vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Web Development")),
-            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Build websites with web frameworks")),
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+                "Build websites with web frameworks",
+            )),
         ]),
     )
     .unwrap();

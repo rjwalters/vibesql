@@ -14,7 +14,9 @@ fn test_substring_from_for() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
@@ -30,7 +32,9 @@ fn test_substring_from_only() {
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
         ],
         character_unit: None,
@@ -47,7 +51,9 @@ fn test_substring_both_syntaxes_equivalent() {
     let comma_expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
@@ -59,7 +65,9 @@ fn test_substring_both_syntaxes_equivalent() {
     let from_for_expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("hello"),
+            )),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
         ],
@@ -81,7 +89,9 @@ fn test_trim_from_no_char() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,     // Defaults to BOTH
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("  hello  "),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
@@ -93,7 +103,9 @@ fn test_trim_both_from_no_char() {
     let expr = vibesql_ast::Expression::Trim {
         position: Some(vibesql_ast::TrimPosition::Both),
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("  hello  "),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
@@ -105,7 +117,9 @@ fn test_trim_leading_from_no_char() {
     let expr = vibesql_ast::Expression::Trim {
         position: Some(vibesql_ast::TrimPosition::Leading),
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("  hello  "),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello  ")));
@@ -117,7 +131,9 @@ fn test_trim_trailing_from_no_char() {
     let expr = vibesql_ast::Expression::Trim {
         position: Some(vibesql_ast::TrimPosition::Trailing),
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello  ")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("  hello  "),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("  hello")));
@@ -129,7 +145,9 @@ fn test_trim_from_only_spaces() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("    ")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("    "),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")));
@@ -141,7 +159,9 @@ fn test_trim_from_empty_string() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(""),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")));
@@ -153,7 +173,9 @@ fn test_trim_from_no_spaces() {
     let expr = vibesql_ast::Expression::Trim {
         position: None,
         removal_char: None, // Defaults to space
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("hello"),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("hello")));
@@ -168,7 +190,9 @@ fn test_trim_with_char_still_works() {
         removal_char: Some(Box::new(vibesql_ast::Expression::Literal(
             vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("x")),
         ))),
-        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("xfoox")))),
+        string: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("xfoox"),
+        ))),
     };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("foo")));

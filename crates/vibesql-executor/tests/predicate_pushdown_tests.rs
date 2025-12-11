@@ -50,7 +50,10 @@ fn setup_test_db_with_tables(num_tables: usize, rows_per_table: i64) -> vibesql_
             let row = vibesql_storage::Row::new(vec![
                 vibesql_types::SqlValue::Integer(row_num),
                 vibesql_types::SqlValue::Integer(row_num % 10 + 1),
-                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!("t{} row {}", table_num, row_num))),
+                vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                    "t{} row {}",
+                    table_num, row_num
+                ))),
             ]);
             db.insert_row(&table_name, row).unwrap();
         }

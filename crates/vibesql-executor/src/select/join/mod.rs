@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use super::{cte::CteResult, from_iterator::FromIterator};
 use crate::{
@@ -31,9 +30,9 @@ use hash_join::{
     hash_join_inner, hash_join_inner_arithmetic, hash_join_inner_multi, hash_join_left_outer,
     hash_join_left_outer_multi,
 };
-use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 // Re-export hash join iterator for public use
 pub use hash_join_iterator::HashJoinIterator;
+use hash_semi_join::{hash_semi_join, hash_semi_join_with_filter};
 // Re-export nested loop join variants for internal use
 use nested_loop::{
     nested_loop_anti_join, nested_loop_cross_join, nested_loop_full_outer_join,
@@ -709,9 +708,10 @@ pub(super) fn nested_loop_join(
         }
 
         // Phase 3.4: Try multi-column hash join from WHERE clause conditions
-        // When there are multiple equijoin conditions (e.g., ps_suppkey = l_suppkey AND ps_partkey = l_partkey),
-        // using composite key hash join is critical for performance. Single-key hash join with post-filter
-        // can cause catastrophic performance issues (48B cartesian products in Q9 at SF=0.1).
+        // When there are multiple equijoin conditions (e.g., ps_suppkey = l_suppkey AND ps_partkey
+        // = l_partkey), using composite key hash join is critical for performance.
+        // Single-key hash join with post-filter can cause catastrophic performance issues
+        // (48B cartesian products in Q9 at SF=0.1).
         if additional_equijoins.len() >= 2 {
             // Collect all valid equi-join conditions
             let mut left_col_indices = Vec::new();
@@ -737,12 +737,8 @@ pub(super) fn nested_loop_join(
                     (None, None)
                 };
 
-                let mut result = hash_join_inner_multi(
-                    left,
-                    right,
-                    &left_col_indices,
-                    &right_col_indices,
-                )?;
+                let mut result =
+                    hash_join_inner_multi(left, right, &left_col_indices, &right_col_indices)?;
 
                 // Apply remaining conditions (non-equijoins) as post-join filters
                 let remaining_conditions: Vec<_> = additional_equijoins
@@ -1008,9 +1004,7 @@ pub(super) fn nested_loop_join(
                 // to NULL for unmatched rows. These rows should be preserved.
                 // TODO: Consider a LEFT JOIN-aware post-filter that preserves NULL results
                 if !multi_result.remaining_conditions.is_empty() {
-                    if let Some(filter_expr) =
-                        combine_with_and(multi_result.remaining_conditions)
-                    {
+                    if let Some(filter_expr) = combine_with_and(multi_result.remaining_conditions) {
                         result =
                             apply_post_join_filter(result, &filter_expr, database, cte_results)?;
                     }

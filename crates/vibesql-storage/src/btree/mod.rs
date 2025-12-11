@@ -75,9 +75,9 @@ mod node;
 mod serialize;
 
 pub use node::{BTreeIndex, Key, RowId};
+use vibesql_types::DataType;
 
 use crate::page::{PageId, PAGE_SIZE};
-use vibesql_types::DataType;
 
 // Page type identifiers
 #[allow(dead_code)] // Reserved for future use when implementing BTreeIndex::load()
@@ -107,7 +107,8 @@ fn calculate_degree(key_schema: &[DataType]) -> usize {
     let key_size = estimate_max_key_size(key_schema);
 
     // Internal node format: [header: 3 bytes][keys: N * key_size][children: (N+1) * 8 bytes]
-    // Leaf node format: [header: 3 bytes][entries: N * (key_size + num_row_ids_varint + row_ids)][next_leaf: 8 bytes]
+    // Leaf node format: [header: 3 bytes][entries: N * (key_size + num_row_ids_varint +
+    // row_ids)][next_leaf: 8 bytes]
 
     // Use leaf node calculation as it's more restrictive
     let header_size = 3; // page_type(1) + num_entries(2)
@@ -254,8 +255,9 @@ mod tests {
     /// to verify that bulk loading produces correct results
     #[test]
     fn test_bulk_load_produces_searchable_index() {
-        use node::BTreeIndex;
         use std::sync::Arc;
+
+        use node::BTreeIndex;
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();

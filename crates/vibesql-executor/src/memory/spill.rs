@@ -10,10 +10,12 @@
 //! - Files are created lazily (only when first written to)
 //! - Supports both sequential writes and random reads for merge operations
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 /// Global counter for unique file naming
 static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -72,13 +74,7 @@ impl SpillFile {
         let filename = format!("vibesql_spill_{}_{}.tmp", pid, id);
         let path = temp_dir.join(filename);
 
-        Ok(Self {
-            path,
-            writer: None,
-            reader: None,
-            bytes_written: 0,
-            created: false,
-        })
+        Ok(Self { path, writer: None, reader: None, bytes_written: 0, created: false })
     }
 
     /// Create a spill file with a specific name suffix
@@ -92,13 +88,7 @@ impl SpillFile {
         let filename = format!("vibesql_spill_{}_{}_{}.tmp", pid, id, suffix);
         let path = temp_dir.join(filename);
 
-        Ok(Self {
-            path,
-            writer: None,
-            reader: None,
-            bytes_written: 0,
-            created: false,
-        })
+        Ok(Self { path, writer: None, reader: None, bytes_written: 0, created: false })
     }
 
     /// Get the path to the spill file
@@ -197,10 +187,7 @@ impl SpillFile {
         if let Some(reader) = self.reader.as_mut() {
             reader.read_exact(buf)
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "spill file not created",
-            ))
+            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "spill file not created"))
         }
     }
 
@@ -251,11 +238,7 @@ pub struct SpillFileSet {
 impl SpillFileSet {
     /// Create a new spill file set
     pub fn new(temp_dir: PathBuf) -> Self {
-        Self {
-            temp_dir,
-            files: Vec::new(),
-            total_bytes: 0,
-        }
+        Self { temp_dir, files: Vec::new(), total_bytes: 0 }
     }
 
     /// Create a new spill file in this set
@@ -319,8 +302,9 @@ impl SpillFileSet {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_spill_file_create_and_write() {

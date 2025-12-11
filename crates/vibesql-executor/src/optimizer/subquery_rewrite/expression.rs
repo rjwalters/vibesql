@@ -5,9 +5,9 @@
 
 use vibesql_ast::{Expression, SelectItem, SelectStmt};
 
-use super::correlation::is_correlated;
-use super::transformations::{
-    add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists,
+use super::{
+    correlation::is_correlated,
+    transformations::{add_distinct_to_in_subquery, rewrite_exists_to_in, rewrite_in_to_exists},
 };
 
 /// Rewrite an expression to optimize IN subqueries
@@ -366,15 +366,21 @@ pub(super) fn rewrite_from_clause(
             alias: alias.clone(),
             column_aliases: None,
         },
-        vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
-            vibesql_ast::FromClause::Join {
-                left: Box::new(rewrite_from_clause(left, rewrite_subquery_fn)),
-                right: Box::new(rewrite_from_clause(right, rewrite_subquery_fn)),
-                join_type: join_type.clone(),
-                condition: condition.as_ref().map(|c| rewrite_expression(c, rewrite_subquery_fn)),
-                natural: *natural,
-            }
-        }
+        vibesql_ast::FromClause::Join {
+            left,
+            right,
+            join_type,
+            condition,
+            using_columns,
+            natural,
+        } => vibesql_ast::FromClause::Join {
+            left: Box::new(rewrite_from_clause(left, rewrite_subquery_fn)),
+            right: Box::new(rewrite_from_clause(right, rewrite_subquery_fn)),
+            join_type: join_type.clone(),
+            condition: condition.as_ref().map(|c| rewrite_expression(c, rewrite_subquery_fn)),
+            using_columns: using_columns.clone(),
+            natural: *natural,
+        },
         vibesql_ast::FromClause::Subquery { query, alias, .. } => {
             vibesql_ast::FromClause::Subquery {
                 query: Box::new(rewrite_subquery_fn(query)),

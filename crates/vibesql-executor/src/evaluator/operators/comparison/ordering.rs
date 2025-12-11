@@ -2,9 +2,8 @@
 
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-
 use super::compare;
+use crate::errors::ExecutorError;
 
 /// Less than operator (<)
 #[inline]

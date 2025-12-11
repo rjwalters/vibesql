@@ -2,9 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use super::config::ParallelSearchConfig;
-use super::reorder::JoinEdge;
-use super::state::CascadingFilterState;
+use super::{config::ParallelSearchConfig, reorder::JoinEdge, state::CascadingFilterState};
 use crate::optimizer::aggregate_analysis::AggregateAnalysis;
 
 /// Context for join order search operations

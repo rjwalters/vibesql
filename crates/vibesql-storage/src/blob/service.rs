@@ -1,16 +1,18 @@
+use std::{sync::Arc, time::Duration};
+
+use bytes::Bytes;
+#[cfg(feature = "opendal")]
+use opendal::{services, Operator};
+
 /// Blob storage service
 ///
 /// Manages storing and retrieving blobs with support for multiple backends
 /// via OpenDAL abstraction layer.
 use super::{BlobId, BlobMetadata, BlobStorageConfig};
-use crate::database::Database;
-use crate::error::{StorageError, StorageResult};
-use bytes::Bytes;
-use std::sync::Arc;
-use std::time::Duration;
-
-#[cfg(feature = "opendal")]
-use opendal::{services, Operator};
+use crate::{
+    database::Database,
+    error::{StorageError, StorageResult},
+};
 
 /// Blob storage service for file/blob operations
 pub struct BlobStorageService {
@@ -289,7 +291,9 @@ impl BlobStorageService {
             match op.stat(&path).await {
                 Ok(_) => Ok(true),
                 Err(e) if e.kind() == opendal::ErrorKind::NotFound => Ok(false),
-                Err(e) => Err(StorageError::Other(format!("Failed to check blob existence: {}", e))),
+                Err(e) => {
+                    Err(StorageError::Other(format!("Failed to check blob existence: {}", e)))
+                }
             }
         } else {
             Err(StorageError::Other(

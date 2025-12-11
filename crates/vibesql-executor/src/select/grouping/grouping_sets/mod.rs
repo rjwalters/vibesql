@@ -7,12 +7,11 @@ mod alias_resolution;
 mod expansion;
 mod expression_utils;
 
-use vibesql_ast::Expression;
-
 // Re-export public API
 pub use alias_resolution::{resolve_base_expressions_aliases, resolve_grouping_set_aliases};
 pub use expansion::{expand_group_by_clause, get_base_expressions};
 pub use expression_utils::expressions_equal;
+use vibesql_ast::Expression;
 
 /// A resolved grouping set - a set of expressions to group by
 /// along with information about which base expressions are "rolled up" (aggregated)
@@ -55,7 +54,8 @@ impl GroupingContext {
     /// - 1 = column is rolled up (aggregated)
     /// - 0 = column is present in grouping
     ///
-    /// Formula: GROUPING_ID(c1, c2, ..., cn) = GROUPING(c1) * 2^(n-1) + GROUPING(c2) * 2^(n-2) + ... + GROUPING(cn)
+    /// Formula: GROUPING_ID(c1, c2, ..., cn) = GROUPING(c1) * 2^(n-1) + GROUPING(c2) * 2^(n-2) +
+    /// ... + GROUPING(cn)
     ///
     /// Example with 3 columns (d_year, i_category, i_brand):
     /// - All present: 0 (binary 000)
@@ -81,8 +81,9 @@ impl GroupingContext {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::BinaryOperator;
+
+    use super::*;
 
     fn col(name: &str) -> Expression {
         Expression::ColumnRef { table: None, column: name.to_string() }

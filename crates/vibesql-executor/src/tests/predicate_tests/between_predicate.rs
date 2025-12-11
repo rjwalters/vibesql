@@ -352,7 +352,8 @@ fn test_not_negative_literal_between_null_bounds() {
     // Tests issue #1840: NOT -78 BETWEEN NULL AND 25
     // This is a regression test for the specific query from index/random/10/slt_good_0.test
     // According to SQLite behavior:
-    // - Since low bound is NULL and negated=true, should return: -78 > 25 = FALSE    // - So this should filter ALL rows (return 0 rows)
+    // - Since low bound is NULL and negated=true, should return: -78 > 25 = FALSE    // - So this
+    //   should filter ALL rows (return 0 rows)
     let mut db = vibesql_storage::Database::new();
     let schema = vibesql_catalog::TableSchema::new(
         "tab0".to_string(),

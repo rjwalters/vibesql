@@ -2,9 +2,8 @@
 
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-
 use super::compare;
+use crate::errors::ExecutorError;
 
 /// Equality operator (=)
 #[inline]
@@ -33,9 +32,11 @@ mod tests {
 
     #[test]
     fn test_string_equality() {
-        let result =
-            equal(&SqlValue::Varchar(arcstr::ArcStr::from("hello")), &SqlValue::Varchar(arcstr::ArcStr::from("hello")))
-                .unwrap();
+        let result = equal(
+            &SqlValue::Varchar(arcstr::ArcStr::from("hello")),
+            &SqlValue::Varchar(arcstr::ArcStr::from("hello")),
+        )
+        .unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
     }
 

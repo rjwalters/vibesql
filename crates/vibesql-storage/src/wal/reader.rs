@@ -6,12 +6,12 @@
 
 use std::io::{Read, Seek, SeekFrom};
 
-use crate::persistence::binary::io::read_u32;
-use crate::StorageError;
-
-use super::entry::{Lsn, WalEntry};
-use super::format::{WalHeader, WAL_HEADER_SIZE};
-use super::writer::verify_checksum;
+use super::{
+    entry::{Lsn, WalEntry},
+    format::{WalHeader, WAL_HEADER_SIZE},
+    writer::verify_checksum,
+};
+use crate::{persistence::binary::io::read_u32, StorageError};
 
 /// Result of reading a WAL entry
 #[derive(Debug)]
@@ -223,8 +223,7 @@ mod tests {
     use vibesql_types::SqlValue;
 
     use super::*;
-    use crate::wal::entry::WalOp;
-    use crate::wal::writer::WalWriter;
+    use crate::wal::{entry::WalOp, writer::WalWriter};
 
     fn create_test_wal() -> Cursor<Vec<u8>> {
         let buf = Vec::new();

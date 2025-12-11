@@ -1,16 +1,17 @@
 //! Individual record processing and execution.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use md5::Digest;
 
 use super::core::{AsyncDB, Runner, SqlDialect};
-use crate::column_type::ColumnType;
-use crate::error_handling::AnyError;
-use crate::output::{DBOutput, RecordOutput};
-use crate::parser::*;
-use crate::MakeConnection;
+use crate::{
+    column_type::ColumnType,
+    error_handling::AnyError,
+    output::{DBOutput, RecordOutput},
+    parser::*,
+    MakeConnection,
+};
 
 impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
     /// Infer the required SQL dialect from skipif/onlyif conditions.
@@ -37,7 +38,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                 Condition::OnlyIf { label } if label.eq_ignore_ascii_case("sqlite") => {
                     return Some(SqlDialect::SQLite);
                 }
-                // Other labels (postgresql, etc.) - not supported, return None to let normal skip logic handle
+                // Other labels (postgresql, etc.) - not supported, return None to let normal skip
+                // logic handle
                 _ => {}
             }
         }
@@ -384,9 +386,10 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                     if types.len() == expected_types.len() {
                         types = expected_types.clone();
 
-                        // Reformat string values to match expected types (MySQL/SQLite normalization)
-                        // When test expects Real but we returned Integer, append ".000"
-                        // When test expects Integer but we returned Real, strip decimal if whole number
+                        // Reformat string values to match expected types (MySQL/SQLite
+                        // normalization) When test expects Real but we
+                        // returned Integer, append ".000" When test expects
+                        // Integer but we returned Real, strip decimal if whole number
                         // When test expects Integer but we returned TEXT, coerce to integer
                         for row in &mut rows {
                             for (col_idx, value) in row.iter_mut().enumerate() {
@@ -405,7 +408,8 @@ impl<D: AsyncDB, M: MakeConnection<Conn = D>> Runner<D, M> {
                                                 *value = format!("{}", f.trunc() as i64);
                                             }
                                         } else if value.parse::<i64>().is_err() {
-                                            // TEXT → Integer: coerce non-numeric text to 0 (SQLite affinity)
+                                            // TEXT → Integer: coerce non-numeric text to 0 (SQLite
+                                            // affinity)
                                             *value = "0".to_string();
                                         }
                                     }

@@ -1,9 +1,10 @@
 //! Utility functions for join reordering
 
-use crate::schema::CombinedSchema;
-use crate::select::cte::CteResult;
 use std::collections::HashMap;
+
 use vibesql_ast::{Expression, FromClause, SelectItem};
+
+use crate::{schema::CombinedSchema, select::cte::CteResult};
 
 /// Extract column names from a SELECT list for subquery schema inference
 ///
@@ -67,8 +68,8 @@ fn extract_column_name_from_expr(expr: &Expression) -> String {
 ///
 /// Previous approach (hard 8-table limit):
 /// - 3-8 table joins: Find optimal ordering via exhaustive search with pruning
-/// - 9+ table joins: Previously received NO optimization, now get partial
-///   optimization within time budget
+/// - 9+ table joins: Previously received NO optimization, now get partial optimization within time
+///   budget
 ///
 /// The time budget prevents pathological cases while enabling better plans
 /// for complex queries that need optimization most.
@@ -133,14 +134,13 @@ pub(super) fn build_reordered_schema(
     for table_name in original_order {
         // Find this table's schema in the current (optimally ordered) schema
         // get_table handles case-insensitive lookups via TableKey
-        let table_schema = current_schema
-            .get_table(table_name)
-            .map(|(_, schema)| schema.clone());
+        let table_schema = current_schema.get_table(table_name).map(|(_, schema)| schema.clone());
 
         if let Some(schema) = table_schema {
             let col_count = schema.columns.len();
             // TableKey handles case normalization automatically
-            new_table_schemas.insert(crate::schema::TableKey::new(table_name), (current_position, schema));
+            new_table_schemas
+                .insert(crate::schema::TableKey::new(table_name), (current_position, schema));
             current_position += col_count;
         }
     }
@@ -156,8 +156,10 @@ pub(super) fn build_reordered_schema(
 /// - Column counts: {tab0: 3, tab1: 3, tab2: 3}
 ///
 /// Returns permutation mapping current positions to original positions:
-/// - Current: [tab1.col0, tab1.col1, tab1.col2, tab0.col0, tab0.col1, tab0.col2, tab2.col0, tab2.col1, tab2.col2]
-/// - Target:  [tab0.col0, tab0.col1, tab0.col2, tab2.col0, tab2.col1, tab2.col2, tab1.col0, tab1.col1, tab1.col2]
+/// - Current: [tab1.col0, tab1.col1, tab1.col2, tab0.col0, tab0.col1, tab0.col2, tab2.col0,
+///   tab2.col1, tab2.col2]
+/// - Target:  [tab0.col0, tab0.col1, tab0.col2, tab2.col0, tab2.col1, tab2.col2, tab1.col0,
+///   tab1.col1, tab1.col2]
 /// - Permutation: [3, 4, 5, 6, 7, 8, 0, 1, 2]
 pub(super) fn build_column_permutation(
     original_order: &[String],
@@ -246,7 +248,8 @@ pub(super) fn build_column_to_table_map(
                 .or_else(|| cte_results.get(&tr.name.to_lowercase()))
                 .or_else(|| cte_results.get(&tr.name.to_uppercase()))
             {
-                // CTE: get columns from CTE result schema (CteResult is a tuple: (TableSchema, Vec<Row>))
+                // CTE: get columns from CTE result schema (CteResult is a tuple: (TableSchema,
+                // Vec<Row>))
                 cte_result.0.columns.iter().map(|c| c.name.to_lowercase()).collect()
             } else {
                 // Regular table: get columns from database

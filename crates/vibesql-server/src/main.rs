@@ -1,22 +1,26 @@
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
+
 use anyhow::Result;
 use bytes::BytesMut;
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::{io::AsyncWriteExt, net::TcpListener, sync::broadcast};
 use tracing::{error, info, warn};
-
-use vibesql_server::auth::PasswordStore;
-use vibesql_server::config::Config;
-use vibesql_server::connection::{ConnectionHandler, TableMutationNotification};
-use vibesql_server::http::create_http_router;
-use vibesql_server::observability::ObservabilityProvider;
-use vibesql_server::protocol::BackendMessage;
-use vibesql_server::registry::DatabaseRegistry;
-use vibesql_server::subscription::SubscriptionManager;
+use vibesql_server::{
+    auth::PasswordStore,
+    config::Config,
+    connection::{ConnectionHandler, TableMutationNotification},
+    http::create_http_router,
+    observability::ObservabilityProvider,
+    protocol::BackendMessage,
+    registry::DatabaseRegistry,
+    subscription::SubscriptionManager,
+};
 use vibesql_storage::Database;
 
 #[tokio::main]
@@ -141,7 +145,12 @@ async fn main() -> Result<()> {
 
         let metrics_for_http = observability.metrics().cloned();
         tokio::spawn(async move {
-            let app = create_http_router(db_for_http, registry_for_http, subscription_manager_for_http, metrics_for_http);
+            let app = create_http_router(
+                db_for_http,
+                registry_for_http,
+                subscription_manager_for_http,
+                metrics_for_http,
+            );
             let listener = tokio::net::TcpListener::bind(&http_addr)
                 .await
                 .expect("Failed to bind HTTP server");

@@ -3,11 +3,11 @@
 //! This module handles tree rebalancing after deletions, including borrowing
 //! from siblings, merging nodes, and collapsing the root.
 
-use crate::page::PageId;
-use crate::StorageError;
-
-use super::super::structure::{InternalNode, LeafNode};
-use super::BTreeIndex;
+use super::{
+    super::structure::{InternalNode, LeafNode},
+    BTreeIndex,
+};
+use crate::{page::PageId, StorageError};
 
 impl BTreeIndex {
     /// Rebalance a leaf node after deletion

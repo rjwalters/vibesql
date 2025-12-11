@@ -3,7 +3,8 @@
 //! **First open-source Rust implementation of TPC-E**
 //!
 //! Run with:
-//!   cargo bench --package vibesql-executor --bench tpce_benchmark --no-run && ./target/release/deps/tpce_benchmark-*
+//!   cargo bench --package vibesql-executor --bench tpce_benchmark --no-run &&
+//! ./target/release/deps/tpce_benchmark-*
 //!
 //! Set environment variables:
 //!   TPCE_SCALE_FACTOR  - Customer scale (1 = 1000 customers, default: 0.1)
@@ -29,11 +30,12 @@
 
 mod tpce;
 
-use std::env;
-use std::time::{Duration, Instant};
-use tpce::data::TPCEData;
-use tpce::schema::load_vibesql;
-use tpce::transactions::*;
+use std::{
+    env,
+    time::{Duration, Instant},
+};
+
+use tpce::{data::TPCEData, schema::load_vibesql, transactions::*};
 
 /// Transaction type enum
 #[derive(Debug, Clone, Copy, PartialEq)]

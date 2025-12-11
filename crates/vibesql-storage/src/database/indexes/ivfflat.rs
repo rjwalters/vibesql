@@ -8,8 +8,7 @@
 //! - `lists`: Number of clusters (default 100)
 //! - `probes`: Number of clusters to search at query time (default 1)
 
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use vibesql_ast::VectorDistanceMetric;
 

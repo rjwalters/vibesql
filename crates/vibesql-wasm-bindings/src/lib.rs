@@ -32,8 +32,7 @@ pub fn init_wasm() {
 /// Returns `Some(locale)` if detection succeeds, `None` to use default.
 #[cfg(feature = "i18n")]
 fn detect_browser_locale() -> Option<String> {
-    web_sys::window()
-        .and_then(|w| w.navigator().language())
+    web_sys::window().and_then(|w| w.navigator().language())
 }
 
 /// Sets the locale for localized error messages at runtime.

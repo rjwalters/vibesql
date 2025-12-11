@@ -6,6 +6,7 @@
 //! 3. Critical pattern: empty table → create index → INSERT...SELECT → query
 
 use std::cell::RefCell;
+
 use vibesql_executor::{InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;

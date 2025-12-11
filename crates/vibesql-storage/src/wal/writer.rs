@@ -6,14 +6,16 @@
 
 use std::io::{Seek, SeekFrom, Write};
 
-use crate::persistence::binary::io::{write_u32, write_u64};
-use crate::StorageError;
-
-use super::entry::{Lsn, WalEntry};
-use super::format::{WAL_MAGIC, WAL_VERSION};
-
 #[cfg(test)]
 use super::format::WAL_HEADER_SIZE;
+use super::{
+    entry::{Lsn, WalEntry},
+    format::{WAL_MAGIC, WAL_VERSION},
+};
+use crate::{
+    persistence::binary::io::{write_u32, write_u64},
+    StorageError,
+};
 
 /// CRC-32 implementation using the IEEE polynomial
 /// This is a simple, portable implementation that works on both native and WASM
@@ -194,11 +196,7 @@ mod tests {
         let entry = WalEntry::new(
             1,
             1234567890,
-            WalOp::Insert {
-                table_id: 1,
-                row_id: 100,
-                values: vec![SqlValue::Integer(42)],
-            },
+            WalOp::Insert { table_id: 1, row_id: 100, values: vec![SqlValue::Integer(42)] },
         );
 
         let lsn = writer.append(&entry).unwrap();

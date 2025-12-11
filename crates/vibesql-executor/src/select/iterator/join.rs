@@ -4,11 +4,10 @@
 
 use std::cell::RefCell;
 
+use super::RowIterator;
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
 };
-
-use super::RowIterator;
 
 /// Iterator that performs lazy nested loop join between two row sources
 ///
@@ -395,8 +394,8 @@ impl<'schema, I: RowIterator> Iterator for LazyNestedLoopJoin<'schema, I> {
                 (right_count, None)
             }
             vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti => {
-                // At minimum 0 (no matches for anti, all filtered for semi), at most left side count
-                // Each left row appears at most once in result
+                // At minimum 0 (no matches for anti, all filtered for semi), at most left side
+                // count Each left row appears at most once in result
                 (0, left_upper)
             }
         }

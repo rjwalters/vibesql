@@ -195,10 +195,12 @@ fn test_hash_join_duplicate_keys() {
 
 fn create_test_rows(count: usize) -> Vec<vibesql_storage::Row> {
     (0..count)
-        .map(|i| vibesql_storage::Row::from_vec(vec![
+        .map(|i| {
+            vibesql_storage::Row::from_vec(vec![
                 SqlValue::Integer(i as i64 % 100), // Keys with duplicates
                 SqlValue::Varchar(arcstr::ArcStr::from(format!("value{}", i))),
-            ]))
+            ])
+        })
         .collect()
 }
 
@@ -234,10 +236,22 @@ fn test_build_hash_table_sequential_with_duplicates() {
 #[test]
 fn test_build_hash_table_sequential_null_values() {
     let rows = vec![
-        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("one"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("null1"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("two"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("null2"))]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("one")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Null,
+            SqlValue::Varchar(arcstr::ArcStr::from("null1")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("two")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Null,
+            SqlValue::Varchar(arcstr::ArcStr::from("null2")),
+        ]),
     ];
 
     let hash_table = build_hash_table_sequential(&rows, 0);
@@ -296,11 +310,26 @@ fn test_parallel_sequential_equivalence_large() {
 #[test]
 fn test_parallel_with_null_values() {
     let rows = vec![
-        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("one"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("null1"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("two"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("null2"))]),
-        vibesql_storage::Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("one_dup"))]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("one")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Null,
+            SqlValue::Varchar(arcstr::ArcStr::from("null1")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("two")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Null,
+            SqlValue::Varchar(arcstr::ArcStr::from("null2")),
+        ]),
+        vibesql_storage::Row::from_vec(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("one_dup")),
+        ]),
     ];
 
     let par_table = build_hash_table_parallel(&rows, 0);
@@ -321,7 +350,12 @@ fn test_parallel_hash_join_integration() {
 
     // Left table: 6000 rows (above join threshold of 5000)
     let left_rows: Vec<Vec<SqlValue>> = (0..6000)
-        .map(|i| vec![SqlValue::Integer(i % 100), SqlValue::Varchar(arcstr::ArcStr::from(format!("left{}", i)))])
+        .map(|i| {
+            vec![
+                SqlValue::Integer(i % 100),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("left{}", i))),
+            ]
+        })
         .collect();
 
     let left = create_test_from_result(
@@ -332,7 +366,12 @@ fn test_parallel_hash_join_integration() {
 
     // Right table: 6000 rows
     let right_rows: Vec<Vec<SqlValue>> = (0..6000)
-        .map(|i| vec![SqlValue::Integer(i % 100), SqlValue::Varchar(arcstr::ArcStr::from(format!("right{}", i)))])
+        .map(|i| {
+            vec![
+                SqlValue::Integer(i % 100),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("right{}", i))),
+            ]
+        })
         .collect();
 
     let right = create_test_from_result(
@@ -702,8 +741,16 @@ fn test_hash_join_inner_multi_duplicate_composite_keys() {
             ("data", DataType::Varchar { max_length: Some(10) }),
         ],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("L1"))],
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("L2"))], // Duplicate key
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("L1")),
+            ],
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("L2")),
+            ], // Duplicate key
         ],
     );
 
@@ -715,8 +762,16 @@ fn test_hash_join_inner_multi_duplicate_composite_keys() {
             ("info", DataType::Varchar { max_length: Some(10) }),
         ],
         vec![
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("R1"))],
-            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("R2"))], // Duplicate key
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("R1")),
+            ],
+            vec![
+                SqlValue::Integer(1),
+                SqlValue::Integer(2),
+                SqlValue::Varchar(arcstr::ArcStr::from("R2")),
+            ], // Duplicate key
         ],
     );
 
@@ -729,14 +784,22 @@ fn test_hash_join_inner_multi_duplicate_composite_keys() {
     let result_data: Vec<_> =
         result.rows().iter().map(|r| (r.values[2].clone(), r.values[5].clone())).collect();
 
-    assert!(result_data
-        .contains(&(SqlValue::Varchar(arcstr::ArcStr::from("L1")), SqlValue::Varchar(arcstr::ArcStr::from("R1")))));
-    assert!(result_data
-        .contains(&(SqlValue::Varchar(arcstr::ArcStr::from("L1")), SqlValue::Varchar(arcstr::ArcStr::from("R2")))));
-    assert!(result_data
-        .contains(&(SqlValue::Varchar(arcstr::ArcStr::from("L2")), SqlValue::Varchar(arcstr::ArcStr::from("R1")))));
-    assert!(result_data
-        .contains(&(SqlValue::Varchar(arcstr::ArcStr::from("L2")), SqlValue::Varchar(arcstr::ArcStr::from("R2")))));
+    assert!(result_data.contains(&(
+        SqlValue::Varchar(arcstr::ArcStr::from("L1")),
+        SqlValue::Varchar(arcstr::ArcStr::from("R1"))
+    )));
+    assert!(result_data.contains(&(
+        SqlValue::Varchar(arcstr::ArcStr::from("L1")),
+        SqlValue::Varchar(arcstr::ArcStr::from("R2"))
+    )));
+    assert!(result_data.contains(&(
+        SqlValue::Varchar(arcstr::ArcStr::from("L2")),
+        SqlValue::Varchar(arcstr::ArcStr::from("R1"))
+    )));
+    assert!(result_data.contains(&(
+        SqlValue::Varchar(arcstr::ArcStr::from("L2")),
+        SqlValue::Varchar(arcstr::ArcStr::from("R2"))
+    )));
 }
 
 #[test]
@@ -767,14 +830,16 @@ fn test_composite_key_build_and_hash() {
     assert_eq!(hash_table.len(), 2);
 
     // Key (1, "a") should have 2 row indices
-    let key_1_a = CompositeKey(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("a"))]);
+    let key_1_a =
+        CompositeKey(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("a"))]);
     let indices = hash_table.get(&key_1_a).unwrap();
     assert_eq!(indices.len(), 2);
     assert!(indices.contains(&0));
     assert!(indices.contains(&2));
 
     // Key (2, "b") should have 1 row index
-    let key_2_b = CompositeKey(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("b"))]);
+    let key_2_b =
+        CompositeKey(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("b"))]);
     let indices = hash_table.get(&key_2_b).unwrap();
     assert_eq!(indices.len(), 1);
     assert!(indices.contains(&1));
@@ -785,8 +850,8 @@ fn test_composite_key_with_nulls() {
     // Test that rows with NULL in composite key are skipped
     let rows = vec![
         Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("a"))]),
-        Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("b"))]), // NULL in first column
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Null]),               // NULL in second column
+        Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("b"))]), /* NULL in first column */
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Null]), // NULL in second column
         Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("c"))]),
     ];
 

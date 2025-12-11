@@ -16,16 +16,14 @@ pub mod schema;
 
 // Re-export commonly used items for convenience
 pub use data::SysbenchData;
-pub use schema::load_vibesql;
-
-// SQL constants for consistent column naming across engines
-pub use schema::INSERT_SQL;
-#[cfg(any(feature = "sqlite", feature = "duckdb"))]
-pub use schema::INSERT_SQL_NUMBERED;
-
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
 #[cfg(feature = "mysql")]
 pub use schema::load_mysql;
 #[cfg(feature = "sqlite")]
 pub use schema::load_sqlite;
+pub use schema::load_vibesql;
+// SQL constants for consistent column naming across engines
+pub use schema::INSERT_SQL;
+#[cfg(any(feature = "sqlite", feature = "duckdb"))]
+pub use schema::INSERT_SQL_NUMBERED;

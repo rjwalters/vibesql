@@ -14,9 +14,9 @@
 
 mod harness;
 
+use std::{hint::black_box, time::Instant};
+
 use harness::{print_group_header, BenchResult, Harness};
-use std::hint::black_box;
-use std::time::Instant;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -166,8 +166,13 @@ fn bench_simple_integer_sort(harness: &Harness) {
 
         for cores in [1, 2, 4, 8] {
             let name = format!("{}_cores/{}_rows", cores, row_count);
-            let stats =
-                run_benchmark_with_cores(harness, &name, &db, "SELECT * FROM sort_test ORDER BY id;", cores);
+            let stats = run_benchmark_with_cores(
+                harness,
+                &name,
+                &db,
+                "SELECT * FROM sort_test ORDER BY id;",
+                cores,
+            );
             stats.print_compact();
         }
     }
@@ -257,8 +262,13 @@ fn bench_threshold_boundary(harness: &Harness) {
 
         let cores = 8;
         let name = format!("8_cores/{}_rows", row_count);
-        let stats =
-            run_benchmark_with_cores(harness, &name, &db, "SELECT * FROM sort_test ORDER BY id;", cores);
+        let stats = run_benchmark_with_cores(
+            harness,
+            &name,
+            &db,
+            "SELECT * FROM sort_test ORDER BY id;",
+            cores,
+        );
         stats.print();
     }
 }

@@ -16,9 +16,7 @@ mod operators;
 mod types;
 mod window;
 
-use crate::StorageError;
 use std::io::{Read, Write};
-use vibesql_ast::Expression;
 
 // Import helper functions from submodules
 use case::{read_case_when, write_case_when};
@@ -30,11 +28,13 @@ use types::{
     read_trim_position, write_character_unit, write_fulltext_mode, write_interval_unit,
     write_pseudo_table, write_trim_position,
 };
+use vibesql_ast::Expression;
 use window::{
     read_window_function_spec, read_window_spec, write_window_function_spec, write_window_spec,
 };
 
 use super::{io::*, value::*};
+use crate::StorageError;
 
 /// Expression variant tags for serialization
 #[repr(u8)]
@@ -592,9 +592,10 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{BinaryOperator, CaseWhen};
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_literal_roundtrip() {

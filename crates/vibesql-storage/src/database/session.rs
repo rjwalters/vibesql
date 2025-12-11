@@ -107,21 +107,25 @@ impl Database {
             vibesql_types::SqlMode::SQLite => "SQLITE".to_string(),
         };
 
-        self.metadata
-            .set_session_variable("SQL_MODE", vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(mode_string.as_str())));
+        self.metadata.set_session_variable(
+            "SQL_MODE",
+            vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(mode_string.as_str())),
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::{MySqlModeFlags, SqlMode, SqlValue};
+
+    use super::*;
 
     #[test]
     fn test_set_sql_mode_changes_mode() {
         let mut db = Database::new();
 
-        // Default is MySQL (for SQLLogicTest compatibility - dolthub corpus was regenerated against MySQL 8.x)
+        // Default is MySQL (for SQLLogicTest compatibility - dolthub corpus was regenerated against
+        // MySQL 8.x)
         assert!(matches!(db.sql_mode(), SqlMode::MySQL { .. }));
 
         // Change to SQLite

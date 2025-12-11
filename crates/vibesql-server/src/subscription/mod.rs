@@ -66,38 +66,29 @@ mod types;
 
 // Config types
 pub use config::{SubscriptionConfig, SubscriptionRetryPolicy};
-
 // Delta computation
 pub use delta::{compute_delta, compute_delta_with_pk, PartialRowDelta};
-
 // Error handling
 pub use error::{classify_error, classify_error_str, SubscriptionErrorKind};
-
 // Hash utilities
 pub use hash::hash_rows;
-
 // Manager
 pub use manager::SubscriptionManager;
-
 // PK detection
 pub use pk_detector::{
     detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionFailureReason, PkDetectionResult,
 };
-
 // Router
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
-
 // Selective column updates
 pub use selective::{
     compute_column_diff, create_partial_row_update, create_partial_row_update_with_metrics,
     should_use_selective_update, should_use_selective_update_with_metrics, ColumnDiff,
     SelectiveColumnConfig,
 };
-
 // Table analysis
 pub use table_dependencies::extract_table_dependencies;
 pub use table_extract::extract_table_refs;
-
 // Core types
 pub use types::{
     Subscription, SubscriptionError, SubscriptionId, SubscriptionMetrics, SubscriptionUpdate,
@@ -187,9 +178,14 @@ mod tests {
 
         let rows = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
 
         // Same old and new should return None
@@ -208,9 +204,14 @@ mod tests {
 
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
 
         let test_id = SubscriptionId::new();
@@ -235,9 +236,14 @@ mod tests {
 
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
 
         let new = vec![crate::Row {
@@ -295,9 +301,14 @@ mod tests {
         let old: Vec<crate::Row> = vec![];
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
 
         let test_id = SubscriptionId::new();
@@ -320,9 +331,14 @@ mod tests {
 
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
         let new: Vec<crate::Row> = vec![];
 
@@ -447,9 +463,14 @@ mod tests {
 
         let rows = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
 
         let test_id = SubscriptionId::new();
@@ -465,16 +486,26 @@ mod tests {
         // Multiple rows with updates
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
         ];
 
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("ALICE"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("ALICE")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("BOB"))] },
+            crate::Row {
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("BOB"))],
+            },
         ];
 
         let test_id = SubscriptionId::new();
@@ -566,24 +597,41 @@ mod tests {
         // Mix of insert, update, and delete
         let old = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
+                ],
             },
-            crate::Row { values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))] },
             crate::Row {
-                values: vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))],
+                values: vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))],
+            },
+            crate::Row {
+                values: vec![
+                    SqlValue::Integer(3),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+                ],
             },
         ];
 
         let new = vec![
             crate::Row {
-                values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("ALICE"))],
+                values: vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("ALICE")),
+                ],
             }, // Update
             // Row 2 deleted
             crate::Row {
-                values: vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))],
+                values: vec![
+                    SqlValue::Integer(3),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
+                ],
             }, // Unchanged
             crate::Row {
-                values: vec![SqlValue::Integer(4), SqlValue::Varchar(arcstr::ArcStr::from("Diana"))],
+                values: vec![
+                    SqlValue::Integer(4),
+                    SqlValue::Varchar(arcstr::ArcStr::from("Diana")),
+                ],
             }, // Insert
         ];
 
@@ -776,10 +824,8 @@ mod tests {
 
     #[test]
     fn test_create_partial_row_update() {
-        let old_row =
-            vec![Some(b"1".to_vec()), Some(b"Alice".to_vec()), Some(b"100".to_vec())];
-        let new_row =
-            vec![Some(b"1".to_vec()), Some(b"Bob".to_vec()), Some(b"100".to_vec())];
+        let old_row = vec![Some(b"1".to_vec()), Some(b"Alice".to_vec()), Some(b"100".to_vec())];
+        let new_row = vec![Some(b"1".to_vec()), Some(b"Bob".to_vec()), Some(b"100".to_vec())];
 
         let config = SelectiveColumnConfig {
             enabled: true,
@@ -1121,7 +1167,9 @@ mod tests {
     fn test_compute_column_diff_different_row_lengths() {
         use vibesql_types::SqlValue;
 
-        let old = crate::Row { values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))] };
+        let old = crate::Row {
+            values: vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+        };
         let new = crate::Row {
             values: vec![
                 SqlValue::Integer(1),
@@ -1149,17 +1197,17 @@ mod tests {
         };
         let new = crate::Row {
             values: vec![
-                SqlValue::Integer(1),   // PK col 0 unchanged
-                SqlValue::Integer(100), // PK col 1 unchanged
+                SqlValue::Integer(1),                           // PK col 0 unchanged
+                SqlValue::Integer(100),                         // PK col 1 unchanged
                 SqlValue::Varchar(arcstr::ArcStr::from("Bob")), // Changed
-                SqlValue::Integer(50), // Unchanged
+                SqlValue::Integer(50),                          // Unchanged
             ],
         };
 
         // Composite PK: columns 0 and 1
         let diff = compute_column_diff(&old, &new, &[0, 1]).unwrap();
         assert_eq!(diff.changed_columns, vec![2]); // Only column 2 changed
-        // Included columns should be PK (0, 1) + changed (2)
+                                                   // Included columns should be PK (0, 1) + changed (2)
         assert_eq!(diff.included_columns, vec![0, 1, 2]);
     }
 
@@ -1217,9 +1265,9 @@ mod tests {
         assert_eq!(partial.column_mask.len(), 3); // ceil(20/8) = 3 bytes
 
         // Check column presence across bytes
-        assert!(partial.is_column_present(0));  // Byte 0, bit 0
-        assert!(partial.is_column_present(7));  // Byte 0, bit 7
-        assert!(partial.is_column_present(8));  // Byte 1, bit 0
+        assert!(partial.is_column_present(0)); // Byte 0, bit 0
+        assert!(partial.is_column_present(7)); // Byte 0, bit 7
+        assert!(partial.is_column_present(8)); // Byte 1, bit 0
         assert!(partial.is_column_present(15)); // Byte 1, bit 7
         assert!(partial.is_column_present(16)); // Byte 2, bit 0
         assert!(!partial.is_column_present(19)); // Not present

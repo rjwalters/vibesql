@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::{column::ColumnSchema, foreign_key::ForeignKeyConstraint};
-
 /// Storage format for tables
 ///
 /// Tables can be stored in row-oriented (default) or columnar format.
 /// Re-exported from vibesql_ast for convenience.
 pub use vibesql_ast::StorageFormat;
+
+use crate::{column::ColumnSchema, foreign_key::ForeignKeyConstraint};
 
 /// Table schema definition.
 #[derive(Debug, Clone, PartialEq)]

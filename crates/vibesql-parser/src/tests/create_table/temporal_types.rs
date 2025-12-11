@@ -329,7 +329,7 @@ fn test_parse_create_table_datetime() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             match create.columns[0].data_type {
-                vibesql_types::DataType::Timestamp { with_timezone: false } => {} // Success - DATETIME maps to TIMESTAMP
+                vibesql_types::DataType::Timestamp { with_timezone: false } => {} /* Success - DATETIME maps to TIMESTAMP */
                 _ => panic!(
                     "Expected DATETIME to map to TIMESTAMP, got {:?}",
                     create.columns[0].data_type
@@ -389,7 +389,7 @@ fn test_parse_create_table_year() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             match &create.columns[0].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} // Success
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
                 _ => panic!(
                     "Expected YEAR to map to UserDefined type, got {:?}",
                     create.columns[0].data_type
@@ -415,7 +415,7 @@ fn test_parse_create_table_year_with_constraints() {
             // Verify first column: c1 YEAR KEY
             assert_eq!(create.columns[0].name, "c1");
             match &create.columns[0].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} // Success
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
                 _ => panic!(
                     "Expected c1 to be YEAR (UserDefined), got {:?}",
                     create.columns[0].data_type
@@ -425,7 +425,7 @@ fn test_parse_create_table_year_with_constraints() {
             // Verify second column: c2 YEAR NULL (uppercased because not in backticks)
             assert_eq!(create.columns[1].name, "C2");
             match &create.columns[1].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} // Success
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
                 _ => panic!(
                     "Expected c2 to be YEAR (UserDefined), got {:?}",
                     create.columns[1].data_type

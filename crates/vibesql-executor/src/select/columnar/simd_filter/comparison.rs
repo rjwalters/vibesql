@@ -3,11 +3,16 @@
 //! This module provides SIMD-accelerated comparison operations for i64, i32, and f64 columns.
 //! Uses the centralized simd_ops module for consistent, optimized operations.
 
-use super::super::filter::ColumnPredicate;
-use super::super::simd_ops::{self, PackedMask};
-use super::conversion::{value_to_date_i32, value_to_f64, value_to_timestamp_i64};
-use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
+
+use super::{
+    super::{
+        filter::ColumnPredicate,
+        simd_ops::{self, PackedMask},
+    },
+    conversion::{value_to_date_i32, value_to_f64, value_to_timestamp_i64},
+};
+use crate::errors::ExecutorError;
 
 /// Evaluate predicate on i64 column using SIMD
 pub fn evaluate_predicate_i64_simd(

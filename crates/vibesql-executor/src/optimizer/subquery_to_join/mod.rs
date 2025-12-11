@@ -43,10 +43,9 @@ mod exists;
 mod helpers;
 mod in_clause;
 
-use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt};
-
 use exists::try_convert_exists_to_join;
 use in_clause::try_convert_in_to_join;
+use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt};
 
 /// Transform a SELECT statement by converting IN/NOT IN subqueries to semi/anti-joins
 ///
@@ -122,8 +121,9 @@ fn try_extract_subqueries_to_joins(
                     if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
                         // Successfully converted left IN side, keep right side as WHERE clause
                         // Note: We no longer qualify remaining WHERE clause columns because it
-                        // incorrectly qualifies columns from OTHER tables (not the self-join table).
-                        // The subquery's columns have already been rewritten to use the new alias,
+                        // incorrectly qualifies columns from OTHER tables (not the self-join
+                        // table). The subquery's columns have already been
+                        // rewritten to use the new alias,
                         // so column resolution will work correctly during execution.
                         return Some((result.from, Some((**right).clone())));
                     }
@@ -143,7 +143,8 @@ fn try_extract_subqueries_to_joins(
                     if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
                         // Successfully converted right IN side, keep left side as WHERE clause
                         // Note: We no longer qualify remaining WHERE clause columns because it
-                        // incorrectly qualifies columns from OTHER tables (not the self-join table).
+                        // incorrectly qualifies columns from OTHER tables (not the self-join
+                        // table).
                         return Some((result.from, Some((**left).clone())));
                     }
                 }
@@ -189,7 +190,8 @@ fn try_extract_subqueries_to_joins(
             None
         }
 
-        // EXISTS can also be converted (after decorrelation it becomes IN, but handle it directly too)
+        // EXISTS can also be converted (after decorrelation it becomes IN, but handle it directly
+        // too)
         Expression::Exists { subquery, negated } => {
             // Try to convert EXISTS to a semi-join by extracting correlation
             try_convert_exists_to_join(from, subquery, *negated)
@@ -220,7 +222,8 @@ fn try_extract_subqueries_to_joins(
                         }
                     }
                     Expression::Exists { subquery, negated } => {
-                        if let Some((join, _)) = try_convert_exists_to_join(from, subquery, *negated)
+                        if let Some((join, _)) =
+                            try_convert_exists_to_join(from, subquery, *negated)
                         {
                             // Build remaining WHERE from other children
                             let remaining: Vec<_> = children

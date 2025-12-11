@@ -4,8 +4,7 @@
 //! It includes constants for reference data (nations, regions) and a data
 //! generator that produces deterministic pseudo-random data based on scale factor.
 
-use rand::Rng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 pub const NATIONS: &[(&str, usize)] = &[
@@ -146,7 +145,8 @@ pub const TYPE_SYLLABLE3: &[&str] = &["TIN", "NICKEL", "BRASS", "STEEL", "COPPER
 pub fn generate_part_type(part_index: usize) -> String {
     let s1 = TYPE_SYLLABLE1[part_index % TYPE_SYLLABLE1.len()];
     let s2 = TYPE_SYLLABLE2[(part_index / TYPE_SYLLABLE1.len()) % TYPE_SYLLABLE2.len()];
-    let s3 = TYPE_SYLLABLE3[(part_index / (TYPE_SYLLABLE1.len() * TYPE_SYLLABLE2.len())) % TYPE_SYLLABLE3.len()];
+    let s3 = TYPE_SYLLABLE3
+        [(part_index / (TYPE_SYLLABLE1.len() * TYPE_SYLLABLE2.len())) % TYPE_SYLLABLE3.len()];
     format!("{} {} {}", s1, s2, s3)
 }
 pub const CONTAINERS: &[&str] = &[

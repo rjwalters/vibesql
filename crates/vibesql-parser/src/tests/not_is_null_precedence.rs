@@ -4,8 +4,9 @@
 //! This test verifies that `NOT col IS NULL` is parsed as `NOT (col IS NULL)`
 //! and not as `(NOT col) IS NULL`.
 
-use crate::Parser;
 use vibesql_ast::{Expression, UnaryOperator};
+
+use crate::Parser;
 
 #[test]
 fn test_not_is_null_precedence() {

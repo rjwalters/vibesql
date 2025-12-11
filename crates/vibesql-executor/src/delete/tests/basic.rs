@@ -1,10 +1,10 @@
 //! Basic DELETE operation tests
 
-use super::common::setup_users_table_with_active as setup_test_table;
 use vibesql_ast::{BinaryOperator, DeleteStmt, Expression, WhereClause};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
+use super::common::setup_users_table_with_active as setup_test_table;
 use crate::DeleteExecutor;
 
 #[test]
@@ -113,6 +113,8 @@ fn test_delete_multiple_rows() {
 
     let remaining_name = if let SqlValue::Varchar(name) = table.scan()[0].get(1).unwrap() {
         name.clone()
-    } else { arcstr::ArcStr::from("") };
+    } else {
+        arcstr::ArcStr::from("")
+    };
     assert_eq!(remaining_name.as_str(), "Alice");
 }

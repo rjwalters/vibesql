@@ -425,8 +425,8 @@ bench-sysbench-emb-disc-nonindex = 非インデックス列のフルテーブル
 bench-sysbench-emb-disc-deletes = トゥームストーンベースの削除にはクリーンアップオーバーヘッドがあり、コンパクション改善を計画中
 bench-sysbench-emb-disc-duckdb-title = DuckDB比較
 bench-sysbench-emb-disc-duckdb = DuckDBは分析ワークロード向けに最適化されており、マイクロ操作向けではありません。ここでの100-1000倍遅い結果は、単一行レイテンシをバルクスループットと引き換えにするアーキテクチャの選択（列指向ストレージ、ベクトル化実行）を反映しています。VibeSQLは両方のユースケースを対象としています。
-bench-sysbench-emb-disc-architecture-title = Architectural Trade-offs
-bench-sysbench-emb-disc-architecture = VibeSQL's hybrid architecture targets both OLTP and OLAP workloads. Our B-tree storage provides SQLite-competitive point lookup performance, while columnar execution handles analytical queries efficiently. This differs from pure OLAP databases like DuckDB that optimize exclusively for bulk operations at the cost of single-row latency.
+bench-sysbench-emb-disc-architecture-title = アーキテクチャのトレードオフ
+bench-sysbench-emb-disc-architecture = VibeSQLのハイブリッドアーキテクチャは、OLTPとOLAPの両方のワークロードを対象としています。B-treeストレージはSQLiteと同等のポイントルックアップ性能を提供し、列指向実行は分析クエリを効率的に処理します。これは、単一行レイテンシを犠牲にしてバルク操作のみを最適化するDuckDBのような純粋なOLAPデータベースとは異なります。
 
 # Sysbenchサーバー固有
 bench-sysbench-server-name = Sysbench（サーバー）

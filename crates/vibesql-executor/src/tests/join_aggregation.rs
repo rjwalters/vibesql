@@ -59,7 +59,10 @@ fn setup_join_test_data(db: &mut Database) {
 
     db.insert_row(
         "departments",
-        vibesql_storage::Row::new(vec![SqlValue::Integer(3), SqlValue::Varchar(arcstr::ArcStr::from("HR"))]),
+        vibesql_storage::Row::new(vec![
+            SqlValue::Integer(3),
+            SqlValue::Varchar(arcstr::ArcStr::from("HR")),
+        ]),
     )
     .unwrap();
 
@@ -181,6 +184,7 @@ fn test_inner_join_with_group_by_count() {
                     column: "dept_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -288,6 +292,7 @@ fn test_left_join_with_group_by_avg_salary() {
                     column: "dept_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -396,6 +401,7 @@ fn test_join_group_by_with_having() {
                     column: "dept_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,
@@ -516,6 +522,7 @@ fn test_join_group_by_multiple_aggregates() {
                     column: "dept_id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         }),
         where_clause: None,

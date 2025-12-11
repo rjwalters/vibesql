@@ -2,13 +2,12 @@
 
 use std::time::Duration;
 
+// Re-export DialectStats for use by the test suite
+pub use sqllogictest::DialectStats;
 use sqllogictest::Runner;
 use tokio::time::timeout;
 
 use super::{db_adapter::VibeSqlDB, scheduler, stats::TestFailure};
-
-// Re-export DialectStats for use by the test suite
-pub use sqllogictest::DialectStats;
 
 #[derive(Debug)]
 pub enum TestError {
@@ -150,11 +149,12 @@ pub fn run_test_file_with_details(contents: &str, file_name: &str) -> TestFileRe
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
+    use std::env;
+
+    #[allow(unused_imports)]
     use super::*;
     #[allow(unused_imports)]
     use crate::sqllogictest::scheduler::get_test_file_timeout;
-    #[allow(unused_imports)]
-    use std::env;
 
     #[test]
     fn test_timeout_wraps_execution() {

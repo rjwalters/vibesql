@@ -16,12 +16,18 @@ fn test_update_unique_constraint_duplicate() {
     // Insert two users
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))]),
+        Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com"))]),
+        Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")),
+        ]),
     )
     .unwrap();
 
@@ -52,12 +58,18 @@ fn test_update_unique_constraint_to_unique_value() {
     // Insert two users
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))]),
+        Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com"))]),
+        Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")),
+        ]),
     )
     .unwrap();
 
@@ -75,7 +87,10 @@ fn test_update_unique_constraint_to_unique_value() {
     // Verify the update
     let table = db.get_table("users").unwrap();
     let rows: Vec<&Row> = table.scan().iter().collect();
-    assert_eq!(rows[1].get(1).unwrap(), &SqlValue::Varchar(arcstr::ArcStr::from("robert@example.com")));
+    assert_eq!(
+        rows[1].get(1).unwrap(),
+        &SqlValue::Varchar(arcstr::ArcStr::from("robert@example.com"))
+    );
 }
 
 #[test]
@@ -86,12 +101,18 @@ fn test_update_unique_constraint_allows_null() {
     // Insert two users with email
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))]),
+        Row::new(vec![
+            SqlValue::Integer(1),
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")),
+        ]),
     )
     .unwrap();
     db.insert_row(
         "users",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com"))]),
+        Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Varchar(arcstr::ArcStr::from("bob@example.com")),
+        ]),
     )
     .unwrap();
 

@@ -317,17 +317,23 @@ fn test_distinct_false_preserves_duplicates() {
 
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Electronics",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Electronics",
+        ))]),
     )
     .unwrap();
     db.insert_row(
         "products",
-        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books"))]),
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(
+            "Books",
+        ))]),
     )
     .unwrap();
 
@@ -546,6 +552,12 @@ fn test_distinct_with_order_by() {
 
     // Should return 2 unique categories, sorted
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books")));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Books"))
+    );
+    assert_eq!(
+        result[1].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Electronics"))
+    );
 }

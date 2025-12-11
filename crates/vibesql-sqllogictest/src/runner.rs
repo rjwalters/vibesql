@@ -9,29 +9,26 @@
 //! - [`executor`] - Core execution logic and database traits
 //! - [`result_updater`] - Query result updating
 
-// Re-export the main Runner struct
-pub use crate::executor::{default_partitioner, AsyncDB, Partitioner, Runner, DB};
-
-// Re-export error types
-pub use crate::error_handling::{
-    format_column_diff, format_diff, AnyError, ParallelTestError, ParallelTestErrorDisplay,
-    RecordKind, TestError, TestErrorDisplay, TestErrorKind, TestErrorKindDisplay,
+// Re-export the main Runner struct, error types, output types, and result updater
+pub use crate::{
+    error_handling::{
+        format_column_diff, format_diff, AnyError, ParallelTestError, ParallelTestErrorDisplay,
+        RecordKind, TestError, TestErrorDisplay, TestErrorKind, TestErrorKindDisplay,
+    },
+    executor::{default_partitioner, AsyncDB, Partitioner, Runner, DB},
+    output::{
+        default_column_validator, default_normalizer, default_validator, strict_column_validator,
+        ColumnTypeValidator, DBOutput, Normalizer, RecordOutput, Validator,
+    },
+    result_updater::update_record_with_output,
 };
-
-// Re-export output types
-pub use crate::output::{
-    default_column_validator, default_normalizer, default_validator, strict_column_validator,
-    ColumnTypeValidator, DBOutput, Normalizer, RecordOutput, Validator,
-};
-
-// Re-export result updater
-pub use crate::result_updater::update_record_with_output;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::DefaultColumnType;
-    use std::sync::Arc;
 
     #[test]
     fn test_query_replacement_no_changes() {

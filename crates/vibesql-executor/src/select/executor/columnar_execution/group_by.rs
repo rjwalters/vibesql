@@ -3,13 +3,14 @@
 //! This module implements the GROUP BY path for native columnar execution,
 //! using hash-based grouping with SIMD-accelerated aggregation.
 
+use vibesql_ast::Expression;
+
 use super::cse::{expression_depth, find_cached_subexpression, hash_expression};
 use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
     select::{columnar, executor::builder::SelectExecutor},
 };
-use vibesql_ast::Expression;
 
 impl SelectExecutor<'_> {
     /// Execute a GROUP BY query using columnar hash aggregation

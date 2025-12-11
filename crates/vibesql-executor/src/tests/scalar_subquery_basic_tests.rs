@@ -129,7 +129,10 @@ fn test_scalar_subquery_in_where_clause() {
     // Only Charlie (70000) should be returned
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(3));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
+    assert_eq!(
+        result[0].values[1],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))
+    );
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(70000));
 }
 
@@ -257,7 +260,10 @@ fn test_scalar_subquery_in_select_list() {
 
     // Should have 2 rows, each with max_sal = 70000
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+    );
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(50000));
     assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(70000)); // max_sal
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")));

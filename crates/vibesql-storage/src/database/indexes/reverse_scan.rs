@@ -10,11 +10,14 @@
 // when combined with LIMIT pushdown.
 
 use std::ops::Bound;
+
 use vibesql_types::SqlValue;
 
-use super::index_metadata::{acquire_btree_lock, IndexData};
-use super::range_bounds::try_increment_sqlvalue;
-use super::value_normalization::normalize_for_comparison;
+use super::{
+    index_metadata::{acquire_btree_lock, IndexData},
+    range_bounds::try_increment_sqlvalue,
+    value_normalization::normalize_for_comparison,
+};
 
 /// Helper to compute the exclusive upper bound for a prefix scan
 fn compute_prefix_upper_bound(prefix: &[SqlValue]) -> Option<Vec<SqlValue>> {
@@ -282,7 +285,8 @@ impl IndexData {
                 }
             }
             IndexData::IVFFlat { .. } => {
-                // IVFFlat indexes don't support reverse scans with limit - use search() method instead
+                // IVFFlat indexes don't support reverse scans with limit - use search() method
+                // instead
                 vec![]
             }
             IndexData::Hnsw { .. } => {
@@ -299,8 +303,9 @@ impl IndexData {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::BTreeMap;
+
+    use super::*;
 
     /// Helper to create an InMemory IndexData with test data
     fn create_test_index_data(entries: Vec<(Vec<SqlValue>, Vec<usize>)>) -> IndexData {
@@ -309,10 +314,7 @@ mod tests {
             let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
             data.insert(normalized_key, row_indices);
         }
-        IndexData::InMemory {
-            data,
-            pending_deletions: Vec::new(),
-        }
+        IndexData::InMemory { data, pending_deletions: Vec::new() }
     }
 
     // ========================================================================

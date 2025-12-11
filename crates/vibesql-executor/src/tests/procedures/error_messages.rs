@@ -94,8 +94,7 @@ fn test_parameter_count_mismatch_error_message() {
 
 #[test]
 fn test_variable_not_found_error_message() {
-    use crate::procedural::executor::execute_procedural_statement;
-    use crate::procedural::ExecutionContext;
+    use crate::procedural::{executor::execute_procedural_statement, ExecutionContext};
 
     let mut db = setup_test_db();
     let mut ctx = ExecutionContext::new();

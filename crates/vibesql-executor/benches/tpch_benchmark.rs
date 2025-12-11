@@ -24,9 +24,9 @@
 //!
 //! ## Environment Variables
 //!
-//! - `ENGINE_FILTER` - Comma-separated list of engines to run (e.g., "vibesql,sqlite")
-//!   Valid values: vibesql, sqlite, duckdb, mysql (default: vibesql,sqlite,duckdb)
-//!   Note: MySQL is excluded by default (client-server database). Use ENGINE_FILTER=all to include.
+//! - `ENGINE_FILTER` - Comma-separated list of engines to run (e.g., "vibesql,sqlite") Valid
+//!   values: vibesql, sqlite, duckdb, mysql (default: vibesql,sqlite,duckdb) Note: MySQL is
+//!   excluded by default (client-server database). Use ENGINE_FILTER=all to include.
 //! - `WARMUP_ITERATIONS` - Number of warmup runs per query (default: 3)
 //! - `BENCHMARK_ITERATIONS` - Number of timed runs per query (default: 10)
 //! - `BENCHMARK_TIMEOUT_SECS` - Timeout per query (default: 30)
@@ -57,17 +57,14 @@
 mod harness;
 mod tpch;
 
-use harness::{BenchConfig, BenchResult, BenchStats, EngineFilter, Harness};
-use std::env;
-use std::time::{Duration, Instant};
-use tpch::queries::*;
-use tpch::schema::load_vibesql;
-use vibesql_executor::SelectExecutor;
-use vibesql_parser::Parser;
-use vibesql_storage::Database as VibeDB;
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 
 #[cfg(feature = "duckdb")]
 use duckdb::Connection as DuckDBConn;
+use harness::{BenchConfig, BenchResult, BenchStats, EngineFilter, Harness};
 #[cfg(feature = "mysql")]
 use mysql::prelude::*;
 #[cfg(feature = "mysql")]
@@ -80,6 +77,10 @@ use tpch::schema::load_duckdb;
 use tpch::schema::load_mysql;
 #[cfg(feature = "sqlite")]
 use tpch::schema::load_sqlite;
+use tpch::{queries::*, schema::load_vibesql};
+use vibesql_executor::SelectExecutor;
+use vibesql_parser::Parser;
+use vibesql_storage::Database as VibeDB;
 
 /// All available TPC-H queries (standard SQL with EXTRACT)
 const ALL_QUERIES: &[(&str, &str)] = &[
@@ -152,9 +153,9 @@ fn get_query_filter() -> Option<Vec<String>> {
     }
 
     // Fall back to environment variable
-    env::var("QUERY_FILTER").ok().map(|s| {
-        s.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect()
-    })
+    env::var("QUERY_FILTER")
+        .ok()
+        .map(|s| s.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect())
 }
 
 /// Get queries to run based on filter

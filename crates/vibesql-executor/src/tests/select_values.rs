@@ -97,22 +97,13 @@ fn test_values_multiple_rows() {
     assert_eq!(result.len(), 3, "Expected 3 rows");
 
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(
-        result[0].values[1],
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("a"))
-    );
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("a")));
 
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
-    assert_eq!(
-        result[1].values[1],
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b"))
-    );
+    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("b")));
 
     assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(3));
-    assert_eq!(
-        result[2].values[1],
-        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("c"))
-    );
+    assert_eq!(result[2].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("c")));
 }
 
 /// Test VALUES with column aliases

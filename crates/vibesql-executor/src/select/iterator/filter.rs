@@ -1,10 +1,9 @@
 //! Filter iterator implementation
 
+use super::RowIterator;
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
 };
-
-use super::RowIterator;
 
 /// Iterator that filters rows based on a predicate expression
 ///

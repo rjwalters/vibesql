@@ -15,8 +15,7 @@ use vibesql_ast::{
 use vibesql_catalog::{
     ColumnSchema, ForeignKeyConstraint, ReferentialAction, TableSchema, TriggerDefinition,
 };
-use vibesql_executor::errors::ExecutorError;
-use vibesql_executor::{CreateTableExecutor, TruncateTableExecutor};
+use vibesql_executor::{errors::ExecutorError, CreateTableExecutor, TruncateTableExecutor};
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
@@ -305,7 +304,10 @@ fn test_truncate_allowed_with_insert_trigger() {
     for i in 0..10 {
         db.insert_row(
             "insert_triggered",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data{}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -459,7 +461,10 @@ fn test_truncate_allowed_no_fk_references() {
     for i in 0..100 {
         db.insert_row(
             "standalone",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data{}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -571,7 +576,10 @@ fn test_truncate_clears_all_data() {
     for i in 0..1000 {
         db.insert_row(
             "large_table",
-            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i)))]),
+            Row::new(vec![
+                SqlValue::Integer(i),
+                SqlValue::Varchar(arcstr::ArcStr::from(format!("data_{}", i))),
+            ]),
         )
         .unwrap();
     }
@@ -613,7 +621,10 @@ fn test_truncate_returns_correct_row_count() {
         for i in 0..count {
             db.insert_row(
                 "count_test",
-                Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(format!("row_{}", i)))]),
+                Row::new(vec![
+                    SqlValue::Integer(i),
+                    SqlValue::Varchar(arcstr::ArcStr::from(format!("row_{}", i))),
+                ]),
             )
             .unwrap();
         }

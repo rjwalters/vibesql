@@ -281,11 +281,8 @@ impl ToSql for Expression {
                 let op_sql = op.to_sql();
 
                 // Add parentheses for nested binary ops to ensure correct precedence
-                let left_str = if needs_parens(left, op, true) {
-                    format!("({})", left_sql)
-                } else {
-                    left_sql
-                };
+                let left_str =
+                    if needs_parens(left, op, true) { format!("({})", left_sql) } else { left_sql };
                 let right_str = if needs_parens(right, op, false) {
                     format!("({})", right_sql)
                 } else {
@@ -844,7 +841,7 @@ impl ToSql for FromClause {
                 }
                 result
             }
-            FromClause::Join { left, right, join_type, condition, natural } => {
+            FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
                 let mut result = left.to_sql();
 
                 if *natural {
@@ -855,6 +852,10 @@ impl ToSql for FromClause {
 
                 if let Some(cond) = condition {
                     result.push_str(&format!(" ON {}", cond.to_sql()));
+                }
+
+                if let Some(cols) = using_columns {
+                    result.push_str(&format!(" USING ({})", cols.join(", ")));
                 }
 
                 result
@@ -1052,10 +1053,8 @@ mod tests {
         let expr = Expression::ColumnRef { table: None, column: "id".to_string() };
         assert_eq!(expr.to_sql(), "id");
 
-        let expr = Expression::ColumnRef {
-            table: Some("users".to_string()),
-            column: "name".to_string(),
-        };
+        let expr =
+            Expression::ColumnRef { table: Some("users".to_string()), column: "name".to_string() };
         assert_eq!(expr.to_sql(), "users.name");
     }
 
@@ -1188,13 +1187,11 @@ mod tests {
                     column: "id".to_string(),
                 }),
             }),
+            using_columns: None,
             natural: false,
         };
 
-        assert_eq!(
-            from.to_sql(),
-            "orders AS o INNER JOIN customers AS c ON o.customer_id = c.id"
-        );
+        assert_eq!(from.to_sql(), "orders AS o INNER JOIN customers AS c ON o.customer_id = c.id");
     }
 
     #[test]
@@ -1219,7 +1216,9 @@ mod tests {
                 }],
                 result: Expression::Literal(SqlValue::Varchar("positive".into())),
             }],
-            else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar("non-positive".into())))),
+            else_result: Some(Box::new(Expression::Literal(SqlValue::Varchar(
+                "non-positive".into(),
+            )))),
         };
         assert_eq!(expr.to_sql(), "CASE WHEN x > 0 THEN 'positive' ELSE 'non-positive' END");
     }
@@ -1281,9 +1280,6 @@ mod tests {
                 frame: None,
             },
         };
-        assert_eq!(
-            expr.to_sql(),
-            "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)"
-        );
+        assert_eq!(expr.to_sql(), "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)");
     }
 }

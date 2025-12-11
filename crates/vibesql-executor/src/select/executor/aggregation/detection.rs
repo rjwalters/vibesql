@@ -80,8 +80,8 @@ impl SelectExecutor<'_> {
             vibesql_ast::Expression::QuantifiedComparison { expr, .. } => {
                 self.expression_has_aggregate(expr)
             }
-            // Scalar subquery and EXISTS: subqueries can contain aggregates, but we don't check inside them
-            // The aggregates inside subqueries are in their own scope
+            // Scalar subquery and EXISTS: subqueries can contain aggregates, but we don't check
+            // inside them The aggregates inside subqueries are in their own scope
             vibesql_ast::Expression::ScalarSubquery(_) | vibesql_ast::Expression::Exists { .. } => {
                 false
             }
@@ -89,7 +89,8 @@ impl SelectExecutor<'_> {
             vibesql_ast::Expression::WindowFunction { .. } => false,
             // DuplicateKeyValue references a column from INSERT VALUES
             vibesql_ast::Expression::DuplicateKeyValue { .. } => false,
-            // Literals, column refs, wildcards, current date/time, defaults, sequences, etc. don't contain aggregates
+            // Literals, column refs, wildcards, current date/time, defaults, sequences, etc. don't
+            // contain aggregates
             _ => false,
         }
     }

@@ -8,15 +8,17 @@ use std::collections::HashMap;
 
 use vibesql_ast::Expression;
 
+use super::{
+    table_refs::{extract_referenced_tables_branch, flatten_conjuncts},
+    PredicateDecomposition,
+};
 use crate::schema::CombinedSchema;
-
-use super::table_refs::{extract_referenced_tables_branch, flatten_conjuncts};
-use super::PredicateDecomposition;
 
 /// Extract implied single-table filters from complex OR predicates
 ///
 /// For predicates like:
-///   (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
+///   (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name =
+/// 'FRANCE')
 ///
 /// We can extract implied filters:
 ///   n1.n_name IN ('FRANCE', 'GERMANY')

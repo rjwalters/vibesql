@@ -14,22 +14,19 @@ mod expression;
 mod functions;
 mod group_by;
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
+// Re-export public types and functions to maintain API compatibility
+pub use expression::{
+    evaluate_expression_to_column, evaluate_expression_with_cached_column, extract_aggregates,
+};
+pub use group_by::columnar_group_by;
+// SIMD-accelerated GROUP BY for ColumnarBatch - used in native columnar execution path
+pub use group_by::columnar_group_by_batch;
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::batch::ColumnarBatch;
-use super::scan::ColumnarScan;
-
-// Re-export public types and functions to maintain API compatibility
-pub use expression::evaluate_expression_to_column;
-pub use expression::evaluate_expression_with_cached_column;
-pub use expression::extract_aggregates;
-pub use group_by::columnar_group_by;
-// SIMD-accelerated GROUP BY for ColumnarBatch - used in native columnar execution path
-pub use group_by::columnar_group_by_batch;
+use super::{batch::ColumnarBatch, scan::ColumnarScan};
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Aggregate operation type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,9 +281,10 @@ mod tests {
 
     #[test]
     fn test_extract_aggregates_simple() {
-        use crate::schema::CombinedSchema;
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
+        use crate::schema::CombinedSchema;
 
         // Create a simple schema with two columns
         let schema = TableSchema::new(
@@ -353,9 +351,10 @@ mod tests {
 
     #[test]
     fn test_extract_aggregates_unsupported() {
-        use crate::schema::CombinedSchema;
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
+        use crate::schema::CombinedSchema;
 
         let schema = TableSchema::new(
             "test".to_string(),
@@ -407,9 +406,10 @@ mod tests {
 
     #[test]
     fn test_extract_aggregates_with_expression() {
-        use crate::schema::CombinedSchema;
         use vibesql_catalog::{ColumnSchema, TableSchema};
         use vibesql_types::DataType;
+
+        use crate::schema::CombinedSchema;
 
         // Create a simple schema with two columns
         let schema = TableSchema::new(
@@ -655,8 +655,9 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         // Find the groups
-        let a_group =
-            result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Varchar(s)) if s.as_str() == "A"));
+        let a_group = result
+            .iter()
+            .find(|r| matches!(r.get(0), Some(SqlValue::Varchar(s)) if s.as_str() == "A"));
         let null_group = result.iter().find(|r| matches!(r.get(0), Some(SqlValue::Null)));
 
         assert!(a_group.is_some());

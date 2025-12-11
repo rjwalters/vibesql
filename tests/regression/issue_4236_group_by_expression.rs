@@ -45,32 +45,16 @@ fn create_test_table(db: &mut Database) {
     let table = db.get_table_mut("TAB1").unwrap();
     // Insert test data: col1 values are 4, 57, 6, 44
     table
-        .insert(Row::new(vec![
-            SqlValue::Integer(0),
-            SqlValue::Integer(4),
-            SqlValue::Integer(3),
-        ]))
+        .insert(Row::new(vec![SqlValue::Integer(0), SqlValue::Integer(4), SqlValue::Integer(3)]))
         .unwrap();
     table
-        .insert(Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Integer(57),
-            SqlValue::Integer(6),
-        ]))
+        .insert(Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(57), SqlValue::Integer(6)]))
         .unwrap();
     table
-        .insert(Row::new(vec![
-            SqlValue::Integer(2),
-            SqlValue::Integer(6),
-            SqlValue::Integer(89),
-        ]))
+        .insert(Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(6), SqlValue::Integer(89)]))
         .unwrap();
     table
-        .insert(Row::new(vec![
-            SqlValue::Integer(3),
-            SqlValue::Integer(44),
-            SqlValue::Integer(11),
-        ]))
+        .insert(Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(44), SqlValue::Integer(11)]))
         .unwrap();
 }
 
@@ -111,8 +95,7 @@ fn test_group_by_with_unary_operators() {
     let mut db = Database::new();
     create_test_table(&mut db);
 
-    let rows =
-        select_rows(&db, "SELECT - + col1 * - 11 AS col2, COUNT(*) FROM tab1 GROUP BY col1");
+    let rows = select_rows(&db, "SELECT - + col1 * - 11 AS col2, COUNT(*) FROM tab1 GROUP BY col1");
 
     assert_eq!(rows.len(), 4, "Should return 4 groups");
 
@@ -138,8 +121,7 @@ fn test_group_by_column_selected_alongside_expression() {
     let mut db = Database::new();
     create_test_table(&mut db);
 
-    let rows =
-        select_rows(&db, "SELECT col1, col1 * 11 AS col2, COUNT(*) FROM tab1 GROUP BY col1");
+    let rows = select_rows(&db, "SELECT col1, col1 * 11 AS col2, COUNT(*) FROM tab1 GROUP BY col1");
 
     assert_eq!(rows.len(), 4, "Should return 4 groups");
 

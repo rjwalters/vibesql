@@ -30,16 +30,22 @@
 // Only operations from committed transactions are applied. Operations from
 // uncommitted transactions (those without TxnCommit before crash) are ignored.
 
-use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::BufReader,
+    path::{Path, PathBuf},
+};
 
-use crate::persistence::binary::{read_catalog_v, read_data, read_header};
-use crate::wal::checkpoint::{read_checkpoint_data, CheckpointInfo, CheckpointWriter};
-use crate::wal::entry::{Lsn, WalOp};
-use crate::wal::reader::{ReadResult, WalReader};
-use crate::{Database, StorageError};
+use crate::{
+    persistence::binary::{read_catalog_v, read_data, read_header},
+    wal::{
+        checkpoint::{read_checkpoint_data, CheckpointInfo, CheckpointWriter},
+        entry::{Lsn, WalOp},
+        reader::{ReadResult, WalReader},
+    },
+    Database, StorageError,
+};
 
 /// Recovery configuration options
 #[derive(Debug, Clone)]
@@ -194,11 +200,7 @@ impl RecoveryManager {
 
     /// Create with custom configuration
     pub fn with_config<P: AsRef<Path>>(checkpoint_dir: P, config: RecoveryConfig) -> Self {
-        Self {
-            config,
-            checkpoint_dir: checkpoint_dir.as_ref().to_path_buf(),
-            wal_path: None,
-        }
+        Self { config, checkpoint_dir: checkpoint_dir.as_ref().to_path_buf(), wal_path: None }
     }
 
     /// Set the WAL file path
@@ -226,7 +228,10 @@ impl RecoveryManager {
     }
 
     /// Find and load the latest valid checkpoint
-    fn load_latest_checkpoint(&self, stats: &mut RecoveryStats) -> Result<(Database, Lsn), StorageError> {
+    fn load_latest_checkpoint(
+        &self,
+        stats: &mut RecoveryStats,
+    ) -> Result<(Database, Lsn), StorageError> {
         // List all checkpoints
         let checkpoints = self.list_checkpoints()?;
 
@@ -364,7 +369,10 @@ impl RecoveryManager {
 
                     // Progress callback
                     if stats.entries_replayed.is_multiple_of(self.config.progress_interval as u64) {
-                        log::debug!("Recovery progress: {} entries replayed", stats.entries_replayed);
+                        log::debug!(
+                            "Recovery progress: {} entries replayed",
+                            stats.entries_replayed
+                        );
                     }
                 }
                 ReadResult::Eof => {
@@ -375,7 +383,10 @@ impl RecoveryManager {
                     stats.corruption_position = Some(position);
 
                     if self.config.stop_on_corruption {
-                        log::warn!("WAL corruption detected at position {}, stopping replay", position);
+                        log::warn!(
+                            "WAL corruption detected at position {}, stopping replay",
+                            position
+                        );
                         break;
                     } else {
                         log::warn!(
@@ -424,9 +435,10 @@ impl RecoveryManager {
         match op {
             WalOp::Insert { table_id: _, row_id: _, values } => {
                 // For recovery, we need to determine the table name from the table_id
-                // This is a simplified approach - in practice we'd maintain a table_id -> name mapping
-                // For now, we'll use a different approach: replay through the existing database APIs
-                // Since the table should already exist (created during checkpoint or earlier WAL replay)
+                // This is a simplified approach - in practice we'd maintain a table_id -> name
+                // mapping For now, we'll use a different approach: replay through
+                // the existing database APIs Since the table should already exist
+                // (created during checkpoint or earlier WAL replay)
 
                 // Note: This is a simplified implementation. A full implementation would:
                 // 1. Maintain a table_id -> table_name mapping during recovery
@@ -451,7 +463,11 @@ impl RecoveryManager {
                     Ok(schema) => {
                         if db.get_table(&table_name).is_none() {
                             if let Err(e) = db.create_table(schema) {
-                                log::warn!("Failed to create table {} during recovery: {}", table_name, e);
+                                log::warn!(
+                                    "Failed to create table {} during recovery: {}",
+                                    table_name,
+                                    e
+                                );
                             } else {
                                 stats.tables_created += 1;
                             }
@@ -467,7 +483,13 @@ impl RecoveryManager {
                     log::warn!("Failed to drop table {} during recovery: {}", table_name, e);
                 }
             }
-            WalOp::CreateIndex { index_id: _, index_name, table_id: _, column_indices, is_unique } => {
+            WalOp::CreateIndex {
+                index_id: _,
+                index_name,
+                table_id: _,
+                column_indices,
+                is_unique,
+            } => {
                 // Index creation during recovery
                 // For now, just log - full implementation would need table name resolution
                 log::trace!(
@@ -499,10 +521,9 @@ fn deserialize_table_schema(data: &[u8]) -> Result<vibesql_catalog::TableSchema,
     let mut pos = 0;
 
     // Read table name (null-terminated)
-    let name_end = data[pos..]
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| StorageError::IoError("Invalid schema data: missing table name".to_string()))?;
+    let name_end = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
+        StorageError::IoError("Invalid schema data: missing table name".to_string())
+    })?;
     let table_name = String::from_utf8(data[pos..pos + name_end].to_vec())
         .map_err(|e| StorageError::IoError(format!("Invalid UTF-8 in table name: {}", e)))?;
     pos += name_end + 1;
@@ -511,26 +532,25 @@ fn deserialize_table_schema(data: &[u8]) -> Result<vibesql_catalog::TableSchema,
     if pos + 4 > data.len() {
         return Err(StorageError::IoError("Invalid schema data: missing column count".to_string()));
     }
-    let column_count = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+    let column_count =
+        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
     pos += 4;
 
     // Read columns
     let mut columns = Vec::with_capacity(column_count);
     for _ in 0..column_count {
         // Column name (null-terminated)
-        let name_end = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| StorageError::IoError("Invalid schema data: missing column name".to_string()))?;
+        let name_end = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
+            StorageError::IoError("Invalid schema data: missing column name".to_string())
+        })?;
         let column_name = String::from_utf8(data[pos..pos + name_end].to_vec())
             .map_err(|e| StorageError::IoError(format!("Invalid UTF-8 in column name: {}", e)))?;
         pos += name_end + 1;
 
         // Data type (null-terminated string representation)
-        let type_end = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| StorageError::IoError("Invalid schema data: missing data type".to_string()))?;
+        let type_end = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
+            StorageError::IoError("Invalid schema data: missing data type".to_string())
+        })?;
         let type_str = String::from_utf8(data[pos..pos + type_end].to_vec())
             .map_err(|e| StorageError::IoError(format!("Invalid UTF-8 in data type: {}", e)))?;
         pos += type_end + 1;
@@ -540,7 +560,9 @@ fn deserialize_table_schema(data: &[u8]) -> Result<vibesql_catalog::TableSchema,
 
         // Nullable flag
         if pos >= data.len() {
-            return Err(StorageError::IoError("Invalid schema data: missing nullable flag".to_string()));
+            return Err(StorageError::IoError(
+                "Invalid schema data: missing nullable flag".to_string(),
+            ));
         }
         let nullable = data[pos] != 0;
         pos += 1;
@@ -766,11 +788,18 @@ pub fn recover<P: AsRef<Path>>(
 ///
 /// Returns true if there are checkpoint files or a WAL file that could be used
 /// to recover database state.
-pub fn needs_recovery<P1: AsRef<Path>, P2: AsRef<Path>>(checkpoint_dir: P1, wal_path: Option<P2>) -> bool {
+pub fn needs_recovery<P1: AsRef<Path>, P2: AsRef<Path>>(
+    checkpoint_dir: P1,
+    wal_path: Option<P2>,
+) -> bool {
     let checkpoint_dir = checkpoint_dir.as_ref();
     let has_checkpoints = checkpoint_dir.exists()
         && fs::read_dir(checkpoint_dir)
-            .map(|entries| entries.filter_map(Result::ok).any(|e| e.path().extension().is_some_and(|ext| ext == "vchk")))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "vchk"))
+            })
             .unwrap_or(false);
 
     let has_wal = wal_path.is_some_and(|p| p.as_ref().exists());
@@ -780,12 +809,13 @@ pub fn needs_recovery<P1: AsRef<Path>, P2: AsRef<Path>>(checkpoint_dir: P1, wal_
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
     use tempfile::TempDir;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::{DataType, SqlValue};
 
+    use super::*;
     use crate::wal::checkpoint::CheckpointWriter;
 
     #[test]
@@ -820,11 +850,11 @@ mod tests {
         assert!(tracker.is_in_flight(1));
 
         // Buffer some operations
-        tracker.buffer_op(1, 10, WalOp::Insert {
-            table_id: 1,
-            row_id: 0,
-            values: vec![SqlValue::Integer(42)],
-        });
+        tracker.buffer_op(
+            1,
+            10,
+            WalOp::Insert { table_id: 1, row_id: 0, values: vec![SqlValue::Integer(42)] },
+        );
 
         // Commit
         let ops = tracker.commit_transaction(1);
@@ -837,11 +867,11 @@ mod tests {
         let mut tracker = TransactionTracker::new();
 
         tracker.begin_transaction(1);
-        tracker.buffer_op(1, 10, WalOp::Insert {
-            table_id: 1,
-            row_id: 0,
-            values: vec![SqlValue::Integer(42)],
-        });
+        tracker.buffer_op(
+            1,
+            10,
+            WalOp::Insert { table_id: 1, row_id: 0, values: vec![SqlValue::Integer(42)] },
+        );
 
         // Rollback discards operations
         tracker.rollback_transaction(1);
@@ -869,7 +899,11 @@ mod tests {
             "test".to_string(),
             vec![
                 ColumnSchema::new("id".to_string(), DataType::Integer, false),
-                ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, true),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    true,
+                ),
             ],
         );
 

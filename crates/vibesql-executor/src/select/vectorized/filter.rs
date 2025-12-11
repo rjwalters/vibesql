@@ -2,19 +2,23 @@
 //!
 //! Simplified implementation using Arrow 53 scalar comparison API
 
-use crate::errors::ExecutorError;
-use arrow::array::{
-    Array, ArrayRef, BooleanArray, Date32Array, Float64Array, Int64Array, Scalar, StringArray,
-    TimestampMicrosecondArray,
+use arrow::{
+    array::{
+        Array, ArrayRef, BooleanArray, Date32Array, Float64Array, Int64Array, Scalar, StringArray,
+        TimestampMicrosecondArray,
+    },
+    compute::{
+        and_kleene as and_op, filter_record_batch,
+        kernels::cmp::{eq, gt, gt_eq, lt, lt_eq, neq},
+        like, not as not_op, or_kleene as or_op,
+    },
+    datatypes::TimeUnit,
+    record_batch::RecordBatch,
 };
-use arrow::compute::kernels::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
-use arrow::compute::{
-    and_kleene as and_op, filter_record_batch, like, not as not_op, or_kleene as or_op,
-};
-use arrow::datatypes::TimeUnit;
-use arrow::record_batch::RecordBatch;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// Apply WHERE clause filter to a RecordBatch using SIMD operations
 pub fn filter_record_batch_simd(
@@ -624,9 +628,11 @@ fn evaluate_like_simd(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
+
+    use arrow::datatypes::{DataType, Field, Schema};
+
+    use super::*;
 
     #[test]
     fn test_simd_filter_int64_gt() {

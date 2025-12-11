@@ -21,6 +21,7 @@
 
 #[cfg(test)]
 use std::collections::HashMap;
+
 use vibesql_ast::{
     DeleteStmt, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet, InsertSource,
     InsertStmt, MixedGroupingItem, SelectItem, SelectStmt, Statement, UpdateStmt, WhereClause,
@@ -814,8 +815,9 @@ fn bind_frame_bound_named_mut(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::InsertSource;
+
+    use super::*;
 
     #[test]
     fn test_bind_expression_mut_placeholder() {
@@ -879,7 +881,10 @@ mod tests {
         if let Statement::Insert(insert) = stmt {
             if let InsertSource::Values(rows) = &insert.source {
                 assert_eq!(rows[0][0], Expression::Literal(SqlValue::Integer(1)));
-                assert_eq!(rows[0][1], Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))));
+                assert_eq!(
+                    rows[0][1],
+                    Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice")))
+                );
             } else {
                 panic!("Expected VALUES insert source");
             }
@@ -944,7 +949,7 @@ mod tests {
 
         let mut stmt = stmt.clone();
         let params = vec![
-            SqlValue::Integer(42),                // $1
+            SqlValue::Integer(42),                          // $1
             SqlValue::Varchar(arcstr::ArcStr::from("Bob")), // $2
         ];
         bind_statement_mut(&mut stmt, &params);

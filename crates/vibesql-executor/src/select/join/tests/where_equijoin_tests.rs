@@ -4,9 +4,10 @@
 //! during join execution (not post-join filtering), preventing massive intermediate
 //! result materialization.
 
-use crate::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
+
+use crate::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 
 /// Helper to execute SQL and handle statements
 fn exec_sql(db: &mut Database, sql: &str) {

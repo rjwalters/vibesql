@@ -1,11 +1,13 @@
 //! Test helpers and utilities for iterator tests
 
-use super::*;
-use crate::evaluator::CombinedExpressionEvaluator;
-use crate::select::iterator::join::LazyNestedLoopJoin;
-use crate::select::iterator::projection::ProjectionIterator;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
+
+use super::*;
+use crate::{
+    evaluator::CombinedExpressionEvaluator,
+    select::iterator::{join::LazyNestedLoopJoin, projection::ProjectionIterator},
+};
 
 /// Helper to create a simple schema for testing
 pub(crate) fn test_schema() -> CombinedSchema {

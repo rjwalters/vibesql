@@ -4,11 +4,11 @@
 //! expressions we support in columnar aggregates (column references and
 //! binary operations).
 
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
+
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Evaluate a simple arithmetic expression for a single row
 ///

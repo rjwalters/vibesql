@@ -1,7 +1,6 @@
 // Integration tests for database file persistence
 
-use std::fs;
-use std::process::Command;
+use std::{fs, process::Command};
 
 /// Get the path to the vibesql binary.
 /// Uses CARGO_BIN_EXE_vibesql which is set by cargo during test compilation,

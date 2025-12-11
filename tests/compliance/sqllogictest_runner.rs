@@ -718,7 +718,8 @@ SELECT COUNT(*) FROM test_table
 }
 
 // Test for benchmarking: Run a test file from environment variable
-// Usage: SQLLOGICTEST_FILE=path/to/file.test cargo test -p vibesql --test sqllogictest_runner run_single_test_file
+// Usage: SQLLOGICTEST_FILE=path/to/file.test cargo test -p vibesql --test sqllogictest_runner
+// run_single_test_file
 #[tokio::test]
 async fn run_single_test_file() {
     use std::path::Path;
@@ -749,7 +750,8 @@ async fn run_single_test_file() {
 
     let mut tester = sqllogictest::Runner::new(|| async { Ok(VibeSqlDB::new()) });
 
-    // Set hash threshold to 8 (SQLLogicTest default) - results with more than 8 values will be hashed
+    // Set hash threshold to 8 (SQLLogicTest default) - results with more than 8 values will be
+    // hashed
     tester.with_hash_threshold(8);
 
     // Add "mysql" label for skipif/onlyif directives

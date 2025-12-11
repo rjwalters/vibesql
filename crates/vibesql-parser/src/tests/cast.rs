@@ -28,7 +28,7 @@ fn test_parse_cast_integer_to_varchar() {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
-                                vibesql_types::DataType::Varchar { max_length: Some(10) } => {} // Success
+                                vibesql_types::DataType::Varchar { max_length: Some(10) } => {} /* Success */
                                 _ => panic!("Expected VARCHAR(10), got {:?}", data_type),
                             }
                         }
@@ -109,7 +109,8 @@ fn test_parse_cast_to_unsigned() {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
-                                vibesql_types::DataType::Unsigned => {} // UNSIGNED maps to Unsigned
+                                vibesql_types::DataType::Unsigned => {} /* UNSIGNED maps to */
+                                // Unsigned
                                 _ => panic!("Expected UNSIGNED, got {:?}", data_type),
                             }
                         }

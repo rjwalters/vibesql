@@ -11,9 +11,10 @@
 //! For simple predicates in OLTP workloads (e.g., TPC-C), this can provide
 //! 10-50x improvement in predicate evaluation throughput.
 
-use crate::schema::CombinedSchema;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
+
+use crate::schema::CombinedSchema;
 
 /// A compiled predicate that can be evaluated efficiently without expression traversal
 #[derive(Debug)]
@@ -656,10 +657,11 @@ impl CompiledPredicate {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     fn create_test_schema() -> CombinedSchema {
         let columns = vec![
@@ -706,13 +708,17 @@ mod tests {
         let compiled = CompiledPredicate::compile(&expr, &schema);
 
         // Test matching row
-        let row =
-            Row::from_vec(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
+        let row = Row::from_vec(vec![
+            SqlValue::Integer(42),
+            SqlValue::Varchar(arcstr::ArcStr::from("test")),
+        ]);
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test non-matching row
-        let row =
-            Row::from_vec(vec![SqlValue::Integer(99), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
+        let row = Row::from_vec(vec![
+            SqlValue::Integer(99),
+            SqlValue::Varchar(arcstr::ArcStr::from("test")),
+        ]);
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 
@@ -737,17 +743,24 @@ mod tests {
         assert!(compiled.is_fully_compiled());
 
         // Test row that matches both conditions
-        let row =
-            Row::from_vec(vec![SqlValue::Integer(50), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
+        let row = Row::from_vec(vec![
+            SqlValue::Integer(50),
+            SqlValue::Varchar(arcstr::ArcStr::from("test")),
+        ]);
         assert_eq!(compiled.evaluate(&row), Some(true));
 
         // Test row that fails first condition
-        let row = Row::from_vec(vec![SqlValue::Integer(5), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
+        let row = Row::from_vec(vec![
+            SqlValue::Integer(5),
+            SqlValue::Varchar(arcstr::ArcStr::from("test")),
+        ]);
         assert_eq!(compiled.evaluate(&row), Some(false));
 
         // Test row that fails second condition
-        let row =
-            Row::from_vec(vec![SqlValue::Integer(150), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
+        let row = Row::from_vec(vec![
+            SqlValue::Integer(150),
+            SqlValue::Varchar(arcstr::ArcStr::from("test")),
+        ]);
         assert_eq!(compiled.evaluate(&row), Some(false));
     }
 

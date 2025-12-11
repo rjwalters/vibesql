@@ -9,9 +9,13 @@ use super::operator_test_utils::*;
 fn test_string_concat_basic() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("Hello"),
+        ))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(" World")))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(" World"),
+        ))),
     };
     assert_expression_result(
         &db,
@@ -24,18 +28,28 @@ fn test_string_concat_basic() {
 fn test_string_concat_empty() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("Hello"),
+        ))),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from(""),
+        ))),
     };
-    assert_expression_result(&db, expr, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")));
+    assert_expression_result(
+        &db,
+        expr,
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")),
+    );
 }
 
 #[test]
 fn test_string_concat_null() {
     let db = vibesql_storage::Database::new();
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Hello")))),
+        left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("Hello"),
+        ))),
         op: vibesql_ast::BinaryOperator::Concat,
         right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
     };
@@ -65,10 +79,14 @@ fn test_string_concat_multiple() {
                 )),
             }),
             op: vibesql_ast::BinaryOperator::Concat,
-            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(" ")))),
+            right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from(" "),
+            ))),
         }),
         op: vibesql_ast::BinaryOperator::Concat,
-        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("World")))),
+        right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+            arcstr::ArcStr::from("World"),
+        ))),
     };
 
     assert_expression_result(

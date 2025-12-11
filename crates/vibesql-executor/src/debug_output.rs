@@ -28,8 +28,10 @@
 //! - `dml` - DML operation timing (insert, update, delete)
 //! - `profile` - General profiling output
 
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::atomic::{AtomicU8, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 /// Output format for debug messages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -53,10 +55,7 @@ pub fn init() {
             "json" => DEBUG_FORMAT.store(1, Ordering::Relaxed),
             "text" | "" => DEBUG_FORMAT.store(0, Ordering::Relaxed),
             _ => {
-                eprintln!(
-                    "[WARNING] Unknown VIBESQL_DEBUG_FORMAT='{}', using 'text'",
-                    format
-                );
+                eprintln!("[WARNING] Unknown VIBESQL_DEBUG_FORMAT='{}', using 'text'", format);
                 DEBUG_FORMAT.store(0, Ordering::Relaxed);
             }
         }
@@ -123,11 +122,8 @@ fn iso_timestamp() -> String {
     let mut remaining_days = days_since_epoch as i64;
 
     loop {
-        let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
-            366
-        } else {
-            365
-        };
+        let days_in_year =
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
         if remaining_days < days_in_year {
             break;
         }
@@ -230,13 +226,7 @@ impl JsonValue {
 impl DebugEvent {
     /// Create a new debug event
     pub fn new(category: Category, event: &'static str, tag: &'static str) -> Self {
-        Self {
-            category,
-            event,
-            tag,
-            text_parts: Vec::new(),
-            json_fields: Vec::new(),
-        }
+        Self { category, event, tag, text_parts: Vec::new(), json_fields: Vec::new() }
     }
 
     /// Add a text message (for human-readable output)
@@ -278,18 +268,12 @@ impl DebugEvent {
 
     /// Add duration in milliseconds (as float)
     pub fn field_duration_ms(self, name: impl Into<String>, duration: std::time::Duration) -> Self {
-        self.field(
-            name,
-            JsonValue::Number(duration.as_secs_f64() * 1000.0),
-        )
+        self.field(name, JsonValue::Number(duration.as_secs_f64() * 1000.0))
     }
 
     /// Add a string array field
     pub fn field_str_array(self, name: impl Into<String>, values: &[String]) -> Self {
-        let arr: Vec<JsonValue> = values
-            .iter()
-            .map(|s| JsonValue::String(s.clone()))
-            .collect();
+        let arr: Vec<JsonValue> = values.iter().map(|s| JsonValue::String(s.clone())).collect();
         self.field(name, JsonValue::Array(arr))
     }
 
@@ -306,14 +290,8 @@ impl DebugEvent {
                 let timestamp = iso_timestamp();
                 let mut fields = vec![
                     ("timestamp".to_string(), JsonValue::String(timestamp)),
-                    (
-                        "category".to_string(),
-                        JsonValue::String(self.category.as_str().to_string()),
-                    ),
-                    (
-                        "event".to_string(),
-                        JsonValue::String(self.event.to_string()),
-                    ),
+                    ("category".to_string(), JsonValue::String(self.category.as_str().to_string())),
+                    ("event".to_string(), JsonValue::String(self.event.to_string())),
                 ];
 
                 // Add data object with all custom fields

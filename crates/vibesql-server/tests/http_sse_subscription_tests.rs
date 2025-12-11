@@ -485,10 +485,7 @@ async fn test_sse_selective_updates_disabled() {
         client
             .get(&http_url)
             .header("X-Database-Name", "testdb")
-            .query(&[
-                ("query", "SELECT * FROM selective_test"),
-                ("selective_enabled", "false"),
-            ])
+            .query(&[("query", "SELECT * FROM selective_test"), ("selective_enabled", "false")])
             .timeout(Duration::from_secs(1))
             .send(),
     )
@@ -503,8 +500,7 @@ async fn test_sse_selective_updates_disabled() {
                 for line in body.lines() {
                     if let Some((field, value)) = parse_sse_event(line) {
                         if field == "data" {
-                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value)
-                            {
+                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
                                 if let Some("initial") = event.get("type").and_then(|v| v.as_str())
                                 {
                                     found_initial = true;
@@ -549,7 +545,9 @@ async fn test_sse_selective_updates_with_config() {
         test_client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
 
     test_client
-        .send_query("CREATE TABLE IF NOT EXISTS selective_config_test (id INT, col1 VARCHAR, col2 INT)")
+        .send_query(
+            "CREATE TABLE IF NOT EXISTS selective_config_test (id INT, col1 VARCHAR, col2 INT)",
+        )
         .await
         .expect("Failed to create table");
     let _ = test_client.read_until_message_type(b'Z').await.expect("Failed to read response");
@@ -590,8 +588,7 @@ async fn test_sse_selective_updates_with_config() {
                 for line in body.lines() {
                     if let Some((field, value)) = parse_sse_event(line) {
                         if field == "data" {
-                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value)
-                            {
+                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
                                 if let Some("initial") = event.get("type").and_then(|v| v.as_str())
                                 {
                                     found_initial = true;
@@ -648,10 +645,7 @@ async fn test_sse_invalid_selective_ratio() {
         client
             .get(&http_url)
             .header("X-Database-Name", "testdb")
-            .query(&[
-                ("query", "SELECT * FROM users"),
-                ("selective_max_changed_ratio", "1.5"),
-            ])
+            .query(&[("query", "SELECT * FROM users"), ("selective_max_changed_ratio", "1.5")])
             .timeout(Duration::from_secs(1))
             .send(),
     )
@@ -666,14 +660,18 @@ async fn test_sse_invalid_selective_ratio() {
                 for line in body.lines() {
                     if let Some((field, value)) = parse_sse_event(line) {
                         if field == "data" {
-                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value)
-                            {
-                                if let Some("error") = event.get("type").and_then(|v| v.as_str())
-                                {
+                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&value) {
+                                if let Some("error") = event.get("type").and_then(|v| v.as_str()) {
                                     found_error = true;
                                     // Check for ratio validation error message
-                                    if let Some(error_msg) = event.get("error").and_then(|v| v.as_str()) {
-                                        assert!(error_msg.contains("between 0.0 and 1.0"), "Error message '{}' doesn't contain expected text", error_msg);
+                                    if let Some(error_msg) =
+                                        event.get("error").and_then(|v| v.as_str())
+                                    {
+                                        assert!(
+                                            error_msg.contains("between 0.0 and 1.0"),
+                                            "Error message '{}' doesn't contain expected text",
+                                            error_msg
+                                        );
                                     }
                                 }
                             }
@@ -699,7 +697,8 @@ async fn test_sse_invalid_selective_ratio() {
 // PARTIAL UPDATE TESTS (PK DETECTION FOR SELECTIVE COLUMN UPDATES)
 // ============================================================================
 
-/// test_sse_partial_updates_with_pk_detection - HTTP SSE subscriptions emit partial updates when PK is detected
+/// test_sse_partial_updates_with_pk_detection - HTTP SSE subscriptions emit partial updates when PK
+/// is detected
 ///
 /// This test verifies that:
 /// 1. HTTP SSE subscriptions perform PK detection after initial query execution
@@ -809,7 +808,9 @@ async fn test_sse_partial_updates_with_pk_detection() {
             eprintln!("Note: HTTP request failed: {}. Expected in basic test environment.", e);
         }
         Err(_) => {
-            eprintln!("Note: HTTP server not responding (timeout). Expected in basic test environment.");
+            eprintln!(
+                "Note: HTTP server not responding (timeout). Expected in basic test environment."
+            );
         }
     }
 
@@ -851,7 +852,10 @@ async fn test_efficiency_stats_endpoint_returns_json() {
                 return;
             }
 
-            assert_eq!(status, 200, "Efficiency stats endpoint should return 200 OK when metrics are available");
+            assert_eq!(
+                status, 200,
+                "Efficiency stats endpoint should return 200 OK when metrics are available"
+            );
 
             if let Ok(body) = resp.text().await {
                 // Parse the JSON response
@@ -888,7 +892,10 @@ async fn test_efficiency_stats_endpoint_returns_json() {
                     fallbacks.get("row_count_mismatch").is_some(),
                     "Should have fallbacks.row_count_mismatch"
                 );
-                assert!(fallbacks.get("pk_mismatch").is_some(), "Should have fallbacks.pk_mismatch");
+                assert!(
+                    fallbacks.get("pk_mismatch").is_some(),
+                    "Should have fallbacks.pk_mismatch"
+                );
                 assert!(fallbacks.get("no_changes").is_some(), "Should have fallbacks.no_changes");
 
                 // Verify initial values are zero or valid

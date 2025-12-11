@@ -14,7 +14,9 @@ fn test_insert_from_select_basic() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -87,11 +89,15 @@ fn test_insert_from_select_with_where() {
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("Alice"),
+                )),
             ],
             vec![
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                    arcstr::ArcStr::from("Bob"),
+                )),
             ],
         ]),
         conflict_clause: None,
@@ -171,7 +177,9 @@ fn test_insert_from_select_column_mismatch() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("Alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

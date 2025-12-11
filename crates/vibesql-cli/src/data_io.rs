@@ -217,6 +217,7 @@ mod tests {
     #[test]
     fn test_import_json_basic() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         // Create temporary JSON file
@@ -243,6 +244,7 @@ mod tests {
     #[test]
     fn test_import_json_sql_injection() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         // Create JSON with SQL injection attempt
@@ -270,6 +272,7 @@ mod tests {
     #[test]
     fn test_import_json_invalid_format() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         // Create invalid JSON file
@@ -288,6 +291,7 @@ mod tests {
     #[test]
     fn test_import_json_empty_array() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         // Create empty JSON array

@@ -4,17 +4,16 @@
 
 #![allow(clippy::clone_on_copy)]
 
-use super::config::{DatabaseConfig, DEFAULT_COLUMNAR_CACHE_BUDGET};
-use super::lifecycle::Lifecycle;
-use super::metadata::Metadata;
-use super::operations::Operations;
-use crate::columnar_cache::ColumnarCache;
-use crate::QueryBufferPool;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use super::core::Database;
+use super::{
+    config::{DatabaseConfig, DEFAULT_COLUMNAR_CACHE_BUDGET},
+    core::Database,
+    lifecycle::Lifecycle,
+    metadata::Metadata,
+    operations::Operations,
+};
+use crate::{columnar_cache::ColumnarCache, QueryBufferPool};
 
 impl Clone for Database {
     fn clone(&self) -> Self {
@@ -71,6 +70,7 @@ impl Database {
     /// # Example
     /// ```rust
     /// use std::path::PathBuf;
+    ///
     /// use vibesql_storage::Database;
     ///
     /// let db = Database::with_path(PathBuf::from("/var/lib/myapp/db"));
@@ -111,11 +111,12 @@ impl Database {
     /// # Example
     /// ```rust
     /// use std::path::PathBuf;
+    ///
     /// use vibesql_storage::{Database, DatabaseConfig};
     ///
     /// let db = Database::with_path_and_config(
     ///     PathBuf::from("/var/lib/myapp/db"),
-    ///     DatabaseConfig::server_default()
+    ///     DatabaseConfig::server_default(),
     /// );
     /// ```
     pub fn with_path_and_config(path: PathBuf, config: DatabaseConfig) -> Self {
@@ -140,8 +141,10 @@ impl Database {
     /// # async fn example() {
     /// let db = Database::with_path_and_config_async(
     ///     PathBuf::from("/vibesql-data"),
-    ///     DatabaseConfig::browser_default()
-    /// ).await.unwrap();
+    ///     DatabaseConfig::browser_default(),
+    /// )
+    /// .await
+    /// .unwrap();
     /// # }
     /// ```
     #[cfg(target_arch = "wasm32")]

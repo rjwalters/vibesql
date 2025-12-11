@@ -1,11 +1,12 @@
 //! Tests for DELETE trigger firing behavior
 
-use super::{count_audit_rows, create_audit_table, create_users_table};
-use crate::{DeleteExecutor, InsertExecutor};
 use vibesql_ast::{
     CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
 };
 use vibesql_storage::Database;
+
+use super::{count_audit_rows, create_audit_table, create_users_table};
+use crate::{DeleteExecutor, InsertExecutor};
 
 #[test]
 fn test_after_delete_trigger_fires() {
@@ -19,7 +20,9 @@ fn test_after_delete_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -76,7 +79,9 @@ fn test_before_delete_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,

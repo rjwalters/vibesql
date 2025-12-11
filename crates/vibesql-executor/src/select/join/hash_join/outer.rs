@@ -1,12 +1,13 @@
-use super::build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey};
-use super::FromResult;
-use crate::{errors::ExecutorError, schema::CombinedSchema};
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
-
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+
+use super::{
+    build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey},
+    FromResult,
+};
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Create a row with all NULL values
 #[allow(dead_code)]

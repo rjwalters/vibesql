@@ -38,14 +38,13 @@
 //! - Larger improvements for high-throughput OLTP workloads
 //! - Near-zero allocation for simple prepared queries
 
+use std::{hint::black_box, sync::Arc};
+
 use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::hint::black_box;
-use std::sync::Arc;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{PreparedStatementCache, SelectExecutor, Session};
-use vibesql_parser::arena_parser::ArenaParser;
-use vibesql_parser::Parser;
+use vibesql_parser::{arena_parser::ArenaParser, Parser};
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 

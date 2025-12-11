@@ -35,7 +35,8 @@ fn setup_test_db() -> Database {
     // Insert data into customer (500 rows)
     for i in 1..=500 {
         let segment = if i % 2 == 0 { "BUILDING" } else { "FURNITURE" };
-        let row = Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(segment))]);
+        let row =
+            Row::new(vec![SqlValue::Integer(i), SqlValue::Varchar(arcstr::ArcStr::from(segment))]);
         db.insert_row("CUSTOMER", row).unwrap();
     }
 

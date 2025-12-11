@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
-use crate::errors::ExecutorError;
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::types::{ColumnArray, ColumnType, ColumnarBatch};
+use crate::errors::ExecutorError;
 
 impl ColumnarBatch {
     /// Create a new empty columnar batch
@@ -117,10 +117,7 @@ impl ColumnarBatch {
         let column_types: Vec<ColumnType> = column_indices
             .iter()
             .map(|&col_idx| {
-                rows[0]
-                    .get(col_idx)
-                    .map(Self::infer_type_from_value)
-                    .unwrap_or(ColumnType::Mixed)
+                rows[0].get(col_idx).map(Self::infer_type_from_value).unwrap_or(ColumnType::Mixed)
             })
             .collect();
 
@@ -309,10 +306,8 @@ impl ColumnarBatch {
         let mut types = Vec::with_capacity(first_row.len());
 
         for i in 0..first_row.len() {
-            let col_type = first_row
-                .get(i)
-                .map(Self::infer_type_from_value)
-                .unwrap_or(ColumnType::Mixed);
+            let col_type =
+                first_row.get(i).map(Self::infer_type_from_value).unwrap_or(ColumnType::Mixed);
             types.push(col_type);
         }
 

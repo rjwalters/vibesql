@@ -2,9 +2,10 @@
 //!
 //! Provides functions for getting and setting SRID on geometries.
 
+use vibesql_types::SqlValue;
+
 use super::{geometry_to_sql_value, sql_value_to_geometry};
 use crate::errors::ExecutorError;
-use vibesql_types::SqlValue;
 
 /// ST_SRID(geom) - Get the SRID of a geometry
 pub fn st_srid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {

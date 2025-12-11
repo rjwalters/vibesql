@@ -58,9 +58,11 @@
 //! 3. Create ComparisonReport
 //! 4. Output in requested format (console/JSON/markdown)
 
-use super::metrics::BenchmarkMetrics;
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use super::metrics::BenchmarkMetrics;
 
 /// Comparison report containing metrics from multiple engines
 #[allow(dead_code)]
@@ -468,8 +470,9 @@ impl fmt::Display for ComparisonReport {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
+    use super::*;
 
     #[allow(dead_code)]
     fn create_sample_metrics(

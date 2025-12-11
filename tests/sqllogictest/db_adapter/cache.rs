@@ -7,6 +7,7 @@
 //! results when dialect switches occur during test execution.
 
 use std::sync::Arc;
+
 use vibesql_executor::cache::{QueryResultCache, QuerySignature};
 use vibesql_types::SqlMode;
 

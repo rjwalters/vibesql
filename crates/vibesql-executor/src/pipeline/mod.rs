@@ -48,10 +48,9 @@ pub use context::ExecutionContext;
 pub use native_columnar::NativeColumnarPipeline;
 pub use row_oriented::RowOrientedPipeline;
 pub use types::{PipelineInput, PipelineOutput};
-
-use crate::errors::ExecutorError;
-use crate::evaluator::CombinedExpressionEvaluator;
 use vibesql_ast::{Expression, SelectItem};
+
+use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 /// Unified execution pipeline trait for all query execution strategies.
 ///

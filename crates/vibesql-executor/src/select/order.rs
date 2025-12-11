@@ -1,7 +1,6 @@
 //! ORDER BY sorting logic
 
-use std::borrow::Cow;
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering};
 
 #[cfg(feature = "parallel")]
 use rayon::slice::ParallelSliceMut;
@@ -48,7 +47,8 @@ pub(super) fn apply_order_by(
         *sort_keys = Some(keys);
     }
 
-    // Sort by the evaluated keys (with automatic parallelism based on row count when feature enabled)
+    // Sort by the evaluated keys (with automatic parallelism based on row count when feature
+    // enabled)
     let comparison_fn = |(_, keys_a): &RowWithSortKeys, (_, keys_b): &RowWithSortKeys| {
         let keys_a = keys_a.as_ref().unwrap();
         let keys_b = keys_b.as_ref().unwrap();
@@ -107,7 +107,8 @@ pub(super) fn apply_order_by(
 /// Handles cases:
 /// 1. Numeric position (ORDER BY 1) - returns ColumnRef to the alias/column at that position
 /// 2. Alias name (ORDER BY alias) - returns ColumnRef to that alias
-/// 3. Original column name (ORDER BY col where col is aliased to alias) - returns ColumnRef to alias
+/// 3. Original column name (ORDER BY col where col is aliased to alias) - returns ColumnRef to
+///    alias
 /// 4. Complex expressions containing GROUPING() - recursively resolves sub-expressions
 /// 5. Otherwise - returns the original expression (for expressions not matching aliases)
 pub(crate) fn resolve_order_by_for_aggregates(
@@ -214,8 +215,8 @@ pub(crate) fn resolve_order_by_for_aggregates(
     }
 
     // Handle BinaryOp expressions by recursively resolving sub-expressions
-    // Try to match the entire binary expression first (already done above with find_matching_select_expression)
-    // If no match, try matching each side separately
+    // Try to match the entire binary expression first (already done above with
+    // find_matching_select_expression) If no match, try matching each side separately
     if let vibesql_ast::Expression::BinaryOp { left, op, right } = order_expr {
         let resolved_left = resolve_order_by_for_aggregates(left, select_list);
         let resolved_right = resolve_order_by_for_aggregates(right, select_list);
@@ -264,7 +265,8 @@ fn find_matching_select_expression(
     None
 }
 
-/// Check if two expressions are structurally equal (for matching ORDER BY expressions to SELECT list)
+/// Check if two expressions are structurally equal (for matching ORDER BY expressions to SELECT
+/// list)
 fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -> bool {
     match (a, b) {
         (
@@ -297,9 +299,11 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
 /// Resolve ORDER BY expression that might be a SELECT list alias or column position
 ///
 /// Handles four cases:
-/// 1. Numeric literal (e.g., ORDER BY 1, 2, 3) - returns the expression from that position in SELECT list
+/// 1. Numeric literal (e.g., ORDER BY 1, 2, 3) - returns the expression from that position in
+///    SELECT list
 /// 2. Simple column reference that matches a SELECT list alias - returns the SELECT list expression
-/// 3. Simple column reference that matches an aliased column's original name - returns a ColumnRef to the alias
+/// 3. Simple column reference that matches an aliased column's original name - returns a ColumnRef
+///    to the alias
 /// 4. Otherwise - returns the original ORDER BY expression
 pub(crate) fn resolve_order_by_alias<'a>(
     order_expr: &'a vibesql_ast::Expression,
@@ -356,10 +360,12 @@ pub(crate) fn resolve_order_by_alias<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::cmp::Ordering;
+
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     /// Test the comparison function logic with pre-evaluated sort keys
     /// This tests the parallel/sequential sorting logic without needing full evaluator setup

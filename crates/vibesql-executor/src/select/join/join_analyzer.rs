@@ -278,7 +278,8 @@ fn flatten_or_conditions<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>
 /// For expressions like `(a.x = b.x AND ...) OR (a.x = b.x AND ...) OR (a.x = b.x AND ...)`,
 /// this will extract the common equi-join `a.x = b.x` that appears in ALL branches.
 ///
-/// This enables hash join optimization for TPC-H Q19 and similar queries with complex OR conditions.
+/// This enables hash join optimization for TPC-H Q19 and similar queries with complex OR
+/// conditions.
 ///
 /// Returns Some(CompoundEquiJoinResult) if:
 /// - All OR branches contain the same equi-join condition

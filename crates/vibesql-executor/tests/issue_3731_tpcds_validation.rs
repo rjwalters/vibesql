@@ -412,7 +412,9 @@ fn test_q64_having_filter_edge_case() {
         "#,
     );
 
-    println!("\nAfter HAVING (200 > 100 is true, so should pass HAVING but with wrong sale value):");
+    println!(
+        "\nAfter HAVING (200 > 100 is true, so should pass HAVING but with wrong sale value):"
+    );
     for row in &after_having {
         println!("  {:?}", row);
     }
@@ -428,8 +430,8 @@ fn test_q64_having_filter_edge_case() {
 }
 
 /// Test Q75 division filter edge cases
-/// Q75 has this condition: CAST(curr_yr.sales_cnt AS DECIMAL) / CAST(prev_yr.sales_cnt AS DECIMAL) < 0.9
-/// If prev_yr.sales_cnt is 0, this could cause issues
+/// Q75 has this condition: CAST(curr_yr.sales_cnt AS DECIMAL) / CAST(prev_yr.sales_cnt AS DECIMAL)
+/// < 0.9 If prev_yr.sales_cnt is 0, this could cause issues
 #[test]
 fn test_q75_division_edge_cases() {
     let mut db = Database::new();
@@ -580,7 +582,7 @@ fn test_left_join_preserves_left_columns() {
     execute_insert(&mut db, "INSERT INTO left_table VALUES (1, 'a')");
     execute_insert(&mut db, "INSERT INTO left_table VALUES (2, 'b')");
     execute_insert(&mut db, "INSERT INTO left_table VALUES (3, 'c')");
-    
+
     // Only match id=2
     execute_insert(&mut db, "INSERT INTO right_table VALUES (2, 'matched')");
 
@@ -600,7 +602,7 @@ fn test_left_join_preserves_left_columns() {
     }
 
     assert_eq!(results.len(), 3, "Should have 3 rows (all from left table)");
-    
+
     // Check that left.id is NEVER null
     for (i, row) in results.iter().enumerate() {
         let left_id = &row.values[0];

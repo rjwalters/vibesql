@@ -13,6 +13,8 @@
 use std::collections::HashMap;
 
 use super::predicates::{apply_table_local_predicates, filter_and_clone_rows};
+#[cfg(feature = "parallel")]
+use crate::select::parallel::parallel_scan_materialize;
 use crate::{
     errors::ExecutorError,
     evaluator::CombinedExpressionEvaluator,
@@ -22,13 +24,14 @@ use crate::{
     optimizer::PredicatePlan,
     privilege_checker::PrivilegeChecker,
     schema::CombinedSchema,
-    select::columnar::{simd_filter_batch, simd_filter_to_indices, ColumnPredicate, ColumnarBatch},
-    select::cte::CteResult,
-    sqlite_schema::{execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table},
+    select::{
+        columnar::{simd_filter_batch, simd_filter_to_indices, ColumnPredicate, ColumnarBatch},
+        cte::CteResult,
+    },
+    sqlite_schema::{
+        execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table,
+    },
 };
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::parallel_scan_materialize;
 
 /// Minimum row count to benefit from SIMD columnar filtering
 /// Below this threshold, row-by-row filtering is faster due to conversion overhead
@@ -113,7 +116,8 @@ pub(crate) fn execute_table_scan(
         let schema = CombinedSchema::from_table(effective_name.clone(), cte_table_schema);
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
-        // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
+        // Skip predicate pushdown for correlated subqueries (filtering happens later with full
+        // context)
         let is_correlated = outer_row.is_some() || outer_schema.is_some();
         if where_clause.is_some() && !is_correlated {
             // Build predicate plan once for this table
@@ -123,7 +127,8 @@ pub(crate) fn execute_table_scan(
             // Issue #4199: Use filter-while-copy optimization for CTEs
             // This avoids cloning ALL rows before filtering - only clone rows that pass the filter.
             // Critical for queries like TPC-DS Q4 with 6-way self-join on CTEs.
-            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
+            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema
+            // table names
             let rows = filter_and_clone_rows(
                 cte_rows.as_ref(),
                 schema.clone(),
@@ -197,7 +202,8 @@ pub(crate) fn execute_table_scan(
             select_result.columns.clone()
         };
 
-        // Since views can have arbitrary SELECT expressions, we derive column types from the first row
+        // Since views can have arbitrary SELECT expressions, we derive column types from the first
+        // row
         let columns = if !select_result.rows.is_empty() {
             let first_row = &select_result.rows[0];
             column_names
@@ -234,15 +240,17 @@ pub(crate) fn execute_table_scan(
         let mut rows = select_result.rows;
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
-        // Skip predicate pushdown for correlated subqueries (filtering happens later with full context)
+        // Skip predicate pushdown for correlated subqueries (filtering happens later with full
+        // context)
         let is_correlated = outer_row.is_some() || outer_schema.is_some();
         if where_clause.is_some() && !is_correlated {
             // Build predicate plan once for this table
             let predicate_plan = PredicatePlan::from_where_clause(where_clause, &schema)
                 .map_err(ExecutorError::InvalidWhereClause)?;
 
-            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
-            // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema
+            // table names Issue #3562: Pass CTE context so IN subqueries can reference
+            // CTEs
             rows = apply_table_local_predicates(
                 rows,
                 schema.clone(),
@@ -264,9 +272,14 @@ pub(crate) fn execute_table_scan(
     // First, try primary key point lookup for O(1) access (TPC-C optimization #3221)
     // This handles queries like: SELECT ... FROM stock WHERE s_w_id = 1 AND s_i_id = 123
     // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
-    if let Some(result) =
-        try_primary_key_lookup(table_name, alias, column_aliases, where_clause, database, cte_results)?
-    {
+    if let Some(result) = try_primary_key_lookup(
+        table_name,
+        alias,
+        column_aliases,
+        where_clause,
+        database,
+        cte_results,
+    )? {
         return Ok(result);
     }
 
@@ -279,10 +292,14 @@ pub(crate) fn execute_table_scan(
             super::index_scan::IndexScanChoice::Regular { index_name, sorted_columns } => {
                 // Use regular index scan for potentially better performance
                 if crate::profiling::is_scan_debug_enabled() {
-                    eprintln!("[SCAN_PATH] Using index scan: table={}, index={}", table_name, index_name);
+                    eprintln!(
+                        "[SCAN_PATH] Using index scan: table={}, index={}",
+                        table_name, index_name
+                    );
                 }
-                // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index (#3253)
-                // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+                // Pass limit for LIMIT pushdown optimization when ORDER BY is satisfied by index
+                // (#3253) Issue #3562: Pass CTE context so IN subqueries can
+                // reference CTEs
                 return super::index_scan::execute_index_scan(
                     table_name,
                     &index_name,
@@ -414,7 +431,8 @@ pub(crate) fn execute_table_scan(
                 }
 
                 // For row-oriented tables, use cached columnar filter with late materialization
-                // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing rows
+                // Issue #4136: Use database columnar cache for SIMD filtering, clone only passing
+                // rows
                 if all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
                     if let Ok(filtered_rows) = filter_with_cached_columnar(
                         database,
@@ -443,13 +461,16 @@ pub(crate) fn execute_table_scan(
 
             // extract_column_predicates returned None - fall back
             if crate::profiling::is_scan_debug_enabled() {
-                eprintln!("[SCAN_PATH] {} table: using generic predicate path (complex expression)",
-                    table_name);
+                eprintln!(
+                    "[SCAN_PATH] {} table: using generic predicate path (complex expression)",
+                    table_name
+                );
             }
             // Fall back to generic predicate evaluation for complex expressions
             // Must use scan_live_vec() here since apply_table_local_predicates expects owned rows
-            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema table names
-            // Issue #3562: Pass CTE context so IN subqueries can reference CTEs
+            // Note: Use effective_name (alias) for filter lookup since PredicatePlan uses schema
+            // table names Issue #3562: Pass CTE context so IN subqueries can reference
+            // CTEs
             let live_rows = table.scan_live_vec();
             let filtered_rows = apply_table_local_predicates(
                 live_rows,
@@ -602,10 +623,8 @@ fn filter_with_cached_columnar(
 
     // Step 4: Clone only the rows that passed all predicates (late materialization)
     // This is the payoff - we only clone passing_indices.len() rows instead of all rows
-    let filtered_rows: Vec<vibesql_storage::Row> = passing_indices
-        .into_iter()
-        .filter_map(|idx| live_rows.get(idx).cloned())
-        .collect();
+    let filtered_rows: Vec<vibesql_storage::Row> =
+        passing_indices.into_iter().filter_map(|idx| live_rows.get(idx).cloned()).collect();
 
     Ok(filtered_rows)
 }
@@ -620,7 +639,8 @@ fn filter_with_cached_columnar(
 /// In TPC-C benchmarks, this can improve New-Order transaction from 800ms to <10ms.
 ///
 /// # Returns
-/// - `Ok(Some(result))` - Point lookup succeeded, result contains the matching row (or empty if no match)
+/// - `Ok(Some(result))` - Point lookup succeeded, result contains the matching row (or empty if no
+///   match)
 /// - `Ok(None)` - Cannot use primary key lookup (fall back to other methods)
 /// - `Err(...)` - An error occurred
 ///

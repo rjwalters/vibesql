@@ -44,9 +44,10 @@ pub trait TPCCExecutor {
     fn stock_level(&self, input: &StockLevelInput) -> TransactionResult;
 }
 
-use super::data::TPCCRng;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
+
+use super::data::TPCCRng;
 
 /// Transaction input for New-Order
 #[derive(Debug, Clone)]
@@ -1095,8 +1096,7 @@ impl<'a> MysqlTransactionExecutor<'a> {
         let mut conn = self.conn.borrow_mut();
 
         // Get warehouse tax rate
-        if let Err(e) =
-            conn.exec_drop("SELECT w_tax FROM warehouse WHERE w_id = ?", (input.w_id,))
+        if let Err(e) = conn.exec_drop("SELECT w_tax FROM warehouse WHERE w_id = ?", (input.w_id,))
         {
             return TransactionResult {
                 success: false,

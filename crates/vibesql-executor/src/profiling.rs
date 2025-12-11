@@ -31,9 +31,11 @@
 //! - `JOIN_PROFILE` - Join execution phase timing
 //! - `RANGE_SCAN_PROFILE` - Range scan phase timing
 
-use crate::debug_output::{self, Category, DebugEvent};
-use instant::Instant;
 use std::sync::LazyLock;
+
+use instant::Instant;
+
+use crate::debug_output::{self, Category, DebugEvent};
 
 /// Debug level from VIBESQL_DEBUG environment variable (lazily initialized)
 /// 0 = disabled, 1 = all, 2 = optimizer, 3 = scan, 4 = dml

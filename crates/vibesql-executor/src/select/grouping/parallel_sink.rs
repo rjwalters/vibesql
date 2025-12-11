@@ -108,47 +108,49 @@ pub fn parallel_group_aggregate<'a>(
     let chunk_size = rows.len().div_ceil(num_threads);
 
     // Phase 1: Sink - Process chunks in parallel with thread-local state
-    let thread_local_results: Vec<Result<AHashMap<Vec<SqlValue>, Vec<AggregateAccumulator>>, ExecutorError>> =
-        rows.par_chunks(chunk_size.max(1))
-            .map(|chunk| {
-                // Create thread-local evaluator (fresh instance, no Rc sharing)
-                let evaluator = CombinedExpressionEvaluator::with_database(schema, database);
+    let thread_local_results: Vec<
+        Result<AHashMap<Vec<SqlValue>, Vec<AggregateAccumulator>>, ExecutorError>,
+    > = rows
+        .par_chunks(chunk_size.max(1))
+        .map(|chunk| {
+            // Create thread-local evaluator (fresh instance, no Rc sharing)
+            let evaluator = CombinedExpressionEvaluator::with_database(schema, database);
 
-                let mut state = ThreadLocalAggregationState::new();
+            let mut state = ThreadLocalAggregationState::new();
 
-                // Process each row in this chunk
-                for row in chunk {
-                    // Clear CSE cache before evaluating each row
-                    evaluator.clear_cse_cache();
+            // Process each row in this chunk
+            for row in chunk {
+                // Clear CSE cache before evaluating each row
+                evaluator.clear_cse_cache();
 
-                    // Evaluate GROUP BY expressions to get the group key
-                    let mut key = Vec::with_capacity(group_by_exprs.len());
-                    for expr in group_by_exprs {
-                        let value = evaluator.eval(expr, row)?;
-                        key.push(value);
-                    }
-
-                    // Get or create accumulators for this group
-                    let accumulators = state.groups.entry(key).or_insert_with(|| {
-                        aggregate_infos
-                            .iter()
-                            .map(|info| AggregateAccumulator::new(&info.function_name, info.distinct))
-                            .collect::<Result<Vec<_>, _>>()
-                            .unwrap_or_default()
-                    });
-
-                    // Accumulate values for each aggregate
-                    for (i, info) in aggregate_infos.iter().enumerate() {
-                        if i < accumulators.len() {
-                            let value = evaluator.eval(&info.expr, row)?;
-                            accumulators[i].accumulate(&value);
-                        }
-                    }
+                // Evaluate GROUP BY expressions to get the group key
+                let mut key = Vec::with_capacity(group_by_exprs.len());
+                for expr in group_by_exprs {
+                    let value = evaluator.eval(expr, row)?;
+                    key.push(value);
                 }
 
-                Ok(state.groups)
-            })
-            .collect();
+                // Get or create accumulators for this group
+                let accumulators = state.groups.entry(key).or_insert_with(|| {
+                    aggregate_infos
+                        .iter()
+                        .map(|info| AggregateAccumulator::new(&info.function_name, info.distinct))
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap_or_default()
+                });
+
+                // Accumulate values for each aggregate
+                for (i, info) in aggregate_infos.iter().enumerate() {
+                    if i < accumulators.len() {
+                        let value = evaluator.eval(&info.expr, row)?;
+                        accumulators[i].accumulate(&value);
+                    }
+                }
+            }
+
+            Ok(state.groups)
+        })
+        .collect();
 
     // Check timeout after parallel phase
     timeout_ctx.check()?;
@@ -275,10 +277,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_info_creation() {
-        let expr = vibesql_ast::Expression::ColumnRef {
-            table: None,
-            column: "col1".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "col1".to_string() };
         let info = AggregateInfo::new("SUM".to_string(), expr, false);
         assert_eq!(info.function_name, "SUM");
         assert!(!info.distinct);

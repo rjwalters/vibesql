@@ -1,8 +1,9 @@
 //! Predicate evaluation methods (BETWEEN, LIKE, IN, POSITION, EXTRACT)
 
+use chrono::{Datelike, Timelike};
+
 use super::super::{casting::cast_value, core::ExpressionEvaluator, pattern::like_match};
 use crate::errors::ExecutorError;
-use chrono::{Datelike, Timelike};
 
 impl ExpressionEvaluator<'_> {
     /// Evaluate BETWEEN predicate: expr BETWEEN low AND high
@@ -167,9 +168,7 @@ impl ExpressionEvaluator<'_> {
 
         // Extract the string value
         let s = match &string_val {
-            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                &**s
-            }
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => &**s,
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: string_val.clone(),
@@ -190,7 +189,9 @@ impl ExpressionEvaluator<'_> {
             }
 
             match removal_val {
-                vibesql_types::SqlValue::Varchar(c) | vibesql_types::SqlValue::Character(c) => c.to_string(),
+                vibesql_types::SqlValue::Varchar(c) | vibesql_types::SqlValue::Character(c) => {
+                    c.to_string()
+                }
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
                         left: removal_val.clone(),

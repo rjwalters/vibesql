@@ -1,10 +1,10 @@
 //! Tests for transaction functionality (BEGIN, COMMIT, ROLLBACK)
 
-use super::common::setup_users_table as setup_test_table;
 use vibesql_ast::{BeginStmt, CommitStmt, DurabilityHint, InsertStmt, RollbackStmt};
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
+use super::common::setup_users_table as setup_test_table;
 use crate::{BeginTransactionExecutor, CommitExecutor, InsertExecutor, RollbackExecutor};
 
 #[test]
@@ -17,7 +17,10 @@ fn test_begin_transaction_success() {
     assert_eq!(db.transaction_id(), None);
 
     // Begin transaction
-    let result = BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db);
+    let result = BeginTransactionExecutor::execute(
+        &BeginStmt { durability: DurabilityHint::Default },
+        &mut db,
+    );
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "Transaction started");
 
@@ -32,11 +35,15 @@ fn test_begin_transaction_already_active() {
     setup_test_table(&mut db);
 
     // Begin first transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
     assert!(db.in_transaction());
 
     // Try to begin another transaction
-    let result = BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db);
+    let result = BeginTransactionExecutor::execute(
+        &BeginStmt { durability: DurabilityHint::Default },
+        &mut db,
+    );
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Transaction already active"));
 }
@@ -67,7 +74,8 @@ fn test_commit_transaction() {
     setup_test_table(&mut db);
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
     assert!(db.in_transaction());
 
     // Commit transaction
@@ -86,7 +94,8 @@ fn test_rollback_transaction() {
     setup_test_table(&mut db);
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
     assert!(db.in_transaction());
 
     // Rollback transaction
@@ -105,7 +114,8 @@ fn test_transaction_insert_commit() {
     setup_test_table(&mut db);
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
 
     // Insert a row
     let insert_stmt = InsertStmt {
@@ -139,7 +149,8 @@ fn test_transaction_insert_rollback() {
     setup_test_table(&mut db);
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
 
     // Insert a row
     let insert_stmt = InsertStmt {
@@ -186,7 +197,8 @@ fn test_transaction_multiple_operations_commit() {
     InsertExecutor::execute(&mut db, &insert_stmt1).unwrap();
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
 
     // Insert another row
     let insert_stmt2 = InsertStmt {
@@ -232,7 +244,8 @@ fn test_transaction_multiple_operations_rollback() {
     InsertExecutor::execute(&mut db, &insert_stmt1).unwrap();
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
 
     // Insert another row
     let insert_stmt2 = InsertStmt {
@@ -271,7 +284,8 @@ fn test_transaction_isolation() {
     assert_eq!(db2.get_table("users").unwrap().row_count(), 0);
 
     // db1 begins transaction and inserts
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db1).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db1)
+        .unwrap();
     let insert_stmt = InsertStmt {
         table_name: "users".to_string(),
         columns: vec![],
@@ -305,7 +319,8 @@ fn test_transaction_nested_operations() {
     setup_test_table(&mut db);
 
     // Begin transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
 
     // Insert multiple rows
     for i in 1..=5 {
@@ -314,7 +329,10 @@ fn test_transaction_nested_operations() {
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(i)),
-                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(format!("User{}", i)))),
+                vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(format!(
+                    "User{}",
+                    i
+                )))),
             ]]),
             conflict_clause: None,
             on_duplicate_key_update: None,
@@ -353,7 +371,8 @@ fn test_transaction_empty_rollback() {
     InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
 
     // Begin transaction but don't do anything
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
 
     // Rollback
     RollbackExecutor::execute(&RollbackStmt, &mut db).unwrap();
@@ -369,7 +388,8 @@ fn test_multiple_transactions() {
     setup_test_table(&mut db);
 
     // First transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
     let insert_stmt1 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec![],
@@ -384,7 +404,8 @@ fn test_multiple_transactions() {
     CommitExecutor::execute(&CommitStmt, &mut db).unwrap();
 
     // Second transaction
-    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db).unwrap();
+    BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
+        .unwrap();
     let insert_stmt2 = InsertStmt {
         table_name: "users".to_string(),
         columns: vec![],

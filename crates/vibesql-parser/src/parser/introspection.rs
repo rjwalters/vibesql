@@ -1,8 +1,7 @@
 //! Database introspection statement parsing (SHOW, DESCRIBE)
 
 use super::{ParseError, Parser};
-use crate::keywords::Keyword;
-use crate::token::Token;
+use crate::{keywords::Keyword, token::Token};
 
 impl Parser {
     /// Helper to parse a string literal

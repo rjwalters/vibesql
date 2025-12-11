@@ -1,7 +1,6 @@
 //! Tests for string concatenation operator (||)
 
-use crate::token::MultiCharOperator;
-use crate::*;
+use crate::{token::MultiCharOperator, *};
 
 #[test]
 fn test_parse_concat_basic() {

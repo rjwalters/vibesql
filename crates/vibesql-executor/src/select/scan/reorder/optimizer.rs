@@ -1,5 +1,9 @@
 //! Main join reordering optimization logic
 
+use std::collections::{HashMap, HashSet};
+
+use vibesql_ast::{Expression, FromClause};
+
 use super::{graph, predicates, utils};
 use crate::{
     debug_output::{Category, DebugEvent, JsonValue},
@@ -13,8 +17,6 @@ use crate::{
     },
     timeout::TimeoutContext,
 };
-use std::collections::{HashMap, HashSet};
-use vibesql_ast::{Expression, FromClause};
 
 /// Check if join profiling is enabled via environment variable
 fn join_profile_enabled() -> bool {
@@ -85,10 +87,7 @@ where
             .emit();
         if column_to_table.is_empty() && !table_names.is_empty() {
             DebugEvent::new(Category::Optimizer, "column_mapping_warning", "JOIN_REORDER")
-                .text(format!(
-                    "Warning: No schema columns found for tables: {:?}",
-                    table_names
-                ))
+                .text(format!("Warning: No schema columns found for tables: {:?}", table_names))
                 .field_str_array("tables", &table_names)
                 .emit();
         }
@@ -178,13 +177,9 @@ where
     }
 
     if join_reorder_verbose() && !table_local_predicates.is_empty() {
-        let predicate_tables: Vec<String> =
-            table_local_predicates.keys().cloned().collect();
+        let predicate_tables: Vec<String> = table_local_predicates.keys().cloned().collect();
         DebugEvent::new(Category::Optimizer, "table_local_predicates", "JOIN_REORDER")
-            .text(format!(
-                "Table-local predicates: {:?}",
-                predicate_tables
-            ))
+            .text(format!("Table-local predicates: {:?}", predicate_tables))
             .field_str_array("tables_with_predicates", &predicate_tables)
             .field_int("predicate_table_count", predicate_tables.len() as i64)
             .emit();
@@ -215,10 +210,7 @@ where
     // Log the reordering decision (optional, for debugging)
     if join_reorder_verbose() {
         DebugEvent::new(Category::Optimizer, "join_order_decision", "JOIN_REORDER")
-            .text(format!(
-                "Original order: {:?}, Optimal order: {:?}",
-                table_names, optimal_order
-            ))
+            .text(format!("Original order: {:?}, Optimal order: {:?}", table_names, optimal_order))
             .field_str_array("original_order", &table_names)
             .field_str_array("optimal_order", &optimal_order)
             .field_int("join_condition_count", join_conditions.len() as i64)
@@ -274,8 +266,13 @@ where
             eprintln!(
                 "[SCAN_PUSHDOWN] Table {} has {} local predicates, filter: {:?}",
                 table_name,
-                table_local_predicates.get(&table_name.to_lowercase()).map(|p| p.len()).unwrap_or(0),
-                table_filter.as_ref().map(|f| format!("{:?}", f).chars().take(200).collect::<String>())
+                table_local_predicates
+                    .get(&table_name.to_lowercase())
+                    .map(|p| p.len())
+                    .unwrap_or(0),
+                table_filter
+                    .as_ref()
+                    .map(|f| format!("{:?}", f).chars().take(200).collect::<String>())
             );
         }
 
@@ -295,8 +292,8 @@ where
             }
         } else {
             // Use table-local predicates instead of full WHERE clause for early filtering
-            // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'`
-            // to the table scan, significantly reducing rows before joins
+            // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND
+            // '1996-12-31'` to the table scan, significantly reducing rows before joins
             // Note: LIMIT pushdown is None here because this is for join intermediate results
             // Note: column_aliases is None - join reordering doesn't preserve column aliases
             execute_table_scan(
@@ -347,7 +344,8 @@ where
                 );
 
                 // Check if condition connects the new table with any already-joined table
-                // Condition is applicable if it references the new table AND at least one joined table
+                // Condition is applicable if it references the new table AND at least one joined
+                // table
                 let references_new_table = referenced_tables.contains(&table_name.to_lowercase());
                 let references_joined_table =
                     referenced_tables.iter().any(|t| joined_tables.contains(t));
@@ -400,12 +398,14 @@ where
             // Using CROSS join would trigger memory limit checks for large Cartesian products.
             let join_type = &vibesql_ast::JoinType::Inner;
 
-            // Note: Using default timeout context - proper timeout propagation is a future improvement
+            // Note: Using default timeout context - proper timeout propagation is a future
+            // improvement
             let timeout_ctx = TimeoutContext::new_default();
             let left_rows = prev_result.data.as_slice().len();
             let right_rows = table_result.data.as_slice().len();
             let join_start = std::time::Instant::now();
-            // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve CTEs
+            // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve
+            // CTEs
             result = Some(nested_loop_join(
                 prev_result,
                 table_result,
@@ -575,13 +575,9 @@ where
 {
     // Extract the semi/anti join structure
     let (inner_from, derived_query, derived_alias, semi_join_type, semi_condition) = match from {
-        FromClause::Join {
-            left,
-            right,
-            join_type,
-            condition,
-            ..
-        } if matches!(join_type, vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti) => {
+        FromClause::Join { left, right, join_type, condition, .. }
+            if matches!(join_type, vibesql_ast::JoinType::Semi | vibesql_ast::JoinType::Anti) =>
+        {
             // Extract the subquery from the right side
             match right.as_ref() {
                 FromClause::Subquery { query, alias, .. } => {
@@ -614,7 +610,8 @@ where
     // Step 1: Execute the derived table first
     // This is the subquery result (e.g., order keys with quantity > 300)
     let derived_start = std::time::Instant::now();
-    let derived_result = execute_derived_table(derived_query, derived_alias, None, execute_subquery)?;
+    let derived_result =
+        execute_derived_table(derived_query, derived_alias, None, execute_subquery)?;
     let derived_time = derived_start.elapsed();
     let derived_row_count = derived_result.data.as_slice().len();
 
@@ -653,10 +650,7 @@ where
     let target_table = identify_semi_join_target_table(semi_condition, inner_from);
 
     if profile {
-        eprintln!(
-            "[SEMI_JOIN_REORDER] Semi-join target table: {:?}",
-            target_table
-        );
+        eprintln!("[SEMI_JOIN_REORDER] Semi-join target table: {:?}", target_table);
     }
 
     // Step 4: If we can identify a target table, apply the semi-join early
@@ -720,10 +714,7 @@ where
             result.data.as_slice().len(),
             semi_time
         );
-        eprintln!(
-            "[SEMI_JOIN_REORDER] Total time: {:?}",
-            derived_time + inner_time + semi_time
-        );
+        eprintln!("[SEMI_JOIN_REORDER] Total time: {:?}", derived_time + inner_time + semi_time);
     }
 
     Ok(result)
@@ -759,7 +750,9 @@ where
             let schema = cte_schema.clone();
             match result_schema.take() {
                 None => result_schema = Some(CombinedSchema::from_table(alias, schema)),
-                Some(existing) => result_schema = Some(CombinedSchema::combine(existing, alias, schema)),
+                Some(existing) => {
+                    result_schema = Some(CombinedSchema::combine(existing, alias, schema))
+                }
             }
             continue;
         }
@@ -769,7 +762,9 @@ where
             let schema = table.schema.clone();
             match result_schema.take() {
                 None => result_schema = Some(CombinedSchema::from_table(alias, schema)),
-                Some(existing) => result_schema = Some(CombinedSchema::combine(existing, alias, schema)),
+                Some(existing) => {
+                    result_schema = Some(CombinedSchema::combine(existing, alias, schema))
+                }
             }
         }
     }
@@ -1014,10 +1009,8 @@ where
     }
 
     // Build column_to_table map for schema-based equijoin extraction
-    let table_names: Vec<String> = table_refs
-        .iter()
-        .map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase())
-        .collect();
+    let table_names: Vec<String> =
+        table_refs.iter().map(|t| t.alias.as_ref().unwrap_or(&t.name).to_lowercase()).collect();
     let column_to_table =
         utils::build_column_to_table_map(database, &table_names, &table_refs, cte_results);
 
@@ -1050,11 +1043,7 @@ where
         )?;
         let table_scan_time = table_start.elapsed();
 
-        let new_table_alias = table_ref
-            .alias
-            .as_ref()
-            .unwrap_or(&table_ref.name)
-            .to_lowercase();
+        let new_table_alias = table_ref.alias.as_ref().unwrap_or(&table_ref.name).to_lowercase();
 
         if profile {
             eprintln!(
@@ -1065,7 +1054,8 @@ where
             );
         }
 
-        // Extract equijoin predicates from WHERE clause that connect accumulated tables to new table
+        // Extract equijoin predicates from WHERE clause that connect accumulated tables to new
+        // table
         let equijoins = if let Some(where_expr) = where_clause {
             // Build table set including accumulated tables and the new table
             let mut join_table_set = accumulated_tables.clone();

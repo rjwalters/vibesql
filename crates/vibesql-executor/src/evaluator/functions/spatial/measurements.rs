@@ -5,11 +5,14 @@
 
 #![cfg(feature = "spatial")]
 
+use geo::{
+    algorithm::{Area, BoundingRect, Centroid, ConvexHull},
+    Distance, Euclidean,
+};
+use vibesql_types::SqlValue;
+
 use super::{sql_value_to_geometry, Geometry};
 use crate::errors::ExecutorError;
-use geo::algorithm::{Area, BoundingRect, Centroid, ConvexHull};
-use geo::{Distance, Euclidean};
-use vibesql_types::SqlValue;
 
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {
@@ -588,14 +591,16 @@ pub fn st_boundary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let boundary_geom = match geom {
                 Geometry::Point { .. } => {
                     // Boundary of a point is empty
-                    return Ok(SqlValue::Varchar(arcstr::ArcStr::from("__GEOMETRY__GEOMETRYCOLLECTION()")));
+                    return Ok(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "__GEOMETRY__GEOMETRYCOLLECTION()",
+                    )));
                 }
                 Geometry::LineString { points } => {
                     // Boundary of a line is a multi-point of the endpoints
                     if points.is_empty() {
-                        return Ok(SqlValue::Varchar(
-                            arcstr::ArcStr::from("__GEOMETRY__GEOMETRYCOLLECTION()"),
-                        ));
+                        return Ok(SqlValue::Varchar(arcstr::ArcStr::from(
+                            "__GEOMETRY__GEOMETRYCOLLECTION()",
+                        )));
                     }
                     if points.len() == 1 {
                         let (x, y) = points[0];
@@ -608,18 +613,18 @@ pub fn st_boundary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     let last = points[points.len() - 1];
                     if first == last {
                         // Closed linestring (ring): boundary is empty
-                        return Ok(SqlValue::Varchar(
-                            arcstr::ArcStr::from("__GEOMETRY__GEOMETRYCOLLECTION()"),
-                        ));
+                        return Ok(SqlValue::Varchar(arcstr::ArcStr::from(
+                            "__GEOMETRY__GEOMETRYCOLLECTION()",
+                        )));
                     }
                     Geometry::MultiPoint { points: vec![first, last] }
                 }
                 Geometry::Polygon { rings } => {
                     // Boundary of a polygon is all its rings as a MultiLineString
                     if rings.is_empty() {
-                        return Ok(SqlValue::Varchar(
-                            arcstr::ArcStr::from("__GEOMETRY__GEOMETRYCOLLECTION()"),
-                        ));
+                        return Ok(SqlValue::Varchar(arcstr::ArcStr::from(
+                            "__GEOMETRY__GEOMETRYCOLLECTION()",
+                        )));
                     }
                     Geometry::MultiLineString { lines: rings.clone() }
                 }
@@ -628,11 +633,15 @@ pub fn st_boundary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 | Geometry::MultiPolygon { .. } => {
                     // Boundary of multi-geometries: aggregate boundaries
                     // For simplicity, we'll return empty geometry collection for now
-                    return Ok(SqlValue::Varchar(arcstr::ArcStr::from("__GEOMETRY__GEOMETRYCOLLECTION()")));
+                    return Ok(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "__GEOMETRY__GEOMETRYCOLLECTION()",
+                    )));
                 }
                 Geometry::Collection { .. } => {
                     // Boundary of a collection: aggregate boundaries
-                    return Ok(SqlValue::Varchar(arcstr::ArcStr::from("__GEOMETRY__GEOMETRYCOLLECTION()")));
+                    return Ok(SqlValue::Varchar(arcstr::ArcStr::from(
+                        "__GEOMETRY__GEOMETRYCOLLECTION()",
+                    )));
                 }
             };
 
@@ -646,7 +655,8 @@ pub fn st_boundary(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 }
 
-/// ST_HausdorffDistance(geom1, geom2) - Maximum distance between any point in geom1 to nearest point in geom2
+/// ST_HausdorffDistance(geom1, geom2) - Maximum distance between any point in geom1 to nearest
+/// point in geom2
 pub fn st_hausdorff_distance(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::SpatialArgumentError {

@@ -22,15 +22,14 @@
 //! for thread-safe access to the cache.
 
 use std::sync::Arc;
-
-use crate::ColumnarTable;
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
 
 // Platform-specific synchronization primitives
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::RwLock;
 
-#[cfg(target_arch = "wasm32")]
-use std::sync::RwLock;
+use crate::ColumnarTable;
 
 /// Statistics for monitoring cache effectiveness
 #[derive(Debug, Clone, Default)]
@@ -374,9 +373,10 @@ impl Clone for ColumnarCache {
 
 #[cfg(test)]
 mod tests {
+    use vibesql_types::SqlValue;
+
     use super::*;
     use crate::Row;
-    use vibesql_types::SqlValue;
 
     fn create_test_columnar(rows: usize) -> ColumnarTable {
         let row_data: Vec<Row> = (0..rows)

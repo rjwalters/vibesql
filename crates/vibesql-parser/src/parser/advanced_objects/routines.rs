@@ -26,13 +26,16 @@
 //! DROP PROCEDURE [IF EXISTS] procedure_name;
 //! DROP FUNCTION [IF EXISTS] function_name;
 
-use crate::keywords::Keyword;
-use crate::parser::{ParseError, Parser};
-use crate::token::Token;
 use vibesql_ast::{
     CallStmt, CreateFunctionStmt, CreateProcedureStmt, DropFunctionStmt, DropProcedureStmt,
     FunctionParameter, ParameterMode, ProceduralStatement, ProcedureBody, ProcedureParameter,
     SqlSecurity,
+};
+
+use crate::{
+    keywords::Keyword,
+    parser::{ParseError, Parser},
+    token::Token,
 };
 
 impl Parser {
@@ -64,7 +67,8 @@ impl Parser {
 
     /// Parse CREATE FUNCTION statement
     ///
-    /// Syntax: CREATE FUNCTION func_name ([param_list]) RETURNS data_type [characteristics] BEGIN ... END;
+    /// Syntax: CREATE FUNCTION func_name ([param_list]) RETURNS data_type [characteristics] BEGIN
+    /// ... END;
     pub fn parse_create_function(&mut self) -> Result<CreateFunctionStmt, ParseError> {
         // Already consumed CREATE FUNCTION
         let function_name = self.parse_identifier()?;

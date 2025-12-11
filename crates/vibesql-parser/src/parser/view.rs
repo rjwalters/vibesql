@@ -7,8 +7,9 @@ impl Parser {
     /// Parse CREATE VIEW statement
     ///
     /// Syntax:
-    ///   CREATE [OR REPLACE] [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS select_statement [WITH CHECK OPTION]
-    ///   CREATE [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS select_statement [WITH CHECK OPTION]
+    ///   CREATE [OR REPLACE] [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS select_statement
+    /// [WITH CHECK OPTION]   CREATE [TEMP | TEMPORARY] VIEW view_name [(column_list)] AS
+    /// select_statement [WITH CHECK OPTION]
     pub(super) fn parse_create_view_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateViewStmt, ParseError> {

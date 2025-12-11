@@ -3,8 +3,10 @@
 //! This runner executes SQL test files and validates results against expected output.
 //! The test format is inspired by PostgreSQL's regression tests but adapted for VibeSQL.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
@@ -105,7 +107,8 @@ impl TestFileParser {
 
                 // Skip directive
                 if comment.starts_with("SKIP:") {
-                    current_skip = Some(comment.strip_prefix("SKIP:").unwrap_or("").trim().to_string());
+                    current_skip =
+                        Some(comment.strip_prefix("SKIP:").unwrap_or("").trim().to_string());
                     continue;
                 }
 
@@ -118,7 +121,8 @@ impl TestFileParser {
                         expect_rows.clear();
                     } else {
                         // Single line expect
-                        current_expected = Some(ExpectedResult::Rows(vec![expect_content.to_string()]));
+                        current_expected =
+                            Some(ExpectedResult::Rows(vec![expect_content.to_string()]));
                     }
                     continue;
                 }
@@ -265,10 +269,9 @@ pub fn execute_test_case(db: &mut Database, case: &TestCase) -> (TestStatus, Opt
                         )
                     }
                 }
-                Some(ExpectedResult::Error(_)) => (
-                    TestStatus::Failed,
-                    Some("Expected error but statement succeeded".to_string()),
-                ),
+                Some(ExpectedResult::Error(_)) => {
+                    (TestStatus::Failed, Some("Expected error but statement succeeded".to_string()))
+                }
                 Some(ExpectedResult::Ok) | None => (TestStatus::Passed, None),
             }
         }
@@ -302,13 +305,7 @@ fn execute_statement(
             let rows = executor.execute(&select_stmt).map_err(|e| format!("{:?}", e))?;
             Ok(rows
                 .iter()
-                .map(|row| {
-                    row.values
-                        .iter()
-                        .map(|v| format_value(v))
-                        .collect::<Vec<_>>()
-                        .join("|")
-                })
+                .map(|row| row.values.iter().map(|v| format_value(v)).collect::<Vec<_>>().join("|"))
                 .collect())
         }
         Statement::CreateTable(create_stmt) => {
@@ -405,10 +402,7 @@ pub fn run_test_file(path: &Path) -> FileStats {
         Ok(c) => c,
         Err(e) => {
             let mut stats = FileStats::default();
-            stats.add_result(
-                TestStatus::Error,
-                Some(format!("Failed to read file: {}", e)),
-            );
+            stats.add_result(TestStatus::Error, Some(format!("Failed to read file: {}", e)));
             return stats;
         }
     };
@@ -431,21 +425,16 @@ pub fn run_test_suite(test_dir: &Path) -> PgTestStats {
 
     // Find all .sql files
     let pattern = format!("{}/**/*.sql", test_dir.display());
-    let files: Vec<PathBuf> = glob::glob(&pattern)
-        .expect("Failed to read test pattern")
-        .filter_map(Result::ok)
-        .collect();
+    let files: Vec<PathBuf> =
+        glob::glob(&pattern).expect("Failed to read test pattern").filter_map(Result::ok).collect();
 
     println!("\n=== PostgreSQL Regression Test Suite ===");
     println!("Test directory: {}", test_dir.display());
     println!("Found {} test files\n", files.len());
 
     for file in files {
-        let relative_path = file
-            .strip_prefix(test_dir)
-            .unwrap_or(&file)
-            .to_string_lossy()
-            .to_string();
+        let relative_path =
+            file.strip_prefix(test_dir).unwrap_or(&file).to_string_lossy().to_string();
 
         // Extract category from path (e.g., "triggers" from "triggers.sql")
         let category = file
@@ -456,11 +445,8 @@ pub fn run_test_suite(test_dir: &Path) -> PgTestStats {
         print!("Running {}... ", relative_path);
         let file_stats = run_test_file(&file);
 
-        let status_emoji = if file_stats.failed == 0 && file_stats.errors == 0 {
-            "✓"
-        } else {
-            "✗"
-        };
+        let status_emoji =
+            if file_stats.failed == 0 && file_stats.errors == 0 { "✓" } else { "✗" };
         println!(
             "{} {}/{} passed ({:.1}%)",
             status_emoji,

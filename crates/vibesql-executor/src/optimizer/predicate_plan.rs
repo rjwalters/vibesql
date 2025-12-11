@@ -13,10 +13,13 @@
 //! the beginning of query execution, then threaded through the execution context.
 
 use std::collections::HashMap;
+
 use vibesql_ast::Expression;
 
-use super::selectivity::order_predicates_by_selectivity;
-use super::where_pushdown::{decompose_where_clause, PredicateDecomposition};
+use super::{
+    selectivity::order_predicates_by_selectivity,
+    where_pushdown::{decompose_where_clause, PredicateDecomposition},
+};
 use crate::schema::CombinedSchema;
 
 /// Structured plan for predicate application during query execution

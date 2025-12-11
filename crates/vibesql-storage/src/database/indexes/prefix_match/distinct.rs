@@ -67,9 +67,9 @@ impl IndexData {
             IndexData::DiskBacked { btree, .. } => {
                 // For disk-backed indexes, we need to scan all keys
                 match acquire_btree_lock(btree) {
-                    Ok(guard) => guard
-                        .get_distinct_prefix_values(num_columns)
-                        .unwrap_or_else(|_| vec![]),
+                    Ok(guard) => {
+                        guard.get_distinct_prefix_values(num_columns).unwrap_or_else(|_| vec![])
+                    }
                     Err(e) => {
                         log::warn!(
                             "BTreeIndex lock acquisition failed in get_distinct_prefix_values: {}",

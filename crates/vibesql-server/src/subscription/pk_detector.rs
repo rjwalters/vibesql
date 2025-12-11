@@ -45,7 +45,9 @@ impl std::fmt::Display for PkDetectionFailureReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ParseError => write!(f, "query parse error"),
-            Self::SetOperation => write!(f, "query contains set operation (UNION/INTERSECT/EXCEPT)"),
+            Self::SetOperation => {
+                write!(f, "query contains set operation (UNION/INTERSECT/EXCEPT)")
+            }
             Self::NoFromClause => write!(f, "query has no FROM clause"),
             Self::MultipleTablesInQuery => write!(f, "query involves multiple tables (join)"),
             Self::TableNotFound => write!(f, "table not found in database"),
@@ -93,12 +95,7 @@ impl PkDetectionResult {
 
     /// Create a default result with a specific failure reason and tables
     fn with_reason_and_tables(reason: PkDetectionFailureReason, tables: HashSet<String>) -> Self {
-        Self {
-            pk_column_indices: vec![0],
-            confident: false,
-            tables,
-            reason: Some(reason),
-        }
+        Self { pk_column_indices: vec![0], confident: false, tables, reason: Some(reason) }
     }
 }
 
@@ -217,9 +214,7 @@ fn detect_pk_from_select(select: &SelectStmt, db: &Database) -> PkDetectionResul
 /// Extract table name and alias from a simple single-table FROM clause
 fn extract_single_table(from: &FromClause) -> Option<(String, Option<String>)> {
     match from {
-        FromClause::Table { name, alias, .. } => {
-            Some((name.to_lowercase(), alias.clone()))
-        }
+        FromClause::Table { name, alias, .. } => Some((name.to_lowercase(), alias.clone())),
         FromClause::Join { .. } => None, // Join means multiple tables
         FromClause::Subquery { .. } => None, // Subquery is complex
         FromClause::Values { .. } => None, // VALUES is complex
@@ -230,11 +225,7 @@ fn extract_single_table(from: &FromClause) -> Option<(String, Option<String>)> {
 ///
 /// For joins, we try to find the PK of the "primary" table (first table in FROM).
 /// This is a best-effort approach - for complex queries, we fall back to defaults.
-fn detect_pk_from_join(
-    select: &SelectStmt,
-    from: &FromClause,
-    db: &Database,
-) -> PkDetectionResult {
+fn detect_pk_from_join(select: &SelectStmt, from: &FromClause, db: &Database) -> PkDetectionResult {
     // Collect all tables and their aliases
     let (tables_info, has_subquery) = collect_join_tables(from);
 
@@ -383,9 +374,8 @@ fn map_columns_to_result_positions(
             SelectItem::QualifiedWildcard { qualifier, alias: _ } => {
                 // SELECT t.* - all columns from specific table
                 // Only expand if qualifier matches our table alias
-                let qualifier_matches = table_alias
-                    .map(|alias| alias.eq_ignore_ascii_case(qualifier))
-                    .unwrap_or(false);
+                let qualifier_matches =
+                    table_alias.map(|alias| alias.eq_ignore_ascii_case(qualifier)).unwrap_or(false);
 
                 if qualifier_matches {
                     for (idx, col_name) in all_table_columns.iter().enumerate() {
@@ -435,9 +425,10 @@ fn extract_column_name(expr: &Expression, table_alias: Option<&str>) -> Option<S
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn create_test_db() -> Database {
         let mut db = Database::new();
@@ -445,8 +436,16 @@ mod tests {
         // Create users table with id as PK
         let user_columns = vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(100) }, true),
-            ColumnSchema::new("email".to_string(), DataType::Varchar { max_length: Some(255) }, true),
+            ColumnSchema::new(
+                "name".to_string(),
+                DataType::Varchar { max_length: Some(100) },
+                true,
+            ),
+            ColumnSchema::new(
+                "email".to_string(),
+                DataType::Varchar { max_length: Some(255) },
+                true,
+            ),
         ];
         let user_schema = TableSchema::with_primary_key(
             "users".to_string(),
@@ -460,7 +459,11 @@ mod tests {
             ColumnSchema::new("order_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("user_id".to_string(), DataType::Integer, false),
             ColumnSchema::new("amount".to_string(), DataType::Integer, true),
-            ColumnSchema::new("status".to_string(), DataType::Varchar { max_length: Some(50) }, true),
+            ColumnSchema::new(
+                "status".to_string(),
+                DataType::Varchar { max_length: Some(50) },
+                true,
+            ),
         ];
         let order_schema = TableSchema::with_primary_key(
             "orders".to_string(),
@@ -632,7 +635,8 @@ mod tests {
     #[test]
     fn test_reason_set_operation() {
         let db = create_test_db();
-        let result = detect_pk_columns("SELECT id FROM users UNION SELECT order_id FROM orders", &db);
+        let result =
+            detect_pk_columns("SELECT id FROM users UNION SELECT order_id FROM orders", &db);
 
         assert!(!result.confident);
         assert_eq!(result.reason, Some(PkDetectionFailureReason::SetOperation));
@@ -650,10 +654,7 @@ mod tests {
     #[test]
     fn test_failure_reason_display() {
         // Test Display implementation
-        assert_eq!(
-            PkDetectionFailureReason::ParseError.to_string(),
-            "query parse error"
-        );
+        assert_eq!(PkDetectionFailureReason::ParseError.to_string(), "query parse error");
         assert_eq!(
             PkDetectionFailureReason::TableNotFound.to_string(),
             "table not found in database"

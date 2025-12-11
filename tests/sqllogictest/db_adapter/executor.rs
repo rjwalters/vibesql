@@ -4,15 +4,18 @@
 //! executors. It coordinates with caching, batching, and timing modules to optimize
 //! and instrument query execution.
 
-use sqllogictest::{DBOutput, DefaultColumnType};
 use std::{collections::HashSet, env};
+
+use sqllogictest::{DBOutput, DefaultColumnType};
 use vibesql_executor::{IntrospectionExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use super::super::execution::TestError;
-use super::{batching::BatchingManager, cache::CacheManager, timing::truncate_sql};
+use super::{
+    super::execution::TestError, batching::BatchingManager, cache::CacheManager,
+    timing::truncate_sql,
+};
 
 /// Execute a SQL statement with caching, batching, and timing support.
 pub fn execute_sql(

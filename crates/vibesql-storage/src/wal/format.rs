@@ -21,8 +21,10 @@
 
 use std::io::Read;
 
-use crate::persistence::binary::io::{read_u32, read_u64};
-use crate::StorageError;
+use crate::{
+    persistence::binary::io::{read_u32, read_u64},
+    StorageError,
+};
 
 /// Magic number for WAL files: "VWAL"
 pub const WAL_MAGIC: &[u8; 4] = b"VWAL";

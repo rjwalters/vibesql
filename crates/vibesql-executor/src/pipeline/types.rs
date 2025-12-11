@@ -18,8 +18,9 @@
 //! - `PipelineInput::Rows` → `as_rows()` is zero-copy (borrow)
 //! - Batch ↔ Rows conversions require materialization
 
-use crate::select::columnar::ColumnarBatch;
 use vibesql_storage::Row;
+
+use crate::select::columnar::ColumnarBatch;
 
 /// Polymorphic input for pipeline stages.
 ///
@@ -360,8 +361,9 @@ impl PipelineOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn make_test_row(values: Vec<i64>) -> Row {
         Row::new(values.into_iter().map(SqlValue::Integer).collect::<Vec<_>>())

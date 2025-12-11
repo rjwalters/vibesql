@@ -31,6 +31,7 @@
 #![allow(dead_code)]
 
 use std::sync::atomic::{AtomicU64, Ordering};
+
 use sysinfo::System;
 
 /// macOS-specific memory detection using host_statistics64

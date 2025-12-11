@@ -5,13 +5,16 @@
 //! a single pass. This provides significant performance improvement for
 //! simple aggregate queries like TPC-H Q6.
 
-use super::super::aggregate::{AggregateOp, AggregateSource, AggregateSpec};
-use super::super::batch::{ColumnArray, ColumnarBatch};
-use super::super::simd_filter::simd_create_filter_mask;
-use super::super::simd_ops;
-use crate::errors::ExecutorError;
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
+
+use super::super::{
+    aggregate::{AggregateOp, AggregateSource, AggregateSpec},
+    batch::{ColumnArray, ColumnarBatch},
+    simd_filter::simd_create_filter_mask,
+    simd_ops,
+};
+use crate::errors::ExecutorError;
 
 /// Check if all aggregates can use the fused filter+aggregate optimization
 pub fn can_use_fused_aggregation(aggregates: &[AggregateSpec]) -> bool {

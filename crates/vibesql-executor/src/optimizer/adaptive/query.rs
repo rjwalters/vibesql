@@ -87,7 +87,9 @@ pub(super) fn has_selective_projection(query: &SelectStmt) -> bool {
 pub(super) fn is_single_table(query: &SelectStmt) -> bool {
     match &query.from {
         Some(FromClause::Table { .. }) => true,
-        Some(FromClause::Join { .. }) | Some(FromClause::Subquery { .. }) | Some(FromClause::Values { .. }) => false,
+        Some(FromClause::Join { .. })
+        | Some(FromClause::Subquery { .. })
+        | Some(FromClause::Values { .. }) => false,
         None => false, // No FROM clause (e.g., SELECT 1)
     }
 }

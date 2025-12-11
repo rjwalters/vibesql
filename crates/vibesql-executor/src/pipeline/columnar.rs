@@ -6,13 +6,13 @@
 use vibesql_ast::{Expression, SelectItem};
 use vibesql_storage::Row;
 
-use crate::errors::ExecutorError;
-
 use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
-
-use crate::select::columnar::{
-    extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateSource,
-    ColumnarBatch,
+use crate::{
+    errors::ExecutorError,
+    select::columnar::{
+        extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateSource,
+        ColumnarBatch,
+    },
 };
 
 /// Columnar execution pipeline.
@@ -91,7 +91,6 @@ impl ExecutionPipeline for ColumnarPipeline {
     /// 3. Extracts simple predicates
     /// 4. Applies SIMD-accelerated filtering
     /// 5. Returns columnar batch output (defers row conversion to final stage)
-    ///
     fn apply_filter(
         &self,
         input: PipelineInput<'_>,
@@ -444,10 +443,11 @@ impl ColumnarPipeline {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema::CombinedSchema;
     use vibesql_catalog::TableSchema;
     use vibesql_types::SqlValue;
+
+    use super::*;
+    use crate::schema::CombinedSchema;
 
     fn create_test_setup() -> (vibesql_storage::Database, CombinedSchema) {
         let database = vibesql_storage::Database::new();

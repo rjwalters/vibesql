@@ -9,10 +9,10 @@
 //!
 //! ## Expected Results
 //!
-//! - Native columnar tables should show ~10-20% improvement over row+cache for scans
-//!   (eliminates row-to-columnar conversion overhead)
-//! - INSERT should show significant slowdown for native columnar tables
-//!   (O(n) rebuild cost for columnar tables)
+//! - Native columnar tables should show ~10-20% improvement over row+cache for scans (eliminates
+//!   row-to-columnar conversion overhead)
+//! - INSERT should show significant slowdown for native columnar tables (O(n) rebuild cost for
+//!   columnar tables)
 //!
 //! ## Usage
 //!
@@ -30,9 +30,9 @@
 //! cargo bench --bench columnar_storage_benchmark -- insert
 //! ```
 
+use std::{hint::black_box, time::Duration};
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::hint::black_box;
-use std::time::Duration;
 use vibesql_catalog::{ColumnSchema, StorageFormat, TableSchema};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
@@ -114,14 +114,14 @@ fn generate_lineitem_data(row_count: usize) -> Vec<Row> {
             SqlValue::Numeric(extendedprice),                  // l_extendedprice
             SqlValue::Numeric(discount),                       // l_discount
             SqlValue::Numeric(tax),                            // l_tax
-            SqlValue::Varchar(arcstr::ArcStr::from(return_flag)),        // l_returnflag
-            SqlValue::Varchar(arcstr::ArcStr::from(line_status)),        // l_linestatus
+            SqlValue::Varchar(arcstr::ArcStr::from(return_flag)), // l_returnflag
+            SqlValue::Varchar(arcstr::ArcStr::from(line_status)), // l_linestatus
             SqlValue::Date(ship_date),                         // l_shipdate
             SqlValue::Date(commit_date),                       // l_commitdate
             SqlValue::Date(receipt_date),                      // l_receiptdate
             SqlValue::Varchar(arcstr::ArcStr::from("DELIVER IN PERSON")), // l_shipinstruct
-            SqlValue::Varchar(arcstr::ArcStr::from("TRUCK")),            // l_shipmode
-            SqlValue::Varchar(arcstr::ArcStr::from("test comment")),     // l_comment
+            SqlValue::Varchar(arcstr::ArcStr::from("TRUCK")),  // l_shipmode
+            SqlValue::Varchar(arcstr::ArcStr::from("test comment")), // l_comment
         ]);
 
         rows.push(row);

@@ -3,15 +3,20 @@
 //! This module handles converting B+ tree nodes to/from disk pages.
 //! It reuses the existing SqlValue serialization from persistence/binary/value.rs
 
-use std::io::{Cursor, Write};
-use std::sync::Arc;
+use std::{
+    io::{Cursor, Write},
+    sync::Arc,
+};
 
-use crate::page::{Page, PageId, PageManager, PAGE_SIZE};
-use crate::persistence::binary::value::{read_sql_value, write_sql_value};
-use crate::StorageError;
-
-use super::node::{InternalNode, LeafNode};
-use super::{PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF};
+use super::{
+    node::{InternalNode, LeafNode},
+    PAGE_TYPE_INTERNAL, PAGE_TYPE_LEAF,
+};
+use crate::{
+    page::{Page, PageId, PageManager, PAGE_SIZE},
+    persistence::binary::value::{read_sql_value, write_sql_value},
+    StorageError,
+};
 
 /// Write a variable-length encoded unsigned integer
 /// Uses MSB-based encoding: 0xxxxxxx = single byte, 1xxxxxxx = more bytes follow
@@ -358,10 +363,11 @@ pub fn read_leaf_node(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::page::PageManager;
     use tempfile::TempDir;
     use vibesql_types::SqlValue;
+
+    use super::*;
+    use crate::page::PageManager;
 
     #[test]
     fn test_serialize_deserialize_internal_node() {
@@ -439,7 +445,10 @@ mod tests {
         // Create leaf node with multi-column keys
         let mut node = LeafNode::new(page_id);
         node.entries = vec![
-            (vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))], vec![100]),
+            (
+                vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))],
+                vec![100],
+            ),
             (vec![SqlValue::Integer(2), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))], vec![200]),
         ];
         node.next_leaf = 0;

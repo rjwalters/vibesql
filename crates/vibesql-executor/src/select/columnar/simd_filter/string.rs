@@ -3,13 +3,16 @@
 //! This module provides batch string comparison and pattern matching operations
 //! using optimized string_ops functions.
 
-use super::super::filter::ColumnPredicate;
-use super::super::string_ops::{
-    batch_string_eq, batch_string_ge, batch_string_gt, batch_string_le, batch_string_like,
-    batch_string_lt, batch_string_ne, LikePattern,
+use vibesql_types::SqlValue;
+
+use super::super::{
+    filter::ColumnPredicate,
+    string_ops::{
+        batch_string_eq, batch_string_ge, batch_string_gt, batch_string_le, batch_string_like,
+        batch_string_lt, batch_string_ne, LikePattern,
+    },
 };
 use crate::errors::ExecutorError;
-use vibesql_types::SqlValue;
 
 /// Evaluate predicate on string column using batch operations
 pub fn evaluate_predicate_string_batch(

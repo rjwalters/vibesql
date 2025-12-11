@@ -16,8 +16,9 @@ use std::{cmp::Ordering, fmt, str::FromStr};
 /// - days: Total days
 /// - microseconds: Total time in microseconds (hours, minutes, seconds, fractions)
 ///
-/// Note: Equality and ordering are based on the internal representation (months, days, microseconds),
-/// not the string value. This means "1 YEAR" equals "12 MONTH" even though the strings differ.
+/// Note: Equality and ordering are based on the internal representation (months, days,
+/// microseconds), not the string value. This means "1 YEAR" equals "12 MONTH" even though the
+/// strings differ.
 #[derive(Debug, Clone)]
 pub struct Interval {
     /// The original interval string (e.g., "5 YEAR", "1-6 YEAR TO MONTH")
@@ -444,8 +445,10 @@ mod tests {
 
     #[test]
     fn test_interval_hash_consistency() {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use std::{
+            collections::hash_map::DefaultHasher,
+            hash::{Hash, Hasher},
+        };
 
         // Helper function to compute hash
         fn calculate_hash<T: Hash>(t: &T) -> u64 {

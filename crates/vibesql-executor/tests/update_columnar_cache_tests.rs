@@ -6,7 +6,6 @@
 //!
 //! Related: #3884, #3890, #3891, #3911
 
-
 mod common;
 
 use common::setup_test_table;
@@ -45,7 +44,11 @@ fn test_update_invalidates_columnar_cache() {
             other => panic!("Expected Integer, got {:?}", other),
         })
         .collect();
-    assert_eq!(salaries, vec![45000, 48000, 42000], "Initial salaries should be 45000, 48000, 42000");
+    assert_eq!(
+        salaries,
+        vec![45000, 48000, 42000],
+        "Initial salaries should be 45000, 48000, 42000"
+    );
 
     // Execute UPDATE - give Alice a raise
     let stmt = UpdateStmt {
@@ -76,22 +79,13 @@ fn test_update_invalidates_columnar_cache() {
         .collect();
 
     // Verify the updated value is present
-    assert!(
-        updated_salaries.contains(&55000),
-        "New salary 55000 should exist after UPDATE"
-    );
+    assert!(updated_salaries.contains(&55000), "New salary 55000 should exist after UPDATE");
     assert!(
         !updated_salaries.contains(&45000),
         "Old salary 45000 should no longer exist after UPDATE"
     );
-    assert!(
-        updated_salaries.contains(&48000),
-        "Unchanged salary 48000 should still exist"
-    );
-    assert!(
-        updated_salaries.contains(&42000),
-        "Unchanged salary 42000 should still exist"
-    );
+    assert!(updated_salaries.contains(&48000), "Unchanged salary 48000 should still exist");
+    assert!(updated_salaries.contains(&42000), "Unchanged salary 42000 should still exist");
 
     // Verify cache was invalidated and re-converted
     let final_stats = db.columnar_cache_stats();
@@ -322,7 +316,9 @@ fn test_update_multiple_columns_invalidates_cache() {
 
     let dept_col = columnar.get_column("department").expect("Column should exist");
     assert!(
-        (0..3).any(|i| matches!(dept_col.get(i), SqlValue::Varchar(ref s) if s.as_str() == "Management")),
+        (0..3).any(
+            |i| matches!(dept_col.get(i), SqlValue::Varchar(ref s) if s.as_str() == "Management")
+        ),
         "New department 'Management' should be visible"
     );
 }

@@ -106,7 +106,8 @@ pub(super) fn try_convert_in_to_join(
         // original table name (not the leftmost table in the FROM clause).
         // Example: `i_item_id IN (SELECT i_item_id FROM item WHERE ...)`
         // The outer `i_item_id` refers to the outer `item` table, so we qualify it
-        // as `item.i_item_id`, and the subquery columns get rewritten to `__subquery_item.i_item_id`
+        // as `item.i_item_id`, and the subquery columns get rewritten to
+        // `__subquery_item.i_item_id`
         let outer_table_name = table_alias.as_ref().unwrap_or(&table_name);
 
         // Qualify outer expression columns with the outer table name
@@ -171,6 +172,7 @@ pub(super) fn try_convert_in_to_join(
         right: Box::new(right_from),
         join_type,
         condition: final_condition.clone(),
+        using_columns: None,
         natural: false,
     };
 
@@ -254,6 +256,7 @@ fn try_convert_aggregate_in_to_join(
         right: Box::new(right_from),
         join_type,
         condition: Some(join_condition.clone()),
+        using_columns: None,
         natural: false,
     };
 

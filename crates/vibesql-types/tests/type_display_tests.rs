@@ -5,7 +5,6 @@ fn sv(s: &str) -> vibesql_types::StringValue {
     vibesql_types::StringValue::from(s)
 }
 
-
 // ============================================================================
 // Display/Format Tests - How types are displayed
 // ============================================================================

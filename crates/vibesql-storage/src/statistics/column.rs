@@ -1,8 +1,10 @@
 //! Column-level statistics for selectivity estimation
 
-use super::histogram::{BucketStrategy, Histogram};
 use std::collections::HashMap;
+
 use vibesql_types::SqlValue;
+
+use super::histogram::{BucketStrategy, Histogram};
 
 /// Statistics for a single column
 #[derive(Debug, Clone)]
@@ -197,9 +199,10 @@ impl ColumnStatistics {
 
 #[cfg(test)]
 mod tests {
+    use vibesql_types::SqlValue;
+
     use super::*;
     use crate::Row;
-    use vibesql_types::SqlValue;
 
     #[test]
     fn test_column_statistics_basic() {

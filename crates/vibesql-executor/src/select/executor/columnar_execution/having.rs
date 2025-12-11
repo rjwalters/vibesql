@@ -17,13 +17,16 @@
 //! 2. Evaluate the HAVING expression using the pre-computed aggregate values
 //! 3. Filter out rows where HAVING evaluates to false
 
-use crate::errors::ExecutorError;
-use crate::evaluator::casting::cast_value;
-use crate::schema::CombinedSchema;
-use crate::select::columnar::{AggregateOp, AggregateSource, AggregateSpec};
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 use vibesql_types::{SqlMode, SqlValue};
+
+use crate::{
+    errors::ExecutorError,
+    evaluator::casting::cast_value,
+    schema::CombinedSchema,
+    select::columnar::{AggregateOp, AggregateSource, AggregateSpec},
+};
 
 /// Filter GROUP BY results using a HAVING clause
 ///
@@ -56,24 +59,15 @@ pub fn apply_having_filter(
     let mut filtered = Vec::with_capacity(total);
 
     for row in rows {
-        let include = evaluate_having_on_result_row(
-            having_expr,
-            &row,
-            group_col_count,
-            aggregates,
-            schema,
-        )?;
+        let include =
+            evaluate_having_on_result_row(having_expr, &row, group_col_count, aggregates, schema)?;
 
         if include {
             filtered.push(row);
         }
     }
 
-    log::debug!(
-        "HAVING filter: {} of {} rows passed",
-        filtered.len(),
-        total
-    );
+    log::debug!("HAVING filter: {} of {} rows passed", filtered.len(), total);
 
     Ok(filtered)
 }
@@ -130,7 +124,8 @@ fn evaluate_expr_on_result_row(
             } else if args.len() == 1 {
                 match &args[0] {
                     Expression::ColumnRef { table, column } => {
-                        if let Some(idx) = schema.get_column_index(table.as_deref(), column.as_str())
+                        if let Some(idx) =
+                            schema.get_column_index(table.as_deref(), column.as_str())
                         {
                             AggregateSource::Column(idx)
                         } else {
@@ -236,16 +231,13 @@ fn evaluate_expr_on_result_row(
         Expression::ScalarSubquery(_)
         | Expression::In { .. }
         | Expression::Exists { .. }
-        | Expression::QuantifiedComparison { .. } => {
-            Err(ExecutorError::UnsupportedFeature(
-                "Subqueries in HAVING not supported in columnar path".to_string(),
-            ))
-        }
+        | Expression::QuantifiedComparison { .. } => Err(ExecutorError::UnsupportedFeature(
+            "Subqueries in HAVING not supported in columnar path".to_string(),
+        )),
 
         // IN list
         Expression::InList { expr, values, negated } => {
-            let val =
-                evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
+            let val = evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
 
             // SQL three-valued logic for IN:
             // - NULL IN (list) -> NULL (unless list is empty)
@@ -292,8 +284,7 @@ fn evaluate_expr_on_result_row(
 
         // BETWEEN
         Expression::Between { expr, low, high, negated, .. } => {
-            let val =
-                evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
+            let val = evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
             let low_val =
                 evaluate_expr_on_result_row(low, row, group_col_count, aggregates, schema)?;
             let high_val =
@@ -345,8 +336,7 @@ fn evaluate_expr_on_result_row(
 
         // IS NULL / IS NOT NULL
         Expression::IsNull { expr, negated } => {
-            let val =
-                evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
+            let val = evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
             let is_null = matches!(val, SqlValue::Null);
             Ok(SqlValue::Boolean(if *negated { !is_null } else { is_null }))
         }
@@ -447,8 +437,7 @@ fn evaluate_expr_on_result_row(
 
         // Cast expression
         Expression::Cast { expr, data_type } => {
-            let val =
-                evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
+            let val = evaluate_expr_on_result_row(expr, row, group_col_count, aggregates, schema)?;
             cast_value(&val, data_type, &SqlMode::default())
         }
 

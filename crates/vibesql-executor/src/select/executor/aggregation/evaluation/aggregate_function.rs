@@ -2,8 +2,9 @@
 
 use super::super::super::builder::SelectExecutor;
 use crate::{
-    errors::ExecutorError, evaluator::compiled_case::CompiledCaseExpression,
-    evaluator::CombinedExpressionEvaluator, select::grouping::AggregateAccumulator,
+    errors::ExecutorError,
+    evaluator::{compiled_case::CompiledCaseExpression, CombinedExpressionEvaluator},
+    select::grouping::AggregateAccumulator,
 };
 
 /// Evaluate aggregate function expressions (COUNT, SUM, AVG, MIN, MAX)

@@ -116,7 +116,10 @@ fn test_between_integer() {
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(30));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie")));
+    assert_eq!(
+        result[1].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Charlie"))
+    );
     assert_eq!(result[1].values[1], vibesql_types::SqlValue::Integer(35));
 }
 
@@ -214,8 +217,14 @@ fn test_not_between() {
 
     // Should return Cheap (5) and Expensive (25)
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Cheap")));
-    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Expensive")));
+    assert_eq!(
+        result[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Cheap"))
+    );
+    assert_eq!(
+        result[1].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Expensive"))
+    );
 }
 
 #[test]

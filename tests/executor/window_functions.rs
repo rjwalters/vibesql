@@ -283,13 +283,22 @@ fn test_window_lag_basic() {
     use vibesql_storage::Row;
     let table = db.get_table_mut("SALES").unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-01")), SqlValue::Integer(100)]))
+        .insert(Row::new(vec![
+            SqlValue::Varchar(StringValue::from("2024-01")),
+            SqlValue::Integer(100),
+        ]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-02")), SqlValue::Integer(150)]))
+        .insert(Row::new(vec![
+            SqlValue::Varchar(StringValue::from("2024-02")),
+            SqlValue::Integer(150),
+        ]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-03")), SqlValue::Integer(200)]))
+        .insert(Row::new(vec![
+            SqlValue::Varchar(StringValue::from("2024-03")),
+            SqlValue::Integer(200),
+        ]))
         .unwrap();
 
     // Test LAG to get previous month's revenue
@@ -345,13 +354,22 @@ fn test_window_lead_basic() {
     use vibesql_storage::Row;
     let table = db.get_table_mut("SALES").unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-01")), SqlValue::Integer(100)]))
+        .insert(Row::new(vec![
+            SqlValue::Varchar(StringValue::from("2024-01")),
+            SqlValue::Integer(100),
+        ]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-02")), SqlValue::Integer(150)]))
+        .insert(Row::new(vec![
+            SqlValue::Varchar(StringValue::from("2024-02")),
+            SqlValue::Integer(150),
+        ]))
         .unwrap();
     table
-        .insert(Row::new(vec![SqlValue::Varchar(StringValue::from("2024-03")), SqlValue::Integer(200)]))
+        .insert(Row::new(vec![
+            SqlValue::Varchar(StringValue::from("2024-03")),
+            SqlValue::Integer(200),
+        ]))
         .unwrap();
 
     // Test LEAD to get next month's revenue

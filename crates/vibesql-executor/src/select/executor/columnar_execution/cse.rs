@@ -20,8 +20,7 @@ pub(super) fn expression_depth(expr: &Expression) -> usize {
 /// Hash an expression for cache lookup
 /// Uses a simple string-based hash that captures the expression structure
 pub(super) fn hash_expression(expr: &Expression) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::Hasher;
+    use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
     let mut hasher = DefaultHasher::new();
     hash_expression_recursive(expr, &mut hasher);

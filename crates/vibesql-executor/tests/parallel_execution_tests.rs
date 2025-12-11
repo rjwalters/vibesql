@@ -47,7 +47,8 @@ fn setup_large_test_db(num_rows: usize) -> Database {
 #[test]
 fn test_parallel_filter_produces_correct_results() {
     // Create database with a table containing enough rows to trigger automatic parallel execution
-    // The exact threshold depends on hardware (2k-20k rows), so we use 15k to ensure it's above threshold
+    // The exact threshold depends on hardware (2k-20k rows), so we use 15k to ensure it's above
+    // threshold
     let db = setup_large_test_db(15_000);
     let executor = SelectExecutor::new(&db);
 

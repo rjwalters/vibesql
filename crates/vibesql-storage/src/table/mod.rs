@@ -186,7 +186,6 @@ pub struct Table {
 
     /// Counter for modifications since last statistics update
     modifications_since_stats: usize,
-
     // Note: Table-level columnar caching was removed in #3892 to eliminate duplicate
     // caching with Database::columnar_cache. All columnar caching now goes through
     // Database::get_columnar() which provides LRU eviction and Arc-based sharing.
@@ -505,10 +504,7 @@ impl Table {
     /// ```
     #[inline]
     pub fn scan_live(&self) -> impl Iterator<Item = (usize, &Row)> {
-        self.rows
-            .iter()
-            .enumerate()
-            .filter(|(idx, _)| !self.deleted[*idx])
+        self.rows.iter().enumerate().filter(|(idx, _)| !self.deleted[*idx])
     }
 
     /// Scan only live (non-deleted) rows, returning an owned Vec.
@@ -817,13 +813,7 @@ impl Table {
         let affected_indexes = self.indexes.get_affected_indexes(&self.schema, changed_columns);
 
         // Update affected indexes BEFORE replacing row
-        self.indexes.update_selective(
-            &self.schema,
-            old_row,
-            &new_row,
-            index,
-            &affected_indexes,
-        );
+        self.indexes.update_selective(&self.schema, old_row, &new_row, index, &affected_indexes);
 
         // Update the row (direct move, no validation)
         self.rows[index] = new_row;

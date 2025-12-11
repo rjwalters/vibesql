@@ -2,11 +2,11 @@
 
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::evaluator::coercion::coerce_to_date;
-use crate::evaluator::functions::datetime::date_add_subtract;
-
 use super::coerce_numeric_values;
+use crate::{
+    errors::ExecutorError,
+    evaluator::{coercion::coerce_to_date, functions::datetime::date_add_subtract},
+};
 
 pub struct Addition;
 

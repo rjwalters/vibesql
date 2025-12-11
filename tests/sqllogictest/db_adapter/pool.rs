@@ -6,6 +6,7 @@
 //! that is reset between files.
 
 use std::cell::RefCell;
+
 use vibesql_executor::clear_in_subquery_cache;
 use vibesql_storage::Database;
 

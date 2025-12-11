@@ -22,10 +22,10 @@
 
 use std::collections::HashMap;
 
-use crate::schema::CombinedSchema;
-use crate::select::grouping::AggregateAccumulator;
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
+
+use crate::{schema::CombinedSchema, select::grouping::AggregateAccumulator};
 
 /// A group of pivot aggregates that can be evaluated together in a single pass.
 ///
@@ -291,11 +291,12 @@ struct PivotCandidate {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{BinaryOperator, CaseWhen, SelectItem};
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::DataType;
+
+    use super::*;
 
     fn create_test_schema() -> CombinedSchema {
         let table_schema = TableSchema::new(

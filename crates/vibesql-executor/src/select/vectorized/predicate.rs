@@ -7,7 +7,6 @@
 //! Performance optimization: Uses compiled predicates for simple WHERE clauses
 //! (e.g., AND-combined column comparisons) to avoid expression tree overhead.
 
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 use vibesql_ast::Expression;
 use vibesql_storage::Row;
 
@@ -15,6 +14,7 @@ use super::{
     compiled_predicate::{CompiledOrClause, CompiledWhereClause},
     VECTORIZE_THRESHOLD,
 };
+use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 /// Apply WHERE clause filter using chunk-based evaluation
 ///

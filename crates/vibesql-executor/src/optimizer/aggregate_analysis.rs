@@ -8,6 +8,7 @@
 #![allow(clippy::redundant_closure, clippy::unnecessary_map_or)]
 
 use std::collections::HashSet;
+
 #[cfg(test)]
 use vibesql_ast::GroupByClause;
 use vibesql_ast::{Expression, SelectStmt};
@@ -485,8 +486,9 @@ impl AggregatePushdown {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{Expression, SelectItem, SelectStmt};
+
+    use super::*;
 
     fn make_column_ref(table: &str, column: &str) -> Expression {
         Expression::ColumnRef { table: Some(table.to_string()), column: column.to_string() }
@@ -555,7 +557,8 @@ mod tests {
         assert!(analysis.has_aggregates);
         assert!(!analysis.has_having);
         assert!(analysis.grouping_tables.contains("orders"));
-        assert!(!analysis.aggregate_tables.contains("orders")); // COUNT(*) doesn't reference specific table
+        assert!(!analysis.aggregate_tables.contains("orders")); // COUNT(*) doesn't reference
+                                                                // specific table
     }
 
     #[test]

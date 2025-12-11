@@ -38,16 +38,15 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use vibesql_ast::Expression;
-
-use crate::schema::CombinedSchema;
-
 // Re-exports
 pub(crate) use classification::classify_predicate_branch;
 pub(crate) use or_conditions::{
     combine_predicates_with_and, extract_implied_filters_from_or_predicates,
 };
 pub(crate) use table_refs::{extract_referenced_tables_branch, flatten_conjuncts};
+use vibesql_ast::Expression;
+
+use crate::schema::CombinedSchema;
 
 // ============================================================================
 // Unified WHERE Clause Decomposition API
@@ -165,8 +164,9 @@ pub fn decompose_where_clause(
 
     // Extract implied single-table filters from OR predicates
     // This is critical for queries like TPC-H Q7 where:
-    //   (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
-    // implies: n1.n_name IN ('FRANCE', 'GERMANY') AND n2.n_name IN ('FRANCE', 'GERMANY')
+    //   (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name =
+    // 'FRANCE') implies: n1.n_name IN ('FRANCE', 'GERMANY') AND n2.n_name IN ('FRANCE',
+    // 'GERMANY')
     extract_implied_filters_from_or_predicates(&mut decomposition, from_schema);
 
     Ok(decomposition)

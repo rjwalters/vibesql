@@ -326,7 +326,8 @@ fn test_columnar_count_with_predicates() {
 /// Test that verifies columnar execution is actually being used for Q6
 ///
 /// This test demonstrates that TPC-H Q6 uses the columnar execution path with SIMD optimizations.
-/// Run with: RUST_LOG=vibesql_executor=debug cargo test verify_q6_uses_columnar_execution -- --nocapture
+/// Run with: RUST_LOG=vibesql_executor=debug cargo test verify_q6_uses_columnar_execution --
+/// --nocapture
 #[test]
 fn verify_q6_uses_columnar_execution() {
     // Initialize env_logger to capture debug output

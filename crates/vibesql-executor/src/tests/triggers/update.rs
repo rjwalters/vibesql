@@ -1,11 +1,12 @@
 //! Tests for UPDATE trigger firing behavior
 
-use super::{count_audit_rows, create_audit_table, create_users_table};
-use crate::{InsertExecutor, UpdateExecutor};
 use vibesql_ast::{
     CreateTriggerStmt, TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming,
 };
 use vibesql_storage::Database;
+
+use super::{count_audit_rows, create_audit_table, create_users_table};
+use crate::{InsertExecutor, UpdateExecutor};
 
 #[test]
 fn test_after_update_trigger_fires() {
@@ -19,7 +20,9 @@ fn test_after_update_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -46,7 +49,9 @@ fn test_after_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
-            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice_updated"))),
+            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice_updated"),
+            )),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {
@@ -79,7 +84,9 @@ fn test_before_update_trigger_fires() {
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice"))),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
         ]]),
         conflict_clause: None,
         on_duplicate_key_update: None,
@@ -106,7 +113,9 @@ fn test_before_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
-            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("alice_updated"))),
+            value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice_updated"),
+            )),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             vibesql_ast::Expression::BinaryOp {

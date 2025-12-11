@@ -16,10 +16,13 @@
 //!     0 - All translations complete
 //!     1 - Missing translations found
 
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
+
 use fluent_syntax::parser::parse;
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 
 /// ANSI color codes for terminal output
 mod colors {
@@ -68,12 +71,7 @@ impl Args {
             i += 1;
         }
 
-        Self {
-            verbose,
-            json,
-            locale,
-            strict,
-        }
+        Self { verbose, json, locale, strict }
     }
 }
 
@@ -128,8 +126,7 @@ impl LocaleResult {
     }
 
     fn has_issues(&self) -> bool {
-        !self.missing_files.is_empty()
-            || self.missing_messages.values().any(|v| !v.is_empty())
+        !self.missing_files.is_empty() || self.missing_messages.values().any(|v| !v.is_empty())
     }
 
     fn has_warnings(&self) -> bool {
@@ -221,10 +218,7 @@ fn check_locale(
     locale: &str,
     en_us_messages: &BTreeMap<String, BTreeSet<String>>,
 ) -> LocaleResult {
-    let mut result = LocaleResult {
-        locale: locale.to_string(),
-        ..Default::default()
-    };
+    let mut result = LocaleResult { locale: locale.to_string(), ..Default::default() };
 
     let locale_dir = resources_dir.join(locale);
 
@@ -235,9 +229,7 @@ fn check_locale(
             result.missing_files.push(file.clone());
             // All messages in this file are missing
             if let Some(msgs) = en_us_messages.get(file) {
-                result
-                    .missing_messages
-                    .insert(file.clone(), msgs.iter().cloned().collect());
+                result.missing_messages.insert(file.clone(), msgs.iter().cloned().collect());
                 result.total_expected += msgs.len();
             }
         } else {
@@ -266,11 +258,7 @@ fn check_locale(
 
 /// Print results in human-readable format
 fn print_results(results: &[LocaleResult], verbose: bool) {
-    println!(
-        "\n{}Translation Completeness Report{}",
-        colors::BOLD,
-        colors::RESET
-    );
+    println!("\n{}Translation Completeness Report{}", colors::BOLD, colors::RESET);
     println!("================================\n");
 
     for result in results {
@@ -295,11 +283,7 @@ fn print_results(results: &[LocaleResult], verbose: bool) {
 
         // Missing files
         if !result.missing_files.is_empty() {
-            println!(
-                "  {}Missing files:{}",
-                colors::RED,
-                colors::RESET
-            );
+            println!("  {}Missing files:{}", colors::RED, colors::RESET);
             for file in &result.missing_files {
                 println!("    - {}", file);
             }
@@ -361,11 +345,8 @@ fn print_json(results: &[LocaleResult]) {
 
         // Missing messages
         println!("      \"missing_messages\": {{");
-        let missing_entries: Vec<_> = result
-            .missing_messages
-            .iter()
-            .filter(|(_, v)| !v.is_empty())
-            .collect();
+        let missing_entries: Vec<_> =
+            result.missing_messages.iter().filter(|(_, v)| !v.is_empty()).collect();
         for (j, (file, messages)) in missing_entries.iter().enumerate() {
             let comma = if j < missing_entries.len() - 1 { "," } else { "" };
             println!("        \"{}\": {:?}{}", file, messages, comma);
@@ -374,11 +355,8 @@ fn print_json(results: &[LocaleResult]) {
 
         // Extra messages
         println!("      \"extra_messages\": {{");
-        let extra_entries: Vec<_> = result
-            .extra_messages
-            .iter()
-            .filter(|(_, v)| !v.is_empty())
-            .collect();
+        let extra_entries: Vec<_> =
+            result.extra_messages.iter().filter(|(_, v)| !v.is_empty()).collect();
         for (j, (file, messages)) in extra_entries.iter().enumerate() {
             let comma = if j < extra_entries.len() - 1 { "," } else { "" };
             println!("        \"{}\": {:?}{}", file, messages, comma);
@@ -399,33 +377,21 @@ fn main() -> ExitCode {
     let resources_dir = match find_resources_dir() {
         Some(dir) => dir,
         None => {
-            eprintln!(
-                "{}Error: Could not find resources directory{}",
-                colors::RED,
-                colors::RESET
-            );
+            eprintln!("{}Error: Could not find resources directory{}", colors::RED, colors::RESET);
             eprintln!("Run from workspace root or crate directory.");
             return ExitCode::FAILURE;
         }
     };
 
     if !args.json {
-        println!(
-            "{}Checking translation completeness...{}",
-            colors::CYAN,
-            colors::RESET
-        );
+        println!("{}Checking translation completeness...{}", colors::CYAN, colors::RESET);
         println!("Resources directory: {}\n", resources_dir.display());
     }
 
     // Get en-US as the source of truth
     let en_us_dir = resources_dir.join("en-US");
     if !en_us_dir.exists() {
-        eprintln!(
-            "{}Error: en-US locale directory not found{}",
-            colors::RED,
-            colors::RESET
-        );
+        eprintln!("{}Error: en-US locale directory not found{}", colors::RED, colors::RESET);
         return ExitCode::FAILURE;
     }
 
@@ -449,10 +415,7 @@ fn main() -> ExitCode {
     let locales: Vec<String> = if let Some(ref locale) = args.locale {
         vec![locale.clone()]
     } else {
-        get_locales(&resources_dir)
-            .into_iter()
-            .filter(|l| l != "en-US")
-            .collect()
+        get_locales(&resources_dir).into_iter().filter(|l| l != "en-US").collect()
     };
 
     // Check each locale
@@ -473,31 +436,20 @@ fn main() -> ExitCode {
         println!("=======");
 
         let complete_count = results.iter().filter(|r| !r.has_issues()).count();
-        let total_missing: usize = results
-            .iter()
-            .flat_map(|r| r.missing_messages.values())
-            .map(|v| v.len())
-            .sum();
+        let total_missing: usize =
+            results.iter().flat_map(|r| r.missing_messages.values()).map(|v| v.len()).sum();
 
         println!("Locales checked: {}", results.len());
         println!(
             "Complete locales: {}{}/{}{}",
-            if complete_count == results.len() {
-                colors::GREEN
-            } else {
-                colors::YELLOW
-            },
+            if complete_count == results.len() { colors::GREEN } else { colors::YELLOW },
             complete_count,
             results.len(),
             colors::RESET
         );
         println!(
             "Total missing messages: {}{}{}",
-            if total_missing > 0 {
-                colors::RED
-            } else {
-                colors::GREEN
-            },
+            if total_missing > 0 { colors::RED } else { colors::GREEN },
             total_missing,
             colors::RESET
         );
@@ -509,20 +461,12 @@ fn main() -> ExitCode {
 
     if has_missing || (args.strict && has_extra) {
         if !args.json {
-            println!(
-                "\n{}INCOMPLETE: Missing translations found{}",
-                colors::RED,
-                colors::RESET
-            );
+            println!("\n{}INCOMPLETE: Missing translations found{}", colors::RED, colors::RESET);
         }
         ExitCode::FAILURE
     } else {
         if !args.json {
-            println!(
-                "\n{}COMPLETE: All translations present{}",
-                colors::GREEN,
-                colors::RESET
-            );
+            println!("\n{}COMPLETE: All translations present{}", colors::GREEN, colors::RESET);
         }
         ExitCode::SUCCESS
     }

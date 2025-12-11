@@ -11,8 +11,7 @@
 // - Memory usage proportional to output, not total matches
 // - Better cache locality (process rows as they're found)
 
-use std::collections::btree_map;
-use std::ops::Bound;
+use std::{collections::btree_map, ops::Bound};
 
 use vibesql_types::SqlValue;
 
@@ -168,8 +167,9 @@ impl Iterator for OwnedStreamingRangeScan<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::BTreeMap;
+
+    use super::*;
 
     #[test]
     fn test_owned_streaming_range_scan_basic() {
@@ -210,15 +210,8 @@ mod tests {
         let pending_deletions: Vec<usize> = vec![1];
 
         // Full scan
-        let iter = OwnedStreamingRangeScan::new(
-            &data,
-            &pending_deletions,
-            None,
-            None,
-            true,
-            true,
-        )
-        .unwrap();
+        let iter = OwnedStreamingRangeScan::new(&data, &pending_deletions, None, None, true, true)
+            .unwrap();
 
         let results: Vec<usize> = iter.collect();
         // Original: [0, 1, 2, 3, 4]

@@ -149,6 +149,7 @@ fn try_convert_simple_exists_to_join(
         right: Box::new(right_from),
         join_type,
         condition: Some(rewritten_where),
+        using_columns: None,
         natural: false,
     };
 
@@ -265,6 +266,7 @@ fn try_convert_complex_exists_to_join(
         right: Box::new(right_from),
         join_type,
         condition: Some(rewritten_join_condition),
+        using_columns: None,
         natural: false,
     };
 

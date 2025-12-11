@@ -6,13 +6,15 @@
 // queries where all SELECT columns are part of the index key.
 
 use std::ops::Bound;
+
 use vibesql_types::SqlValue;
 
-use crate::database::indexes::index_metadata::IndexData;
-use crate::database::indexes::range_bounds::{try_increment_sqlvalue, try_increment_sqlvalue_prefix};
-use crate::database::indexes::value_normalization::normalize_for_comparison;
-
 use super::compute_prefix_upper_bound;
+use crate::database::indexes::{
+    index_metadata::IndexData,
+    range_bounds::{try_increment_sqlvalue, try_increment_sqlvalue_prefix},
+    value_normalization::normalize_for_comparison,
+};
 
 impl IndexData {
     /// Covering index scan - returns both key values AND row indices for index-only queries
@@ -308,24 +310,22 @@ impl IndexData {
     /// Returns all keys and their row indices (for covering scans on empty prefix)
     pub(super) fn keys_and_values(&self) -> Vec<(Vec<SqlValue>, Vec<usize>)> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
-                data.iter()
-                    .map(|(k, v)| {
-                        let adjusted = if pending_deletions.is_empty() {
-                            v.clone()
-                        } else {
-                            v.iter()
-                                .map(|&row_idx| {
-                                    let decrement =
-                                        pending_deletions.partition_point(|&d| d < row_idx);
-                                    row_idx - decrement
-                                })
-                                .collect()
-                        };
-                        (k.clone(), adjusted)
-                    })
-                    .collect()
-            }
+            IndexData::InMemory { data, pending_deletions } => data
+                .iter()
+                .map(|(k, v)| {
+                    let adjusted = if pending_deletions.is_empty() {
+                        v.clone()
+                    } else {
+                        v.iter()
+                            .map(|&row_idx| {
+                                let decrement = pending_deletions.partition_point(|&d| d < row_idx);
+                                row_idx - decrement
+                            })
+                            .collect()
+                    };
+                    (k.clone(), adjusted)
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }

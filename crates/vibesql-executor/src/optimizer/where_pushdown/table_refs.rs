@@ -23,7 +23,8 @@ pub(crate) fn flatten_conjuncts(expr: &vibesql_ast::Expression) -> Vec<vibesql_a
 }
 
 /// Extract all table names referenced in a predicate (branch version with schema)
-/// Returns None if the expression references tables not in the schema (should be treated as complex)
+/// Returns None if the expression references tables not in the schema (should be treated as
+/// complex)
 pub(crate) fn extract_referenced_tables_branch(
     expr: &vibesql_ast::Expression,
     schema: &CombinedSchema,
@@ -109,9 +110,10 @@ fn extract_tables_recursive_branch(
             // because they can be evaluated independently (and cached)
             //
             // For example, in Q18:
-            //   WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING SUM(l_quantity) > 300)
-            // The subquery is non-correlated, so this can be pushed down to filter the orders table
-            // during the scan phase, significantly reducing the join input size.
+            //   WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem GROUP BY l_orderkey HAVING
+            // SUM(l_quantity) > 300) The subquery is non-correlated, so this can be
+            // pushed down to filter the orders table during the scan phase,
+            // significantly reducing the join input size.
             if !crate::correlation::is_correlated(subquery, schema) {
                 // Non-correlated subquery: the predicate can be pushed down
                 // Extract table references from the left-hand expression only
@@ -125,7 +127,8 @@ fn extract_tables_recursive_branch(
         vibesql_ast::Expression::ScalarSubquery(_) => {
             // Scalar subqueries may reference columns from outer scope (correlated subqueries)
             // Treat as complex predicates to prevent incorrect pushdown to individual tables
-            // This ensures the subquery has access to the full combined schema including outer context
+            // This ensures the subquery has access to the full combined schema including outer
+            // context
             false
         }
         vibesql_ast::Expression::Exists { .. } => {

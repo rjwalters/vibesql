@@ -2,9 +2,10 @@
 //!
 //! Tests for filtering aggregate results with HAVING.
 
-use super::super::*;
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;
+
+use super::super::*;
 
 #[test]
 fn test_having_with_count_star_simple() {

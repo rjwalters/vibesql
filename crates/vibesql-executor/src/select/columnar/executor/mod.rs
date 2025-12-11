@@ -29,17 +29,18 @@ mod aggregate;
 mod expression;
 mod fused;
 
-use super::aggregate::{AggregateOp, AggregateSpec};
-use super::batch::ColumnarBatch;
-use super::filter::ColumnPredicate;
-use super::simd_filter::simd_filter_batch;
-use crate::errors::ExecutorError;
-use crate::schema::CombinedSchema;
+use aggregate::compute_batch_aggregates;
+use fused::{can_use_fused_aggregation, execute_fused_filter_aggregate};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use aggregate::compute_batch_aggregates;
-use fused::{can_use_fused_aggregation, execute_fused_filter_aggregate};
+use super::{
+    aggregate::{AggregateOp, AggregateSpec},
+    batch::ColumnarBatch,
+    filter::ColumnPredicate,
+    simd_filter::simd_filter_batch,
+};
+use crate::{errors::ExecutorError, schema::CombinedSchema};
 
 /// Execute a columnar query end-to-end on a ColumnarBatch
 ///
@@ -127,9 +128,10 @@ pub fn execute_columnar_batch(
 
 #[cfg(test)]
 mod tests {
-    use super::super::aggregate::AggregateSource;
-    use super::super::batch::ColumnarBatch;
-    use super::*;
+    use super::{
+        super::{aggregate::AggregateSource, batch::ColumnarBatch},
+        *,
+    };
 
     fn make_test_batch() -> ColumnarBatch {
         let rows = vec![
@@ -249,7 +251,8 @@ mod tests {
     fn test_execute_columnar_batch_with_nulls_and_filter() {
         let rows = vec![
             Row::new(vec![SqlValue::Integer(10), SqlValue::Double(1.0)]),
-            Row::new(vec![SqlValue::Integer(20), SqlValue::Null]), // NULL - should be excluded from sum
+            Row::new(vec![SqlValue::Integer(20), SqlValue::Null]), /* NULL - should be excluded
+                                                                    * from sum */
             Row::new(vec![SqlValue::Integer(30), SqlValue::Double(3.0)]),
             Row::new(vec![SqlValue::Integer(40), SqlValue::Double(4.0)]),
         ];

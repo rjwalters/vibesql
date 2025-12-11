@@ -4,14 +4,15 @@
 //! For simple column-only projections, uses optimized batch processing.
 //! For complex expressions, falls back to row-by-row projection.
 
-use crate::{
-    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
-};
 use std::collections::HashMap;
+
 use vibesql_ast::{Expression, SelectItem};
 use vibesql_storage::{QueryBufferPool, Row};
 
 use super::window::WindowFunctionKey;
+use crate::{
+    errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema,
+};
 
 /// Minimum number of rows to trigger batch projection optimization
 const BATCH_PROJECTION_THRESHOLD: usize = 100;
@@ -164,11 +165,12 @@ fn batch_project_by_indices(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
     use vibesql_ast::SelectItem;
     use vibesql_storage::{QueryBufferPool, Row};
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
+    use crate::{evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
 
     fn create_test_evaluator() -> CombinedExpressionEvaluator<'static> {
         use vibesql_catalog::{ColumnSchema, TableSchema};
@@ -227,10 +229,7 @@ mod tests {
             .collect();
 
         let columns = vec![SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                table: None,
-                column: "a".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
             alias: None,
         }];
 
@@ -254,10 +253,7 @@ mod tests {
 
         // SELECT b FROM test (just column b)
         let columns = vec![SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                table: None,
-                column: "b".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
             alias: None,
         }];
 
@@ -291,17 +287,11 @@ mod tests {
 
         let columns = vec![
             SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    table: None,
-                    column: "b".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
                 alias: None,
             },
             SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    table: None,
-                    column: "a".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
                 alias: None,
             },
         ];

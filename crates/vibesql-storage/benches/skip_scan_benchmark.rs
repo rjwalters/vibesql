@@ -20,12 +20,14 @@
 //! After running, compare estimated costs with actual execution times
 //! to validate cost model accuracy.
 
+use std::{collections::BTreeMap, hint::black_box};
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use instant::SystemTime;
-use std::collections::BTreeMap;
-use std::hint::black_box;
-use vibesql_storage::statistics::{ColumnStatistics, CostEstimator, TableStatistics};
-use vibesql_storage::IndexData;
+use vibesql_storage::{
+    statistics::{ColumnStatistics, CostEstimator, TableStatistics},
+    IndexData,
+};
 use vibesql_types::SqlValue;
 
 // ============================================================================
@@ -51,10 +53,7 @@ fn create_composite_index_data(row_count: usize, prefix_cardinality: usize) -> I
         data.insert(key, vec![i]);
     }
 
-    IndexData::InMemory {
-        data,
-        pending_deletions: Vec::new(),
-    }
+    IndexData::InMemory { data, pending_deletions: Vec::new() }
 }
 
 /// Create table statistics for cost estimation
@@ -100,16 +99,12 @@ fn bench_skip_scan_vs_table_scan(c: &mut Criterion) {
         group.throughput(Throughput::Elements(row_count as u64));
 
         // Benchmark skip-scan (filter on second column)
-        group.bench_with_input(
-            BenchmarkId::new("skip_scan", cardinality),
-            &cardinality,
-            |b, _| {
-                b.iter(|| {
-                    let results = index.skip_scan_equality(1, &filter_value);
-                    black_box(results.len())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("skip_scan", cardinality), &cardinality, |b, _| {
+            b.iter(|| {
+                let results = index.skip_scan_equality(1, &filter_value);
+                black_box(results.len())
+            });
+        });
 
         // Benchmark simulated table scan (iterate all entries)
         group.bench_with_input(
@@ -159,10 +154,7 @@ fn bench_skip_scan_selectivity(c: &mut Criterion) {
         // Multiple rows can have same key - use row index as value
         data.entry(key).or_insert_with(Vec::new).push(i);
     }
-    let index = IndexData::InMemory {
-        data,
-        pending_deletions: Vec::new(),
-    };
+    let index = IndexData::InMemory { data, pending_deletions: Vec::new() };
 
     group.throughput(Throughput::Elements(row_count as u64));
 
@@ -222,16 +214,12 @@ fn bench_skip_scan_table_size(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(row_count as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("skip_scan", row_count),
-            &row_count,
-            |b, _| {
-                b.iter(|| {
-                    let results = index.skip_scan_equality(1, &filter_value);
-                    black_box(results.len())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("skip_scan", row_count), &row_count, |b, _| {
+            b.iter(|| {
+                let results = index.skip_scan_equality(1, &filter_value);
+                black_box(results.len())
+            });
+        });
 
         // Compare with get_distinct_first_column_values (prefix enumeration cost)
         group.bench_with_input(
@@ -291,16 +279,12 @@ fn bench_breakeven_analysis(c: &mut Criterion) {
         );
 
         // Benchmark actual execution time
-        group.bench_with_input(
-            BenchmarkId::new("skip_scan", cardinality),
-            &cardinality,
-            |b, _| {
-                b.iter(|| {
-                    let results = index.skip_scan_equality(1, &filter_value);
-                    black_box(results.len())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("skip_scan", cardinality), &cardinality, |b, _| {
+            b.iter(|| {
+                let results = index.skip_scan_equality(1, &filter_value);
+                black_box(results.len())
+            });
+        });
     }
 
     println!();
@@ -351,7 +335,8 @@ fn bench_cost_model_accuracy(c: &mut Criterion) {
 
             // Benchmark the actual operation
             let index = create_composite_index_data(row_count, cardinality);
-            // For selectivity simulation, use filter value that matches approximately right fraction
+            // For selectivity simulation, use filter value that matches approximately right
+            // fraction
             let filter_value = SqlValue::Integer(0);
 
             let label = format!("card{}_sel{}", cardinality, selectivity);
@@ -422,7 +407,8 @@ fn bench_skip_scan_range(c: &mut Criterion) {
     // Range filter: value < 10000 (bottom 20%)
     group.bench_function("range_lt", |b| {
         b.iter(|| {
-            let results = index.skip_scan_range(1, None, false, Some(&SqlValue::Integer(10000)), false);
+            let results =
+                index.skip_scan_range(1, None, false, Some(&SqlValue::Integer(10000)), false);
             black_box(results.len())
         });
     });

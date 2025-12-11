@@ -1,14 +1,18 @@
 //! Query result updating and record output processing.
 
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::{
+    io::{Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+};
 
 use rand::Rng;
 
-use crate::executor::Runner;
-use crate::output::{ColumnTypeValidator, Normalizer, RecordOutput, Validator};
-use crate::parser::*;
-use crate::{AsyncDB, ColumnType, MakeConnection};
+use crate::{
+    executor::Runner,
+    output::{ColumnTypeValidator, Normalizer, RecordOutput, Validator},
+    parser::*,
+    AsyncDB, ColumnType, MakeConnection,
+};
 
 /// Updates the specified [`Record`] with the [`QueryOutput`] produced
 /// by a Database, returning `Some(new_record)`.
@@ -140,7 +144,8 @@ pub fn update_record_with_output<T: ColumnType>(
                     {
                         expected_results.clone()
                     }
-                    // Flatten the rows so each column value becomes its own line (SQLLogicTest format)
+                    // Flatten the rows so each column value becomes its own line (SQLLogicTest
+                    // format)
                     _ => rows.iter().flat_map(|cols| cols.iter().cloned()).collect(),
                 };
                 let types = match &expected {

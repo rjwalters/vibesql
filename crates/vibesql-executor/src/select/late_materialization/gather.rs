@@ -4,12 +4,15 @@
 //! only the columns and rows needed for query output.
 
 use std::sync::Arc;
+
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::SelectionVector;
-use crate::errors::ExecutorError;
-use crate::select::columnar::{ColumnArray, ColumnarBatch};
+use crate::{
+    errors::ExecutorError,
+    select::columnar::{ColumnArray, ColumnarBatch},
+};
 
 /// Gather specific columns from a columnar batch using a selection vector
 ///
@@ -436,8 +439,14 @@ mod gather_tests {
 
         assert_eq!(gathered.row_count(), 2);
         assert_eq!(gathered.column_count(), 1);
-        assert_eq!(gathered.get_value(0, 0).unwrap(), SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
-        assert_eq!(gathered.get_value(1, 0).unwrap(), SqlValue::Varchar(arcstr::ArcStr::from("Eve")));
+        assert_eq!(
+            gathered.get_value(0, 0).unwrap(),
+            SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
+        );
+        assert_eq!(
+            gathered.get_value(1, 0).unwrap(),
+            SqlValue::Varchar(arcstr::ArcStr::from("Eve"))
+        );
     }
 
     #[test]

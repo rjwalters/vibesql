@@ -4,8 +4,9 @@
 //! These functions follow SQLite's exact semantics as documented at:
 //! https://www.sqlite.org/lang_corefunc.html
 
-use crate::errors::ExecutorError;
 use vibesql_types::SqlValue;
+
+use crate::errors::ExecutorError;
 
 /// TYPEOF(x) - Return the type name of the expression
 ///
@@ -154,11 +155,7 @@ pub(super) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Vector(floats) => {
             // Convert vector to bytes first
-            floats
-                .iter()
-                .flat_map(|f| f.to_le_bytes())
-                .map(|b| format!("{:02X}", b))
-                .collect()
+            floats.iter().flat_map(|f| f.to_le_bytes()).map(|b| format!("{:02X}", b)).collect()
         }
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
@@ -266,7 +263,7 @@ pub(super) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     // Return as a string of null characters (since VibeSQL doesn't have Blob type)
-    let result: String = std::iter::repeat('\0').take(n).collect();
+    let result = "\0".repeat(n);
     Ok(SqlValue::Varchar(result.into()))
 }
 
@@ -334,6 +331,98 @@ pub(super) fn char_func(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     Ok(SqlValue::Varchar(result.into()))
+}
+
+/// TOREAL(x) - Convert value to floating-point number (SQLite REAL type)
+///
+/// Converts the argument to a floating-point number. This is used primarily in SQLite
+/// test suites for explicit type conversion. NULL input returns NULL.
+/// String inputs are parsed as floating-point numbers.
+/// Integer inputs are converted to floating-point.
+///
+/// Reference: https://www.sqlite.org/lang_corefunc.html
+pub(super) fn toreal(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "TOREAL requires exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+
+    match &args[0] {
+        SqlValue::Null => Ok(SqlValue::Null),
+        SqlValue::Real(r) => Ok(SqlValue::Real(*r)),
+        SqlValue::Double(d) => Ok(SqlValue::Real(*d as f32)),
+        SqlValue::Float(f) => Ok(SqlValue::Real(*f)),
+        SqlValue::Numeric(n) => Ok(SqlValue::Real(*n as f32)),
+        SqlValue::Integer(i) => Ok(SqlValue::Real(*i as f32)),
+        SqlValue::Bigint(i) => Ok(SqlValue::Real(*i as f32)),
+        SqlValue::Smallint(i) => Ok(SqlValue::Real(*i as f32)),
+        SqlValue::Unsigned(u) => Ok(SqlValue::Real(*u as f32)),
+        SqlValue::Boolean(b) => Ok(SqlValue::Real(if *b { 1.0 } else { 0.0 })),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // Try to parse string as a number
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Ok(SqlValue::Real(0.0));
+            }
+            match trimmed.parse::<f64>() {
+                Ok(f) => Ok(SqlValue::Real(f as f32)),
+                Err(_) => Ok(SqlValue::Real(0.0)), // SQLite returns 0.0 for non-numeric strings
+            }
+        }
+        // For other types (Date, Time, Timestamp, Interval, Vector), return 0.0
+        _ => Ok(SqlValue::Real(0.0)),
+    }
+}
+
+/// TOINTEGER(x) - Convert value to integer (SQLite INTEGER type)
+///
+/// Converts the argument to an integer. This is used primarily in SQLite
+/// test suites for explicit type conversion. NULL input returns NULL.
+/// String inputs are parsed as integers (truncating any decimal part).
+/// Floating-point inputs are truncated towards zero.
+///
+/// Reference: https://www.sqlite.org/lang_corefunc.html
+pub(super) fn tointeger(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "TOINTEGER requires exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+
+    match &args[0] {
+        SqlValue::Null => Ok(SqlValue::Null),
+        SqlValue::Integer(i) => Ok(SqlValue::Integer(*i)),
+        SqlValue::Bigint(i) => Ok(SqlValue::Integer(*i)),
+        SqlValue::Smallint(i) => Ok(SqlValue::Integer(*i as i64)),
+        SqlValue::Unsigned(u) => Ok(SqlValue::Integer(*u as i64)),
+        SqlValue::Real(r) => Ok(SqlValue::Integer(*r as i64)),
+        SqlValue::Double(d) => Ok(SqlValue::Integer(*d as i64)),
+        SqlValue::Float(f) => Ok(SqlValue::Integer(*f as i64)),
+        SqlValue::Numeric(n) => Ok(SqlValue::Integer(*n as i64)),
+        SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // Try to parse string as a number
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Ok(SqlValue::Integer(0));
+            }
+            // First try parsing as integer
+            if let Ok(i) = trimmed.parse::<i64>() {
+                return Ok(SqlValue::Integer(i));
+            }
+            // Then try parsing as float and truncating
+            if let Ok(f) = trimmed.parse::<f64>() {
+                return Ok(SqlValue::Integer(f as i64));
+            }
+            // SQLite returns 0 for non-numeric strings
+            Ok(SqlValue::Integer(0))
+        }
+        // For other types (Date, Time, Timestamp, Interval, Vector), return 0
+        _ => Ok(SqlValue::Integer(0)),
+    }
 }
 
 /// PRINTF(format, ...) - Formatted string output
@@ -652,11 +741,8 @@ pub(super) fn quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
         SqlValue::Vector(floats) => {
             // Convert blob to X'...' hex format
-            let hex: String = floats
-                .iter()
-                .flat_map(|f| f.to_le_bytes())
-                .map(|b| format!("{:02X}", b))
-                .collect();
+            let hex: String =
+                floats.iter().flat_map(|f| f.to_le_bytes()).map(|b| format!("{:02X}", b)).collect();
             Ok(SqlValue::Varchar(format!("X'{}'", hex).into()))
         }
         SqlValue::Date(d) => Ok(SqlValue::Varchar(format!("'{}'", d).into())),
@@ -688,16 +774,13 @@ mod tests {
 
     #[test]
     fn test_typeof() {
-        assert_eq!(
-            typeof_func(&[SqlValue::Null]).unwrap(),
-            SqlValue::Varchar("null".into())
-        );
+        assert_eq!(typeof_func(&[SqlValue::Null]).unwrap(), SqlValue::Varchar("null".into()));
         assert_eq!(
             typeof_func(&[SqlValue::Integer(42)]).unwrap(),
             SqlValue::Varchar("integer".into())
         );
         assert_eq!(
-            typeof_func(&[SqlValue::Numeric(3.14)]).unwrap(),
+            typeof_func(&[SqlValue::Numeric(3.5)]).unwrap(),
             SqlValue::Varchar("real".into())
         );
         assert_eq!(
@@ -714,8 +797,8 @@ mod tests {
     #[test]
     fn test_likely_unlikely_likelihood() {
         let val = SqlValue::Boolean(true);
-        assert_eq!(likely(&[val.clone()]).unwrap(), val);
-        assert_eq!(unlikely(&[val.clone()]).unwrap(), val);
+        assert_eq!(likely(std::slice::from_ref(&val)).unwrap(), val);
+        assert_eq!(unlikely(std::slice::from_ref(&val)).unwrap(), val);
         assert_eq!(likelihood(&[val.clone(), SqlValue::Numeric(0.9)]).unwrap(), val);
     }
 
@@ -805,14 +888,8 @@ mod tests {
 
     #[test]
     fn test_unicode() {
-        assert_eq!(
-            unicode(&[SqlValue::Varchar("A".into())]).unwrap(),
-            SqlValue::Integer(65)
-        );
-        assert_eq!(
-            unicode(&[SqlValue::Varchar("😀".into())]).unwrap(),
-            SqlValue::Integer(128512)
-        );
+        assert_eq!(unicode(&[SqlValue::Varchar("A".into())]).unwrap(), SqlValue::Integer(65));
+        assert_eq!(unicode(&[SqlValue::Varchar("😀".into())]).unwrap(), SqlValue::Integer(128512));
         assert_eq!(unicode(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Null);
         assert_eq!(unicode(&[SqlValue::Null]).unwrap(), SqlValue::Null);
     }
@@ -843,17 +920,14 @@ mod tests {
 
         // Float
         assert_eq!(
-            printf(&[SqlValue::Varchar("Pi: %f".into()), SqlValue::Numeric(3.14159)]).unwrap(),
-            SqlValue::Varchar("Pi: 3.141590".into())
+            printf(&[SqlValue::Varchar("Value: %f".into()), SqlValue::Numeric(1.5)]).unwrap(),
+            SqlValue::Varchar("Value: 1.500000".into())
         );
 
         // String
         assert_eq!(
-            printf(&[
-                SqlValue::Varchar("Hello, %s!".into()),
-                SqlValue::Varchar("World".into())
-            ])
-            .unwrap(),
+            printf(&[SqlValue::Varchar("Hello, %s!".into()), SqlValue::Varchar("World".into())])
+                .unwrap(),
             SqlValue::Varchar("Hello, World!".into())
         );
 
@@ -871,6 +945,81 @@ mod tests {
         assert_eq!(
             printf(&[SqlValue::Varchar("100%%".into())]).unwrap(),
             SqlValue::Varchar("100%".into())
+        );
+    }
+
+    #[test]
+    fn test_toreal() {
+        // NULL returns NULL
+        assert_eq!(toreal(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+
+        // Integer to real
+        assert_eq!(toreal(&[SqlValue::Integer(123)]).unwrap(), SqlValue::Real(123.0));
+
+        // Float passthrough
+        assert_eq!(toreal(&[SqlValue::Real(2.5)]).unwrap(), SqlValue::Real(2.5));
+
+        // String to real
+        assert_eq!(
+            toreal(&[SqlValue::Varchar("123.456".into())]).unwrap(),
+            SqlValue::Real(123.456)
+        );
+
+        // Non-numeric string returns 0.0
+        assert_eq!(toreal(&[SqlValue::Varchar("abc".into())]).unwrap(), SqlValue::Real(0.0));
+
+        // Empty string returns 0.0
+        assert_eq!(toreal(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Real(0.0));
+
+        // Boolean conversion
+        assert_eq!(toreal(&[SqlValue::Boolean(true)]).unwrap(), SqlValue::Real(1.0));
+        assert_eq!(toreal(&[SqlValue::Boolean(false)]).unwrap(), SqlValue::Real(0.0));
+
+        // Negative number
+        assert_eq!(toreal(&[SqlValue::Integer(-42)]).unwrap(), SqlValue::Real(-42.0));
+
+        // String with whitespace
+        assert_eq!(toreal(&[SqlValue::Varchar("  2.5  ".into())]).unwrap(), SqlValue::Real(2.5));
+    }
+
+    #[test]
+    fn test_tointeger() {
+        // NULL returns NULL
+        assert_eq!(tointeger(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+
+        // Integer passthrough
+        assert_eq!(tointeger(&[SqlValue::Integer(123)]).unwrap(), SqlValue::Integer(123));
+
+        // Float to integer (truncation)
+        assert_eq!(tointeger(&[SqlValue::Real(3.7)]).unwrap(), SqlValue::Integer(3));
+        assert_eq!(tointeger(&[SqlValue::Real(-3.7)]).unwrap(), SqlValue::Integer(-3));
+
+        // String to integer
+        assert_eq!(tointeger(&[SqlValue::Varchar("456".into())]).unwrap(), SqlValue::Integer(456));
+
+        // String with decimal (truncation)
+        assert_eq!(
+            tointeger(&[SqlValue::Varchar("123.789".into())]).unwrap(),
+            SqlValue::Integer(123)
+        );
+
+        // Non-numeric string returns 0
+        assert_eq!(tointeger(&[SqlValue::Varchar("abc".into())]).unwrap(), SqlValue::Integer(0));
+
+        // Empty string returns 0
+        assert_eq!(tointeger(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Integer(0));
+
+        // Boolean conversion
+        assert_eq!(tointeger(&[SqlValue::Boolean(true)]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(tointeger(&[SqlValue::Boolean(false)]).unwrap(), SqlValue::Integer(0));
+
+        // Negative number
+        assert_eq!(tointeger(&[SqlValue::Integer(-42)]).unwrap(), SqlValue::Integer(-42));
+
+        // String with whitespace
+        assert_eq!(
+            tointeger(&[SqlValue::Varchar("  42  ".into())]).unwrap(),
+            SqlValue::Integer(42)
         );
     }
 
@@ -924,11 +1073,7 @@ mod tests {
 
         // Single string (no separator used)
         assert_eq!(
-            concat_ws(&[
-                SqlValue::Varchar(",".into()),
-                SqlValue::Varchar("only".into())
-            ])
-            .unwrap(),
+            concat_ws(&[SqlValue::Varchar(",".into()), SqlValue::Varchar("only".into())]).unwrap(),
             SqlValue::Varchar("only".into())
         );
 
@@ -957,10 +1102,7 @@ mod tests {
         assert_eq!(quote(&[SqlValue::Null]).unwrap(), SqlValue::Varchar("NULL".into()));
 
         // Integer
-        assert_eq!(
-            quote(&[SqlValue::Integer(123)]).unwrap(),
-            SqlValue::Varchar("123".into())
-        );
+        assert_eq!(quote(&[SqlValue::Integer(123)]).unwrap(), SqlValue::Varchar("123".into()));
 
         // String without quotes
         assert_eq!(
@@ -975,41 +1117,23 @@ mod tests {
         );
 
         // Float
-        assert_eq!(
-            quote(&[SqlValue::Numeric(3.14)]).unwrap(),
-            SqlValue::Varchar("3.14".into())
-        );
+        assert_eq!(quote(&[SqlValue::Numeric(2.5)]).unwrap(), SqlValue::Varchar("2.5".into()));
 
         // Boolean
-        assert_eq!(
-            quote(&[SqlValue::Boolean(true)]).unwrap(),
-            SqlValue::Varchar("1".into())
-        );
-        assert_eq!(
-            quote(&[SqlValue::Boolean(false)]).unwrap(),
-            SqlValue::Varchar("0".into())
-        );
+        assert_eq!(quote(&[SqlValue::Boolean(true)]).unwrap(), SqlValue::Varchar("1".into()));
+        assert_eq!(quote(&[SqlValue::Boolean(false)]).unwrap(), SqlValue::Varchar("0".into()));
 
         // Empty string
-        assert_eq!(
-            quote(&[SqlValue::Varchar("".into())]).unwrap(),
-            SqlValue::Varchar("''".into())
-        );
+        assert_eq!(quote(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Varchar("''".into()));
     }
 
     #[test]
     fn test_intreal() {
         // Integer passes through
-        assert_eq!(
-            intreal(&[SqlValue::Integer(42)]).unwrap(),
-            SqlValue::Integer(42)
-        );
+        assert_eq!(intreal(&[SqlValue::Integer(42)]).unwrap(), SqlValue::Integer(42));
 
         // Real passes through
-        assert_eq!(
-            intreal(&[SqlValue::Numeric(3.14)]).unwrap(),
-            SqlValue::Numeric(3.14)
-        );
+        assert_eq!(intreal(&[SqlValue::Numeric(2.5)]).unwrap(), SqlValue::Numeric(2.5));
 
         // NULL passes through
         assert_eq!(intreal(&[SqlValue::Null]).unwrap(), SqlValue::Null);

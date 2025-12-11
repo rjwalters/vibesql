@@ -31,7 +31,8 @@ pub(crate) fn to_i64(value: &vibesql_types::SqlValue) -> Result<i64, ExecutorErr
         vibesql_types::SqlValue::Smallint(n) => Ok(*n as i64),
         vibesql_types::SqlValue::Integer(n) => Ok(*n),
         vibesql_types::SqlValue::Bigint(n) => Ok(*n),
-        vibesql_types::SqlValue::Unsigned(n) => Ok(*n as i64), /* Note: may overflow for large unsigned */
+        vibesql_types::SqlValue::Unsigned(n) => Ok(*n as i64), /* Note: may overflow for large */
+        // unsigned
         vibesql_types::SqlValue::Numeric(f) => Ok(*f as i64),
         vibesql_types::SqlValue::Float(f) => Ok(*f as i64),
         vibesql_types::SqlValue::Real(f) => Ok(*f as i64),

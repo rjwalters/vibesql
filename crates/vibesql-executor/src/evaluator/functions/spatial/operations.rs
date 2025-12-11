@@ -5,10 +5,11 @@
 
 #![cfg(feature = "spatial")]
 
-use super::{geometry_to_sql_value, sql_value_to_geometry, Geometry};
-use crate::errors::ExecutorError;
 use geo::algorithm::{BooleanOps, Simplify};
 use vibesql_types::SqlValue;
+
+use super::{geometry_to_sql_value, sql_value_to_geometry, Geometry};
+use crate::errors::ExecutorError;
 
 /// Helper function to convert WKT string to geo::Geometry
 fn wkt_to_geo(wkt_str: &str) -> Result<geo::Geometry<f64>, ExecutorError> {

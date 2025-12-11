@@ -114,7 +114,10 @@ fn test_index_scan_with_email_index() {
         // Should return exactly 1 row
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].values[0], SqlValue::Integer(1));
-        assert_eq!(result[0].values[1], SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com")));
+        assert_eq!(
+            result[0].values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("alice@example.com"))
+        );
     } else {
         panic!("Expected SELECT statement");
     }
