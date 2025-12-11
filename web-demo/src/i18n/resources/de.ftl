@@ -83,8 +83,21 @@ editor-placeholder = SQL-Abfrage hier eingeben... (Strg+Enter oder Cmd+Enter zum
 nav-terminal = SQL-Terminal Demo
 nav-compliance = SQL-Konformitätsbericht
 nav-benchmarks = Leistungsbenchmarks
+nav-trends = Leistungstrends
 nav-github = GitHub Repository
 nav-home = Startseite
+
+# Trends page
+trends-title = Leistungstrends - VibeSQL
+trends-heading = VibeSQL - Leistungstrends
+trends-total-runs = Gesamte Benchmark-Läufe
+trends-across-suites = über alle Suiten
+trends-date-range = Zeitraum
+trends-first-to-last = erster bis letzter Lauf
+trends-latest-commit = Letzter Commit
+trends-most-recent = neuester Benchmark
+trends-generated = Generiert
+trends-last-export = letzter Datenexport
 
 # Results
 results-success-zero = Abfrage erfolgreich ausgeführt (0 Zeilen)
