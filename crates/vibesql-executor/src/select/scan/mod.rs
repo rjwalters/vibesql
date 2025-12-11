@@ -140,12 +140,13 @@ where
             outer_row,
             outer_schema,
         ),
-        vibesql_ast::FromClause::Join { left, right, join_type, condition, natural } => {
+        vibesql_ast::FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
             join_scan::execute_join(
                 left,
                 right,
                 join_type,
                 condition,
+                using_columns,
                 *natural,
                 cte_results,
                 database,

@@ -428,15 +428,23 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     .as_ref()
                     .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
             },
-            arena_select::FromClause::Join { left, right, join_type, condition, natural } => {
-                FromClause::Join {
-                    left: Box::new(self.convert_from_clause(left)),
-                    right: Box::new(self.convert_from_clause(right)),
-                    join_type: (*join_type).into(),
-                    condition: condition.as_ref().map(|e| self.convert_expression(e)),
-                    natural: *natural,
-                }
-            }
+            arena_select::FromClause::Join {
+                left,
+                right,
+                join_type,
+                condition,
+                using_columns,
+                natural,
+            } => FromClause::Join {
+                left: Box::new(self.convert_from_clause(left)),
+                right: Box::new(self.convert_from_clause(right)),
+                join_type: (*join_type).into(),
+                condition: condition.as_ref().map(|e| self.convert_expression(e)),
+                using_columns: using_columns
+                    .as_ref()
+                    .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+                natural: *natural,
+            },
             arena_select::FromClause::Subquery { query, alias, column_aliases } => {
                 FromClause::Subquery {
                     query: Box::new(self.convert_select(query)),

@@ -53,6 +53,7 @@ pub(crate) fn execute_join<F>(
     right: &vibesql_ast::FromClause,
     join_type: &vibesql_ast::JoinType,
     condition: &Option<vibesql_ast::Expression>,
+    using_columns: &Option<Vec<String>>,
     natural: bool,
     cte_results: &HashMap<String, CteResult>,
     database: &vibesql_storage::Database,
@@ -174,8 +175,17 @@ where
         None
     };
 
-    // Use the natural join condition if present, otherwise use the explicit condition
-    let effective_condition = natural_join_condition.or_else(|| condition.clone());
+    // For USING clause, generate the join condition based on specified columns
+    let using_join_condition = if let Some(cols) = using_columns {
+        generate_using_join_condition(cols, &left_result.schema, &right_result.schema)?
+    } else {
+        None
+    };
+
+    // Use the natural join condition, USING condition, or explicit condition
+    let effective_condition = natural_join_condition
+        .or(using_join_condition)
+        .or_else(|| condition.clone());
 
     // If we have a WHERE clause, use predicate plan to extract equijoin conditions (Phase 1)
     let equijoin_predicates = if let Some(where_expr) = where_clause {
@@ -1113,4 +1123,92 @@ fn try_prefix_scan_semi_join(
         .collect();
 
     Ok(Some(super::FromResult::from_rows(left_result.schema.clone(), result_rows)))
+}
+
+/// Generate a join condition from USING columns with proper table qualification.
+///
+/// USING (col1, col2) is equivalent to:
+/// `left_table.col1 = right_table.col1 AND left_table.col2 = right_table.col2`
+///
+/// This function finds the specified columns in both schemas and creates
+/// properly qualified column references for the join condition.
+fn generate_using_join_condition(
+    columns: &[String],
+    left_schema: &crate::schema::CombinedSchema,
+    right_schema: &crate::schema::CombinedSchema,
+) -> Result<Option<vibesql_ast::Expression>, ExecutorError> {
+    // Find column locations in both schemas
+    let mut condition: Option<vibesql_ast::Expression> = None;
+
+    for col_name in columns {
+        let col_lower = col_name.to_lowercase();
+
+        // Find column in left schema (case-insensitive)
+        let left_col = left_schema
+            .table_schemas
+            .iter()
+            .find_map(|(table_name, (_idx, table_schema))| {
+                table_schema.columns.iter().find_map(|col| {
+                    if col.name.to_lowercase() == col_lower {
+                        Some((table_name.clone(), col.name.clone()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or_else(|| {
+                ExecutorError::ColumnNotFound {
+                    column_name: col_name.clone(),
+                    table_name: "USING clause (left side)".to_string(),
+                    searched_tables: left_schema.table_names(),
+                    available_columns: vec![],
+                }
+            })?;
+
+        // Find column in right schema (case-insensitive)
+        let right_col = right_schema
+            .table_schemas
+            .iter()
+            .find_map(|(table_name, (_idx, table_schema))| {
+                table_schema.columns.iter().find_map(|col| {
+                    if col.name.to_lowercase() == col_lower {
+                        Some((table_name.clone(), col.name.clone()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or_else(|| {
+                ExecutorError::ColumnNotFound {
+                    column_name: col_name.clone(),
+                    table_name: "USING clause (right side)".to_string(),
+                    searched_tables: right_schema.table_names(),
+                    available_columns: vec![],
+                }
+            })?;
+
+        // Create equality condition with qualified column references
+        let equality = vibesql_ast::Expression::BinaryOp {
+            left: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: Some(left_col.0.to_string()),
+                column: left_col.1,
+            }),
+            op: vibesql_ast::BinaryOperator::Equal,
+            right: Box::new(vibesql_ast::Expression::ColumnRef {
+                table: Some(right_col.0.to_string()),
+                column: right_col.1,
+            }),
+        };
+
+        condition = Some(match condition {
+            None => equality,
+            Some(existing) => vibesql_ast::Expression::BinaryOp {
+                left: Box::new(existing),
+                op: vibesql_ast::BinaryOperator::And,
+                right: Box::new(equality),
+            },
+        });
+    }
+
+    Ok(condition)
 }

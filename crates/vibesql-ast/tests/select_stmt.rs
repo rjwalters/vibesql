@@ -378,6 +378,7 @@ fn test_inner_join() {
                 column: "user_id".to_string(),
             }),
         }),
+        using_columns: None,
         natural: false,
     };
     match from {
@@ -401,6 +402,7 @@ fn test_left_outer_join() {
         }),
         join_type: JoinType::LeftOuter,
         condition: None,
+        using_columns: None,
         natural: false,
     };
     match from {
@@ -424,6 +426,7 @@ fn test_right_outer_join() {
         }),
         join_type: JoinType::RightOuter,
         condition: None,
+        using_columns: None,
         natural: false,
     };
     match from {
@@ -447,6 +450,7 @@ fn test_full_outer_join() {
         }),
         join_type: JoinType::FullOuter,
         condition: None,
+        using_columns: None,
         natural: false,
     };
     match from {
@@ -470,6 +474,7 @@ fn test_cross_join() {
         }),
         join_type: JoinType::Cross,
         condition: None,
+        using_columns: None,
         natural: false,
     };
     match from {

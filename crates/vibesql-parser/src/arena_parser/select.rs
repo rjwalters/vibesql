@@ -316,14 +316,33 @@ impl<'arena> ArenaParser<'arena> {
                 let natural = self.try_consume_keyword(Keyword::Natural);
                 let right = self.parse_table_reference()?;
 
-                let condition = if jt != JoinType::Cross && !natural {
+                let (condition, using_columns) = if jt != JoinType::Cross && !natural {
                     if self.try_consume_keyword(Keyword::On) {
-                        Some(self.parse_expression()?)
+                        (Some(self.parse_expression()?), None)
+                    } else if self.try_consume_keyword(Keyword::Using) {
+                        self.expect_token(Token::LParen)?;
+                        let mut columns = BumpVec::new_in(self.arena);
+                        loop {
+                            if let Token::Identifier(name) = self.peek() {
+                                let name = name.clone();
+                                self.advance();
+                                columns.push(self.intern(&name));
+                            } else {
+                                return Err(ParseError {
+                                    message: "Expected column name in USING clause".to_string(),
+                                });
+                            }
+                            if !self.try_consume(&Token::Comma) {
+                                break;
+                            }
+                        }
+                        self.expect_token(Token::RParen)?;
+                        (None, Some(columns))
                     } else {
-                        None
+                        (None, None)
                     }
                 } else {
-                    None
+                    (None, None)
                 };
 
                 let left_ref = self.arena.alloc(from);
@@ -334,6 +353,7 @@ impl<'arena> ArenaParser<'arena> {
                     right: right_ref,
                     join_type: jt,
                     condition,
+                    using_columns,
                     natural,
                 };
             } else {
