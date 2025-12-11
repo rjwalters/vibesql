@@ -12,11 +12,8 @@
 
 use std::sync::OnceLock;
 
-/// Global parallel configuration, initialized once on first access
-static PARALLEL_CONFIG: OnceLock<ParallelConfig> = OnceLock::new();
-
 /// Configuration for parallel execution decisions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParallelConfig {
     /// Number of threads available (from rayon)
     #[allow(dead_code)]
@@ -40,13 +37,42 @@ pub struct ParallelThresholds {
 
 impl ParallelConfig {
     /// Get or initialize the global parallel configuration
-    pub fn global() -> &'static ParallelConfig {
-        PARALLEL_CONFIG.get_or_init(Self::detect)
+    ///
+    /// Note: This uses OnceLock for the user-specified threshold override,
+    /// but re-checks rayon::current_num_threads() each time to handle
+    /// custom thread pools created after initial configuration.
+    pub fn global() -> Self {
+        // Cache the user threshold override (or None) - this is checked once
+        static THRESHOLD_OVERRIDE: OnceLock<Option<ParallelThresholds>> = OnceLock::new();
+        let override_thresholds = THRESHOLD_OVERRIDE.get_or_init(|| {
+            std::env::var("PARALLEL_THRESHOLD")
+                .ok()
+                .map(|s| Self::parse_threshold_override(&s))
+        });
+
+        // Always check current thread count - this allows custom pools to work
+        let num_threads = rayon::current_num_threads();
+
+        let thresholds = match override_thresholds {
+            Some(t) => *t,
+            None => Self::thresholds_for_hardware(num_threads),
+        };
+
+        ParallelConfig { num_threads, thresholds }
     }
 
-    /// Detect hardware capabilities and create appropriate configuration
+    /// Detect hardware capabilities and create appropriate configuration (legacy, unused)
+    #[allow(dead_code)]
     fn detect() -> Self {
         let num_threads = rayon::current_num_threads();
+
+        // Debug: Log when ParallelConfig is initialized
+        if std::env::var("MORSEL_DEBUG").is_ok() {
+            eprintln!(
+                "[MORSEL] ParallelConfig initialized: detected {} threads",
+                num_threads
+            );
+        }
 
         // Check for user override of threshold
         let thresholds = if let Ok(threshold_str) = std::env::var("PARALLEL_THRESHOLD") {

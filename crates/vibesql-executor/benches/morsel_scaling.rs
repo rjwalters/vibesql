@@ -64,10 +64,59 @@ use std::{
 };
 
 use harness::{print_group_header, BenchConfig, BenchResult, BenchStats, Harness};
-use tpch::{
-    queries::{TPCH_Q1, TPCH_Q5, TPCH_Q6},
-    schema::load_vibesql,
-};
+use tpch::schema::load_vibesql;
+
+// Custom queries optimized for morsel-driven parallelism benchmarking.
+// These queries have GROUP BY but NO ORDER BY, which allows the parallel
+// GROUP BY path to be used. Standard TPC-H queries all have ORDER BY which
+// forces fallback to sequential row-oriented execution.
+
+/// Q1 variant: Same aggregates as TPC-H Q1, but without ORDER BY
+/// This allows testing parallel GROUP BY on lineitem (600K rows at SF 0.1)
+const PARALLEL_Q1: &str = r#"
+SELECT
+    l_returnflag,
+    l_linestatus,
+    SUM(l_quantity) as sum_qty,
+    SUM(l_extendedprice) as sum_base_price,
+    SUM(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+    SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+    AVG(l_quantity) as avg_qty,
+    AVG(l_extendedprice) as avg_price,
+    AVG(l_discount) as avg_disc,
+    COUNT(*) as count_order
+FROM lineitem
+WHERE l_shipdate <= '1998-09-01'
+GROUP BY l_returnflag, l_linestatus
+"#;
+
+/// Q5 variant: Multi-table join with GROUP BY, no ORDER BY
+/// Tests parallel GROUP BY with join results
+const PARALLEL_Q5: &str = r#"
+SELECT
+    n_name,
+    SUM(l_extendedprice * (1 - l_discount)) as revenue
+FROM customer, orders, lineitem, supplier, nation, region
+WHERE c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND l_suppkey = s_suppkey
+    AND c_nationkey = s_nationkey
+    AND s_nationkey = n_nationkey
+    AND n_regionkey = r_regionkey
+    AND r_name = 'ASIA'
+    AND o_orderdate >= '1994-01-01'
+    AND o_orderdate < '1995-01-01'
+GROUP BY n_name
+"#;
+
+/// Simple lineitem scan with filter - tests parallel filter (no GROUP BY needed)
+const PARALLEL_SCAN: &str = r#"
+SELECT COUNT(*) as cnt
+FROM lineitem
+WHERE l_shipdate <= '1998-09-01'
+    AND l_discount BETWEEN 0.05 AND 0.07
+    AND l_quantity < 24
+"#;
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_storage::Database as VibeDB;
@@ -130,8 +179,13 @@ fn bench_thread_scaling(db: &VibeDB, harness: &Harness) {
     eprintln!("Testing thread counts: {:?}", thread_counts);
     eprintln!("(Set MAX_THREADS env var to adjust, default: 16)\n");
 
-    // Test queries
-    let queries = [("Q1", TPCH_Q1), ("Q6", TPCH_Q6)];
+    // Test queries - custom variants without ORDER BY to enable parallel GROUP BY
+    // Note: Standard TPC-H Q1/Q6 have ORDER BY which forces sequential execution
+    let queries = [
+        ("ParallelQ1", PARALLEL_Q1),  // GROUP BY on lineitem, no ORDER BY
+        ("ParallelQ5", PARALLEL_Q5),  // Multi-table join with GROUP BY
+        ("ParallelScan", PARALLEL_SCAN), // Simple scan with COUNT(*)
+    ];
 
     for (query_name, query_sql) in queries {
         eprintln!("\n--- {} Thread Scaling ---", query_name);
@@ -307,13 +361,14 @@ fn bench_morsel_size(db: &VibeDB, harness: &Harness) {
     let morsel_sizes = [1024, 2048, 4096, 8192, 16_384, 32_768, 50_000, 100_000];
 
     // Different query types to test (as specified in issue #4257)
-    // Q1: Heavy aggregation with SIMD-friendly operations
-    // Q6: Filter-heavy with SIMD predicates
-    // Q5: Complex 6-way join - tests morsel overhead vs join efficiency
+    // Using custom queries without ORDER BY to enable parallel execution paths:
+    // ParallelQ1: Heavy aggregation with SIMD-friendly operations, no ORDER BY
+    // ParallelQ5: Complex 6-way join, no ORDER BY
+    // ParallelScan: Filter-heavy with COUNT(*)
     let queries = [
-        ("Q1_agg", TPCH_Q1),    // Aggregation-heavy (benefits from SIMD)
-        ("Q6_filter", TPCH_Q6), // Filter-heavy (benefits from SIMD)
-        ("Q5_join", TPCH_Q5),   // Complex 6-way join (tests scheduling overhead)
+        ("Q1_agg", PARALLEL_Q1),    // Aggregation-heavy (benefits from SIMD)
+        ("Q5_join", PARALLEL_Q5),   // Complex 6-way join (tests scheduling overhead)
+        ("Scan_filter", PARALLEL_SCAN), // Filter-heavy
     ];
 
     eprintln!("Testing morsel sizes: {:?}\n", morsel_sizes);
