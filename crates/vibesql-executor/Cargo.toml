@@ -69,6 +69,7 @@ sysinfo = "0.37"
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
 bytes = "1.0"
 tempfile = "3.19"
+num_cpus = "1.16"
 
 [features]
 default = ["parallel", "spatial", "native-columnar"]
@@ -251,3 +252,7 @@ harness = false
 name = "morsel_scaling"
 harness = false
 required-features = ["in-memory-indexes"]
+
+[[bench]]
+name = "concurrent_throughput"
+harness = false
