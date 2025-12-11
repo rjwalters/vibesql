@@ -351,10 +351,11 @@ impl CombinedExpressionEvaluator<'_> {
             }
 
             // Aggregate functions - should be evaluated in aggregation context
-            vibesql_ast::Expression::AggregateFunction { .. } => {
-                Err(ExecutorError::UnsupportedExpression(
-                    "Aggregate functions should be evaluated in aggregation context".to_string(),
-                ))
+            vibesql_ast::Expression::AggregateFunction { name, .. } => {
+                // SQLite-compatible error message for aggregate misuse
+                Err(ExecutorError::MisuseOfAggregate {
+                    function_name: name.clone(),
+                })
             }
 
             // Full-text search

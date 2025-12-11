@@ -179,6 +179,264 @@ fn is_rowid_pseudo_column(column: &str) -> bool {
     lower == "rowid" || lower == "_rowid_" || lower == "oid"
 }
 
+/// Check if a function name is an aggregate function
+fn is_aggregate_function(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    matches!(
+        upper.as_str(),
+        "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "TOTAL" | "GROUP_CONCAT"
+    )
+}
+
+/// Check if an aggregate function has wrong number of arguments
+/// Returns Some((function_name, arg_count)) if there's an error, None otherwise
+fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::AggregateFunction { name, args, .. } => {
+            let upper = name.to_uppercase();
+            let arg_count = args.len();
+
+            // Check for wildcard in non-COUNT aggregates
+            let has_wildcard = args.iter().any(|arg| {
+                matches!(arg, Expression::Wildcard)
+                    || matches!(
+                        arg,
+                        Expression::ColumnRef { table: None, column } if column == "*"
+                    )
+            });
+
+            match upper.as_str() {
+                "COUNT" => {
+                    // Multi-arg count without DISTINCT is an error
+                    // But this is checked elsewhere, so skip here
+                    None
+                }
+                "MIN" | "MAX" => {
+                    if has_wildcard || arg_count == 0 {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                }
+                "SUM" | "AVG" | "TOTAL" => {
+                    if has_wildcard || arg_count == 0 || arg_count > 1 {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                }
+                "GROUP_CONCAT" => {
+                    if arg_count == 0 || arg_count > 2 {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        Expression::Function { name, args, .. } => {
+            // Check if this is an aggregate function with wrong args
+            if is_aggregate_function(name) {
+                let upper = name.to_uppercase();
+                let arg_count = args.len();
+
+                // Check for wildcard
+                let has_wildcard = args.iter().any(|arg| {
+                    matches!(arg, Expression::Wildcard)
+                        || matches!(
+                            arg,
+                            Expression::ColumnRef { table: None, column } if column == "*"
+                        )
+                });
+
+                match upper.as_str() {
+                    "COUNT" => {
+                        // count(a, b) without DISTINCT is wrong
+                        // Regular count without DISTINCT can only have 0-1 args
+                        if arg_count > 1 {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    "MIN" | "MAX" => {
+                        // Multi-arg min/max are scalar, so only check single arg case
+                        if arg_count <= 1 && (has_wildcard || arg_count == 0) {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    "SUM" | "AVG" | "TOTAL" => {
+                        if has_wildcard || arg_count == 0 || arg_count > 1 {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    "GROUP_CONCAT" => {
+                        if arg_count == 0 || arg_count > 2 {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            } else {
+                // Check function arguments recursively
+                for arg in args {
+                    if let Some(found) = check_aggregate_arg_count(arg) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+        }
+        Expression::BinaryOp { left, right, .. } => check_aggregate_arg_count(left)
+            .or_else(|| check_aggregate_arg_count(right)),
+        Expression::UnaryOp { expr, .. } => check_aggregate_arg_count(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                if let Some(found) = check_aggregate_arg_count(op) {
+                    return Some(found);
+                }
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    if let Some(found) = check_aggregate_arg_count(cond) {
+                        return Some(found);
+                    }
+                }
+                if let Some(found) = check_aggregate_arg_count(&case_when.result) {
+                    return Some(found);
+                }
+            }
+            if let Some(else_expr) = else_result {
+                check_aggregate_arg_count(else_expr)
+            } else {
+                None
+            }
+        }
+        Expression::IsNull { expr, .. } => check_aggregate_arg_count(expr),
+        Expression::Cast { expr, .. } => check_aggregate_arg_count(expr),
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                if let Some(found) = check_aggregate_arg_count(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Find the first aggregate function in an expression
+/// Returns the function name if found, None otherwise
+fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::AggregateFunction { name, .. } => Some(name.clone()),
+        Expression::Function { name, args, .. } => {
+            // Check if this function is a built-in aggregate
+            // Note: MIN/MAX with multiple args are scalar functions in SQLite
+            if is_aggregate_function(name) {
+                let upper = name.to_uppercase();
+                if matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1 {
+                    // Multi-arg min/max are scalar, not aggregate
+                    None
+                } else {
+                    Some(name.clone())
+                }
+            } else {
+                // Check function arguments recursively
+                for arg in args {
+                    if let Some(found) = find_aggregate_in_expression(arg) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+        }
+        Expression::BinaryOp { left, right, .. } => find_aggregate_in_expression(left)
+            .or_else(|| find_aggregate_in_expression(right)),
+        Expression::UnaryOp { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                if let Some(found) = find_aggregate_in_expression(op) {
+                    return Some(found);
+                }
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    if let Some(found) = find_aggregate_in_expression(cond) {
+                        return Some(found);
+                    }
+                }
+                if let Some(found) = find_aggregate_in_expression(&case_when.result) {
+                    return Some(found);
+                }
+            }
+            if let Some(else_expr) = else_result {
+                find_aggregate_in_expression(else_expr)
+            } else {
+                None
+            }
+        }
+        Expression::IsNull { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::IsDistinctFrom { left, right, .. } => find_aggregate_in_expression(left)
+            .or_else(|| find_aggregate_in_expression(right)),
+        Expression::IsTruthValue { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::Between { expr, low, high, .. } => find_aggregate_in_expression(expr)
+            .or_else(|| find_aggregate_in_expression(low))
+            .or_else(|| find_aggregate_in_expression(high)),
+        Expression::InList { expr, values, .. } => {
+            if let Some(found) = find_aggregate_in_expression(expr) {
+                return Some(found);
+            }
+            for val in values {
+                if let Some(found) = find_aggregate_in_expression(val) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::In { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::Exists { .. } => None, // EXISTS subqueries have their own scope
+        Expression::Cast { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::Like { expr, pattern, .. } => find_aggregate_in_expression(expr)
+            .or_else(|| find_aggregate_in_expression(pattern)),
+        Expression::Position { substring, string, .. } => find_aggregate_in_expression(substring)
+            .or_else(|| find_aggregate_in_expression(string)),
+        Expression::Trim { removal_char, string, .. } => {
+            if let Some(char_expr) = removal_char {
+                if let Some(found) = find_aggregate_in_expression(char_expr) {
+                    return Some(found);
+                }
+            }
+            find_aggregate_in_expression(string)
+        }
+        Expression::Extract { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::ScalarSubquery(_) => None, // Subqueries have their own scope
+        Expression::QuantifiedComparison { expr, .. } => find_aggregate_in_expression(expr),
+        Expression::Interval { value, .. } => find_aggregate_in_expression(value),
+        Expression::WindowFunction { .. } => None, // Window functions are not regular aggregates
+        Expression::MatchAgainst { search_modifier, .. } => {
+            find_aggregate_in_expression(search_modifier)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                if let Some(found) = find_aggregate_in_expression(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Validate a single column reference against the schema (and optionally outer schema)
 fn validate_column_ref(
     col_ref: &ColumnReference,
@@ -322,6 +580,21 @@ pub fn validate_select_columns_with_context(
     // Extract column references from WHERE clause
     if let Some(where_expr) = where_clause {
         extract_column_refs(where_expr, &mut column_refs);
+
+        // Check for wrong argument count FIRST (takes priority over misuse)
+        // SQLite reports arg count errors before context errors
+        if let Some(agg_name) = check_aggregate_arg_count(where_expr) {
+            return Err(ExecutorError::WrongNumberOfArguments {
+                function_name: agg_name,
+            });
+        }
+
+        // Check for aggregate functions in WHERE clause (misuse of aggregate)
+        if let Some(agg_name) = find_aggregate_in_expression(where_expr) {
+            return Err(ExecutorError::MisuseOfAggregate {
+                function_name: agg_name,
+            });
+        }
     }
 
     // Validate each column reference
