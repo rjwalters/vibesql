@@ -16,10 +16,20 @@ impl Parser {
         while self.is_join_keyword() || self.peek() == &Token::Comma {
             let (join_type, right, condition, using_columns, natural) =
                 if self.peek() == &Token::Comma {
-                    // Comma represents CROSS JOIN
+                    // Comma normally represents CROSS JOIN, but SQLite's legacy syntax
+                    // allows "FROM t1, t2 ON condition" which behaves like INNER JOIN
                     self.advance(); // Consume comma
                     let right = self.parse_table_reference()?;
-                    (vibesql_ast::JoinType::Cross, right, None, None, false)
+
+                    // Check for legacy ON clause after comma-join
+                    // SQLite allows: FROM t1, t2 ON t1.a=t2.b (treated as INNER JOIN)
+                    if self.peek_keyword(Keyword::On) {
+                        self.consume_keyword(Keyword::On)?;
+                        let condition = self.parse_expression()?;
+                        (vibesql_ast::JoinType::Inner, right, Some(condition), None, false)
+                    } else {
+                        (vibesql_ast::JoinType::Cross, right, None, None, false)
+                    }
                 } else {
                     let (join_type, natural) = self.parse_join_type()?;
 
