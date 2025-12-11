@@ -329,7 +329,14 @@ proc parse_result {output} {
             }
             set vals [split $content "|"]
             foreach v $vals {
-                lappend data [string trim $v]
+                set trimmed [string trim $v]
+                # SQLite TCL interface represents NULL as empty string
+                # VibeSQL displays NULL as "NULL" text, convert for compatibility
+                if {$trimmed eq "NULL"} {
+                    lappend data ""
+                } else {
+                    lappend data $trimmed
+                }
             }
         }
     }
@@ -365,7 +372,15 @@ proc parse_result_with_headers {output} {
         if {[regexp {^\|(.+)\|$} $line -> content]} {
             set vals {}
             foreach v [split $content "|"] {
-                lappend vals [string trim $v]
+                set trimmed [string trim $v]
+                # SQLite TCL interface represents NULL as empty string
+                # VibeSQL displays NULL as "NULL" text, convert for compatibility
+                # (Don't convert in header row)
+                if {$separator_count >= 2 && $trimmed eq "NULL"} {
+                    lappend vals ""
+                } else {
+                    lappend vals $trimmed
+                }
             }
 
             if {$separator_count < 2} {
