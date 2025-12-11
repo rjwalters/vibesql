@@ -257,3 +257,7 @@ required-features = ["in-memory-indexes"]
 [[bench]]
 name = "concurrent_throughput"
 harness = false
+
+[[bench]]
+name = "morsel_operation_benchmark"
+harness = false
