@@ -444,6 +444,39 @@ impl ExpressionEvaluator<'_> {
             return Ok(vibesql_types::SqlValue::Null);
         }
 
+        // SQLite compatibility: Handle ROWID pseudo-column
+        // ROWID, _rowid_, and oid are aliases that return the row's unique identifier
+        // Note: We check real columns first - real columns take precedence over ROWID
+        let column_lower = column.to_lowercase();
+        if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
+            // First check if schema has a real column with this name
+            if self.schema.get_column_index(column).is_none() {
+                // No real column - check if table qualifier matches (if provided)
+                let qualifier_matches = match table_qualifier {
+                    Some(qualifier) => {
+                        let qualifier_lower = qualifier.to_lowercase();
+                        let schema_name_lower = self.schema.name.to_lowercase();
+                        qualifier_lower == schema_name_lower
+                    }
+                    None => true, // No qualifier means it applies to the current table
+                };
+
+                if qualifier_matches {
+                    // Check row's embedded row_id first (from scan_live_vec)
+                    if let Some(row_id) = row.row_id {
+                        return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
+                    }
+                    // Fall back to evaluator's row_index (for older code paths)
+                    if let Some(row_index) = self.row_index {
+                        return Ok(vibesql_types::SqlValue::Bigint(row_index as i64));
+                    }
+                    // ROWID not available - this happens for joined/derived rows
+                    // Return NULL in this case (matching SQLite behavior for derived tables)
+                    return Ok(vibesql_types::SqlValue::Null);
+                }
+            }
+        }
+
         // Check procedural context first (variables/parameters take precedence over table columns)
         // This is only checked when there's no table qualifier, as variables don't have table
         // prefixes

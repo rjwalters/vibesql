@@ -167,6 +167,13 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
     }
 }
 
+/// Check if a column name is a ROWID pseudo-column alias (SQLite compatibility)
+/// Returns true for 'rowid', '_rowid_', and 'oid' (case-insensitive)
+fn is_rowid_pseudo_column(column: &str) -> bool {
+    let lower = column.to_lowercase();
+    lower == "rowid" || lower == "_rowid_" || lower == "oid"
+}
+
 /// Validate a single column reference against the schema (and optionally outer schema)
 fn validate_column_ref(
     col_ref: &ColumnReference,
@@ -176,6 +183,28 @@ fn validate_column_ref(
     // Check if column exists in inner schema
     if schema.get_column_index(col_ref.table.as_deref(), &col_ref.column).is_some() {
         return Ok(());
+    }
+
+    // SQLite compatibility: Allow ROWID pseudo-column references
+    // Only if there's no actual column with that name (real columns take precedence)
+    if is_rowid_pseudo_column(&col_ref.column) {
+        // Verify the qualifier matches a table in the schema (if qualified)
+        if let Some(ref qualifier) = col_ref.table {
+            let qualifier_lower = qualifier.to_lowercase();
+            let table_exists =
+                schema.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower);
+            let table_in_outer = outer_schema.is_some_and(|outer| {
+                outer.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower)
+            });
+            if table_exists || table_in_outer {
+                return Ok(());
+            }
+        } else {
+            // Unqualified ROWID is valid if there's at least one table in scope
+            if !schema.table_schemas.is_empty() {
+                return Ok(());
+            }
+        }
     }
 
     // For correlated subqueries, also check outer schema (#2694)

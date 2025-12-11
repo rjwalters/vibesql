@@ -530,7 +530,10 @@ impl Table {
         let mut result = Vec::with_capacity(self.row_count());
         for (idx, row) in self.rows.iter().enumerate() {
             if !self.deleted[idx] {
-                result.push(row.clone());
+                let mut cloned = row.clone();
+                // Set row_id for ROWID pseudo-column support (SQLite compatibility)
+                cloned.row_id = Some(idx as u64);
+                result.push(cloned);
             }
         }
         result

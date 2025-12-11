@@ -65,6 +65,21 @@ impl CombinedExpressionEvaluator<'_> {
                     return Ok(vibesql_types::SqlValue::Null);
                 }
 
+                // SQLite compatibility: Handle ROWID pseudo-column
+                // ROWID, _rowid_, and oid are aliases that return the row's unique identifier
+                let column_lower = column.to_lowercase();
+                if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
+                    // First check if schema has a real column with this name
+                    if self.get_column_index_cached(table.as_deref(), column).is_none() {
+                        // No real column - check if we have a row_id
+                        if let Some(row_id) = row.row_id {
+                            return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
+                        }
+                        // ROWID not available - return NULL (matches SQLite behavior for derived tables)
+                        return Ok(vibesql_types::SqlValue::Null);
+                    }
+                }
+
                 // Check procedural context first (variables/parameters take precedence over table
                 // columns) This is only checked when there's no table qualifier, as
                 // variables don't have table prefixes
