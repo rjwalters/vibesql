@@ -277,3 +277,7 @@ harness = false
 [[bench]]
 name = "aggregate_parallel"
 harness = false
+
+[[bench]]
+name = "nested_loop_parallel"
+harness = false

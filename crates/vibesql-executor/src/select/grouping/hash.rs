@@ -147,14 +147,16 @@ fn group_rows_parallel<'a>(
     timeout_ctx.check()?;
 
     let config = global_config();
+    // Use group_by-specific morsel size
+    let morsel_size = config.group_by_size;
 
     // For small datasets below morsel size, use simpler parallel approach
-    if rows.len() < config.morsel_size {
+    if rows.len() < morsel_size {
         return group_rows_parallel_simple(rows, group_by_exprs, components, timeout_ctx);
     }
 
     // Create morsels for work distribution
-    let morsels = create_morsels(rows.len(), config.morsel_size);
+    let morsels = create_morsels(rows.len(), morsel_size);
     let morsel_count = morsels.len();
 
     if morsel_debug_enabled() {
@@ -162,7 +164,7 @@ fn group_rows_parallel<'a>(
             "[MORSEL] GROUP BY: {} morsels for {} rows (size={})",
             morsel_count,
             rows.len(),
-            config.morsel_size
+            morsel_size
         );
     }
 
@@ -211,7 +213,7 @@ fn group_rows_parallel<'a>(
 
                 // Thread-local group map that accumulates across all morsels this thread processes
                 // Stores INDICES instead of rows (Issue #4168)
-                let estimated_groups = (config.morsel_size / 10).max(16);
+                let estimated_groups = (morsel_size / 10).max(16);
                 let mut local_groups: AHashMap<Vec<vibesql_types::SqlValue>, Vec<usize>> =
                     AHashMap::with_capacity(estimated_groups);
 
