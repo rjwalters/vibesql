@@ -1008,9 +1008,9 @@ function updateSpeedupSummary(
 
   // For server mode, update labels to show MySQL comparison
   if (isServerMode) {
-    const sqliteLabel = document.querySelector('#avg-speedup-sqlite')?.closest('.bg-white, .dark\\:bg-gray-800')?.querySelector('p');
-    if (sqliteLabel) {
-      sqliteLabel.textContent = t('bench-vs-mysql');
+    const sqliteHeader = document.querySelector('#avg-speedup-sqlite')?.closest('.bg-white, .dark\\:bg-gray-800')?.querySelector('h3');
+    if (sqliteHeader) {
+      sqliteHeader.textContent = t('bench-vs-mysql');
     }
     // Hide DuckDB card in server mode
     const duckdbCard = document.getElementById('avg-speedup-duckdb')?.closest('.bg-white, .dark\\:bg-gray-800') as HTMLElement;
