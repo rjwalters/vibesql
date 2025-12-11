@@ -247,6 +247,14 @@ impl ExpressionEvaluator<'_> {
                 Ok(SqlValue::Boolean(result))
             }
 
+            vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
+                let left_val = self.eval(left, row)?;
+                let right_val = self.eval(right, row)?;
+                let is_distinct = super::super::core::values_are_distinct(&left_val, &right_val);
+                let result = if *negated { !is_distinct } else { is_distinct };
+                Ok(SqlValue::Boolean(result))
+            }
+
             vibesql_ast::Expression::WindowFunction { .. } => Err(ExecutorError::UnsupportedExpression(
                 "Window functions should be evaluated separately".to_string(),
             )),

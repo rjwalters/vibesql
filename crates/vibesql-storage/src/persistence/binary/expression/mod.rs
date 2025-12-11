@@ -73,6 +73,7 @@ enum ExprTag {
     Extract = 0x1E,
     Conjunction = 0x1F,
     Disjunction = 0x20,
+    IsDistinctFrom = 0x21,
 }
 
 impl ExprTag {
@@ -111,6 +112,7 @@ impl ExprTag {
             0x1E => Ok(ExprTag::Extract),
             0x1F => Ok(ExprTag::Conjunction),
             0x20 => Ok(ExprTag::Disjunction),
+            0x21 => Ok(ExprTag::IsDistinctFrom),
             _ => {
                 Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
             }
@@ -176,6 +178,12 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
         Expression::IsNull { expr, negated } => {
             write_tag!(writer, ExprTag::IsNull);
             write_expression(writer, expr)?;
+            write_bool(writer, *negated)?;
+        }
+        Expression::IsDistinctFrom { left, right, negated } => {
+            write_tag!(writer, ExprTag::IsDistinctFrom);
+            write_expression(writer, left)?;
+            write_expression(writer, right)?;
             write_bool(writer, *negated)?;
         }
         Expression::Wildcard => {
@@ -424,6 +432,12 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let expr = Box::new(read_expression(reader)?);
             let negated = read_bool(reader)?;
             Ok(Expression::IsNull { expr, negated })
+        }
+        ExprTag::IsDistinctFrom => {
+            let left = Box::new(read_expression(reader)?);
+            let right = Box::new(read_expression(reader)?);
+            let negated = read_bool(reader)?;
+            Ok(Expression::IsDistinctFrom { left, right, negated })
         }
         ExprTag::Wildcard => Ok(Expression::Wildcard),
         ExprTag::Case => {

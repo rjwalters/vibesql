@@ -201,6 +201,16 @@ impl<'a> ExpressionEvaluator<'a> {
         super::core::values_are_equal(left, right)
     }
 
+    /// Compare two SQL values using IS DISTINCT FROM semantics (SQL:1999)
+    ///
+    /// Delegates to the core module's implementation.
+    pub(crate) fn values_are_distinct(
+        left: &vibesql_types::SqlValue,
+        right: &vibesql_types::SqlValue,
+    ) -> bool {
+        super::core::values_are_distinct(left, right)
+    }
+
     /// Helper to execute a closure with incremented depth
     pub(super) fn with_incremented_depth<F, T>(&self, f: F) -> Result<T, ExecutorError>
     where

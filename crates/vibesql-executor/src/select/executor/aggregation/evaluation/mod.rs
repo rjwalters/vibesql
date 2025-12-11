@@ -77,6 +77,7 @@ impl SelectExecutor<'_> {
             | vibesql_ast::Expression::InList { .. }
             | vibesql_ast::Expression::Like { .. }
             | vibesql_ast::Expression::IsNull { .. }
+            | vibesql_ast::Expression::IsDistinctFrom { .. }
             | vibesql_ast::Expression::Position { .. }
             | vibesql_ast::Expression::Trim { .. }
             | vibesql_ast::Expression::Extract { .. }
@@ -469,6 +470,29 @@ impl SelectExecutor<'_> {
                 )?;
                 let is_null = matches!(inner_val, vibesql_types::SqlValue::Null);
                 Ok(vibesql_types::SqlValue::Boolean(if *negated { !is_null } else { is_null }))
+            }
+
+            // IsDistinctFrom - evaluate both expressions with grouping context
+            vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
+                let left_val = self.evaluate_with_aggregates_and_grouping(
+                    left,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                let right_val = self.evaluate_with_aggregates_and_grouping(
+                    right,
+                    group_rows,
+                    group_key,
+                    evaluator,
+                    grouping_context,
+                )?;
+                let is_distinct = !crate::evaluator::ExpressionEvaluator::values_are_equal(
+                    &left_val,
+                    &right_val,
+                );
+                Ok(vibesql_types::SqlValue::Boolean(if *negated { !is_distinct } else { is_distinct }))
             }
 
             // For all other expressions, delegate to existing evaluation

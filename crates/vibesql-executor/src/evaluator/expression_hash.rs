@@ -128,6 +128,10 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::IsNull { expr, .. } => Self::is_deterministic(expr),
 
+            vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
+                Self::is_deterministic(left) && Self::is_deterministic(right)
+            }
+
             vibesql_ast::Expression::Position { substring, string, .. } => {
                 Self::is_deterministic(substring) && Self::is_deterministic(string)
             }
@@ -256,6 +260,12 @@ impl ExpressionHasher {
 
             vibesql_ast::Expression::IsNull { expr, negated } => {
                 Self::hash_expression(expr, hasher);
+                negated.hash(hasher);
+            }
+
+            vibesql_ast::Expression::IsDistinctFrom { left, right, negated } => {
+                Self::hash_expression(left, hasher);
+                Self::hash_expression(right, hasher);
                 negated.hash(hasher);
             }
 

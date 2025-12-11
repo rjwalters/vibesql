@@ -366,6 +366,11 @@ impl LiteralExtractor {
                 Self::extract_from_expression(expr, literals);
             }
 
+            Expression::IsDistinctFrom { left, right, .. } => {
+                Self::extract_from_expression(left, literals);
+                Self::extract_from_expression(right, literals);
+            }
+
             Expression::Case { operand, when_clauses, else_result } => {
                 if let Some(ref op) = operand {
                     Self::extract_from_expression(op, literals);

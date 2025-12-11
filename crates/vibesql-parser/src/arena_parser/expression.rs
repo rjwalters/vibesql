@@ -282,14 +282,24 @@ impl<'arena> ArenaParser<'arena> {
             left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
         }
 
-        // Check for IS NULL / IS NOT NULL
+        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM
         if self.peek_keyword(Keyword::Is) {
             self.consume_keyword(Keyword::Is)?;
             let negated = self.try_consume_keyword(Keyword::Not);
-            self.expect_keyword(Keyword::Null)?;
 
-            let left_ref = self.arena.alloc(left);
-            left = Expression::IsNull { expr: left_ref, negated };
+            // Check for DISTINCT FROM (SQL:1999) or NULL
+            if self.peek_keyword(Keyword::Distinct) {
+                self.consume_keyword(Keyword::Distinct)?;
+                self.expect_keyword(Keyword::From)?;
+                let right = self.parse_additive_expression()?;
+                let left_ref = self.arena.alloc(left);
+                let right_ref = self.arena.alloc(right);
+                left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
+            } else {
+                self.expect_keyword(Keyword::Null)?;
+                let left_ref = self.arena.alloc(left);
+                left = Expression::IsNull { expr: left_ref, negated };
+            }
         }
 
         Ok(left)

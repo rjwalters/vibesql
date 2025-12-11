@@ -141,6 +141,10 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
         vibesql_ast::Expression::IsNull { expr, .. } => {
             extract_from_expression(expr, tables);
         }
+        vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
+            extract_from_expression(left, tables);
+            extract_from_expression(right, tables);
+        }
         vibesql_ast::Expression::Cast { expr, .. } => {
             extract_from_expression(expr, tables);
         }

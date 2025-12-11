@@ -140,3 +140,30 @@ pub(crate) fn values_are_equal(
         _ => false, // Type mismatch = not equal
     }
 }
+
+/// Compare two SQL values using IS DISTINCT FROM semantics (SQL:1999)
+/// - NULL IS NOT DISTINCT FROM NULL is TRUE (both NULL = not distinct)
+/// - NULL IS DISTINCT FROM non-NULL is TRUE (one NULL, one not = distinct)
+/// - For non-NULL values, uses regular != comparison
+pub(crate) fn values_are_distinct(
+    left: &vibesql_types::SqlValue,
+    right: &vibesql_types::SqlValue,
+) -> bool {
+    use vibesql_types::SqlValue::*;
+
+    // IS DISTINCT FROM semantics (SQL:1999):
+    // - Both NULL: NOT distinct (they are considered equal)
+    // - One NULL, one not: distinct
+    // - Both non-NULL: use normal inequality comparison
+    match (left, right) {
+        // Both NULL - not distinct
+        (Null, Null) => false,
+
+        // One NULL, one not - distinct
+        (Null, _) | (_, Null) => true,
+
+        // Both non-NULL - compare for inequality
+        // Reuse the values_are_equal logic but invert it
+        _ => !values_are_equal(left, right),
+    }
+}

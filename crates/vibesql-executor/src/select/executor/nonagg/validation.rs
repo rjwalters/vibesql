@@ -49,6 +49,10 @@ pub(super) fn validate_where_clause_subqueries(
         Expression::IsNull { expr, .. } => {
             validate_where_clause_subqueries(expr, database, cte_results)
         }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            validate_where_clause_subqueries(left, database, cte_results)?;
+            validate_where_clause_subqueries(right, database, cte_results)
+        }
         Expression::InList { expr, values, .. } => {
             validate_where_clause_subqueries(expr, database, cte_results)?;
             for val in values {
@@ -426,6 +430,12 @@ fn validate_expression_column_refs(
         // IS NULL / IS NOT NULL
         Expression::IsNull { expr, .. } => {
             validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)
+        }
+
+        // IS DISTINCT FROM / IS NOT DISTINCT FROM
+        Expression::IsDistinctFrom { left, right, .. } => {
+            validate_expression_column_refs(left, schema, outer_schema, allowed_aliases)?;
+            validate_expression_column_refs(right, schema, outer_schema, allowed_aliases)
         }
 
         // IN list
