@@ -1,0 +1,466 @@
+#!/bin/bash
+# =============================================================================
+# CLI-Based TPC-H Benchmark Script
+# =============================================================================
+# Provides apples-to-apples comparison between vibesql, SQLite, and DuckDB
+# by running the same queries through their respective CLI tools.
+#
+# Usage:
+#   ./scripts/bench-cli [OPTIONS]
+#
+# Options:
+#   --scale FACTOR    Scale factor for data (default: 0.01)
+#   --engines ENGINES Comma-separated list of engines (default: vibesql,sqlite)
+#   --queries QUERIES Comma-separated list of queries (default: all Q1-Q22)
+#   --iterations N    Number of iterations per query (default: 3)
+#   --warmup N        Number of warmup iterations (default: 1)
+#   --output FILE     Output JSON file for results
+#   --verbose         Show query output
+#   --db-dir DIR      Use pre-built databases from DIR (skip data loading)
+#   --prep-only       Only prepare databases, don't run benchmarks
+#   --help            Show this help message
+#
+# Examples:
+#   ./scripts/bench-cli                          # Default: SF 0.01, vibesql+sqlite
+#   ./scripts/bench-cli --scale 0.1              # Larger dataset
+#   ./scripts/bench-cli --engines vibesql        # VibeSQL only
+#   ./scripts/bench-cli --queries Q1,Q6          # Specific queries
+#   ./scripts/bench-cli --output results.json    # Save results to JSON
+# =============================================================================
+
+set -euo pipefail
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BENCH_DIR="$ROOT_DIR/benchmarks/cli/tpch"
+
+# Default settings
+SCALE_FACTOR="0.01"
+ENGINES="vibesql,sqlite"
+QUERIES=""  # Empty means all
+ITERATIONS=3
+WARMUP=1
+OUTPUT_FILE=""
+VERBOSE=false
+DB_DIR=""  # Pre-built database directory (optional)
+PREP_ONLY=false
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+usage() {
+    head -30 "$0" | grep "^#" | sed 's/^# //' | sed 's/^#//'
+    exit 0
+}
+
+log() {
+    echo -e "${BLUE}[bench-cli]${NC} $*" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[bench-cli]${NC} $*" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[bench-cli]${NC} $*" >&2
+}
+
+log_error() {
+    echo -e "${RED}[bench-cli]${NC} $*" >&2
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --scale)
+                SCALE_FACTOR="$2"
+                shift 2
+                ;;
+            --engines)
+                ENGINES="$2"
+                shift 2
+                ;;
+            --queries)
+                QUERIES="$2"
+                shift 2
+                ;;
+            --iterations)
+                ITERATIONS="$2"
+                shift 2
+                ;;
+            --warmup)
+                WARMUP="$2"
+                shift 2
+                ;;
+            --output)
+                OUTPUT_FILE="$2"
+                shift 2
+                ;;
+            --verbose)
+                VERBOSE=true
+                shift
+                ;;
+            --db-dir)
+                DB_DIR="$2"
+                shift 2
+                ;;
+            --prep-only)
+                PREP_ONLY=true
+                shift
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                usage
+                ;;
+        esac
+    done
+}
+
+# Check if required tools are available
+check_tools() {
+    local engine
+    for engine in $(echo "$ENGINES" | tr ',' ' '); do
+        case $engine in
+            vibesql)
+                if [[ ! -x "$ROOT_DIR/target/release/vibesql" ]]; then
+                    log "Building vibesql CLI..."
+                    (cd "$ROOT_DIR" && cargo build --release -p vibesql-cli)
+                fi
+                ;;
+            sqlite)
+                if ! command -v sqlite3 &>/dev/null; then
+                    log_error "sqlite3 not found. Please install it."
+                    exit 1
+                fi
+                ;;
+            duckdb)
+                if ! command -v duckdb &>/dev/null; then
+                    log_error "duckdb not found. Please install it."
+                    exit 1
+                fi
+                ;;
+            *)
+                log_error "Unknown engine: $engine"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Generate TPC-H data
+generate_data() {
+    local data_file="$BENCH_DIR/data_sf${SCALE_FACTOR}.sql"
+
+    if [[ ! -f "$data_file" ]]; then
+        log "Generating TPC-H data (SF=$SCALE_FACTOR)..."
+        python3 "$BENCH_DIR/generate_data.py" --scale "$SCALE_FACTOR" > "$data_file"
+        log_success "Data generated: $data_file"
+    else
+        log "Using existing data file: $data_file"
+    fi
+
+    echo "$data_file"
+}
+
+# Get database file path for an engine
+get_db_file() {
+    local engine="$1"
+    if [[ -n "$DB_DIR" ]]; then
+        # Use pre-built database from specified directory
+        case $engine in
+            vibesql)
+                echo "${DB_DIR}/tpch_sf${SCALE_FACTOR}.vbsql"
+                ;;
+            sqlite)
+                echo "${DB_DIR}/tpch_sf${SCALE_FACTOR}.sqlite"
+                ;;
+            duckdb)
+                echo "${DB_DIR}/tpch_sf${SCALE_FACTOR}.duckdb"
+                ;;
+        esac
+    else
+        # Use temporary database (will be created from SQL)
+        echo "/tmp/tpch_bench_${engine}_sf${SCALE_FACTOR}.db"
+    fi
+}
+
+# Set up a database for an engine
+setup_database() {
+    local engine="$1"
+    local data_file="$2"
+    local db_file
+    db_file=$(get_db_file "$engine")
+
+    # If using pre-built database, verify it exists
+    if [[ -n "$DB_DIR" ]]; then
+        if [[ -f "$db_file" ]]; then
+            log "Using pre-built $engine database: $db_file"
+            return 0
+        else
+            log_error "Pre-built database not found: $db_file"
+            log_error "Generate it first with: ./scripts/bench-cli --prep-only --scale $SCALE_FACTOR"
+            exit 1
+        fi
+    fi
+
+    # Remove existing database
+    rm -f "$db_file"
+
+    log "Setting up $engine database (this may take a while)..."
+
+    case $engine in
+        vibesql)
+            # Create schema and load data
+            cat "$BENCH_DIR/schema.sql" "$data_file" | "$ROOT_DIR/target/release/vibesql" "$db_file"
+            ;;
+        sqlite)
+            cat "$BENCH_DIR/schema.sql" "$data_file" | sqlite3 "$db_file"
+            # Run ANALYZE for fair comparison
+            sqlite3 "$db_file" "ANALYZE;"
+            ;;
+        duckdb)
+            cat "$BENCH_DIR/schema.sql" "$data_file" | duckdb "$db_file"
+            duckdb "$db_file" "ANALYZE;"
+            ;;
+    esac
+
+    log_success "$engine database ready: $db_file"
+}
+
+# Run a query and measure time (returns milliseconds)
+run_query() {
+    local engine="$1"
+    local db_file="$2"
+    local query_file="$3"
+
+    local start_time end_time
+
+    start_time=$(python3 -c "import time; print(int(time.time() * 1000))")
+
+    case $engine in
+        vibesql)
+            if [[ "$VERBOSE" == "true" ]]; then
+                "$ROOT_DIR/target/release/vibesql" "$db_file" < "$query_file"
+            else
+                "$ROOT_DIR/target/release/vibesql" "$db_file" < "$query_file" > /dev/null 2>&1
+            fi
+            ;;
+        sqlite)
+            if [[ "$VERBOSE" == "true" ]]; then
+                sqlite3 "$db_file" < "$query_file"
+            else
+                sqlite3 "$db_file" < "$query_file" > /dev/null 2>&1
+            fi
+            ;;
+        duckdb)
+            if [[ "$VERBOSE" == "true" ]]; then
+                duckdb "$db_file" < "$query_file"
+            else
+                duckdb "$db_file" < "$query_file" > /dev/null 2>&1
+            fi
+            ;;
+    esac
+
+    end_time=$(python3 -c "import time; print(int(time.time() * 1000))")
+    echo $((end_time - start_time))
+}
+
+# Get list of query files
+get_query_files() {
+    if [[ -n "$QUERIES" ]]; then
+        # Specific queries requested
+        local q q_lower q_num q_padded
+        for q in $(echo "$QUERIES" | tr ',' ' '); do
+            # Convert Q1 -> q01, Q22 -> q22
+            q_lower=$(echo "$q" | tr '[:upper:]' '[:lower:]')
+            q_num=$(echo "$q_lower" | sed 's/q//')
+            q_padded=$(printf "q%02d" "$q_num")
+            echo "$BENCH_DIR/queries/${q_padded}.sql"
+        done
+    else
+        # All queries
+        for f in "$BENCH_DIR/queries/"q*.sql; do
+            echo "$f"
+        done
+    fi
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    parse_args "$@"
+
+    if [[ "$PREP_ONLY" == "true" ]]; then
+        log "TPC-H Database Preparation"
+        log "=========================="
+        log "Scale Factor: $SCALE_FACTOR"
+        log "Engines: $ENGINES"
+        echo
+
+        # Check tools
+        check_tools
+
+        # Generate data
+        data_file=$(generate_data)
+
+        # Prep-only mode: create databases and exit
+        local engine
+        for engine in $(echo "$ENGINES" | tr ',' ' '); do
+            setup_database "$engine" "$data_file"
+        done
+
+        log_success "Database preparation complete!"
+        log "Databases are in /tmp/tpch_bench_*"
+        log "Run benchmarks with: ./scripts/bench-cli --db-dir /tmp"
+        return 0
+    fi
+
+    log "TPC-H CLI Benchmark"
+    log "==================="
+    log "Scale Factor: $SCALE_FACTOR"
+    log "Engines: $ENGINES"
+    log "Iterations: $ITERATIONS (warmup: $WARMUP)"
+    if [[ -n "$DB_DIR" ]]; then
+        log "Database Dir: $DB_DIR (pre-built)"
+    fi
+    echo
+
+    # Check tools
+    check_tools
+
+    # Generate data (only if not using pre-built databases)
+    local data_file=""
+    if [[ -z "$DB_DIR" ]]; then
+        data_file=$(generate_data)
+    fi
+
+    # Set up databases for each engine
+    local engine
+    for engine in $(echo "$ENGINES" | tr ',' ' '); do
+        setup_database "$engine" "$data_file"
+    done
+
+    echo
+    log "Running benchmarks..."
+    echo
+
+    # Create results file
+    local results_file="/tmp/bench_cli_results_$$.txt"
+    : > "$results_file"
+
+    # Header
+    printf "%-8s" "Query"
+    for engine in $(echo "$ENGINES" | tr ',' ' '); do
+        printf " %12s" "$engine(ms)"
+    done
+    echo
+    printf "%-8s" "-----"
+    for engine in $(echo "$ENGINES" | tr ',' ' '); do
+        printf " %12s" "------------"
+    done
+    echo
+
+    # Run each query
+    local query_file query_name db_file
+    for query_file in $(get_query_files); do
+        query_name=$(basename "$query_file" .sql | tr '[:lower:]' '[:upper:]')
+        printf "%-8s" "$query_name"
+
+        for engine in $(echo "$ENGINES" | tr ',' ' '); do
+            db_file=$(get_db_file "$engine")
+
+            # Warmup
+            local w
+            for ((w=0; w<WARMUP; w++)); do
+                run_query "$engine" "$db_file" "$query_file" > /dev/null 2>&1 || true
+            done
+
+            # Benchmark iterations
+            local total_ms=0
+            local i elapsed_ms
+            for ((i=0; i<ITERATIONS; i++)); do
+                elapsed_ms=$(run_query "$engine" "$db_file" "$query_file" 2>/dev/null || echo "-1")
+                if [[ "$elapsed_ms" == "-1" ]]; then
+                    total_ms=-1
+                    break
+                fi
+                total_ms=$((total_ms + elapsed_ms))
+            done
+
+            if [[ $total_ms -ge 0 ]]; then
+                local avg_ms=$((total_ms / ITERATIONS))
+                printf " %12d" "$avg_ms"
+                echo "${query_name}_${engine}=$avg_ms" >> "$results_file"
+            else
+                printf " %12s" "ERROR"
+                echo "${query_name}_${engine}=ERROR" >> "$results_file"
+            fi
+        done
+        echo
+    done
+
+    echo
+    log_success "Benchmark complete!"
+
+    # Output JSON if requested
+    if [[ -n "$OUTPUT_FILE" ]]; then
+        log "Writing results to $OUTPUT_FILE..."
+        {
+            echo "{"
+            echo "  \"scale_factor\": $SCALE_FACTOR,"
+            echo "  \"iterations\": $ITERATIONS,"
+            echo "  \"warmup\": $WARMUP,"
+            printf "  \"engines\": ["
+            local first=true
+            for engine in $(echo "$ENGINES" | tr ',' ' '); do
+                if [[ "$first" != "true" ]]; then
+                    printf ", "
+                fi
+                first=false
+                printf "\"%s\"" "$engine"
+            done
+            echo "],"
+            echo "  \"results\": {"
+            first=true
+            while IFS='=' read -r key value; do
+                if [[ "$first" != "true" ]]; then
+                    echo ","
+                fi
+                first=false
+                if [[ "$value" == "ERROR" ]]; then
+                    printf "    \"%s\": null" "$key"
+                else
+                    printf "    \"%s\": %s" "$key" "$value"
+                fi
+            done < "$results_file"
+            echo
+            echo "  }"
+            echo "}"
+        } > "$OUTPUT_FILE"
+        log_success "Results saved to $OUTPUT_FILE"
+    fi
+
+    # Cleanup
+    log "Cleaning up temporary files..."
+    for engine in $(echo "$ENGINES" | tr ',' ' '); do
+        rm -f "$(get_db_file "$engine")"
+    done
+    rm -f "$results_file"
+}
+
+main "$@"

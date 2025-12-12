@@ -123,6 +123,34 @@ pub fn load_sqlite(scale_factor: f64) -> SqliteConn {
     conn
 }
 
+/// Load SQLite TPC-H database directly to a file path
+#[cfg(feature = "sqlite")]
+pub fn load_sqlite_to_file<P: AsRef<std::path::Path>>(scale_factor: f64, path: P) -> SqliteConn {
+    // Remove existing file
+    let _ = std::fs::remove_file(&path);
+
+    let conn = SqliteConn::open(&path).unwrap();
+    let mut data = TPCHData::new(scale_factor);
+
+    // Create schema
+    create_tpch_schema_sqlite(&conn);
+
+    // Load data
+    load_region_sqlite(&conn);
+    load_nation_sqlite(&conn);
+    load_customer_sqlite(&conn, &mut data);
+    load_supplier_sqlite(&conn, &mut data);
+    load_part_sqlite(&conn, &mut data);
+    load_partsupp_sqlite(&conn, &mut data);
+    load_orders_sqlite(&conn, &mut data);
+    load_lineitem_sqlite(&conn, &mut data);
+
+    // Analyze for optimal query plans
+    conn.execute("ANALYZE", []).unwrap();
+
+    conn
+}
+
 #[cfg(feature = "duckdb")]
 pub fn load_duckdb(scale_factor: f64) -> DuckDBConn {
     let conn = DuckDBConn::open_in_memory().unwrap();
