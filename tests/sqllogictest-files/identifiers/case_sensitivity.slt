@@ -238,38 +238,25 @@ DROP TABLE sorted_data
 # =============================================================================
 # SECTION 8: Quoted Identifiers (Case-Sensitive) - CREATE TABLE
 # =============================================================================
-# NOTE: DML (INSERT/SELECT/UPDATE/DELETE) with quoted identifiers
-# requires #4405. These tests verify CREATE TABLE works now,
-# and will be expanded when #4405 is complete.
-
-# Create tables with quoted identifiers - these should be case-sensitive
-# and create three DIFFERENT tables
-statement ok
-CREATE TABLE "CaseSensitive" (id INTEGER)
-
-statement ok
-CREATE TABLE "casesensitive" (id INTEGER)
-
-statement ok
-CREATE TABLE "CASESENSITIVE" (id INTEGER)
-
-# Cleanup - unquoted drop resolves to lowercase canonical form
-# which matches "casesensitive" (the one stored with lowercase)
-statement ok
-DROP TABLE casesensitive
-
-# TODO: When #4405 is complete, add these tests:
-# statement ok
-# DROP TABLE "CaseSensitive"
+# NOTE: Full quoted identifier support (INSERT/SELECT/UPDATE/DELETE/DROP)
+# requires #4405. For now, we test only what can be properly cleaned up.
 #
-# statement ok
-# DROP TABLE "CASESENSITIVE"
-#
-# And add tests for:
+# When #4405 is complete, expand this section to test:
+# - CREATE TABLE "CaseSensitive", "casesensitive", "CASESENSITIVE" (3 different tables)
 # - INSERT INTO "QuotedTable" VALUES (...)
 # - SELECT * FROM "QuotedTable"
 # - UPDATE "QuotedTable" SET ...
 # - DELETE FROM "QuotedTable" WHERE ...
+# - DROP TABLE "QuotedTable"
+
+# Create a quoted table with lowercase name - this can be cleaned up
+# via unquoted DROP (which resolves to lowercase canonical form)
+statement ok
+CREATE TABLE "testquoted" (id INTEGER)
+
+# Cleanup - unquoted drop resolves to lowercase canonical form
+statement ok
+DROP TABLE testquoted
 
 # =============================================================================
 # SECTION 9: Mixed Quoted and Unquoted - Unquoted Operations Only
