@@ -111,7 +111,8 @@ impl ForeignKeyValidator {
             }
 
             for fk in &child_schema.foreign_keys {
-                if fk.parent_table != parent_table_name {
+                // Use case-insensitive comparison for SQL identifier matching
+                if !fk.parent_table.eq_ignore_ascii_case(parent_table_name) {
                     continue;
                 }
 
