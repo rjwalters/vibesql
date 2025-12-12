@@ -282,11 +282,17 @@ proc execsql {sql {db ""}} {
     }
 
     # Direct execution for non-transaction SQL
+    # Use raw format for proper NULL handling:
+    # - Actual NULL values become empty strings
+    # - The literal string 'NULL' remains as "NULL"
+    # This matches SQLite TCL interface behavior
+    set raw_sql ".mode raw\n$sql"
+
     # Use catch to handle process errors and translate them to SQLite format
     if {$::db_file eq ""} {
-        set exec_code [catch {exec echo $sql | $::vibesql_path 2>@1} result]
+        set exec_code [catch {exec echo $raw_sql | $::vibesql_path 2>@1} result]
     } else {
-        set exec_code [catch {exec echo $sql | $::vibesql_path $::db_file 2>@1} result]
+        set exec_code [catch {exec echo $raw_sql | $::vibesql_path $::db_file 2>@1} result]
     }
 
     if {$exec_code != 0} {
@@ -294,11 +300,48 @@ proc execsql {sql {db ""}} {
         error [translate_error_to_sqlite $result]
     }
 
-    return [parse_result $result]
+    return [parse_raw_result $result]
+}
+
+proc parse_raw_result {output} {
+    # Parse VibeSQL raw format output into TCL list
+    # Raw format is space-separated values, one row per line
+    # NULL values are already empty strings, string 'NULL' stays as "NULL"
+    # This matches SQLite TCL interface behavior for NULL representation
+    set data {}
+
+    # Trim trailing newlines to avoid spurious empty elements from split
+    set output [string trimright $output "\n"]
+    set lines [split $output "\n"]
+
+    foreach line $lines {
+        # Skip error lines
+        if {[regexp {^Error} $line]} {
+            error [translate_error_to_sqlite $line]
+        }
+
+        # Handle empty lines (represent rows where all values are NULL)
+        # For a single-column query with NULL, the line will be empty
+        if {$line eq ""} {
+            # Empty line = row with single NULL value = empty string
+            lappend data ""
+            continue
+        }
+
+        # Split by whitespace and add each value to the result
+        # In raw format, values are space-separated on each line
+        foreach val [split $line] {
+            lappend data $val
+        }
+    }
+
+    return $data
 }
 
 proc parse_result {output} {
     # Parse VibeSQL tabular output into TCL list
+    # NOTE: This function is kept for backwards compatibility but parse_raw_result
+    # should be preferred as it correctly handles NULL vs 'NULL' string distinction
     # Errors in output are translated to SQLite-compatible format
     set data {}
     set lines [split $output "\n"]

@@ -148,8 +148,8 @@ fn test_multi_column_select_order() {
 
     // Values should be in the same order as specified in SELECT: 74 first, then 50
     // Values are displayed using Display trait, not Debug (fix for #3810)
-    assert_eq!(result.rows[0][0], "74", "First column should be 74");
-    assert_eq!(result.rows[0][1], "50", "Second column should be 50");
+    assert_eq!(result.rows[0][0], Some("74".to_string()), "First column should be 74");
+    assert_eq!(result.rows[0][1], Some("50".to_string()), "Second column should be 50");
 }
 
 #[test]
@@ -166,9 +166,14 @@ fn test_select_column_names_and_values_issue_3810() {
 
     // Values should be display format, not debug format
     assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], "1", "Integer value should display as '1', not 'Integer(1)'");
     assert_eq!(
-        result.rows[0][1], "hello",
+        result.rows[0][0],
+        Some("1".to_string()),
+        "Integer value should display as '1', not 'Integer(1)'"
+    );
+    assert_eq!(
+        result.rows[0][1],
+        Some("hello".to_string()),
         "Varchar value should display as 'hello', not 'Varchar(\"hello\")'"
     );
 }
@@ -186,8 +191,8 @@ fn test_select_column_names_from_table() {
     assert_eq!(result.columns, vec!["ID", "NAME"]);
 
     // Values should be display format
-    assert_eq!(result.rows[0][0], "1");
-    assert_eq!(result.rows[0][1], "Alice");
+    assert_eq!(result.rows[0][0], Some("1".to_string()));
+    assert_eq!(result.rows[0][1], Some("Alice".to_string()));
 }
 
 #[test]
@@ -201,8 +206,8 @@ fn test_select_wildcard_column_names() {
 
     // Column names should be actual column names from table
     assert_eq!(result.columns, vec!["SKU", "PRICE"]);
-    assert_eq!(result.rows[0][0], "ABC123");
-    assert_eq!(result.rows[0][1], "99");
+    assert_eq!(result.rows[0][0], Some("ABC123".to_string()));
+    assert_eq!(result.rows[0][1], Some("99".to_string()));
 }
 
 // ============================================================================
@@ -326,7 +331,7 @@ fn test_show_create_table() {
     assert_eq!(result.row_count, 1);
 
     // The CREATE TABLE statement should be in the second column
-    let create_stmt = &result.rows[0][1];
+    let create_stmt = result.rows[0][1].as_ref().expect("CREATE TABLE output should not be NULL");
     assert!(create_stmt.contains("CREATE TABLE"));
     assert!(create_stmt.contains("USERS")); // Table name is normalized to uppercase
 }

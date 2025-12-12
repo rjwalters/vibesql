@@ -77,7 +77,13 @@ impl ResultFormatter {
 
         // Add rows
         for row in &result.rows {
-            let cells: Vec<Cell> = row.iter().map(|val| Cell::new(val)).collect();
+            let cells: Vec<Cell> = row
+                .iter()
+                .map(|val| {
+                    // For table display, show "NULL" for actual NULL values
+                    Cell::new(val.as_ref().map(|s| s.as_str()).unwrap_or("NULL"))
+                })
+                .collect();
             table.add_row(Row::new(cells));
         }
 
@@ -90,7 +96,12 @@ impl ResultFormatter {
             let mut json_obj = serde_json::Map::new();
             for (i, col) in result.columns.iter().enumerate() {
                 if i < row.len() {
-                    json_obj.insert(col.clone(), serde_json::Value::String(row[i].clone()));
+                    // For JSON, use proper null for NULL values
+                    let value = match &row[i] {
+                        Some(s) => serde_json::Value::String(s.clone()),
+                        None => serde_json::Value::Null,
+                    };
+                    json_obj.insert(col.clone(), value);
                 }
             }
             json_rows.push(serde_json::Value::Object(json_obj));
@@ -106,7 +117,10 @@ impl ResultFormatter {
 
         // Print rows
         for row in &result.rows {
-            println!("{}", row.join(","));
+            // For CSV, NULL values are empty
+            let values: Vec<&str> =
+                row.iter().map(|val| val.as_ref().map(|s| s.as_str()).unwrap_or("")).collect();
+            println!("{}", values.join(","));
         }
     }
 
@@ -133,7 +147,8 @@ impl ResultFormatter {
         for row in &result.rows {
             print!("|");
             for val in row {
-                print!(" {} |", val);
+                // For markdown, show "NULL" for actual NULL values
+                print!(" {} |", val.as_ref().map(|s| s.as_str()).unwrap_or("NULL"));
             }
             println!();
         }
@@ -161,7 +176,9 @@ impl ResultFormatter {
         for row in &result.rows {
             println!("    <tr>");
             for val in row {
-                println!("      <td>{}</td>", Self::escape_html(val));
+                // For HTML, show "NULL" for actual NULL values
+                let display = val.as_ref().map(|s| s.as_str()).unwrap_or("NULL");
+                println!("      <td>{}</td>", Self::escape_html(display));
             }
             println!("    </tr>");
         }
@@ -189,11 +206,8 @@ impl ResultFormatter {
                 .iter()
                 .map(|val| {
                     // SQLite TCL tests expect NULL to be empty string
-                    if val == "NULL" || val.is_empty() {
-                        ""
-                    } else {
-                        val.as_str()
-                    }
+                    // None represents actual NULL, Some("") is an empty string value
+                    val.as_ref().map(|s| s.as_str()).unwrap_or("")
                 })
                 .collect();
             println!("{}", values.join(" "));
@@ -209,8 +223,8 @@ mod tests {
         QueryResult {
             columns: vec!["id".to_string(), "name".to_string()],
             rows: vec![
-                vec!["1".to_string(), "Alice".to_string()],
-                vec!["2".to_string(), "Bob".to_string()],
+                vec![Some("1".to_string()), Some("Alice".to_string())],
+                vec![Some("2".to_string()), Some("Bob".to_string())],
             ],
             row_count: 2,
             execution_time_ms: None,
@@ -278,8 +292,10 @@ mod tests {
         let result = QueryResult {
             columns: vec!["a".to_string(), "b".to_string(), "c".to_string()],
             rows: vec![
-                vec!["1".to_string(), "NULL".to_string(), "3".to_string()],
-                vec!["".to_string(), "test".to_string(), "NULL".to_string()],
+                // First row: value, NULL (actual), value
+                vec![Some("1".to_string()), None, Some("3".to_string())],
+                // Second row: empty string (not NULL), value, NULL (actual)
+                vec![Some(String::new()), Some("test".to_string()), None],
             ],
             row_count: 2,
             execution_time_ms: None,
@@ -287,7 +303,26 @@ mod tests {
         };
 
         // Just verify it doesn't panic - output goes to stdout
-        // NULL values should be converted to empty strings
+        // NULL values (None) should be converted to empty strings
+        formatter.print_raw(&result);
+    }
+
+    #[test]
+    fn test_raw_format_null_vs_null_string() {
+        let mut formatter = ResultFormatter::new();
+        formatter.set_format(OutputFormat::Raw);
+        let result = QueryResult {
+            columns: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            rows: vec![
+                // Row: actual NULL, literal string "NULL", regular value
+                vec![None, Some("NULL".to_string()), Some("hello".to_string())],
+            ],
+            row_count: 1,
+            execution_time_ms: None,
+            message: None,
+        };
+
+        // NULL (None) should become empty, but "NULL" string (Some("NULL")) should stay "NULL"
         formatter.print_raw(&result);
     }
 
