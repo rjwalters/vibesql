@@ -12,7 +12,7 @@ fn test_create_sequence_basic() {
 
     match stmt {
         Statement::CreateSequence(create_stmt) => {
-            assert_eq!(create_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(create_stmt.sequence_name, "test_seq");
             assert_eq!(create_stmt.start_with, None);
             assert_eq!(create_stmt.increment_by, 1);
             assert_eq!(create_stmt.min_value, None);
@@ -31,7 +31,7 @@ fn test_create_sequence_with_options() {
 
     match stmt {
         Statement::CreateSequence(create_stmt) => {
-            assert_eq!(create_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(create_stmt.sequence_name, "test_seq");
             assert_eq!(create_stmt.start_with, Some(100));
             assert_eq!(create_stmt.increment_by, 5);
             assert_eq!(create_stmt.min_value, Some(1));
@@ -49,7 +49,7 @@ fn test_create_sequence_no_min_max() {
 
     match stmt {
         Statement::CreateSequence(create_stmt) => {
-            assert_eq!(create_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(create_stmt.sequence_name, "test_seq");
             assert_eq!(create_stmt.min_value, None);
             assert_eq!(create_stmt.max_value, None);
         }
@@ -64,7 +64,7 @@ fn test_create_sequence_no_cycle() {
 
     match stmt {
         Statement::CreateSequence(create_stmt) => {
-            assert_eq!(create_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(create_stmt.sequence_name, "test_seq");
             assert!(!create_stmt.cycle);
         }
         _ => panic!("Expected CreateSequence statement, got {:?}", stmt),
@@ -78,7 +78,7 @@ fn test_drop_sequence_basic() {
 
     match stmt {
         Statement::DropSequence(drop_stmt) => {
-            assert_eq!(drop_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(drop_stmt.sequence_name, "test_seq");
             assert!(!drop_stmt.cascade); // RESTRICT is default
         }
         _ => panic!("Expected DropSequence statement, got {:?}", stmt),
@@ -92,7 +92,7 @@ fn test_drop_sequence_cascade() {
 
     match stmt {
         Statement::DropSequence(drop_stmt) => {
-            assert_eq!(drop_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(drop_stmt.sequence_name, "test_seq");
             assert!(drop_stmt.cascade);
         }
         _ => panic!("Expected DropSequence statement, got {:?}", stmt),
@@ -106,7 +106,7 @@ fn test_drop_sequence_restrict() {
 
     match stmt {
         Statement::DropSequence(drop_stmt) => {
-            assert_eq!(drop_stmt.sequence_name, "TEST_SEQ");
+            assert_eq!(drop_stmt.sequence_name, "test_seq");
             assert!(!drop_stmt.cascade);
         }
         _ => panic!("Expected DropSequence statement, got {:?}", stmt),
@@ -120,7 +120,7 @@ fn test_create_type_distinct() {
 
     match stmt {
         Statement::CreateType(create_stmt) => {
-            assert_eq!(create_stmt.type_name, "TEST_TYPE");
+            assert_eq!(create_stmt.type_name, "test_type");
             match create_stmt.definition {
                 TypeDefinition::Distinct { base_type } => {
                     assert!(matches!(base_type, vibesql_types::DataType::Integer));
@@ -139,12 +139,12 @@ fn test_create_type_structured() {
 
     match stmt {
         Statement::CreateType(create_stmt) => {
-            assert_eq!(create_stmt.type_name, "PERSON_TYPE");
+            assert_eq!(create_stmt.type_name, "person_type");
             match create_stmt.definition {
                 TypeDefinition::Structured { attributes } => {
                     assert_eq!(attributes.len(), 2);
-                    assert_eq!(attributes[0].name, "NAME");
-                    assert_eq!(attributes[1].name, "AGE");
+                    assert_eq!(attributes[0].name, "name");
+                    assert_eq!(attributes[1].name, "age");
                     // Check data types
                     assert!(matches!(
                         attributes[0].data_type,
@@ -166,7 +166,7 @@ fn test_drop_type_basic() {
 
     match stmt {
         Statement::DropType(drop_stmt) => {
-            assert_eq!(drop_stmt.type_name, "TEST_TYPE");
+            assert_eq!(drop_stmt.type_name, "test_type");
             assert!(matches!(drop_stmt.behavior, vibesql_ast::DropBehavior::Restrict));
         }
         _ => panic!("Expected DropType statement, got {:?}", stmt),
@@ -180,7 +180,7 @@ fn test_drop_type_cascade() {
 
     match stmt {
         Statement::DropType(drop_stmt) => {
-            assert_eq!(drop_stmt.type_name, "TEST_TYPE");
+            assert_eq!(drop_stmt.type_name, "test_type");
             assert!(matches!(drop_stmt.behavior, vibesql_ast::DropBehavior::Cascade));
         }
         _ => panic!("Expected DropType statement, got {:?}", stmt),
@@ -194,7 +194,7 @@ fn test_drop_type_restrict() {
 
     match stmt {
         Statement::DropType(drop_stmt) => {
-            assert_eq!(drop_stmt.type_name, "TEST_TYPE");
+            assert_eq!(drop_stmt.type_name, "test_type");
             assert!(matches!(drop_stmt.behavior, vibesql_ast::DropBehavior::Restrict));
         }
         _ => panic!("Expected DropType statement, got {:?}", stmt),
@@ -208,7 +208,7 @@ fn test_create_collation() {
 
     match stmt {
         Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "TEST_COLLATION");
+            assert_eq!(create_stmt.collation_name, "test_collation");
         }
         _ => panic!("Expected CreateCollation statement, got {:?}", stmt),
     }
@@ -221,7 +221,7 @@ fn test_drop_collation() {
 
     match stmt {
         Statement::DropCollation(drop_stmt) => {
-            assert_eq!(drop_stmt.collation_name, "TEST_COLLATION");
+            assert_eq!(drop_stmt.collation_name, "test_collation");
         }
         _ => panic!("Expected DropCollation statement, got {:?}", stmt),
     }
@@ -234,7 +234,7 @@ fn test_create_character_set() {
 
     match stmt {
         Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "TEST_CHARSET");
+            assert_eq!(create_stmt.charset_name, "test_charset");
         }
         _ => panic!("Expected CreateCharacterSet statement, got {:?}", stmt),
     }
@@ -247,7 +247,7 @@ fn test_drop_character_set() {
 
     match stmt {
         Statement::DropCharacterSet(drop_stmt) => {
-            assert_eq!(drop_stmt.charset_name, "TEST_CHARSET");
+            assert_eq!(drop_stmt.charset_name, "test_charset");
         }
         _ => panic!("Expected DropCharacterSet statement, got {:?}", stmt),
     }
@@ -260,7 +260,7 @@ fn test_create_translation() {
 
     match stmt {
         Statement::CreateTranslation(create_stmt) => {
-            assert_eq!(create_stmt.translation_name, "TEST_TRANSLATION");
+            assert_eq!(create_stmt.translation_name, "test_translation");
         }
         _ => panic!("Expected CreateTranslation statement, got {:?}", stmt),
     }
@@ -273,7 +273,7 @@ fn test_drop_translation() {
 
     match stmt {
         Statement::DropTranslation(drop_stmt) => {
-            assert_eq!(drop_stmt.translation_name, "TEST_TRANSLATION");
+            assert_eq!(drop_stmt.translation_name, "test_translation");
         }
         _ => panic!("Expected DropTranslation statement, got {:?}", stmt),
     }
@@ -367,7 +367,7 @@ fn test_sequence_complex_options() {
 
     match stmt {
         Statement::CreateSequence(create_stmt) => {
-            assert_eq!(create_stmt.sequence_name, "COMPLEX_SEQ");
+            assert_eq!(create_stmt.sequence_name, "complex_seq");
             assert_eq!(create_stmt.start_with, Some(50));
             assert_eq!(create_stmt.increment_by, -1);
             assert_eq!(create_stmt.min_value, Some(1));
@@ -385,14 +385,14 @@ fn test_type_structured_complex() {
 
     match stmt {
         Statement::CreateType(create_stmt) => {
-            assert_eq!(create_stmt.type_name, "ADDRESS_TYPE");
+            assert_eq!(create_stmt.type_name, "address_type");
             match create_stmt.definition {
                 TypeDefinition::Structured { attributes } => {
                     assert_eq!(attributes.len(), 4);
-                    assert_eq!(attributes[0].name, "STREET");
-                    assert_eq!(attributes[1].name, "CITY");
-                    assert_eq!(attributes[2].name, "ZIP_CODE");
-                    assert_eq!(attributes[3].name, "COUNTRY");
+                    assert_eq!(attributes[0].name, "street");
+                    assert_eq!(attributes[1].name, "city");
+                    assert_eq!(attributes[2].name, "zip_code");
+                    assert_eq!(attributes[3].name, "country");
                 }
                 _ => panic!("Expected Structured type definition"),
             }

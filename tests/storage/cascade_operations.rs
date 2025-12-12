@@ -67,17 +67,17 @@ fn test_drop_sequence_cascade_removes_column_defaults() {
     );
 
     // Verify the sequence exists
-    assert!(db.catalog.get_sequence_mut("USER_ID_SEQ").is_ok());
+    assert!(db.catalog.get_sequence_mut("user_id_seq").is_ok());
 
     // DROP SEQUENCE CASCADE should remove the default value from the column
     execute_ok(&mut db, "DROP SEQUENCE user_id_seq CASCADE");
 
     // Verify the sequence was dropped
-    assert!(db.catalog.get_sequence_mut("USER_ID_SEQ").is_err());
+    assert!(db.catalog.get_sequence_mut("user_id_seq").is_err());
 
     // Verify the table still exists but the column default is gone
-    let table = db.catalog.get_table("USERS").expect("Table should exist");
-    let id_column = table.get_column("ID").expect("Column should exist");
+    let table = db.catalog.get_table("users").expect("Table should exist");
+    let id_column = table.get_column("id").expect("Column should exist");
     assert!(id_column.default_value.is_none(), "Column default should have been removed");
 }
 
@@ -102,7 +102,7 @@ fn test_drop_sequence_restrict_fails_when_in_use() {
     assert!(err.contains("still in use"), "Expected 'still in use' error, got: {}", err);
 
     // Verify the sequence still exists
-    assert!(db.catalog.get_sequence_mut("USER_ID_SEQ").is_ok());
+    assert!(db.catalog.get_sequence_mut("user_id_seq").is_ok());
 }
 
 #[test]
@@ -155,11 +155,11 @@ fn test_drop_sequence_cascade_multiple_columns() {
     execute_ok(&mut db, "DROP SEQUENCE id_seq CASCADE");
 
     // Verify defaults were removed from both tables
-    let table1 = db.catalog.get_table("TABLE1").expect("Table1 should exist");
-    let table2 = db.catalog.get_table("TABLE2").expect("Table2 should exist");
+    let table1 = db.catalog.get_table("table1").expect("Table1 should exist");
+    let table2 = db.catalog.get_table("table2").expect("Table2 should exist");
 
-    assert!(table1.get_column("ID").unwrap().default_value.is_none());
-    assert!(table2.get_column("ID").unwrap().default_value.is_none());
+    assert!(table1.get_column("id").unwrap().default_value.is_none());
+    assert!(table2.get_column("id").unwrap().default_value.is_none());
 }
 
 #[test]
@@ -179,14 +179,14 @@ fn test_drop_view_cascade_drops_dependent_views() {
     execute_ok(&mut db, "DROP VIEW active_users CASCADE");
 
     // Verify both views were dropped
-    assert!(db.catalog.get_view("ACTIVE_USERS").is_none(), "active_users view should be dropped");
+    assert!(db.catalog.get_view("active_users").is_none(), "active_users view should be dropped");
     assert!(
-        db.catalog.get_view("ADMIN_USERS").is_none(),
+        db.catalog.get_view("admin_users").is_none(),
         "admin_users view (dependent) should also be dropped"
     );
 
     // Verify the base table still exists
-    assert!(db.catalog.get_table("USERS").is_some());
+    assert!(db.catalog.get_table("users").is_some());
 }
 
 #[test]
@@ -207,8 +207,8 @@ fn test_drop_view_restrict_fails_when_has_dependents() {
     assert!(err.contains("still in use"), "Expected 'still in use' error, got: {}", err);
 
     // Verify views still exist
-    assert!(db.catalog.get_view("ACTIVE_USERS").is_some());
-    assert!(db.catalog.get_view("ADMIN_USERS").is_some());
+    assert!(db.catalog.get_view("active_users").is_some());
+    assert!(db.catalog.get_view("admin_users").is_some());
 }
 
 #[test]
@@ -227,12 +227,12 @@ fn test_drop_view_cascade_chain_of_dependencies() {
     execute_ok(&mut db, "DROP VIEW view1 CASCADE");
 
     // Verify all views in the chain were dropped
-    assert!(db.catalog.get_view("VIEW1").is_none());
-    assert!(db.catalog.get_view("VIEW2").is_none());
-    assert!(db.catalog.get_view("VIEW3").is_none());
+    assert!(db.catalog.get_view("view1").is_none());
+    assert!(db.catalog.get_view("view2").is_none());
+    assert!(db.catalog.get_view("view3").is_none());
 
     // Verify the base table still exists
-    assert!(db.catalog.get_table("BASE").is_some());
+    assert!(db.catalog.get_table("base").is_some());
 }
 
 #[test]
@@ -247,10 +247,10 @@ fn test_drop_view_no_dependents_works_with_restrict() {
     execute_ok(&mut db, "DROP VIEW user_view RESTRICT");
 
     // Verify the view was dropped
-    assert!(db.catalog.get_view("USER_VIEW").is_none());
+    assert!(db.catalog.get_view("user_view").is_none());
 
     // Verify the table still exists
-    assert!(db.catalog.get_table("USERS").is_some());
+    assert!(db.catalog.get_table("users").is_some());
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn test_drop_domain_cascade_converts_columns_to_base_type() {
     execute_ok(&mut db, "DROP DOMAIN email_domain CASCADE");
 
     // Verify the domain was dropped
-    assert!(!db.catalog.domain_exists("EMAIL_DOMAIN"));
+    assert!(!db.catalog.domain_exists("email_domain"));
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn test_drop_domain_restrict_when_not_in_use() {
     execute_ok(&mut db, "DROP DOMAIN email_domain RESTRICT");
 
     // Verify the domain was dropped
-    assert!(!db.catalog.domain_exists("EMAIL_DOMAIN"));
+    assert!(!db.catalog.domain_exists("email_domain"));
 }
 
 #[test]
@@ -302,10 +302,10 @@ fn test_cascade_operations_isolation() {
     execute_ok(&mut db, "DROP SEQUENCE seq1 CASCADE");
 
     // Verify seq2 and table2 are unaffected
-    assert!(db.catalog.get_sequence_mut("SEQ2").is_ok());
-    let table2 = db.catalog.get_table("TABLE2").unwrap();
+    assert!(db.catalog.get_sequence_mut("seq2").is_ok());
+    let table2 = db.catalog.get_table("table2").unwrap();
     assert!(
-        table2.get_column("ID").unwrap().default_value.is_some(),
+        table2.get_column("id").unwrap().default_value.is_some(),
         "Unrelated table's default should be preserved"
     );
 }
@@ -323,8 +323,8 @@ fn test_drop_view_if_exists_with_cascade() {
     execute_ok(&mut db, "DROP VIEW IF EXISTS view1 CASCADE");
 
     // Verify views were dropped
-    assert!(db.catalog.get_view("VIEW1").is_none());
-    assert!(db.catalog.get_view("VIEW2").is_none());
+    assert!(db.catalog.get_view("view1").is_none());
+    assert!(db.catalog.get_view("view2").is_none());
 
     // DROP VIEW IF EXISTS CASCADE should not fail for non-existent view
     execute_ok(&mut db, "DROP VIEW IF EXISTS nonexistent CASCADE");
@@ -350,6 +350,6 @@ fn test_sequence_cascade_with_complex_default_expression() {
     execute_ok(&mut db, "DROP SEQUENCE id_seq CASCADE");
 
     // Verify the default was removed
-    let table = db.catalog.get_table("USERS").unwrap();
-    assert!(table.get_column("ID").unwrap().default_value.is_none());
+    let table = db.catalog.get_table("users").unwrap();
+    assert!(table.get_column("id").unwrap().default_value.is_none());
 }
