@@ -832,6 +832,43 @@ pub(crate) fn execute_table_scan_with_bloom(
 ) -> Result<super::FromResult, ExecutorError> {
     use super::bloom_context::hash_value;
 
+    // Check if table is a CTE first (with case-insensitive lookup)
+    // Issue #4338: CTEs must be checked before database tables to support
+    // CTE-to-CTE references in join reordering when Bloom filter optimization is enabled
+    let cte_result = cte_results.get(table_name).or_else(|| {
+        cte_results
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(table_name))
+            .map(|(_, value)| value)
+    });
+
+    if let Some((cte_schema, cte_rows)) = cte_result {
+        // CTEs don't benefit from Bloom filtering during scan (already materialized)
+        // but we still need to apply WHERE predicates if present
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let cte_table_schema = cte_schema.clone();
+        let schema = CombinedSchema::from_table(effective_name.clone(), cte_table_schema);
+
+        // Apply WHERE predicates if any
+        if let Some(where_expr) = where_clause {
+            let predicate_plan = PredicatePlan::from_where_clause(Some(where_expr), &schema)
+                .map_err(ExecutorError::InvalidWhereClause)?;
+
+            let rows = filter_and_clone_rows(
+                cte_rows.as_ref(),
+                schema.clone(),
+                &predicate_plan,
+                &effective_name,
+                database,
+                Some(cte_results),
+            )?;
+            return Ok(super::FromResult::from_rows(schema, rows));
+        }
+
+        // No filtering - use zero-copy shared rows
+        return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
+    }
+
     // Check SELECT privilege on the table
     PrivilegeChecker::check_select(database, table_name)?;
 
