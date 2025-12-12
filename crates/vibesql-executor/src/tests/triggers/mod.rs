@@ -41,6 +41,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
         }],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create audit_log table");
 }
@@ -70,6 +71,7 @@ pub(super) fn create_users_table(db: &mut Database) {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create users table");
 }
@@ -82,7 +84,7 @@ pub(super) fn count_audit_rows(db: &Database) -> usize {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "AUDIT_LOG".to_string(),
             alias: None,
             column_aliases: None,

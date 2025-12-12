@@ -13,9 +13,9 @@ fn test_parse_create_table_with_primary_key() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "USERS");
+            assert_eq!(create.table_name, "users");
             assert_eq!(create.columns.len(), 2);
-            assert_eq!(create.columns[0].name, "ID");
+            assert_eq!(create.columns[0].name, "id");
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
@@ -93,8 +93,8 @@ fn test_parse_create_table_with_references() {
                         },
                     ..
                 } => {
-                    assert_eq!(table, "CUSTOMERS");
-                    assert_eq!(column, "ID");
+                    assert_eq!(table, "customers");
+                    assert_eq!(column, "id");
                     assert!(on_delete.is_none());
                     assert!(on_update.is_none());
                 }
@@ -180,16 +180,16 @@ fn test_parse_create_table_enum_with_key() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T1C857");
+            assert_eq!(create.table_name, "t1c857");
             assert_eq!(create.columns.len(), 2);
 
             // c1 has COMMENT but no KEY
-            assert_eq!(create.columns[0].name, "C1");
+            assert_eq!(create.columns[0].name, "c1");
             assert_eq!(create.columns[0].comment, Some("text667808".to_string()));
             assert_eq!(create.columns[0].constraints.len(), 0);
 
             // c2 has KEY constraint
-            assert_eq!(create.columns[1].name, "C2");
+            assert_eq!(create.columns[1].name, "c2");
             assert_eq!(create.columns[1].constraints.len(), 1);
             assert!(matches!(
                 create.columns[1].constraints[0],

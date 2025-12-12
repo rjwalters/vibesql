@@ -9,18 +9,22 @@ impl super::super::Catalog {
 
     /// Create a new user-defined type.
     pub fn create_type(&mut self, type_def: TypeDefinition) -> Result<(), CatalogError> {
-        let type_name = type_def.name.clone();
+        // Normalize name to lowercase for case-insensitive lookup
+        let type_name = type_def.name.to_lowercase();
         if self.type_definitions.contains_key(&type_name) {
             return Err(CatalogError::TypeAlreadyExists(type_name));
         }
-        self.type_definitions.insert(type_name, type_def);
+        let mut normalized_type = type_def;
+        normalized_type.name = type_name.clone();
+        self.type_definitions.insert(type_name, normalized_type);
         Ok(())
     }
 
     /// Drop a user-defined type.
     pub fn drop_type(&mut self, name: &str, cascade: bool) -> Result<(), CatalogError> {
-        if !self.type_definitions.contains_key(name) {
-            return Err(CatalogError::TypeNotFound(name.to_string()));
+        let normalized_name = name.to_lowercase();
+        if !self.type_definitions.contains_key(&normalized_name) {
+            return Err(CatalogError::TypeNotFound(normalized_name));
         }
 
         // Check for dependencies if not CASCADE
@@ -33,8 +37,8 @@ impl super::super::Catalog {
                             if let vibesql_types::DataType::UserDefined { type_name } =
                                 &column.data_type
                             {
-                                if type_name == name {
-                                    return Err(CatalogError::TypeInUse(name.to_string()));
+                                if type_name.to_lowercase() == normalized_name {
+                                    return Err(CatalogError::TypeInUse(normalized_name.clone()));
                                 }
                             }
                         }
@@ -43,7 +47,7 @@ impl super::super::Catalog {
             }
         }
 
-        self.type_definitions.remove(name);
+        self.type_definitions.remove(&normalized_name);
 
         // If CASCADE, also drop dependent objects (tables with columns of this type)
         if cascade {
@@ -55,7 +59,7 @@ impl super::super::Catalog {
                             if let vibesql_types::DataType::UserDefined { type_name } =
                                 &column.data_type
                             {
-                                if type_name == name {
+                                if type_name.to_lowercase() == normalized_name {
                                     tables_to_drop.push(format!("{}.{}", schema_name, table_name));
                                     break;
                                 }
@@ -76,12 +80,12 @@ impl super::super::Catalog {
 
     /// Get a type definition by name.
     pub fn get_type(&self, name: &str) -> Option<&TypeDefinition> {
-        self.type_definitions.get(name)
+        self.type_definitions.get(&name.to_lowercase())
     }
 
     /// Check if a type exists.
     pub fn type_exists(&self, name: &str) -> bool {
-        self.type_definitions.contains_key(name)
+        self.type_definitions.contains_key(&name.to_lowercase())
     }
 
     /// List all user-defined type names.

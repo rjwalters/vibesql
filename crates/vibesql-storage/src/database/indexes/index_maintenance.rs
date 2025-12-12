@@ -1212,17 +1212,17 @@ impl IndexManager {
         &self,
         table_name: &str,
     ) -> Vec<(&IndexMetadata, &IVFFlatIndex)> {
-        let search_name_upper = table_name.to_uppercase();
-        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
+        let search_name_lower = table_name.to_lowercase();
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
 
         self.indexes
             .iter()
             .filter_map(|(normalized_name, metadata)| {
-                let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
+                let stored_lower = metadata.table_name.to_lowercase();
+                let stored_table_only = stored_lower.rsplit('.').next().unwrap_or(&stored_lower);
 
                 // Check if table matches
-                if stored_upper != search_name_upper && stored_table_only != search_table_only {
+                if stored_lower != search_name_lower && stored_table_only != search_table_only {
                     return None;
                 }
 
@@ -1372,17 +1372,17 @@ impl IndexManager {
         &self,
         table_name: &str,
     ) -> Vec<(&IndexMetadata, &super::hnsw::HnswIndex)> {
-        let search_name_upper = table_name.to_uppercase();
-        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
+        let search_name_lower = table_name.to_lowercase();
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
 
         self.indexes
             .iter()
             .filter_map(|(normalized_name, metadata)| {
-                let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
+                let stored_lower = metadata.table_name.to_lowercase();
+                let stored_table_only = stored_lower.rsplit('.').next().unwrap_or(&stored_lower);
 
                 // Check if table matches
-                if stored_upper != search_name_upper && stored_table_only != search_table_only {
+                if stored_lower != search_name_lower && stored_table_only != search_table_only {
                     return None;
                 }
 
@@ -1455,10 +1455,10 @@ impl IndexManager {
     /// Vector of index names that were dropped (for logging/debugging)
     pub fn drop_indexes_for_table(&mut self, table_name: &str) -> Vec<String> {
         // Normalize for case-insensitive comparison
-        let search_name_upper = table_name.to_uppercase();
+        let search_name_lower = table_name.to_lowercase();
 
         // Extract just the table name part if qualified (e.g., "public.users" -> "users")
-        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
 
         // Collect index names to drop (can't modify while iterating)
         // Match if:
@@ -1468,11 +1468,11 @@ impl IndexManager {
             .indexes
             .iter()
             .filter(|(_, metadata)| {
-                let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
+                let stored_lower = metadata.table_name.to_lowercase();
+                let stored_table_only = stored_lower.rsplit('.').next().unwrap_or(&stored_lower);
 
                 // Match if full names match OR unqualified parts match
-                stored_upper == search_name_upper || stored_table_only == search_table_only
+                stored_lower == search_name_lower || stored_table_only == search_table_only
             })
             .map(|(name, _)| name.clone())
             .collect();

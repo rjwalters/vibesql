@@ -137,8 +137,12 @@ fn try_convert_simple_exists_to_join(
     };
 
     // Create the right side of the join
-    let right_from =
-        FromClause::Table { name: table_name, alias: effective_alias, column_aliases: None };
+    let right_from = FromClause::Table {
+        name: table_name,
+        alias: effective_alias,
+        column_aliases: None,
+        quoted: false, // Synthesized from subquery, treat as unquoted
+    };
 
     // Create SEMI or ANTI join based on negation
     let join_type = if negated { JoinType::Anti } else { JoinType::Semi };

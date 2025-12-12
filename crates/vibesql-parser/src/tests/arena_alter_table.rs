@@ -25,8 +25,8 @@ fn test_arena_alter_table_add_column() {
 
     match stmt {
         AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(column_def.name), "EMAIL");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(column_def.name), "email");
             match &column_def.data_type {
                 DataType::Varchar { max_length: Some(100) } => {} // Success
                 _ => panic!("Expected VARCHAR(100) data type"),
@@ -48,8 +48,8 @@ fn test_arena_alter_table_add_column_without_column_keyword() {
 
     match stmt {
         AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }) => {
-            assert_eq!(interner.resolve(*table_name), "T1");
-            assert_eq!(interner.resolve(column_def.name), "COL1");
+            assert_eq!(interner.resolve(*table_name), "t1");
+            assert_eq!(interner.resolve(column_def.name), "col1");
             match &column_def.data_type {
                 DataType::Integer => {} // Success
                 _ => panic!("Expected INTEGER data type"),
@@ -111,8 +111,8 @@ fn test_arena_alter_table_drop_column() {
 
     match stmt {
         AlterTableStmt::DropColumn(DropColumnStmt { table_name, column_name, if_exists }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*column_name), "EMAIL");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "email");
             assert!(!if_exists);
         }
         _ => panic!("Expected DROP COLUMN"),
@@ -131,8 +131,8 @@ fn test_arena_alter_table_drop_column_if_exists() {
 
     match stmt {
         AlterTableStmt::DropColumn(DropColumnStmt { table_name, column_name, if_exists }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*column_name), "EMAIL");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "email");
             assert!(if_exists);
         }
         _ => panic!("Expected DROP COLUMN"),
@@ -155,8 +155,8 @@ fn test_arena_alter_table_alter_column_set_not_null() {
 
     match stmt {
         AlterTableStmt::AlterColumn(AlterColumnStmt::SetNotNull { table_name, column_name }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*column_name), "EMAIL");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "email");
         }
         _ => panic!("Expected ALTER COLUMN SET NOT NULL"),
     }
@@ -174,8 +174,8 @@ fn test_arena_alter_table_alter_column_drop_not_null() {
 
     match stmt {
         AlterTableStmt::AlterColumn(AlterColumnStmt::DropNotNull { table_name, column_name }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*column_name), "EMAIL");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "email");
         }
         _ => panic!("Expected ALTER COLUMN DROP NOT NULL"),
     }
@@ -197,8 +197,8 @@ fn test_arena_alter_table_alter_column_set_default() {
             column_name,
             ..
         }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*column_name), "STATUS");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "status");
         }
         _ => panic!("Expected ALTER COLUMN SET DEFAULT"),
     }
@@ -216,8 +216,8 @@ fn test_arena_alter_table_alter_column_drop_default() {
 
     match stmt {
         AlterTableStmt::AlterColumn(AlterColumnStmt::DropDefault { table_name, column_name }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*column_name), "STATUS");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "status");
         }
         _ => panic!("Expected ALTER COLUMN DROP DEFAULT"),
     }
@@ -239,8 +239,8 @@ fn test_arena_alter_table_rename_to() {
 
     match stmt {
         AlterTableStmt::RenameTable(RenameTableStmt { table_name, new_table_name }) => {
-            assert_eq!(interner.resolve(*table_name), "USERS");
-            assert_eq!(interner.resolve(*new_table_name), "CUSTOMERS");
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*new_table_name), "customers");
         }
         _ => panic!("Expected RENAME TABLE"),
     }
@@ -262,7 +262,7 @@ fn test_arena_alter_table_add_check_constraint() {
 
     match stmt {
         AlterTableStmt::AddConstraint(add) => {
-            assert_eq!(interner.resolve(add.table_name), "T");
+            assert_eq!(interner.resolve(add.table_name), "t");
             assert!(add.constraint.name.is_none());
             match &add.constraint.kind {
                 TableConstraintKind::Check { .. } => {} // Success
@@ -283,11 +283,11 @@ fn test_arena_alter_table_add_unique_constraint() {
 
     match stmt {
         AlterTableStmt::AddConstraint(add) => {
-            assert_eq!(interner.resolve(add.table_name), "T");
+            assert_eq!(interner.resolve(add.table_name), "t");
             match &add.constraint.kind {
                 TableConstraintKind::Unique { columns } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(interner.resolve(columns[0].column_name), "COL");
+                    assert_eq!(interner.resolve(columns[0].column_name), "col");
                 }
                 _ => panic!("Expected UNIQUE constraint"),
             }
@@ -308,11 +308,11 @@ fn test_arena_alter_table_add_primary_key_constraint() {
 
     match stmt {
         AlterTableStmt::AddConstraint(add) => {
-            assert_eq!(interner.resolve(add.table_name), "T");
+            assert_eq!(interner.resolve(add.table_name), "t");
             match &add.constraint.kind {
                 TableConstraintKind::PrimaryKey { columns } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(interner.resolve(columns[0].column_name), "COL");
+                    assert_eq!(interner.resolve(columns[0].column_name), "col");
                 }
                 _ => panic!("Expected PRIMARY KEY constraint"),
             }
@@ -333,7 +333,7 @@ fn test_arena_alter_table_add_foreign_key_constraint() {
 
     match stmt {
         AlterTableStmt::AddConstraint(add) => {
-            assert_eq!(interner.resolve(add.table_name), "T");
+            assert_eq!(interner.resolve(add.table_name), "t");
             match &add.constraint.kind {
                 TableConstraintKind::ForeignKey {
                     columns,
@@ -342,10 +342,10 @@ fn test_arena_alter_table_add_foreign_key_constraint() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(interner.resolve(columns[0]), "COL");
-                    assert_eq!(interner.resolve(*references_table), "OTHER");
+                    assert_eq!(interner.resolve(columns[0]), "col");
+                    assert_eq!(interner.resolve(*references_table), "other");
                     assert_eq!(references_columns.len(), 1);
-                    assert_eq!(interner.resolve(references_columns[0]), "OTHER_COL");
+                    assert_eq!(interner.resolve(references_columns[0]), "other_col");
                 }
                 _ => panic!("Expected FOREIGN KEY constraint"),
             }
@@ -366,9 +366,9 @@ fn test_arena_alter_table_add_named_constraint() {
 
     match stmt {
         AlterTableStmt::AddConstraint(add) => {
-            assert_eq!(interner.resolve(add.table_name), "T");
+            assert_eq!(interner.resolve(add.table_name), "t");
             assert!(add.constraint.name.is_some());
-            assert_eq!(interner.resolve(add.constraint.name.unwrap()), "CK");
+            assert_eq!(interner.resolve(add.constraint.name.unwrap()), "ck");
             match &add.constraint.kind {
                 TableConstraintKind::Check { .. } => {} // Success
                 _ => panic!("Expected CHECK constraint"),
@@ -394,8 +394,8 @@ fn test_arena_alter_table_drop_constraint() {
 
     match stmt {
         AlterTableStmt::DropConstraint(drop) => {
-            assert_eq!(interner.resolve(drop.table_name), "USERS");
-            assert_eq!(interner.resolve(drop.constraint_name), "PK_USERS");
+            assert_eq!(interner.resolve(drop.table_name), "users");
+            assert_eq!(interner.resolve(drop.constraint_name), "pk_users");
         }
         _ => panic!("Expected DROP CONSTRAINT"),
     }
@@ -417,8 +417,8 @@ fn test_arena_alter_table_modify_column() {
 
     match stmt {
         AlterTableStmt::ModifyColumn(modify) => {
-            assert_eq!(interner.resolve(modify.table_name), "USERS");
-            assert_eq!(interner.resolve(modify.column_name), "EMAIL");
+            assert_eq!(interner.resolve(modify.table_name), "users");
+            assert_eq!(interner.resolve(modify.column_name), "email");
             match &modify.new_column_def.data_type {
                 DataType::Varchar { max_length: Some(200) } => {} // Success
                 _ => panic!("Expected VARCHAR(200) data type"),
@@ -444,9 +444,9 @@ fn test_arena_alter_table_change_column() {
 
     match stmt {
         AlterTableStmt::ChangeColumn(change) => {
-            assert_eq!(interner.resolve(change.table_name), "USERS");
-            assert_eq!(interner.resolve(change.old_column_name), "EMAIL");
-            assert_eq!(interner.resolve(change.new_column_def.name), "USER_EMAIL");
+            assert_eq!(interner.resolve(change.table_name), "users");
+            assert_eq!(interner.resolve(change.old_column_name), "email");
+            assert_eq!(interner.resolve(change.new_column_def.name), "user_email");
             match &change.new_column_def.data_type {
                 DataType::Varchar { max_length: Some(200) } => {} // Success
                 _ => panic!("Expected VARCHAR(200) data type"),

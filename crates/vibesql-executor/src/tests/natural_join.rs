@@ -121,12 +121,12 @@ fn test_natural_join_single_common_column() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "t1".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "t2".to_string(),
                 alias: None,
                 column_aliases: None,

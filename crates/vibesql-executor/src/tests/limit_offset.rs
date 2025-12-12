@@ -12,7 +12,7 @@ fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -221,12 +221,12 @@ fn test_limit_with_inner_join() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -334,12 +334,12 @@ fn test_offset_with_inner_join() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -447,12 +447,12 @@ fn test_limit_offset_with_inner_join() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,

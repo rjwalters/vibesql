@@ -37,17 +37,17 @@ fn test_create_view_with_column_list() {
         Statement::CreateView(view_stmt) => {
             execute_create_view(&view_stmt, &mut db).expect("Failed to create view");
 
-            let view = db.catalog.get_view("EMP_VIEW");
+            let view = db.catalog.get_view("emp_view");
             assert!(view.is_some());
 
             let view = view.unwrap();
-            assert_eq!(view.name, "EMP_VIEW");
+            assert_eq!(view.name, "emp_view");
             assert!(view.columns.is_some());
 
             let cols = view.columns.as_ref().unwrap();
             assert_eq!(cols.len(), 2);
-            assert_eq!(cols[0], "EMPLOYEE_ID");
-            assert_eq!(cols[1], "EMPLOYEE_NAME");
+            assert_eq!(cols[0], "employee_id");
+            assert_eq!(cols[1], "employee_name");
         }
         _ => panic!("Expected CreateView statement"),
     }
@@ -83,9 +83,9 @@ fn test_drop_view_simple() {
 
     // Create underlying table first
     let users_schema = vibesql_catalog::TableSchema::new(
-        "USERS".to_string(),
+        "users".to_string(),
         vec![ColumnSchema {
-            name: "ID".to_string(),
+            name: "id".to_string(),
             data_type: DataType::Integer,
             nullable: false,
             default_value: None,
@@ -101,7 +101,7 @@ fn test_drop_view_simple() {
     }
 
     // Verify view exists
-    assert!(db.catalog.get_view("MY_VIEW").is_some());
+    assert!(db.catalog.get_view("my_view").is_some());
 
     // Drop view
     let sql = "DROP VIEW my_view";
@@ -112,7 +112,7 @@ fn test_drop_view_simple() {
             execute_drop_view(&drop_stmt, &mut db).expect("Failed to drop view");
 
             // Verify view no longer exists
-            assert!(db.catalog.get_view("MY_VIEW").is_none());
+            assert!(db.catalog.get_view("my_view").is_none());
         }
         _ => panic!("Expected DropView statement"),
     }
@@ -127,9 +127,9 @@ fn test_create_view_duplicate_error() {
 
     // Create underlying tables first
     let users_schema = vibesql_catalog::TableSchema::new(
-        "USERS".to_string(),
+        "users".to_string(),
         vec![ColumnSchema {
-            name: "ID".to_string(),
+            name: "id".to_string(),
             data_type: DataType::Integer,
             nullable: false,
             default_value: None,
@@ -138,9 +138,9 @@ fn test_create_view_duplicate_error() {
     db.create_table(users_schema).expect("Failed to create users table");
 
     let employees_schema = vibesql_catalog::TableSchema::new(
-        "EMPLOYEES".to_string(),
+        "employees".to_string(),
         vec![ColumnSchema {
-            name: "ID".to_string(),
+            name: "id".to_string(),
             data_type: DataType::Integer,
             nullable: false,
             default_value: None,
@@ -218,22 +218,22 @@ fn test_view_preserves_column_names_with_select_star() {
 
     // Manually create a table with specific column names
     let table_schema = vibesql_catalog::TableSchema::new(
-        "TAB0".to_string(),
+        "tab0".to_string(),
         vec![
             ColumnSchema {
-                name: "PK".to_string(),
+                name: "pk".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
             },
             ColumnSchema {
-                name: "COL0".to_string(),
+                name: "col0".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
             },
             ColumnSchema {
-                name: "COL1".to_string(),
+                name: "col1".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
@@ -251,14 +251,14 @@ fn test_view_preserves_column_names_with_select_star() {
             execute_create_view(&view_stmt, &mut db).expect("Failed to create view");
 
             // Verify view has columns stored
-            let view = db.catalog.get_view("MY_VIEW").expect("View should exist");
+            let view = db.catalog.get_view("my_view").expect("View should exist");
             assert!(view.columns.is_some(), "View should have columns defined");
 
             let cols = view.columns.as_ref().unwrap();
             assert_eq!(cols.len(), 3, "View should have 3 columns");
-            assert_eq!(cols[0], "PK", "First column should be PK");
-            assert_eq!(cols[1], "COL0", "Second column should be COL0");
-            assert_eq!(cols[2], "COL1", "Third column should be COL1");
+            assert_eq!(cols[0], "pk", "First column should be PK");
+            assert_eq!(cols[1], "col0", "Second column should be COL0");
+            assert_eq!(cols[2], "col1", "Third column should be COL1");
         }
         _ => panic!("Expected CreateView statement"),
     }

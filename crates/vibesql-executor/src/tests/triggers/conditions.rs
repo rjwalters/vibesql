@@ -36,6 +36,7 @@ fn test_when_clause_filters_firing() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&table_stmt, &mut db)
         .expect("Failed to create transactions table");

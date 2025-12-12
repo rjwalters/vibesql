@@ -91,6 +91,8 @@ pub enum FromClause<'arena> {
         alias: Option<Symbol>,
         /// SQL:1999 Feature E051-09: Optional column renaming in table alias
         column_aliases: Option<BumpVec<'arena, Symbol>>,
+        /// Whether the identifier was quoted (delimited) in the original SQL.
+        quoted: bool,
     },
     Join {
         left: &'arena FromClause<'arena>,

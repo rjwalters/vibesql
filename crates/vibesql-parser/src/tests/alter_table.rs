@@ -17,8 +17,8 @@ fn test_parse_alter_table_add_column() {
         vibesql_ast::Statement::AlterTable(alter) => {
             match alter {
                 vibesql_ast::AlterTableStmt::AddColumn(add) => {
-                    assert_eq!(add.table_name, "USERS");
-                    assert_eq!(add.column_def.name, "EMAIL");
+                    assert_eq!(add.table_name, "users");
+                    assert_eq!(add.column_def.name, "email");
                     match add.column_def.data_type {
                         vibesql_types::DataType::Varchar { max_length: Some(100) } => {} // Success
                         _ => panic!("Expected VARCHAR(100) data type"),
@@ -42,8 +42,8 @@ fn test_parse_alter_table_drop_column() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::DropColumn(drop) => {
-                assert_eq!(drop.table_name, "USERS");
-                assert_eq!(drop.column_name, "EMAIL");
+                assert_eq!(drop.table_name, "users");
+                assert_eq!(drop.column_name, "email");
                 assert!(!drop.if_exists);
             }
             _ => panic!("Expected DROP COLUMN"),
@@ -61,8 +61,8 @@ fn test_parse_alter_table_drop_column_if_exists() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::DropColumn(drop) => {
-                assert_eq!(drop.table_name, "USERS");
-                assert_eq!(drop.column_name, "EMAIL");
+                assert_eq!(drop.table_name, "users");
+                assert_eq!(drop.column_name, "email");
                 assert!(drop.if_exists);
             }
             _ => panic!("Expected DROP COLUMN"),
@@ -81,8 +81,8 @@ fn test_parse_alter_table_alter_column_set_not_null() {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AlterColumn(alter_col) => match alter_col {
                 vibesql_ast::AlterColumnStmt::SetNotNull { table_name, column_name } => {
-                    assert_eq!(table_name, "USERS");
-                    assert_eq!(column_name, "EMAIL");
+                    assert_eq!(table_name, "users");
+                    assert_eq!(column_name, "email");
                 }
                 _ => panic!("Expected SET NOT NULL"),
             },
@@ -102,8 +102,8 @@ fn test_parse_alter_table_alter_column_drop_not_null() {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AlterColumn(alter_col) => match alter_col {
                 vibesql_ast::AlterColumnStmt::DropNotNull { table_name, column_name } => {
-                    assert_eq!(table_name, "USERS");
-                    assert_eq!(column_name, "EMAIL");
+                    assert_eq!(table_name, "users");
+                    assert_eq!(column_name, "email");
                 }
                 _ => panic!("Expected DROP NOT NULL"),
             },
@@ -127,7 +127,7 @@ fn test_alter_table_add_check_no_keyword() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddConstraint(add) => {
-                assert_eq!(add.table_name, "T");
+                assert_eq!(add.table_name, "t");
                 assert!(add.constraint.name.is_none(), "Expected unnamed constraint");
                 match add.constraint.kind {
                     vibesql_ast::TableConstraintKind::Check { .. } => {} // Success
@@ -149,12 +149,12 @@ fn test_alter_table_add_unique_no_keyword() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddConstraint(add) => {
-                assert_eq!(add.table_name, "T");
+                assert_eq!(add.table_name, "t");
                 assert!(add.constraint.name.is_none(), "Expected unnamed constraint");
                 match &add.constraint.kind {
                     vibesql_ast::TableConstraintKind::Unique { columns } => {
                         assert_eq!(columns.len(), 1);
-                        assert_eq!(columns[0].column_name, "COL");
+                        assert_eq!(columns[0].column_name, "col");
                     }
                     _ => panic!("Expected UNIQUE constraint"),
                 }
@@ -174,12 +174,12 @@ fn test_alter_table_add_primary_key_no_keyword() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddConstraint(add) => {
-                assert_eq!(add.table_name, "T");
+                assert_eq!(add.table_name, "t");
                 assert!(add.constraint.name.is_none(), "Expected unnamed constraint");
                 match &add.constraint.kind {
                     vibesql_ast::TableConstraintKind::PrimaryKey { columns } => {
                         assert_eq!(columns.len(), 1);
-                        assert_eq!(columns[0].column_name, "COL");
+                        assert_eq!(columns[0].column_name, "col");
                     }
                     _ => panic!("Expected PRIMARY KEY constraint"),
                 }
@@ -200,7 +200,7 @@ fn test_alter_table_add_foreign_key_no_keyword() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddConstraint(add) => {
-                assert_eq!(add.table_name, "T");
+                assert_eq!(add.table_name, "t");
                 assert!(add.constraint.name.is_none(), "Expected unnamed constraint");
                 match &add.constraint.kind {
                     vibesql_ast::TableConstraintKind::ForeignKey {
@@ -211,10 +211,10 @@ fn test_alter_table_add_foreign_key_no_keyword() {
                         on_update,
                     } => {
                         assert_eq!(columns.len(), 1);
-                        assert_eq!(columns[0], "COL");
-                        assert_eq!(references_table, "OTHER");
+                        assert_eq!(columns[0], "col");
+                        assert_eq!(references_table, "other");
                         assert_eq!(references_columns.len(), 1);
-                        assert_eq!(references_columns[0], "OTHER_COL");
+                        assert_eq!(references_columns[0], "other_col");
                         assert!(on_delete.is_none());
                         assert!(on_update.is_none());
                     }
@@ -237,8 +237,8 @@ fn test_alter_table_add_named_check_with_keyword() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddConstraint(add) => {
-                assert_eq!(add.table_name, "T");
-                assert_eq!(add.constraint.name, Some("CK".to_string()));
+                assert_eq!(add.table_name, "t");
+                assert_eq!(add.constraint.name, Some("ck".to_string()));
                 match add.constraint.kind {
                     vibesql_ast::TableConstraintKind::Check { .. } => {} // Success
                     _ => panic!("Expected CHECK constraint"),
@@ -265,8 +265,8 @@ fn test_alter_table_add_column_without_column_keyword() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddColumn(add) => {
-                assert_eq!(add.table_name, "T1");
-                assert_eq!(add.column_def.name, "COL1");
+                assert_eq!(add.table_name, "t1");
+                assert_eq!(add.column_def.name, "col1");
                 match add.column_def.data_type {
                     vibesql_types::DataType::Integer => {} // Success
                     _ => panic!("Expected INTEGER data type"),
@@ -289,8 +289,8 @@ fn test_alter_table_add_column_bare_with_varchar() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddColumn(add) => {
-                assert_eq!(add.table_name, "USERS");
-                assert_eq!(add.column_def.name, "EMAIL");
+                assert_eq!(add.table_name, "users");
+                assert_eq!(add.column_def.name, "email");
                 match add.column_def.data_type {
                     vibesql_types::DataType::Varchar { max_length: Some(100) } => {} // Success
                     _ => panic!("Expected VARCHAR(100) data type"),
@@ -311,8 +311,8 @@ fn test_alter_table_add_column_bare_with_not_null() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddColumn(add) => {
-                assert_eq!(add.table_name, "T1");
-                assert_eq!(add.column_def.name, "COL1");
+                assert_eq!(add.table_name, "t1");
+                assert_eq!(add.column_def.name, "col1");
                 assert!(!add.column_def.nullable); // NOT NULL specified
             }
             _ => panic!("Expected ADD COLUMN"),
@@ -330,8 +330,8 @@ fn test_alter_table_add_column_bare_with_default() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddColumn(add) => {
-                assert_eq!(add.table_name, "T1");
-                assert_eq!(add.column_def.name, "STATUS");
+                assert_eq!(add.table_name, "t1");
+                assert_eq!(add.column_def.name, "status");
                 assert!(add.column_def.default_value.is_some());
             }
             _ => panic!("Expected ADD COLUMN"),
@@ -350,8 +350,8 @@ fn test_alter_table_add_column_keyword_still_works() {
     match stmt {
         vibesql_ast::Statement::AlterTable(alter) => match alter {
             vibesql_ast::AlterTableStmt::AddColumn(add) => {
-                assert_eq!(add.table_name, "T1");
-                assert_eq!(add.column_def.name, "COL1");
+                assert_eq!(add.table_name, "t1");
+                assert_eq!(add.column_def.name, "col1");
             }
             _ => panic!("Expected ADD COLUMN"),
         },

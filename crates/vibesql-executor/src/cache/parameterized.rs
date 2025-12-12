@@ -548,6 +548,7 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::And,
@@ -601,6 +602,7 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: Some(Expression::InList {
                 expr: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),

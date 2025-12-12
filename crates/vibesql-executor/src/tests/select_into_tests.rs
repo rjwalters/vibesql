@@ -30,6 +30,7 @@ fn test_select_into_single_row() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -62,7 +63,7 @@ fn test_select_into_single_row() {
         ],
         into_table: Some("target".to_string()),
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "source".to_string(),
             alias: None,
             column_aliases: None,
@@ -91,7 +92,7 @@ fn test_select_into_single_row() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "target".to_string(),
             alias: None,
             column_aliases: None,
@@ -129,6 +130,7 @@ fn test_select_into_no_rows_error() {
         }],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -144,7 +146,7 @@ fn test_select_into_no_rows_error() {
         }],
         into_table: Some("target".to_string()),
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "source".to_string(),
             alias: None,
             column_aliases: None,
@@ -187,6 +189,7 @@ fn test_select_into_multiple_rows_error() {
         }],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -212,7 +215,7 @@ fn test_select_into_multiple_rows_error() {
         }],
         into_table: Some("target".to_string()),
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "source".to_string(),
             alias: None,
             column_aliases: None,
@@ -255,6 +258,7 @@ fn test_select_into_with_expressions() {
         }],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -284,7 +288,7 @@ fn test_select_into_with_expressions() {
         }],
         into_table: Some("target".to_string()),
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "source".to_string(),
             alias: None,
             column_aliases: None,
@@ -310,7 +314,7 @@ fn test_select_into_with_expressions() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "target".to_string(),
             alias: None,
             column_aliases: None,

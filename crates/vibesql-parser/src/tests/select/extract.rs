@@ -52,7 +52,7 @@ fn test_parse_extract_month_from_column() {
                         assert_eq!(*field, vibesql_ast::IntervalUnit::Month);
                         match &**expr {
                             vibesql_ast::Expression::ColumnRef { column, .. } => {
-                                assert_eq!(column, "ORDER_DATE");
+                                assert_eq!(column, "order_date");
                             }
                             _ => panic!("Expected column reference in Extract"),
                         }
@@ -197,8 +197,8 @@ fn test_parse_extract_with_qualified_column() {
                     assert_eq!(*field, vibesql_ast::IntervalUnit::Month);
                     match &**expr {
                         vibesql_ast::Expression::ColumnRef { table, column } => {
-                            assert_eq!(table.as_deref(), Some("ORDERS"));
-                            assert_eq!(column, "ORDER_DATE");
+                            assert_eq!(table.as_deref(), Some("orders"));
+                            assert_eq!(column, "order_date");
                         }
                         _ => panic!("Expected qualified column reference"),
                     }

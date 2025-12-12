@@ -9,7 +9,7 @@ fn test_create_assertion_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "VALID_BALANCE");
+        assert_eq!(stmt.assertion_name, "valid_balance");
         // Check that we have a condition (basic sanity check)
         assert!(matches!(*stmt.check_condition, vibesql_ast::Expression::BinaryOp { .. }));
     } else {
@@ -24,7 +24,7 @@ fn test_create_assertion_with_not_exists() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "VALID_BALANCE");
+        assert_eq!(stmt.assertion_name, "valid_balance");
         // Check that we have a NOT EXISTS expression (could be UnaryOp or Exists depending on
         // implementation) Just verify it parsed successfully - the exact expression type
         // may vary
@@ -40,7 +40,7 @@ fn test_create_assertion_with_complex_condition() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "EMP_DEPT_CONSISTENCY");
+        assert_eq!(stmt.assertion_name, "emp_dept_consistency");
         // Check that we have a binary comparison between two subqueries
         assert!(matches!(*stmt.check_condition, vibesql_ast::Expression::BinaryOp { .. }));
     } else {
@@ -55,7 +55,7 @@ fn test_create_assertion_with_and_condition() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "AGE_RANGE");
+        assert_eq!(stmt.assertion_name, "age_range");
         // Check that we have an AND condition
         assert!(matches!(*stmt.check_condition, vibesql_ast::Expression::BinaryOp { .. }));
     } else {
@@ -70,7 +70,7 @@ fn test_drop_assertion_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "VALID_BALANCE");
+        assert_eq!(stmt.assertion_name, "valid_balance");
         assert!(!stmt.cascade); // Default is RESTRICT (false)
     } else {
         panic!("Expected DropAssertion statement");
@@ -84,7 +84,7 @@ fn test_drop_assertion_cascade() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "VALID_BALANCE");
+        assert_eq!(stmt.assertion_name, "valid_balance");
         assert!(stmt.cascade);
     } else {
         panic!("Expected DropAssertion statement");
@@ -98,7 +98,7 @@ fn test_drop_assertion_restrict() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropAssertion(stmt)) = result {
-        assert_eq!(stmt.assertion_name, "VALID_BALANCE");
+        assert_eq!(stmt.assertion_name, "valid_balance");
         assert!(!stmt.cascade); // RESTRICT means cascade is false
     } else {
         panic!("Expected DropAssertion statement");

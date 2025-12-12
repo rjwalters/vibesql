@@ -377,6 +377,7 @@ fn test_procedural_select_into_single_column() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
+                quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
@@ -460,6 +461,7 @@ fn test_procedural_select_into_multiple_columns() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
+                quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
@@ -529,6 +531,7 @@ fn test_procedural_select_into_error_no_rows() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
+                quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
@@ -611,6 +614,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
+                quoted: false,
                 }),
                 where_clause: None,
                 group_by: None,
@@ -681,6 +685,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                     name: "users".to_string(),
                     alias: None,
                     column_aliases: None,
+                quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),

@@ -55,12 +55,10 @@ use tpcc::load_mysql;
 use tpcc::{
     load_vibesql, TPCCRng,
     // Transaction types and generators
-    TPCCExecutor, VibesqlTransactionExecutor,
     NewOrderInput, PaymentInput, OrderStatusInput, DeliveryInput, StockLevelInput,
-    TransactionResult, TPCCWorkload, TPCCBenchmarkResults,
+    TransactionResult,
     generate_new_order_input, generate_payment_input, generate_order_status_input,
     generate_delivery_input, generate_stock_level_input,
-    print_profile_summary, reset_profile_counters,
 };
 
 /// Default port for vibesql-server (different from other server benchmarks to avoid conflicts)

@@ -373,25 +373,6 @@ fn combine_rows(
     }
 }
 
-/// Combine two rows with ROWID tracking using schema for table name resolution
-///
-/// This is the preferred method for combining rows in JOIN operations when
-/// ROWID tracking is needed. It uses the left schema's table names for the left row
-/// and the right schema's table names for the right row.
-///
-/// Issue #4370: Enables qualified ROWID references like `t1.rowid` in JOIN results.
-#[inline]
-fn combine_rows_with_schema(
-    left_row: &vibesql_storage::Row,
-    right_row: &vibesql_storage::Row,
-    left_schema: &CombinedSchema,
-    right_schema: &CombinedSchema,
-) -> vibesql_storage::Row {
-    let left_table_names = left_schema.table_names();
-    let right_table_names = right_schema.table_names();
-    vibesql_storage::Row::combine_for_join(left_row, right_row, &left_table_names, &right_table_names)
-}
-
 /// Apply a post-join filter expression to join result rows
 ///
 /// This is used to filter rows produced by hash join with additional conditions

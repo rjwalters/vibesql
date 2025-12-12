@@ -11,7 +11,7 @@ fn test_declare_cursor_basic() {
     assert!(result.is_ok(), "Failed to parse basic DECLARE CURSOR: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(!stmt.insensitive);
         assert!(!stmt.scroll);
         assert_eq!(stmt.hold, None);
@@ -28,7 +28,7 @@ fn test_declare_cursor_with_insensitive() {
     assert!(result.is_ok(), "Failed to parse DECLARE CURSOR with INSENSITIVE: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(stmt.insensitive);
         assert!(!stmt.scroll);
     } else {
@@ -43,7 +43,7 @@ fn test_declare_cursor_with_scroll() {
     assert!(result.is_ok(), "Failed to parse DECLARE CURSOR with SCROLL: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(!stmt.insensitive);
         assert!(stmt.scroll);
     } else {
@@ -62,7 +62,7 @@ fn test_declare_cursor_insensitive_scroll() {
     );
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(stmt.insensitive);
         assert!(stmt.scroll);
     } else {
@@ -77,7 +77,7 @@ fn test_declare_cursor_with_hold() {
     assert!(result.is_ok(), "Failed to parse DECLARE CURSOR with WITH HOLD: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert_eq!(stmt.hold, Some(true));
     } else {
         panic!("Expected DeclareCursor statement");
@@ -91,7 +91,7 @@ fn test_declare_cursor_without_hold() {
     assert!(result.is_ok(), "Failed to parse DECLARE CURSOR with WITHOUT HOLD: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert_eq!(stmt.hold, Some(false));
     } else {
         panic!("Expected DeclareCursor statement");
@@ -109,7 +109,7 @@ fn test_declare_cursor_for_read_only() {
     );
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.updatability, CursorUpdatability::ReadOnly));
     } else {
         panic!("Expected DeclareCursor statement");
@@ -123,7 +123,7 @@ fn test_declare_cursor_for_update() {
     assert!(result.is_ok(), "Failed to parse DECLARE CURSOR with FOR UPDATE: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         if let CursorUpdatability::Update { columns } = stmt.updatability {
             assert_eq!(columns, None);
         } else {
@@ -145,9 +145,9 @@ fn test_declare_cursor_for_update_of_columns() {
     );
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         if let CursorUpdatability::Update { columns } = stmt.updatability {
-            assert_eq!(columns, Some(vec!["A".to_string(), "B".to_string()]));
+            assert_eq!(columns, Some(vec!["a".to_string(), "b".to_string()]));
         } else {
             panic!("Expected Update updatability with columns");
         }
@@ -163,7 +163,7 @@ fn test_declare_cursor_full_syntax() {
     assert!(result.is_ok(), "Failed to parse full DECLARE CURSOR syntax: {:?}", result.err());
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(stmt.insensitive);
         assert!(stmt.scroll);
         assert_eq!(stmt.hold, Some(true));
@@ -184,7 +184,7 @@ fn test_declare_cursor_complex_query() {
     );
 
     if let Ok(Statement::DeclareCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "C1");
+        assert_eq!(stmt.cursor_name, "c1");
     } else {
         panic!("Expected DeclareCursor statement");
     }
@@ -197,7 +197,7 @@ fn test_open_cursor_statement() {
     assert!(result.is_ok(), "Failed to parse OPEN CURSOR: {:?}", result.err());
 
     if let Ok(Statement::OpenCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
     } else {
         panic!("Expected OpenCursor statement");
     }
@@ -210,7 +210,7 @@ fn test_close_cursor_statement() {
     assert!(result.is_ok(), "Failed to parse CLOSE CURSOR: {:?}", result.err());
 
     if let Ok(Statement::CloseCursor(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
     } else {
         panic!("Expected CloseCursor statement");
     }
@@ -223,7 +223,7 @@ fn test_fetch_statement_next() {
     assert!(result.is_ok(), "Failed to parse FETCH NEXT: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Next));
         assert_eq!(stmt.into_variables, None);
     } else {
@@ -238,7 +238,7 @@ fn test_fetch_statement_prior() {
     assert!(result.is_ok(), "Failed to parse FETCH PRIOR: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Prior));
         assert_eq!(stmt.into_variables, None);
     } else {
@@ -253,7 +253,7 @@ fn test_fetch_statement_first() {
     assert!(result.is_ok(), "Failed to parse FETCH FIRST: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::First));
         assert_eq!(stmt.into_variables, None);
     } else {
@@ -268,7 +268,7 @@ fn test_fetch_statement_last() {
     assert!(result.is_ok(), "Failed to parse FETCH LAST: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Last));
         assert_eq!(stmt.into_variables, None);
     } else {
@@ -283,7 +283,7 @@ fn test_fetch_statement_absolute() {
     assert!(result.is_ok(), "Failed to parse FETCH ABSOLUTE: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Absolute(5)));
         assert_eq!(stmt.into_variables, None);
     } else {
@@ -298,7 +298,7 @@ fn test_fetch_statement_relative() {
     assert!(result.is_ok(), "Failed to parse FETCH RELATIVE: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Relative(3)));
         assert_eq!(stmt.into_variables, None);
     } else {
@@ -313,9 +313,9 @@ fn test_fetch_statement_with_into() {
     assert!(result.is_ok(), "Failed to parse FETCH with INTO: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Next));
-        assert_eq!(stmt.into_variables, Some(vec!["VAR1".to_string(), "VAR2".to_string()]));
+        assert_eq!(stmt.into_variables, Some(vec!["var1".to_string(), "var2".to_string()]));
     } else {
         panic!("Expected Fetch statement");
     }
@@ -328,7 +328,7 @@ fn test_fetch_statement_default_orientation() {
     assert!(result.is_ok(), "Failed to parse FETCH with default orientation: {:?}", result.err());
 
     if let Ok(Statement::Fetch(stmt)) = result {
-        assert_eq!(stmt.cursor_name, "MY_CURSOR");
+        assert_eq!(stmt.cursor_name, "my_cursor");
         assert!(matches!(stmt.orientation, vibesql_ast::FetchOrientation::Next)); // default
         assert_eq!(stmt.into_variables, None);
     } else {

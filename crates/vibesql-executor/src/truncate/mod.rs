@@ -62,6 +62,7 @@ impl TruncateTableExecutor {
     ///     }],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
+    ///     quoted: false,
     /// };
     /// CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
     ///

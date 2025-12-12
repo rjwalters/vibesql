@@ -74,7 +74,7 @@ fn test_scalar_subquery() {
         from: Some(FromClause::Table {
             name: "employees".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -107,7 +107,7 @@ fn test_in_expression() {
         from: Some(FromClause::Table {
             name: "departments".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -141,7 +141,7 @@ fn test_not_in_expression() {
         from: Some(FromClause::Table {
             name: "excluded".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,

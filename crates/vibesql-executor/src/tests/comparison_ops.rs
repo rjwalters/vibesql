@@ -30,7 +30,7 @@ fn test_greater_than_comparison() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "nums".to_string(),
             alias: None,
             column_aliases: None,
@@ -81,7 +81,7 @@ fn test_less_than_comparison() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "nums".to_string(),
             alias: None,
             column_aliases: None,
@@ -134,7 +134,7 @@ fn test_not_equal_comparison() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "nums".to_string(),
             alias: None,
             column_aliases: None,
@@ -188,7 +188,7 @@ fn test_less_than_or_equal_comparison() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "nums".to_string(),
             alias: None,
             column_aliases: None,

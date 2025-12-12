@@ -1,7 +1,7 @@
 //! CREATE TABLE statement execution
 
 use vibesql_ast::{CreateTableStmt, IndexColumn, OrderDirection};
-use vibesql_catalog::{ColumnSchema, TableSchema};
+use vibesql_catalog::{ColumnSchema, TableIdentifier, TableSchema};
 use vibesql_storage::Database;
 
 use crate::{
@@ -56,6 +56,7 @@ impl CreateTableExecutor {
     ///     ],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
+    ///     quoted: false,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -76,9 +77,12 @@ impl CreateTableExecutor {
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
 
-        // Check if table already exists in the target schema
-        let qualified_name = format!("{}.{}", schema_name, table_name);
-        if database.catalog.table_exists(&qualified_name) {
+        // Create TableIdentifier with proper case semantics based on quoted flag
+        // This identifier is used for both existence check and table creation
+        let identifier = TableIdentifier::new(&table_name, stmt.quoted);
+
+        // Check if table already exists using identifier (respects quoted semantics)
+        if database.catalog.table_exists_by_identifier(&identifier) {
             if stmt.if_not_exists {
                 // IF NOT EXISTS - silently return success without creating the table
                 return Ok(format!(
@@ -86,7 +90,11 @@ impl CreateTableExecutor {
                     table_name, schema_name
                 ));
             }
-            return Err(ExecutorError::TableAlreadyExists(qualified_name));
+            return Err(ExecutorError::TableAlreadyExists(format!(
+                "{}.{}",
+                schema_name,
+                identifier.display()
+            )));
         }
 
         // Check for AUTO_INCREMENT constraints
@@ -277,9 +285,10 @@ impl CreateTableExecutor {
                 })?;
         }
 
-        // Create table using Database API (handles both catalog and storage)
+        // Create table using Database API with TableIdentifier (handles both catalog and storage)
+        // Note: identifier was created at the start of this function with proper quoted semantics
         let result = database
-            .create_table(table_schema.clone())
+            .create_table_with_identifier(table_schema.clone(), identifier.clone())
             .map_err(|e| ExecutorError::StorageError(e.to_string()));
 
         // Check if table creation succeeded before creating indexes

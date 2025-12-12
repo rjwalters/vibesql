@@ -11,12 +11,12 @@ fn test_auto_increment_basic() {
 
     match result.unwrap() {
         vibesql_ast::Statement::CreateTable(stmt) => {
-            assert_eq!(stmt.table_name, "USERS");
+            assert_eq!(stmt.table_name, "users");
             assert_eq!(stmt.columns.len(), 2);
 
             // Check first column has AUTO_INCREMENT constraint
             let id_col = &stmt.columns[0];
-            assert_eq!(id_col.name, "ID");
+            assert_eq!(id_col.name, "id");
             assert!(id_col
                 .constraints
                 .iter()

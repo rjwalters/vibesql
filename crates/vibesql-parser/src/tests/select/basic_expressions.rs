@@ -114,7 +114,7 @@ fn test_parse_select_from_table() {
             assert!(select.from.is_some());
             match &select.from.as_ref().unwrap() {
                 vibesql_ast::FromClause::Table { name, alias, .. } => {
-                    assert_eq!(name, "USERS");
+                    assert_eq!(name, "users");
                     assert!(alias.is_none());
                 }
                 _ => panic!("Expected table in FROM clause"),
@@ -137,7 +137,7 @@ fn test_parse_select_columns() {
             // Check first column (id)
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "ID" => {}
+                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "id" => {}
                     _ => panic!("Expected id column"),
                 },
                 _ => panic!("Expected Expression select item"),
@@ -146,7 +146,7 @@ fn test_parse_select_columns() {
             // Check second column (name)
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "NAME" => {}
+                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "name" => {}
                     _ => panic!("Expected name column"),
                 },
                 _ => panic!("Expected Expression select item"),
@@ -155,7 +155,7 @@ fn test_parse_select_columns() {
             // Check third column (age)
             match &select.select_list[2] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "AGE" => {}
+                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "age" => {}
                     _ => panic!("Expected age column"),
                 },
                 _ => panic!("Expected Expression select item"),
@@ -255,7 +255,7 @@ fn test_parse_select_qualified_wildcard() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias: _ } => {
-                    assert_eq!(qualifier, "TABLE_NAME");
+                    assert_eq!(qualifier, "table_name");
                 }
                 _ => panic!(
                     "Expected QualifiedWildcard select item, got {:?}",
@@ -280,7 +280,7 @@ fn test_parse_select_qualified_wildcard_alias() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias: _ } => {
-                    assert_eq!(qualifier, "ALIAS");
+                    assert_eq!(qualifier, "alias");
                 }
                 _ => panic!("Expected QualifiedWildcard select item"),
             }

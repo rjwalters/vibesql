@@ -29,6 +29,7 @@ fn test_create_table_statement() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+        quoted: false,
     });
 
     match stmt {

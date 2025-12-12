@@ -12,10 +12,10 @@ fn test_parse_create_table_basic() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "USERS");
+            assert_eq!(create.table_name, "users");
             assert_eq!(create.columns.len(), 2);
-            assert_eq!(create.columns[0].name, "ID");
-            assert_eq!(create.columns[1].name, "NAME");
+            assert_eq!(create.columns[0].name, "id");
+            assert_eq!(create.columns[1].name, "name");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Integer => {} // Success
                 _ => panic!("Expected Integer data type"),
@@ -41,7 +41,7 @@ fn test_parse_create_table_various_types() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "TEST");
+            assert_eq!(create.table_name, "test");
             assert_eq!(create.columns.len(), 4);
             match create.columns[0].data_type {
                 vibesql_types::DataType::Integer => {} // Success
@@ -72,9 +72,9 @@ fn test_parse_create_table_without_oids() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T1");
+            assert_eq!(create.table_name, "t1");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "ID");
+            assert_eq!(create.columns[0].name, "id");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -88,9 +88,9 @@ fn test_parse_create_table_with_oids() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T2");
+            assert_eq!(create.table_name, "t2");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "ID");
+            assert_eq!(create.columns[0].name, "id");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -105,7 +105,7 @@ fn test_parse_create_table_no_oids_clause() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T3");
+            assert_eq!(create.table_name, "t3");
             assert_eq!(create.columns.len(), 1);
         }
         _ => panic!("Expected CREATE TABLE statement"),
@@ -127,7 +127,7 @@ fn test_parse_create_table_with_backtick_table_name() {
             // Backtick identifiers preserve case
             assert_eq!(create.table_name, "user_table");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "ID");
+            assert_eq!(create.columns[0].name, "id");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -142,7 +142,7 @@ fn test_parse_create_table_with_backtick_column_names() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "USERS");
+            assert_eq!(create.table_name, "users");
             assert_eq!(create.columns.len(), 2);
             // Backtick identifiers preserve case
             assert_eq!(create.columns[0].name, "user_id");
@@ -203,9 +203,9 @@ fn test_parse_create_table_mixed_backtick_and_regular() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.table_name, "MyTable");
             assert_eq!(create.columns.len(), 3);
-            assert_eq!(create.columns[0].name, "ID"); // Regular identifier - uppercased
+            assert_eq!(create.columns[0].name, "id"); // Regular identifier - uppercased
             assert_eq!(create.columns[1].name, "userName"); // Backtick - preserves case
-            assert_eq!(create.columns[2].name, "STATUS"); // Regular identifier - uppercased
+            assert_eq!(create.columns[2].name, "status"); // Regular identifier - uppercased
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

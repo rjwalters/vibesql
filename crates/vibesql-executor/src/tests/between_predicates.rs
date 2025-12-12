@@ -89,7 +89,7 @@ fn test_between_integer() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -193,7 +193,7 @@ fn test_not_between() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -266,7 +266,7 @@ fn test_between_boundary_inclusive() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "DATA".to_string(),
             alias: None,
             column_aliases: None,
@@ -366,7 +366,7 @@ fn test_between_with_column_references() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "ranges".to_string(),
             alias: None,
             column_aliases: None,

@@ -55,7 +55,7 @@ fn test_count_star_fast_path_simple() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -103,7 +103,7 @@ fn test_count_star_fast_path_empty_table() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "empty_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -169,7 +169,7 @@ fn test_count_star_with_where_no_fast_path() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -283,7 +283,7 @@ fn test_count_star_with_group_by_no_fast_path() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -341,7 +341,7 @@ fn test_count_star_distinct_no_fast_path() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -400,7 +400,7 @@ fn test_count_column_no_fast_path() {
             },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -456,7 +456,7 @@ fn test_count_star_with_alias() {
             },
             alias: Some("total".to_string()), // Has alias
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,
@@ -535,7 +535,7 @@ fn test_count_star_multiple_select_items_no_fast_path() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test_table".to_string(),
             alias: None,
             column_aliases: None,

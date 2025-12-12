@@ -263,6 +263,7 @@ fn test_insert_select_invalidates_cache() {
             name: "source_products".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,

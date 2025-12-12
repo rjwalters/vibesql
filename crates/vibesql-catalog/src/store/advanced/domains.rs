@@ -9,23 +9,27 @@ impl super::super::Catalog {
 
     /// Create a new domain.
     pub fn create_domain(&mut self, domain: DomainDefinition) -> Result<(), CatalogError> {
-        let name = domain.name.clone();
+        // Normalize name to lowercase for case-insensitive lookup
+        let name = domain.name.to_lowercase();
         if self.domains.contains_key(&name) {
             return Err(CatalogError::DomainAlreadyExists(name));
         }
-        self.domains.insert(name, domain);
+        let mut normalized_domain = domain;
+        normalized_domain.name = name.clone();
+        self.domains.insert(name, normalized_domain);
         Ok(())
     }
 
     /// Get a domain definition by name.
     pub fn get_domain(&self, name: &str) -> Option<&DomainDefinition> {
-        self.domains.get(name)
+        self.domains.get(&name.to_lowercase())
     }
 
     /// Drop a domain.
     pub fn drop_domain(&mut self, name: &str, cascade: bool) -> Result<(), CatalogError> {
-        if !self.domains.contains_key(name) {
-            return Err(CatalogError::DomainNotFound(name.to_string()));
+        let normalized_name = name.to_lowercase();
+        if !self.domains.contains_key(&normalized_name) {
+            return Err(CatalogError::DomainNotFound(normalized_name));
         }
 
         // Check if any columns use this domain
@@ -44,7 +48,8 @@ impl super::super::Catalog {
                             &column.data_type
                         {
                             // Check if this user-defined type is actually a domain
-                            if self.domains.contains_key(type_name) && type_name == name {
+                            let normalized_type = type_name.to_lowercase();
+                            if self.domains.contains_key(&normalized_type) && normalized_type == normalized_name {
                                 columns_using_domain
                                     .push((table_name.clone(), column.name.clone()));
                             }
@@ -57,7 +62,7 @@ impl super::super::Catalog {
         // If RESTRICT and domain is in use, return error
         if !cascade && !columns_using_domain.is_empty() {
             return Err(CatalogError::DomainInUse {
-                domain_name: name.to_string(),
+                domain_name: normalized_name.clone(),
                 dependent_columns: columns_using_domain,
             });
         }
@@ -68,7 +73,7 @@ impl super::super::Catalog {
         // For now, since domain support isn't fully implemented, we'll just proceed
         if cascade && !columns_using_domain.is_empty() {
             // Get the domain to find its base type
-            let domain = self.domains.get(name).cloned();
+            let domain = self.domains.get(&normalized_name).cloned();
 
             if let Some(domain_def) = domain {
                 // Convert all columns using this domain to the domain's base type
@@ -92,13 +97,13 @@ impl super::super::Catalog {
             }
         }
 
-        self.domains.remove(name);
+        self.domains.remove(&normalized_name);
         Ok(())
     }
 
     /// Check if a domain exists.
     pub fn domain_exists(&self, name: &str) -> bool {
-        self.domains.contains_key(&name.to_uppercase())
+        self.domains.contains_key(&name.to_lowercase())
     }
 
     /// List all domain names.

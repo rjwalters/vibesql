@@ -18,7 +18,7 @@ fn test_create_domain_basic() {
         assert!(result.is_ok(), "Failed to create domain: {:?}", result);
 
         // Verify domain was created
-        assert!(db.catalog.domain_exists("POSITIVEINT"));
+        assert!(db.catalog.domain_exists("positiveint"));
     } else {
         panic!("Expected CreateDomain statement");
     }
@@ -36,7 +36,7 @@ fn test_create_domain_with_default() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create domain with DEFAULT: {:?}", result);
 
-        let domain = db.catalog.get_domain("AGE");
+        let domain = db.catalog.get_domain("age");
         assert!(domain.is_some());
         assert!(domain.unwrap().default.is_some());
     } else {
@@ -56,7 +56,7 @@ fn test_create_domain_with_check_constraint() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create domain with CHECK: {:?}", result);
 
-        let domain = db.catalog.get_domain("POSITIVEINT");
+        let domain = db.catalog.get_domain("positiveint");
         assert!(domain.is_some());
         assert_eq!(domain.unwrap().constraints.len(), 1);
     } else {
@@ -76,7 +76,7 @@ fn test_create_domain_with_default_and_check() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create domain with DEFAULT and CHECK: {:?}", result);
 
-        let domain = db.catalog.get_domain("POSITIVEINT");
+        let domain = db.catalog.get_domain("positiveint");
         assert!(domain.is_some());
         let domain = domain.unwrap();
         assert!(domain.default.is_some());
@@ -98,7 +98,7 @@ fn test_create_domain_varchar() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create VARCHAR domain: {:?}", result);
 
-        assert!(db.catalog.domain_exists("EMAIL"));
+        assert!(db.catalog.domain_exists("email"));
     } else {
         panic!("Expected CreateDomain statement");
     }
@@ -116,7 +116,7 @@ fn test_create_domain_multiple_check_constraints() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create domain with multiple CHECKs: {:?}", result);
 
-        let domain = db.catalog.get_domain("RANGEINT");
+        let domain = db.catalog.get_domain("rangeint");
         assert!(domain.is_some());
         assert_eq!(domain.unwrap().constraints.len(), 2);
     } else {
@@ -153,7 +153,7 @@ fn test_drop_domain_basic() {
     let stmt = Parser::parse_sql(sql).expect("Failed to parse");
     if let Statement::CreateDomain(create_stmt) = stmt {
         DomainExecutor::execute_create_domain(&create_stmt, &mut db).unwrap();
-        assert!(db.catalog.domain_exists("POSITIVEINT"));
+        assert!(db.catalog.domain_exists("positiveint"));
     }
 
     // Drop domain
@@ -163,7 +163,7 @@ fn test_drop_domain_basic() {
         let result = DomainExecutor::execute_drop_domain(&drop_stmt, &mut db);
         assert!(result.is_ok(), "Failed to drop domain: {:?}", result);
 
-        assert!(!db.catalog.domain_exists("POSITIVEINT"));
+        assert!(!db.catalog.domain_exists("positiveint"));
     } else {
         panic!("Expected DropDomain statement");
     }
@@ -187,7 +187,7 @@ fn test_drop_domain_restrict() {
         let result = DomainExecutor::execute_drop_domain(&drop_stmt, &mut db);
         assert!(result.is_ok(), "Failed to drop domain with RESTRICT: {:?}", result);
 
-        assert!(!db.catalog.domain_exists("POSITIVEINT"));
+        assert!(!db.catalog.domain_exists("positiveint"));
     } else {
         panic!("Expected DropDomain statement");
     }
@@ -211,7 +211,7 @@ fn test_drop_domain_cascade() {
         let result = DomainExecutor::execute_drop_domain(&drop_stmt, &mut db);
         assert!(result.is_ok(), "Failed to drop domain with CASCADE: {:?}", result);
 
-        assert!(!db.catalog.domain_exists("POSITIVEINT"));
+        assert!(!db.catalog.domain_exists("positiveint"));
     } else {
         panic!("Expected DropDomain statement");
     }
@@ -244,7 +244,7 @@ fn test_domain_case_insensitivity() {
     }
 
     // Should be able to find it with different case
-    assert!(db.catalog.domain_exists("POSITIVEINT"));
+    assert!(db.catalog.domain_exists("positiveint"));
     assert!(db.catalog.domain_exists("positiveint"));
 
     // Drop with different case
@@ -268,7 +268,7 @@ fn test_domain_with_complex_check() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create domain with complex CHECK: {:?}", result);
 
-        let domain = db.catalog.get_domain("RANGEINT");
+        let domain = db.catalog.get_domain("rangeint");
         assert!(domain.is_some());
         assert_eq!(domain.unwrap().constraints.len(), 1);
     } else {
@@ -288,7 +288,7 @@ fn test_domain_with_default_current_date() {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "Failed to create domain with CURRENT_DATE: {:?}", result);
 
-        let domain = db.catalog.get_domain("CREATIONDATE");
+        let domain = db.catalog.get_domain("creationdate");
         assert!(domain.is_some());
         assert!(domain.unwrap().default.is_some());
     } else {
@@ -305,7 +305,7 @@ fn test_domain_create_drop_recreate_sequence() {
     if let Statement::CreateDomain(create_stmt) = stmt1 {
         let result = DomainExecutor::execute_create_domain(&create_stmt, &mut db);
         assert!(result.is_ok(), "First CREATE failed: {:?}", result);
-        assert!(db.catalog.domain_exists("DOMAIN1"), "Domain should exist after CREATE");
+        assert!(db.catalog.domain_exists("domain1"), "Domain should exist after CREATE");
     }
 
     // Step 2: DROP DOMAIN
@@ -314,7 +314,7 @@ fn test_domain_create_drop_recreate_sequence() {
     if let Statement::DropDomain(drop_stmt) = stmt2 {
         let result = DomainExecutor::execute_drop_domain(&drop_stmt, &mut db);
         assert!(result.is_ok(), "DROP failed: {:?}", result);
-        assert!(!db.catalog.domain_exists("DOMAIN1"), "Domain should not exist after DROP");
+        assert!(!db.catalog.domain_exists("domain1"), "Domain should not exist after DROP");
     }
 
     // Step 3: CREATE DOMAIN again (same name)
@@ -327,6 +327,6 @@ fn test_domain_create_drop_recreate_sequence() {
             "Second CREATE failed (domain should have been dropped): {:?}",
             result
         );
-        assert!(db.catalog.domain_exists("DOMAIN1"), "Domain should exist after second CREATE");
+        assert!(db.catalog.domain_exists("domain1"), "Domain should exist after second CREATE");
     }
 }
