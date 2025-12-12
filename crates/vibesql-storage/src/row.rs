@@ -1,4 +1,5 @@
 use smallvec::SmallVec;
+use std::collections::HashMap;
 use vibesql_types::{Date, SqlValue};
 
 /// Inline capacity for Row values.
@@ -45,6 +46,10 @@ pub struct Row {
     /// Optional row ID for SQLite ROWID compatibility
     /// This is set during table scans and used to support ROWID, _rowid_, and oid pseudo-columns
     pub row_id: Option<u64>,
+    /// Row IDs per table for JOIN support (issue #4370)
+    /// Maps table name (lowercase) to row ID for qualified ROWID references like `t1.rowid`
+    /// Only populated for joined rows; single-table rows use `row_id` field instead.
+    pub row_ids: Option<HashMap<String, u64>>,
 }
 
 impl Row {
@@ -55,6 +60,7 @@ impl Row {
         Row {
             values: values.into(),
             row_id: None,
+            row_ids: None,
         }
     }
 
@@ -65,6 +71,7 @@ impl Row {
         Row {
             values: SmallVec::from_vec(values),
             row_id: None,
+            row_ids: None,
         }
     }
 
@@ -75,12 +82,96 @@ impl Row {
         Row {
             values: values.into(),
             row_id: Some(row_id),
+            row_ids: None,
         }
+    }
+
+    /// Create a new row with per-table row IDs (for JOIN results)
+    ///
+    /// Used when combining rows from multiple tables in a JOIN.
+    pub fn with_row_ids(values: impl Into<RowValues>, row_ids: HashMap<String, u64>) -> Self {
+        Row {
+            values: values.into(),
+            row_id: None,
+            row_ids: if row_ids.is_empty() { None } else { Some(row_ids) },
+        }
+    }
+
+    /// Get row ID for a specific table (case-insensitive lookup)
+    ///
+    /// For single-table rows, returns `row_id` if `table_name` is None or matches.
+    /// For joined rows, looks up in the `row_ids` map by table name.
+    pub fn get_row_id_for_table(&self, table_name: Option<&str>) -> Option<u64> {
+        // Try table-specific row_ids first (for joined rows)
+        if let Some(ref row_ids) = self.row_ids {
+            if let Some(name) = table_name {
+                let name_lower = name.to_lowercase();
+                return row_ids.get(&name_lower).copied();
+            }
+            // No table specified, return the first row_id if there's exactly one
+            if row_ids.len() == 1 {
+                return row_ids.values().next().copied();
+            }
+            // Multiple tables and no qualifier - return None (ambiguous)
+            return None;
+        }
+
+        // Fall back to single row_id (for non-joined rows)
+        self.row_id
     }
 
     /// Set the row ID
     pub fn set_row_id(&mut self, row_id: u64) {
         self.row_id = Some(row_id);
+    }
+
+    /// Combine two rows for JOIN operations, preserving ROWIDs for each table
+    ///
+    /// This method is used by all JOIN implementations to properly track ROWIDs
+    /// from both left and right tables, enabling qualified ROWID references like
+    /// `t1.rowid` and `t2.rowid` in the result set.
+    ///
+    /// # Arguments
+    /// * `left` - The left row in the join
+    /// * `right` - The right row in the join
+    /// * `left_table_names` - Table names for the left side (for ROWID mapping)
+    /// * `right_table_names` - Table names for the right side (for ROWID mapping)
+    pub fn combine_for_join(
+        left: &Row,
+        right: &Row,
+        left_table_names: &[String],
+        right_table_names: &[String],
+    ) -> Row {
+        let mut combined_values = Vec::with_capacity(left.values.len() + right.values.len());
+        combined_values.extend_from_slice(&left.values);
+        combined_values.extend_from_slice(&right.values);
+
+        // Merge ROWIDs from both rows
+        let mut combined_row_ids = HashMap::new();
+
+        // Add left row's ROWIDs
+        if let Some(ref row_ids) = left.row_ids {
+            combined_row_ids.extend(row_ids.iter().map(|(k, v)| (k.clone(), *v)));
+        } else if let Some(row_id) = left.row_id {
+            for name in left_table_names {
+                combined_row_ids.insert(name.to_lowercase(), row_id);
+            }
+        }
+
+        // Add right row's ROWIDs
+        if let Some(ref row_ids) = right.row_ids {
+            combined_row_ids.extend(row_ids.iter().map(|(k, v)| (k.clone(), *v)));
+        } else if let Some(row_id) = right.row_id {
+            for name in right_table_names {
+                combined_row_ids.insert(name.to_lowercase(), row_id);
+            }
+        }
+
+        if combined_row_ids.is_empty() {
+            Row::new(combined_values)
+        } else {
+            Row::with_row_ids(combined_values, combined_row_ids)
+        }
     }
 
     /// Get the row ID if set

@@ -47,6 +47,15 @@ pub enum ExecutorError {
     },
     DivisionByZero,
     InvalidWhereClause(String),
+    /// Wrong number of arguments to a function (SQLite-compatible error)
+    WrongNumberOfArguments {
+        function_name: String,
+    },
+    /// Misuse of aggregate function (SQLite-compatible error)
+    /// e.g., aggregate in WHERE clause or nested aggregates
+    MisuseOfAggregate {
+        function_name: String,
+    },
     UnsupportedExpression(String),
     UnsupportedFeature(String),
     StorageError(String),
@@ -468,6 +477,14 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::InvalidWhereClause(msg) => {
                 write!(f, "{}", vibe_msg!("executor-invalid-where-clause", message = msg.as_str()))
+            }
+            ExecutorError::WrongNumberOfArguments { function_name } => {
+                // SQLite-compatible error message format
+                write!(f, "wrong number of arguments to function {}()", function_name)
+            }
+            ExecutorError::MisuseOfAggregate { function_name } => {
+                // SQLite-compatible error message format
+                write!(f, "misuse of aggregate function {}()", function_name)
             }
             ExecutorError::UnsupportedExpression(msg) => {
                 write!(

@@ -47,6 +47,29 @@ pub(super) fn batch_combine_rows(
     join_pairs: &[(usize, usize)],
     left_is_build: bool,
 ) -> Vec<vibesql_storage::Row> {
+    batch_combine_rows_with_table_names(build_rows, probe_rows, join_pairs, left_is_build, &[], &[])
+}
+
+/// Batch combine rows from join index pairs, preserving ROWIDs for each table
+///
+/// This extended version of batch_combine_rows also tracks row IDs per table
+/// for JOIN operations, enabling qualified ROWID references like `t1.rowid`.
+///
+/// # Arguments
+/// * `build_rows` - Rows from the build side of the join
+/// * `probe_rows` - Rows from the probe side of the join
+/// * `join_pairs` - Index pairs (build_idx, probe_idx) of matching rows
+/// * `left_is_build` - True if the left table is the build side
+/// * `build_table_names` - Table names for the build side (for ROWID tracking)
+/// * `probe_table_names` - Table names for the probe side (for ROWID tracking)
+pub(super) fn batch_combine_rows_with_table_names(
+    build_rows: &[vibesql_storage::Row],
+    probe_rows: &[vibesql_storage::Row],
+    join_pairs: &[(usize, usize)],
+    left_is_build: bool,
+    build_table_names: &[String],
+    probe_table_names: &[String],
+) -> Vec<vibesql_storage::Row> {
     if join_pairs.is_empty() {
         return Vec::new();
     }
@@ -54,25 +77,25 @@ pub(super) fn batch_combine_rows(
     // Pre-allocate result vector with exact capacity
     let mut result_rows = Vec::with_capacity(join_pairs.len());
 
-    // Calculate combined row size from first pair for consistent allocation
-    let (first_build_idx, first_probe_idx) = join_pairs[0];
-    let combined_size =
-        build_rows[first_build_idx].values.len() + probe_rows[first_probe_idx].values.len();
+    // Determine left/right table names based on build order
+    let (left_table_names, right_table_names) = if left_is_build {
+        (build_table_names, probe_table_names)
+    } else {
+        (probe_table_names, build_table_names)
+    };
 
     for &(build_idx, probe_idx) in join_pairs {
-        // Pre-allocate combined values vector with exact size
-        let mut combined_values = Vec::with_capacity(combined_size);
+        let build_row = &build_rows[build_idx];
+        let probe_row = &probe_rows[probe_idx];
 
-        // Combine rows in correct order (left first, then right)
-        if left_is_build {
-            combined_values.extend_from_slice(&build_rows[build_idx].values);
-            combined_values.extend_from_slice(&probe_rows[probe_idx].values);
+        // Use Row::combine_for_join to handle both values and ROWIDs
+        let result_row = if left_is_build {
+            vibesql_storage::Row::combine_for_join(build_row, probe_row, left_table_names, right_table_names)
         } else {
-            combined_values.extend_from_slice(&probe_rows[probe_idx].values);
-            combined_values.extend_from_slice(&build_rows[build_idx].values);
-        }
+            vibesql_storage::Row::combine_for_join(probe_row, build_row, left_table_names, right_table_names)
+        };
 
-        result_rows.push(vibesql_storage::Row::new(combined_values));
+        result_rows.push(result_row);
     }
 
     result_rows

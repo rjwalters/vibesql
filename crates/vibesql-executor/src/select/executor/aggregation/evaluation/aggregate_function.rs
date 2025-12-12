@@ -7,6 +7,72 @@ use crate::{
     select::grouping::AggregateAccumulator,
 };
 
+/// Validate aggregate function argument count
+/// Returns error with SQLite-compatible message if validation fails
+fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Result<(), ExecutorError> {
+    let name_upper = name.to_uppercase();
+    let arg_count = args.len();
+
+    // Check for wildcard in non-COUNT aggregates
+    let has_wildcard = args.iter().any(|arg| {
+        matches!(arg, vibesql_ast::Expression::Wildcard)
+            || matches!(
+                arg,
+                vibesql_ast::Expression::ColumnRef { table: None, column } if column == "*"
+            )
+    });
+
+    match name_upper.as_str() {
+        "COUNT" => {
+            // COUNT allows 0 args (COUNT(*) is handled specially), 1 arg, or multiple with DISTINCT
+            // COUNT() with no args and no * is still allowed
+            Ok(())
+        }
+        "MIN" | "MAX" => {
+            // min() and max() with * is wrong number of args
+            if has_wildcard || arg_count == 0 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.to_string(), // Preserve original case
+                });
+            }
+            // min/max with > 1 arg becomes scalar function, handled elsewhere
+            Ok(())
+        }
+        "SUM" | "AVG" | "TOTAL" => {
+            // These require exactly 1 argument, no wildcard allowed
+            if has_wildcard || arg_count == 0 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.to_string(), // Preserve original case
+                });
+            }
+            if arg_count > 1 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.to_string(), // Preserve original case
+                });
+            }
+            Ok(())
+        }
+        "GROUP_CONCAT" => {
+            // GROUP_CONCAT requires 1 or 2 arguments
+            if arg_count == 0 || arg_count > 2 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.to_string(), // Preserve original case
+                });
+            }
+            Ok(())
+        }
+        _ => {
+            // Unknown aggregate functions require at least 1 argument
+            if arg_count == 0 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.to_string(), // Preserve original case
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Evaluate aggregate function expressions (COUNT, SUM, AVG, MIN, MAX)
 /// Only handles AggregateFunction variant
 pub(super) fn evaluate(
@@ -22,6 +88,9 @@ pub(super) fn evaluate(
         }
         _ => unreachable!("evaluate called with non-aggregate expression"),
     };
+
+    // Validate argument count first
+    validate_aggregate_args(name, args)?;
 
     // Generate cache key for this aggregate expression
     // Format: "{name}:{distinct}:{arg_debug}"
@@ -126,11 +195,11 @@ pub(super) fn evaluate(
     }
 
     // Regular aggregate - evaluate single argument for each row
+    // This should be caught by validate_aggregate_args above, but keep as safety net
     if args.len() != 1 {
-        return Err(ExecutorError::UnsupportedExpression(format!(
-            "Aggregate functions expect 1 argument, got {}",
-            args.len()
-        )));
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: name.to_string(), // Preserve original case
+        });
     }
 
     // Special handling for COUNT with any argument
