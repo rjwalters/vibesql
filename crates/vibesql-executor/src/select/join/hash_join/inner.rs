@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 
 use super::{
-    batch_combine_rows, batch_combine_rows_with_table_names,
+    batch_combine_rows_with_table_names,
     build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey},
     columnar::{
         hash_join_indices_columnar, hash_join_indices_columnar_multi,

@@ -34,7 +34,8 @@ fn create_populated_table(db: &mut Database) {
             SqlValue::Varchar(StringValue::from("alice@example.com")),
         ]
         .into(),
-        row_id: None, row_ids: None,
+        row_id: None,
+        row_ids: None,
     };
     table.insert(row1).expect("Failed to insert row");
 
@@ -46,7 +47,8 @@ fn create_populated_table(db: &mut Database) {
             SqlValue::Varchar(StringValue::from("bob@example.com")),
         ]
         .into(),
-        row_id: None, row_ids: None,
+        row_id: None,
+        row_ids: None,
     };
     table.insert(row2).expect("Failed to insert row");
 }
@@ -291,7 +293,8 @@ fn test_set_not_null_with_nulls_error() {
             SqlValue::Null, // NULL email
         ]
         .into(),
-        row_id: None, row_ids: None,
+        row_id: None,
+        row_ids: None,
     };
     table.insert(row).expect("Failed to insert row");
 

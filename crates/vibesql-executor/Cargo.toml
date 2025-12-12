@@ -57,6 +57,7 @@ tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.3", path = "../vibesql-parser" }
+vibesql-bench-common = { version = "0.1.3", path = "../vibesql-bench-common" }
 # NOTE: vibesql-server dev-dependency removed to break circular dependency.
 # Server benchmarks (sysbench_server, tpcc_server, tpch_server) are now in vibesql-server crate.
 criterion = { version = "0.8", features = ["html_reports"] }

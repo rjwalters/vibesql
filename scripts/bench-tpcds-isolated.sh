@@ -74,7 +74,7 @@ echo -e "${YELLOW}Phase 1: Running VibeSQL-only benchmark...${NC}"
 echo ""
 echo "--- Phase 1: VibeSQL-only ---" >> "$OUTPUT_FILE"
 
-if cargo bench --package vibesql-executor --bench ${BENCH_NAME} -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
+if cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features in-memory-indexes -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ VibeSQL benchmark completed${NC}"
     ((ENGINES_PASSED++))

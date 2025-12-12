@@ -3,7 +3,7 @@
 //! This module provides schema creation and data loading functions for sysbench
 //! benchmark tables across multiple database engines (VibeSQL, SQLite, DuckDB, MySQL).
 
-use super::data::SysbenchData;
+use vibesql_bench_common::sysbench::SysbenchData;
 
 // =============================================================================
 // SQL Statement Constants
