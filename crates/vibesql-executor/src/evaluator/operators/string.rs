@@ -166,11 +166,11 @@ mod tests {
     fn test_float_concat() {
         // Float || String
         let result = StringOps::concat(
-            &SqlValue::Double(3.14),
+            &SqlValue::Double(3.15),
             &SqlValue::Varchar(arcstr::ArcStr::from("x")),
         )
         .unwrap();
-        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("3.14x")));
+        assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("3.15x")));
 
         // Whole number float preserves .0
         let result = StringOps::concat(&SqlValue::Double(10.0), &SqlValue::Double(20.0)).unwrap();

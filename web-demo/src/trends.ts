@@ -10,6 +10,7 @@ import { initTheme } from './theme';
 import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
 import { initI18n, updateDOM } from './i18n';
+import { setCommitLink } from './components/CommitLink';
 
 // Chart.js is loaded via CDN in trends.html
 declare const Chart: any;
@@ -313,10 +314,10 @@ function updateSummaryCards(data: TrendData): void {
     }
   }
 
-  // Latest commit
+  // Latest commit - render as clickable GitHub link
   const latestCommitEl = document.getElementById('latest-commit');
   if (latestCommitEl && latestCommit) {
-    latestCommitEl.textContent = latestCommit;
+    setCommitLink(latestCommitEl, latestCommit);
   }
 
   // Generated at

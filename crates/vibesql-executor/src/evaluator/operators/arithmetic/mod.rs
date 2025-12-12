@@ -713,12 +713,12 @@ mod tests {
     fn test_numeric_prefix_string() {
         // '3.14abc' + 0 = 3.14 (numeric prefix extracted)
         let result = ArithmeticOps::add(
-            &SqlValue::Varchar(arcstr::ArcStr::from("3.14abc")),
+            &SqlValue::Varchar(arcstr::ArcStr::from("3.15abc")),
             &SqlValue::Integer(0),
         )
         .unwrap();
         match result {
-            SqlValue::Float(f) => assert!((f - 3.14).abs() < 0.01),
+            SqlValue::Float(f) => assert!((f - 3.15).abs() < 0.01),
             _ => panic!("Expected Float result, got {:?}", result),
         }
     }

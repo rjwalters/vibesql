@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use vibesql_ast::{Expression, FromClause};
 
 use super::{graph, predicates, utils};
+use crate::select::scan::bloom_context;
 use crate::{
     debug_output::{Category, DebugEvent, JsonValue},
     errors::ExecutorError,
@@ -12,7 +13,11 @@ use crate::{
     select::{
         cte::CteResult,
         join::{nested_loop_join, JoinOrderAnalyzer, JoinOrderSearch},
-        scan::{derived::execute_derived_table, table::execute_table_scan, FromResult},
+        scan::{
+            derived::execute_derived_table,
+            table::{execute_table_scan, execute_table_scan_with_bloom},
+            FromResult,
+        },
         SelectResult,
     },
     timeout::TimeoutContext,
@@ -276,6 +281,57 @@ where
             );
         }
 
+        // Build Bloom filter context if we have an accumulated result and a connecting join condition
+        let bloom_ctx = if let Some(ref prev_result) = result {
+            // Check if the accumulated result has enough rows to benefit from Bloom filtering
+            let prev_row_count = prev_result.data.as_slice().len();
+            if profile {
+                eprintln!(
+                    "[BLOOM_PREFILTER] Considering Bloom filter for table '{}': accumulated_rows={}, min_required={}, joined_tables={:?}",
+                    table_name, prev_row_count, BLOOM_FILTER_MIN_ACCUMULATED_ROWS, joined_tables
+                );
+            }
+            if prev_row_count >= BLOOM_FILTER_MIN_ACCUMULATED_ROWS {
+                // Find a join condition connecting the new table to the accumulated tables
+                if let Some((acc_table, acc_col, new_col)) = find_connecting_join_condition(
+                    table_name,
+                    &joined_tables,
+                    &join_conditions,
+                    &applied_conditions,
+                    &column_to_table,
+                ) {
+                    // Find the column index in the accumulated result
+                    if let Some(col_idx) = prev_result.schema.get_column_index(Some(&acc_table), &acc_col)
+                    {
+                        // Build Bloom filter from the accumulated result's join key column
+                        if let Some(bloom) = bloom_context::build_bloom_filter_from_rows(
+                            prev_result.data.as_slice(),
+                            col_idx,
+                            0.01, // 1% false positive rate
+                        ) {
+                            if profile {
+                                eprintln!(
+                                    "[BLOOM_PREFILTER] Built Bloom filter from {}.{} ({} rows) for scanning {}.{}",
+                                    acc_table, acc_col, prev_row_count, table_name, new_col
+                                );
+                            }
+                            Some(bloom_context::BloomFilterScanContext::new(bloom, new_col))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let scan_start = std::time::Instant::now();
         let table_result = if table_ref.is_subquery {
             if let Some(subquery) = &table_ref.subquery {
@@ -290,6 +346,17 @@ where
                     "Subquery reference missing query".to_string(),
                 ));
             }
+        } else if bloom_ctx.is_some() {
+            // Use Bloom filter-enabled scan for large tables with join pre-filtering
+            // This is the key optimization for TPC-H Q5 and similar multi-way joins
+            execute_table_scan_with_bloom(
+                &table_ref.name,
+                table_ref.alias.as_ref(),
+                cte_results,
+                database,
+                table_filter.as_ref(),
+                bloom_ctx.as_ref(),
+            )?
         } else {
             // Use table-local predicates instead of full WHERE clause for early filtering
             // This allows pushing down filters like `l_shipdate BETWEEN '1995-01-01' AND
@@ -1146,4 +1213,71 @@ where
     // We return the joined result and let the standard pipeline apply WHERE predicates
 
     Ok(accumulated)
+}
+
+/// Minimum number of rows in the accumulated result to benefit from Bloom filter pre-filtering.
+/// Below this threshold, the overhead of building the Bloom filter exceeds the benefit.
+const BLOOM_FILTER_MIN_ACCUMULATED_ROWS: usize = 10;
+
+/// Minimum number of rows in the table to scan for Bloom filter pre-filtering to be worthwhile.
+/// Below this threshold, scanning all rows is fast enough.
+#[allow(dead_code)] // Planned for future scan-time Bloom filter optimization
+const BLOOM_FILTER_MIN_SCAN_ROWS: usize = 1000;
+
+/// Find the join condition that connects the new table to the accumulated tables.
+///
+/// Returns the column names for both sides of the equijoin if found:
+/// `(accumulated_table_name, accumulated_column_name, new_table_column_name)`
+fn find_connecting_join_condition(
+    new_table: &str,
+    joined_tables: &HashSet<String>,
+    join_conditions: &[Expression],
+    applied_conditions: &HashSet<usize>,
+    column_to_table: &HashMap<String, String>,
+) -> Option<(String, String, String)> {
+    let new_table_lower = new_table.to_lowercase();
+    let profile = std::env::var("JOIN_PROFILE").is_ok()
+        || std::env::var("BLOOM_PREFILTER_DEBUG").is_ok();
+
+    if profile {
+        eprintln!(
+            "[BLOOM_PREFILTER] Looking for join condition connecting '{}' to {:?} ({} conditions, {} applied)",
+            new_table_lower, joined_tables, join_conditions.len(), applied_conditions.len()
+        );
+    }
+
+    for (idx, condition) in join_conditions.iter().enumerate() {
+        if applied_conditions.contains(&idx) {
+            continue;
+        }
+
+        if let Some((left_table, left_col, right_table, right_col)) =
+            bloom_context::extract_equijoin_columns(condition, column_to_table)
+        {
+            if profile {
+                eprintln!(
+                    "[BLOOM_PREFILTER]   Checking condition {}: {}.{} = {}.{}",
+                    idx, left_table, left_col, right_table, right_col
+                );
+            }
+            // Check if one side is the new table and the other is an accumulated table
+            if left_table == new_table_lower && joined_tables.contains(&right_table) {
+                if profile {
+                    eprintln!("[BLOOM_PREFILTER]   -> MATCH: accumulated {}.{} for new {}.{}", right_table, right_col, new_table_lower, left_col);
+                }
+                return Some((right_table, right_col, left_col));
+            }
+            if right_table == new_table_lower && joined_tables.contains(&left_table) {
+                if profile {
+                    eprintln!("[BLOOM_PREFILTER]   -> MATCH: accumulated {}.{} for new {}.{}", left_table, left_col, new_table_lower, right_col);
+                }
+                return Some((left_table, left_col, right_col));
+            }
+        }
+    }
+
+    if profile {
+        eprintln!("[BLOOM_PREFILTER]   -> No matching condition found");
+    }
+    None
 }

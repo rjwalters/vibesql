@@ -17,6 +17,40 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Validate ORDER BY column positions early (SQLite compatibility)
+        if let Some(order_by) = &stmt.order_by {
+            for (term_index, order_item) in order_by.iter().enumerate() {
+                // Check for numeric column positions
+                if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
+                    &order_item.expr
+                {
+                    if *pos <= 0 || (*pos as usize) > stmt.select_list.len() {
+                        return Err(ExecutorError::OrderByOutOfRange {
+                            term_position: term_index + 1,
+                            column_number: *pos,
+                            select_list_len: stmt.select_list.len(),
+                        });
+                    }
+                }
+                // Check for negative column positions (parsed as UnaryOp { Minus, Integer })
+                if let vibesql_ast::Expression::UnaryOp {
+                    op: vibesql_ast::UnaryOperator::Minus,
+                    expr,
+                } = &order_item.expr
+                {
+                    if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
+                        expr.as_ref()
+                    {
+                        return Err(ExecutorError::OrderByOutOfRange {
+                            term_position: term_index + 1,
+                            column_number: -*pos,
+                            select_list_len: stmt.select_list.len(),
+                        });
+                    }
+                }
+            }
+        }
+
         // Create an empty schema (no table context)
         let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
         let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);

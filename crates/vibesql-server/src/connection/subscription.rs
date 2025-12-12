@@ -39,6 +39,7 @@ use super::TableMutationNotification;
 /// * `query` - The SQL SELECT query to subscribe to
 /// * `_params` - Parameter values for parameterized queries (unused for now)
 /// * `filter` - Optional filter expression (SQL WHERE clause) to apply to updates
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_subscribe(
     session: &mut Option<Session>,
     config: &Arc<Config>,
@@ -280,7 +281,7 @@ pub async fn handle_subscribe(
 /// queries, and sends updated results to the client.
 /// Supports delta updates to reduce network bandwidth.
 /// Supports optional filtering expressions to send only matching rows.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub async fn notify_affected_subscriptions(
     session: &mut Session,
     config: &Arc<Config>,
@@ -362,7 +363,7 @@ pub async fn notify_affected_subscriptions(
 /// This method supports delta updates to reduce network bandwidth when
 /// only a small portion of the result set has changed.
 /// Supports optional filtering expressions to send only matching rows.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub async fn handle_cross_connection_notification(
     session: &mut Option<Session>,
     config: &Arc<Config>,

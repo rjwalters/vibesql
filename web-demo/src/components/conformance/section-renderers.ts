@@ -8,6 +8,7 @@ import type {
 } from './types'
 import { getStatusColor, getStatusText, escapeHtml } from './render-utils'
 import { t } from '../../i18n'
+import { commitLink, prLink } from '../CommitLink'
 
 /**
  * Format large numbers with commas for readability
@@ -196,9 +197,9 @@ export function renderMilestones(milestones: DashboardMilestone[]): string {
       })
 
       const linkHtml = m.pr
-        ? `<a href="https://github.com/rjwalters/vibesql/pull/${m.pr}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-sm">PR #${m.pr}</a>`
+        ? prLink(m.pr, { className: 'text-sm' })
         : m.commit
-          ? `<a href="https://github.com/rjwalters/vibesql/commit/${m.commit}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-sm font-mono">${m.commit.slice(0, 7)}</a>`
+          ? commitLink(m.commit, { className: 'text-sm' })
           : ''
 
       return `
@@ -244,13 +245,7 @@ export function renderMetadataCard(commit: string, timestamp: string, passRate: 
         </div>
         <div>
           <span class="text-gray-600 dark:text-gray-400">Commit:</span>
-          <a
-            href="https://github.com/rjwalters/vibesql/commit/${commit}"
-            target="_blank"
-            class="ml-2 text-blue-600 dark:text-blue-400 hover:underline font-mono"
-          >
-            ${commit}
-          </a>
+          <span class="ml-2">${commitLink(commit, { truncate: false })}</span>
         </div>
         <div>
           <span class="text-gray-600 dark:text-gray-400">Status:</span>

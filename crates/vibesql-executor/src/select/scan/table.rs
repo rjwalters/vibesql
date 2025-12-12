@@ -814,3 +814,243 @@ fn collect_equality_predicates_recursive(
         _ => {}
     }
 }
+
+/// Execute a table scan with Bloom filter pre-filtering for join optimization.
+///
+/// This function is used during join reordering to filter rows DURING scan based on
+/// a Bloom filter built from the accumulated join result. This is critical for
+/// multi-way join performance because it avoids scanning large tables (like lineitem)
+/// when most rows won't match the join condition.
+///
+/// # Arguments
+/// * `table_name` - Name of the table to scan
+/// * `alias` - Optional table alias
+/// * `cte_results` - CTE context for the query
+/// * `database` - Database reference
+/// * `where_clause` - Optional WHERE clause for filtering
+/// * `bloom_context` - Optional Bloom filter context for join pre-filtering
+///
+/// # Performance
+///
+/// For TPC-H Q5 at scale factor 0.01:
+/// - Without Bloom filtering: scans all 60K lineitem rows, then filters via hash join
+/// - With Bloom filtering: checks Bloom filter during scan, only keeps matching rows
+///
+/// This can reduce scan time from ~21ms to ~5ms for lineitem alone.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_table_scan_with_bloom(
+    table_name: &str,
+    alias: Option<&String>,
+    cte_results: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
+    where_clause: Option<&vibesql_ast::Expression>,
+    bloom_context: Option<&super::bloom_context::BloomFilterScanContext>,
+) -> Result<super::FromResult, ExecutorError> {
+    use super::bloom_context::hash_value;
+
+    // Check if table is a CTE first (with case-insensitive lookup)
+    // Issue #4338: CTEs must be checked before database tables to support
+    // CTE-to-CTE references in join reordering when Bloom filter optimization is enabled
+    let cte_result = cte_results.get(table_name).or_else(|| {
+        cte_results
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(table_name))
+            .map(|(_, value)| value)
+    });
+
+    if let Some((cte_schema, cte_rows)) = cte_result {
+        // CTEs don't benefit from Bloom filtering during scan (already materialized)
+        // but we still need to apply WHERE predicates if present
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let cte_table_schema = cte_schema.clone();
+        let schema = CombinedSchema::from_table(effective_name.clone(), cte_table_schema);
+
+        // Apply WHERE predicates if any
+        if let Some(where_expr) = where_clause {
+            let predicate_plan = PredicatePlan::from_where_clause(Some(where_expr), &schema)
+                .map_err(ExecutorError::InvalidWhereClause)?;
+
+            let rows = filter_and_clone_rows(
+                cte_rows.as_ref(),
+                schema.clone(),
+                &predicate_plan,
+                &effective_name,
+                database,
+                Some(cte_results),
+            )?;
+            return Ok(super::FromResult::from_rows(schema, rows));
+        }
+
+        // No filtering - use zero-copy shared rows
+        return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
+    }
+
+    // Check SELECT privilege on the table
+    PrivilegeChecker::check_select(database, table_name)?;
+
+    // Get table
+    let table = database
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+    let schema = CombinedSchema::from_table(effective_name.clone(), table.schema.clone());
+
+    // Find the Bloom filter column index if we have a Bloom context
+    let bloom_col_index = bloom_context.and_then(|ctx| {
+        // Look up the column in the table schema
+        table
+            .schema
+            .columns
+            .iter()
+            .position(|col| col.name.to_lowercase() == ctx.column_name)
+    });
+
+    // Build predicate plan for WHERE clause
+    let predicate_plan = if let Some(where_expr) = where_clause {
+        Some(
+            PredicatePlan::from_where_clause(Some(where_expr), &schema)
+                .map_err(ExecutorError::InvalidWhereClause)?,
+        )
+    } else {
+        None
+    };
+
+    // Check if we have WHERE predicates for this table
+    let has_where_predicates = predicate_plan.as_ref().is_some_and(|plan| {
+        let effective_name_lower = effective_name.to_lowercase();
+        plan.has_table_filters(&effective_name)
+            || plan.has_table_filters(&effective_name_lower)
+            || plan.has_table_filters(table_name)
+            || plan.has_table_filters(&table_name.to_lowercase())
+    });
+
+    // Get live rows from table
+    let all_rows = table.scan();
+
+    // If we have a Bloom filter, apply it during scan
+    // This is the key optimization: filter rows BEFORE they enter memory
+    if let (Some(ctx), Some(col_idx)) = (bloom_context, bloom_col_index) {
+        let profile = std::env::var("JOIN_PROFILE").is_ok()
+            || std::env::var("BLOOM_PREFILTER_DEBUG").is_ok();
+
+        let original_count = all_rows.len();
+
+        // Filter using both Bloom filter AND WHERE predicates in a single pass
+        let filtered_rows: Vec<vibesql_storage::Row> = if has_where_predicates {
+            // Apply both Bloom filter and WHERE predicates
+            let predicate_plan = predicate_plan.as_ref().unwrap();
+            let evaluator = CombinedExpressionEvaluator::with_database_and_cte(
+                &schema,
+                database,
+                cte_results,
+            );
+
+            // Get predicates and combine them
+            let ordered_preds = predicate_plan.get_table_filters_ordered(&effective_name, None);
+            let combined_where = super::predicates::combine_predicates_with_and(ordered_preds);
+
+            all_rows
+                .iter()
+                .enumerate()
+                .filter(|(idx, row)| {
+                    // Skip deleted rows
+                    if table.is_row_deleted(*idx) {
+                        return false;
+                    }
+
+                    // Bloom filter check - quick rejection
+                    if let Some(value) = row.values.get(col_idx) {
+                        let hash = hash_value(value);
+                        if !ctx.filter.might_contain_hash(hash) {
+                            return false; // Definitely not a match
+                        }
+                    }
+
+                    // WHERE predicate check
+                    matches!(
+                        evaluator.eval(&combined_where, row),
+                        Ok(vibesql_types::SqlValue::Boolean(true))
+                    )
+                })
+                .map(|(_, row)| row.clone())
+                .collect()
+        } else {
+            // Apply only Bloom filter
+            all_rows
+                .iter()
+                .enumerate()
+                .filter(|(idx, row)| {
+                    // Skip deleted rows
+                    if table.is_row_deleted(*idx) {
+                        return false;
+                    }
+
+                    // Bloom filter check
+                    if let Some(value) = row.values.get(col_idx) {
+                        let hash = hash_value(value);
+                        ctx.filter.might_contain_hash(hash)
+                    } else {
+                        // NULL values won't match equijoin anyway
+                        false
+                    }
+                })
+                .map(|(_, row)| row.clone())
+                .collect()
+        };
+
+        let filtered_count = filtered_rows.len();
+
+        if profile {
+            let reduction = if original_count > 0 {
+                ((original_count - filtered_count) as f64 / original_count as f64) * 100.0
+            } else {
+                0.0
+            };
+            eprintln!(
+                "[BLOOM_PREFILTER] {} ({} rows): Bloom filter on {} removed {} rows ({:.1}% reduction) -> {} rows",
+                table_name,
+                original_count,
+                ctx.column_name,
+                original_count - filtered_count,
+                reduction,
+                filtered_count
+            );
+        }
+
+        return Ok(super::FromResult::from_rows(schema, filtered_rows));
+    }
+
+    // No Bloom filter - fall back to standard scan with WHERE predicates
+    if has_where_predicates {
+        let predicate_plan = predicate_plan.as_ref().unwrap();
+        let evaluator = CombinedExpressionEvaluator::with_database_and_cte(
+            &schema,
+            database,
+            cte_results,
+        );
+
+        // Get predicates and combine them
+        let ordered_preds = predicate_plan.get_table_filters_ordered(&effective_name, None);
+        let combined_where = super::predicates::combine_predicates_with_and(ordered_preds);
+
+        let filtered_rows: Vec<vibesql_storage::Row> = all_rows
+            .iter()
+            .enumerate()
+            .filter(|(idx, row)| {
+                !table.is_row_deleted(*idx)
+                    && matches!(
+                        evaluator.eval(&combined_where, row),
+                        Ok(vibesql_types::SqlValue::Boolean(true))
+                    )
+            })
+            .map(|(_, row)| row.clone())
+            .collect();
+
+        return Ok(super::FromResult::from_rows(schema, filtered_rows));
+    }
+
+    // No filters - return all live rows
+    let live_rows = table.scan_live_vec();
+    Ok(super::FromResult::from_rows(schema, live_rows))
+}

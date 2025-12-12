@@ -114,7 +114,12 @@ impl CombinedExpressionEvaluator<'_> {
             }
         } else {
             // Correlated but no outer schema - skip caching
-            let select_executor = crate::select::SelectExecutor::new(database);
+            // Still pass CTE context if available (fix for TPC-H Q15)
+            let select_executor = if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else {
+                crate::select::SelectExecutor::new(database)
+            };
             let rows = select_executor.execute(subquery)?;
             return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
         };

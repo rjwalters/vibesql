@@ -12,7 +12,10 @@ use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::compiled_pivot::PivotAggregateGroup,
-    optimizer::optimize_where_clause,
+    optimizer::{
+        collect_required_columns, compute_projection_indices, optimize_where_clause, project_rows,
+        remap_schema,
+    },
     pipeline::ExecutionContext,
     select::{
         cte::CteResult,
@@ -32,6 +35,9 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Note: Aggregate argument validation is done in execute_with_ctes() to catch
+        // all execution paths. See issue #4367.
+
         // Fast path: Simple COUNT(*) without filtering
         // This optimization avoids materializing all rows when we just need the count
         if let Some(table_name) = self.is_simple_count_star(stmt) {
@@ -88,12 +94,97 @@ impl SelectExecutor<'_> {
         }
 
         // Extract schema for evaluator before moving from_result
-        let schema = from_result.schema.clone();
+        let original_schema = from_result.schema.clone();
 
         // Create evaluator using consolidated ExecutionContext
         // Handles: outer context (subqueries), procedural context, CTE context
         let cte_ctx = if !cte_results.is_empty() { Some(cte_results) } else { self.cte_context };
 
+        // Apply WHERE clause filter first (using original schema for WHERE evaluation)
+        let filtered_rows = {
+            let mut ctx = ExecutionContext::new(&original_schema, self.database);
+            if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+                ctx = ctx.with_outer_context(outer_row, outer_schema);
+            } else if let Some(proc_ctx) = self.procedural_context {
+                ctx = ctx.with_procedural_context(proc_ctx);
+            }
+            if let Some(cte_ctx) = cte_ctx {
+                ctx = ctx.with_cte_context(cte_ctx);
+            }
+            let evaluator = ctx.create_evaluator();
+
+            // Optimize WHERE clause with constant folding and dead code elimination
+            let where_optimization = optimize_where_clause(stmt.where_clause.as_ref(), &evaluator)?;
+
+            // Apply WHERE clause to filter joined rows (optimized)
+            match where_optimization {
+                crate::optimizer::WhereOptimization::AlwaysTrue => {
+                    // WHERE TRUE - no filtering needed
+                    from_result.into_rows()
+                }
+                crate::optimizer::WhereOptimization::AlwaysFalse => {
+                    // WHERE FALSE - return empty result
+                    Vec::new()
+                }
+                crate::optimizer::WhereOptimization::Optimized(ref expr) => {
+                    // Apply optimized WHERE clause (uses parallel if enabled)
+                    apply_where_filter_combined_auto(
+                        from_result.into_rows(),
+                        Some(expr),
+                        &evaluator,
+                        self,
+                    )?
+                }
+                crate::optimizer::WhereOptimization::Unchanged(where_expr) => {
+                    // Apply original WHERE clause (uses parallel if enabled)
+                    apply_where_filter_combined_auto(
+                        from_result.into_rows(),
+                        where_expr.as_ref(),
+                        &evaluator,
+                        self,
+                    )?
+                }
+            }
+        };
+
+        // Column pruning optimization (#4355, #4377)
+        // After JOIN completes, project only the columns needed for aggregation.
+        // This reduces memory and CPU overhead significantly for multi-way JOINs.
+        // For example, Q7's 6-way JOIN produces 54 columns but only 14 are needed.
+        let (filtered_rows, schema) = {
+            // Collect required columns from SELECT, GROUP BY, and HAVING
+            let required_columns = collect_required_columns(
+                &stmt.select_list,
+                stmt.group_by.as_ref(),
+                stmt.having.as_ref(),
+            );
+
+            // Check if pruning would help (have required columns and would reduce width)
+            if !required_columns.is_empty() {
+                if let Some(projection_indices) =
+                    compute_projection_indices(&required_columns, &original_schema)
+                {
+                    // Only apply pruning if we're removing at least some columns
+                    if projection_indices.len() < original_schema.total_columns {
+                        // Project rows to narrow format
+                        let projected_rows = project_rows(filtered_rows, &projection_indices);
+
+                        // Remap schema to match projected columns
+                        let projected_schema = remap_schema(&original_schema, &projection_indices);
+
+                        (projected_rows, projected_schema)
+                    } else {
+                        (filtered_rows, original_schema)
+                    }
+                } else {
+                    (filtered_rows, original_schema)
+                }
+            } else {
+                (filtered_rows, original_schema)
+            }
+        };
+
+        // Create evaluator for aggregation using the (potentially pruned) schema
         let mut ctx = ExecutionContext::new(&schema, self.database);
         if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
             ctx = ctx.with_outer_context(outer_row, outer_schema);
@@ -104,39 +195,6 @@ impl SelectExecutor<'_> {
             ctx = ctx.with_cte_context(cte_ctx);
         }
         let evaluator = ctx.create_evaluator();
-
-        // Optimize WHERE clause with constant folding and dead code elimination
-        let where_optimization = optimize_where_clause(stmt.where_clause.as_ref(), &evaluator)?;
-
-        // Apply WHERE clause to filter joined rows (optimized)
-        let filtered_rows = match where_optimization {
-            crate::optimizer::WhereOptimization::AlwaysTrue => {
-                // WHERE TRUE - no filtering needed
-                from_result.into_rows()
-            }
-            crate::optimizer::WhereOptimization::AlwaysFalse => {
-                // WHERE FALSE - return empty result
-                Vec::new()
-            }
-            crate::optimizer::WhereOptimization::Optimized(ref expr) => {
-                // Apply optimized WHERE clause (uses parallel if enabled)
-                apply_where_filter_combined_auto(
-                    from_result.into_rows(),
-                    Some(expr),
-                    &evaluator,
-                    self,
-                )?
-            }
-            crate::optimizer::WhereOptimization::Unchanged(where_expr) => {
-                // Apply original WHERE clause (uses parallel if enabled)
-                apply_where_filter_combined_auto(
-                    from_result.into_rows(),
-                    where_expr.as_ref(),
-                    &evaluator,
-                    self,
-                )?
-            }
-        };
 
         // Expand wildcards in SELECT list to explicit column references
         // This allows SELECT * and SELECT table.* to work with GROUP BY/aggregates

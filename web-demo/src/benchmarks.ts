@@ -11,6 +11,7 @@ import { initLocale } from './locale';
 import { NavigationComponent } from './components/Navigation';
 import { formatTime, formatBytes, formatMemory, formatTps } from './utils/measurement';
 import { initI18n, setI18nLocale, updateDOM, t } from './i18n';
+import { commitLink } from './components/CommitLink';
 
 // Chart.js is loaded via CDN in benchmarks.html
 declare const Chart: any;
@@ -576,6 +577,16 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         content: pI18n('bench-sysbench-srv-disc-mysql'),
       },
       {
+        title: t('bench-sysbench-srv-disc-perf-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-sysbench-srv-disc-perf-arch', descKey: 'bench-sysbench-srv-disc-perf-storage' },
+          { labelKey: 'bench-bullet-concurrency', descKey: 'bench-sysbench-srv-disc-perf-locking' },
+          { labelKey: 'bench-bullet-protocol', descKey: 'bench-sysbench-srv-disc-perf-protocol' },
+          { labelKey: 'bench-bullet-writes', descKey: 'bench-sysbench-srv-disc-perf-writes' },
+          { labelKey: 'bench-bullet-reads', descKey: 'bench-sysbench-srv-disc-perf-reads' },
+        ]),
+      },
+      {
         title: t('bench-sysbench-srv-disc-roadmap-title'),
         content: bulletsI18n([
           { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-sysbench-srv-disc-pooling' },
@@ -946,8 +957,8 @@ function updateLastUpdated(timestamp: string, gitCommit?: string): void {
   const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   if (gitCommit) {
-    // Show date, time, and commit hash on two lines
-    lastUpdatedEl.innerHTML = `${dateStr} ${timeStr}<br/><span class="text-sm font-mono text-gray-500 dark:text-gray-400">${gitCommit}</span>`;
+    // Show date, time, and commit hash on two lines with clickable link
+    lastUpdatedEl.innerHTML = `${dateStr} ${timeStr}<br/><span class="text-sm">${commitLink(gitCommit, { className: 'text-gray-500 dark:text-gray-400' })}</span>`;
   } else {
     lastUpdatedEl.textContent = `${dateStr} ${timeStr}`;
   }

@@ -4,11 +4,11 @@ use std::fmt;
 
 use crate::sql_value::SqlValue;
 
-/// Format a float value like SQLite does:
-/// - Use minimal representation (no trailing zeros after decimal point)
+/// Format a f64 value like SQLite does:
+/// - Use minimal representation (shortest round-trip safe string)
 /// - Always show at least one decimal place for whole numbers (1.0 not 1)
 /// - Use scientific notation for very small or very large values
-fn format_float(n: f64) -> String {
+fn format_f64(n: f64) -> String {
     if n.is_nan() {
         return "NaN".to_string();
     }
@@ -29,21 +29,59 @@ fn format_float(n: f64) -> String {
 
     // Use scientific notation for very large or very small numbers (like SQLite)
     if abs_n >= 1e15 || (abs_n < 1e-4 && abs_n != 0.0) {
-        // Format with scientific notation, then clean up
         let s = format!("{:e}", n);
-        // SQLite uses lowercase 'e' and formats like "1.0e-05"
         return s;
     }
 
-    // Use Rust's default Display which gives shortest round-trip representation
-    // This is similar to SQLite's approach of minimal representation
-    let s = format!("{}", n);
+    // Use ryu for shortest round-trip representation
+    let mut buffer = ryu::Buffer::new();
+    let s = buffer.format(n);
 
     // If there's no decimal point, add ".0" for consistency
     if !s.contains('.') && !s.contains('e') {
         format!("{}.0", s)
     } else {
-        s
+        s.to_string()
+    }
+}
+
+/// Format a f32 value like SQLite does.
+/// IMPORTANT: Format at f32 precision, not f64, to avoid exposing
+/// representation differences (e.g., 1.1f32 becomes 1.100000023841858 as f64)
+fn format_f32(n: f32) -> String {
+    if n.is_nan() {
+        return "NaN".to_string();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 {
+            "Infinity".to_string()
+        } else {
+            "-Infinity".to_string()
+        };
+    }
+
+    // Handle zero specially
+    if n == 0.0 {
+        return "0.0".to_string();
+    }
+
+    let abs_n = n.abs();
+
+    // Use scientific notation for very large or very small numbers (like SQLite)
+    if abs_n >= 1e15 || (abs_n < 1e-4 && abs_n != 0.0) {
+        let s = format!("{:e}", n);
+        return s;
+    }
+
+    // Use ryu for shortest round-trip representation at f32 precision
+    let mut buffer = ryu::Buffer::new();
+    let s = buffer.format(n);
+
+    // If there's no decimal point, add ".0" for consistency
+    if !s.contains('.') && !s.contains('e') {
+        format!("{}.0", s)
+    } else {
+        s.to_string()
     }
 }
 
@@ -56,10 +94,11 @@ impl fmt::Display for SqlValue {
             SqlValue::Bigint(i) => write!(f, "{}", i),
             SqlValue::Unsigned(u) => write!(f, "{}", u),
             // Format floating point types like SQLite: minimal representation
-            SqlValue::Numeric(n) => write!(f, "{}", format_float(*n)),
-            SqlValue::Float(n) => write!(f, "{}", format_float(*n as f64)),
-            SqlValue::Real(n) => write!(f, "{}", format_float(*n as f64)),
-            SqlValue::Double(n) => write!(f, "{}", format_float(*n)),
+            // Use f32-specific formatting for Float/Real to avoid precision artifacts
+            SqlValue::Numeric(n) => write!(f, "{}", format_f64(*n)),
+            SqlValue::Float(n) => write!(f, "{}", format_f32(*n)),
+            SqlValue::Real(n) => write!(f, "{}", format_f32(*n)),
+            SqlValue::Double(n) => write!(f, "{}", format_f64(*n)),
             SqlValue::Character(s) => write!(f, "{}", s),
             SqlValue::Varchar(s) => write!(f, "{}", s),
             SqlValue::Boolean(true) => write!(f, "TRUE"),
@@ -83,28 +122,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_format_float_helper() {
+    fn test_format_f64_helper() {
         // SQLite-style formatting: minimal representation with at least one decimal place
-        assert_eq!(format_float(1.1), "1.1");
-        assert_eq!(format_float(2.2), "2.2");
-        assert_eq!(format_float(1.0), "1.0");
-        assert_eq!(format_float(2.0), "2.0");
-        assert_eq!(format_float(0.0), "0.0");
-        assert_eq!(format_float(3.14159), "3.14159");
-        assert_eq!(format_float(0.5), "0.5");
-        assert_eq!(format_float(100.0), "100.0");
-        assert_eq!(format_float(-4373.0), "-4373.0");
-        assert_eq!(format_float(-4373.123), "-4373.123");
+        assert_eq!(format_f64(1.1), "1.1");
+        assert_eq!(format_f64(2.2), "2.2");
+        assert_eq!(format_f64(1.0), "1.0");
+        assert_eq!(format_f64(2.0), "2.0");
+        assert_eq!(format_f64(0.0), "0.0");
+        assert_eq!(format_f64(3.14158), "3.14158");
+        assert_eq!(format_f64(0.5), "0.5");
+        assert_eq!(format_f64(100.0), "100.0");
+        assert_eq!(format_f64(-4373.0), "-4373.0");
+        assert_eq!(format_f64(-4373.123), "-4373.123");
     }
 
     #[test]
-    fn test_format_float_scientific() {
+    fn test_format_f32_helper() {
+        // f32 formatting: minimal representation at f32 precision
+        // This is the key fix: 1.1f32 should display as "1.1", not "1.100000023841858"
+        assert_eq!(format_f32(1.1f32), "1.1");
+        assert_eq!(format_f32(2.2f32), "2.2");
+        assert_eq!(format_f32(1.0f32), "1.0");
+        assert_eq!(format_f32(0.0f32), "0.0");
+        assert_eq!(format_f32(3.14158f32), "3.14158");
+        assert_eq!(format_f32(0.5f32), "0.5");
+        assert_eq!(format_f32(100.0f32), "100.0");
+        assert_eq!(format_f32(-4373.0f32), "-4373.0");
+    }
+
+    #[test]
+    fn test_format_f64_scientific() {
         // Very large numbers use scientific notation
-        assert_eq!(format_float(1e15), "1e15");
-        assert_eq!(format_float(1e16), "1e16");
+        assert_eq!(format_f64(1e15), "1e15");
+        assert_eq!(format_f64(1e16), "1e16");
         // Very small numbers use scientific notation
-        assert_eq!(format_float(0.00001), "1e-5");
-        assert_eq!(format_float(1e-10), "1e-10");
+        assert_eq!(format_f64(0.00001), "1e-5");
+        assert_eq!(format_f64(1e-10), "1e-10");
     }
 
     #[test]
@@ -144,15 +197,13 @@ mod tests {
 
     #[test]
     fn test_real_display_fractional() {
-        // Real type displays with minimal representation
-        // Note: f32 has limited precision (~7 significant digits), so some values
-        // like 1.1 show extra digits when converted to f64 for display
+        // Real type displays with minimal representation at f32 precision
+        // This is the key fix for issue #4362
         assert_eq!(format!("{}", SqlValue::Real(32.5)), "32.5");
         assert_eq!(format!("{}", SqlValue::Real(0.5)), "0.5");
-        // 1.1 can be exactly represented in f32, but becomes 1.100000023841858 when
-        // cast to f64 due to representation differences
-        let result = format!("{}", SqlValue::Real(1.1));
-        assert!(result.starts_with("1.1"), "Expected to start with 1.1, got: {}", result);
+        // 1.1f32 should display as "1.1", not "1.100000023841858"
+        assert_eq!(format!("{}", SqlValue::Real(1.1)), "1.1");
+        assert_eq!(format!("{}", SqlValue::Real(2.2)), "2.2");
     }
 
     #[test]

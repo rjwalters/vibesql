@@ -211,14 +211,15 @@ impl SelectExecutor<'_> {
             result_evaluator.clear_cse_cache();
 
             let mut sort_keys = Vec::new();
-            for order_item in order_by {
+            for (term_index, order_item) in order_by.iter().enumerate() {
                 // Resolve ORDER BY expression to result schema column names
                 // For aggregates, we need ColumnRef expressions to look up computed values
                 // in the result schema, not re-evaluate aggregate expressions
                 let resolved_expr = crate::select::order::resolve_order_by_for_aggregates(
                     &order_item.expr,
                     expanded_select_list,
-                );
+                    term_index,
+                )?;
                 let key_value = result_evaluator.eval(&resolved_expr, &row)?;
                 sort_keys.push((key_value, order_item.direction.clone()));
             }

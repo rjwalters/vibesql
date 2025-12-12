@@ -189,15 +189,12 @@ fn test_eval_division_by_zero() {
 }
 
 #[test]
-fn test_eval_implicit_string_coercion_in_addition() {
-    // After commit edd1ff99, strings are implicitly coerced to numbers
-    // in arithmetic operations (SQLite-compatible behavior).
-    // "hello" becomes 0, so 10 + "hello" = 10.
+fn test_eval_string_coercion_in_addition() {
     let schema = vibesql_catalog::TableSchema::new("test".to_string(), vec![]);
     let evaluator = ExpressionEvaluator::new(&schema);
     let row = vibesql_storage::Row::new(vec![]);
 
-    // 10 + "hello" = 10 (string coerced to 0)
+    // SQLite coerces non-numeric strings to 0 in arithmetic: 10 + "hello" = 10
     let expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         op: vibesql_ast::BinaryOperator::Plus,

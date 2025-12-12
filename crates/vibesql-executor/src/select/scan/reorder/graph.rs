@@ -251,8 +251,17 @@ pub(super) fn extract_referenced_tables_with_schema(
                 column_to_table,
             );
         }
-        // For other expressions (literals, wildcards, subqueries, etc.), no direct column refs to
-        // extract
+        // Scalar subqueries should NOT be pushed down to individual table scans
+        // because they may reference CTEs or complex structures that aren't available
+        // during table scan. By inserting a marker that won't match any real table,
+        // we ensure predicates containing scalar subqueries are treated as complex
+        // and applied post-join (fix for TPC-H Q15).
+        Expression::ScalarSubquery(_)
+        | Expression::Exists { .. }
+        | Expression::QuantifiedComparison { .. } => {
+            output.insert("__subquery__".to_string());
+        }
+        // For other expressions (literals, wildcards, etc.), no direct column refs to extract
         _ => {}
     }
 }

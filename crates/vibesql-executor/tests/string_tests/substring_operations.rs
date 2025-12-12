@@ -137,6 +137,10 @@ fn test_substring_zero_length() {
 #[test]
 fn test_substring_negative_length() {
     let (evaluator, row) = create_test_evaluator();
+    // SQLite compatibility: negative length extracts leftward from start position
+    // substr('hello', 2, -3) extracts 3 chars leftward from position 2
+    // Position 2 is 'e', extracting leftward gets chars before it: "h"
+    // (only 1 char available since we can't go before position 1)
     let expr = vibesql_ast::Expression::Function {
         name: "SUBSTRING".to_string(),
         args: vec![
@@ -149,7 +153,8 @@ fn test_substring_negative_length() {
         character_unit: None,
     };
     let result = evaluator.eval(&expr, &row).unwrap();
-    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("")));
+    // SQLite: substr('hello', 2, -3) = 'h'
+    assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("h")));
 }
 
 #[test]

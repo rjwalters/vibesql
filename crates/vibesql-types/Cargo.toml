@@ -11,6 +11,7 @@ categories = ["database"]
 
 [dependencies]
 arcstr = "1.2"
+ryu = "1.0"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

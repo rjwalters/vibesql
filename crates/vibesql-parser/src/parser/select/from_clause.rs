@@ -16,10 +16,20 @@ impl Parser {
         while self.is_join_keyword() || self.peek() == &Token::Comma {
             let (join_type, right, condition, using_columns, natural) =
                 if self.peek() == &Token::Comma {
-                    // Comma represents CROSS JOIN
+                    // Comma normally represents CROSS JOIN, but SQLite's legacy syntax
+                    // allows "FROM t1, t2 ON condition" which behaves like INNER JOIN
                     self.advance(); // Consume comma
                     let right = self.parse_table_reference()?;
-                    (vibesql_ast::JoinType::Cross, right, None, None, false)
+
+                    // Check for legacy ON clause after comma-join
+                    // SQLite allows: FROM t1, t2 ON t1.a=t2.b (treated as INNER JOIN)
+                    if self.peek_keyword(Keyword::On) {
+                        self.consume_keyword(Keyword::On)?;
+                        let condition = self.parse_expression()?;
+                        (vibesql_ast::JoinType::Inner, right, Some(condition), None, false)
+                    } else {
+                        (vibesql_ast::JoinType::Cross, right, None, None, false)
+                    }
                 } else {
                     let (join_type, natural) = self.parse_join_type()?;
 
@@ -238,6 +248,20 @@ impl Parser {
                         }
                         _ => None,
                     }
+                } else if matches!(self.peek(), Token::Keyword(_))
+                    && !self.is_join_keyword()
+                    && !self.is_clause_keyword()
+                {
+                    // Allow non-reserved keywords as implicit aliases (e.g., FROM t m)
+                    // Keywords like M, YEAR, etc. can be used as aliases
+                    match self.peek() {
+                        Token::Keyword(kw) => {
+                            let alias = kw.to_string();
+                            self.advance();
+                            Some(alias)
+                        }
+                        _ => None,
+                    }
                 } else {
                     None
                 };
@@ -267,6 +291,26 @@ impl Parser {
                 | Token::Keyword(Keyword::Cross)
                 | Token::Keyword(Keyword::Full)
                 | Token::Keyword(Keyword::Natural)
+        )
+    }
+
+    /// Check if current token is a clause keyword that cannot be used as implicit alias
+    /// These keywords start new clauses in SELECT statements
+    pub(crate) fn is_clause_keyword(&self) -> bool {
+        matches!(
+            self.peek(),
+            Token::Keyword(Keyword::On)
+                | Token::Keyword(Keyword::Where)
+                | Token::Keyword(Keyword::Group)
+                | Token::Keyword(Keyword::Having)
+                | Token::Keyword(Keyword::Order)
+                | Token::Keyword(Keyword::Limit)
+                | Token::Keyword(Keyword::Offset)
+                | Token::Keyword(Keyword::Union)
+                | Token::Keyword(Keyword::Intersect)
+                | Token::Keyword(Keyword::Except)
+                | Token::Keyword(Keyword::Using)
+                | Token::Keyword(Keyword::For)
         )
     }
 

@@ -42,6 +42,15 @@ pub enum ExecutorError {
     },
     DivisionByZero,
     InvalidWhereClause(String),
+    /// Wrong number of arguments to a function (SQLite-compatible error)
+    WrongNumberOfArguments {
+        function_name: String,
+    },
+    /// Misuse of aggregate function (SQLite-compatible error)
+    /// e.g., aggregate in WHERE clause or nested aggregates
+    MisuseOfAggregate {
+        function_name: String,
+    },
     UnsupportedExpression(String),
     UnsupportedFeature(String),
     StorageError(String),
@@ -230,6 +239,12 @@ pub enum ExecutorError {
     /// Assertion constraint violation (SQL:1999 Feature F671/F672)
     AssertionViolation {
         assertion_name: String,
+    },
+    /// ORDER BY column number out of range (SQLite-compatible error)
+    OrderByOutOfRange {
+        term_position: usize, // 1-indexed position of the ORDER BY term
+        column_number: i64,   // The column number that was specified
+        select_list_len: usize,
     },
     Other(String),
 }
@@ -453,6 +468,14 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::InvalidWhereClause(msg) => {
                 write!(f, "{}", vibe_msg!("executor-invalid-where-clause", message = msg.as_str()))
+            }
+            ExecutorError::WrongNumberOfArguments { function_name } => {
+                // SQLite-compatible error message format
+                write!(f, "wrong number of arguments to function {}()", function_name)
+            }
+            ExecutorError::MisuseOfAggregate { function_name } => {
+                // SQLite-compatible error message format
+                write!(f, "misuse of aggregate function {}()", function_name)
             }
             ExecutorError::UnsupportedExpression(msg) => {
                 write!(
@@ -970,6 +993,28 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::AssertionViolation { assertion_name } => {
                 write!(f, "Assertion '{}' violated", assertion_name)
+            }
+            ExecutorError::OrderByOutOfRange { term_position, column_number: _, select_list_len } => {
+                // SQLite-compatible error format: "1st ORDER BY term out of range - should be between 1 and N"
+                let ordinal = match term_position {
+                    1 => "1st".to_string(),
+                    2 => "2nd".to_string(),
+                    3 => "3rd".to_string(),
+                    n => format!("{}th", n),
+                };
+                if *select_list_len == 0 {
+                    write!(
+                        f,
+                        "{} ORDER BY term out of range - should be between 1 and 1",
+                        ordinal
+                    )
+                } else {
+                    write!(
+                        f,
+                        "{} ORDER BY term out of range - should be between 1 and {}",
+                        ordinal, select_list_len
+                    )
+                }
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

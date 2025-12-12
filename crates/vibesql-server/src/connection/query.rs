@@ -25,6 +25,7 @@ use super::subscription::{broadcast_mutation, notify_affected_subscriptions};
 use super::TableMutationNotification;
 
 /// Execute a SQL query
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_query(
     session: &mut Option<Session>,
     config: &Arc<Config>,

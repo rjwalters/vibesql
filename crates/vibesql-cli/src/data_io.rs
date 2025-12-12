@@ -17,9 +17,11 @@ impl DataIO {
         // Write header
         write_csv_row(&mut file, &result.columns)?;
 
-        // Write rows
+        // Write rows (NULL values become empty strings in CSV)
         for row in &result.rows {
-            write_csv_row(&mut file, row)?;
+            let values: Vec<String> =
+                row.iter().map(|v| v.clone().unwrap_or_default()).collect();
+            write_csv_row(&mut file, &values)?;
         }
 
         println!("Exported {} rows to '{}'", result.row_count, file_path);
@@ -33,7 +35,12 @@ impl DataIO {
             let mut json_obj = serde_json::Map::new();
             for (i, col) in result.columns.iter().enumerate() {
                 if i < row.len() {
-                    json_obj.insert(col.clone(), serde_json::Value::String(row[i].clone()));
+                    // Use proper JSON null for NULL values
+                    let value = match &row[i] {
+                        Some(s) => serde_json::Value::String(s.clone()),
+                        None => serde_json::Value::Null,
+                    };
+                    json_obj.insert(col.clone(), value);
                 }
             }
             json_rows.push(serde_json::Value::Object(json_obj));

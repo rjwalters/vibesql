@@ -10,7 +10,7 @@ use vibesql_ast::{Expression, SelectStmt, SetOperator, Statement};
 use vibesql_types::SqlValue;
 
 fn parse(sql: &str) -> Statement {
-    Parser::parse_sql(sql).expect(&format!("Failed to parse: {}", sql))
+    Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse: {}", sql))
 }
 
 fn parse_select(sql: &str) -> SelectStmt {

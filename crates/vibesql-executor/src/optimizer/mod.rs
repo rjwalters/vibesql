@@ -9,9 +9,11 @@
 //! - Adaptive execution model selection (row-oriented vs columnar)
 //! - Aggregate-aware query optimization for GROUP BY/HAVING performance
 //! - Unused table elimination for cross join optimization
+//! - Column pruning for post-join processing optimization (#4355)
 
 pub mod adaptive;
 pub mod aggregate_analysis;
+pub mod column_pruning;
 mod expressions;
 pub mod index_planner;
 mod predicate_plan;
@@ -23,6 +25,9 @@ pub mod table_elimination;
 mod tests;
 pub mod where_pushdown;
 
+pub use column_pruning::{
+    collect_required_columns, compute_projection_indices, project_rows, remap_schema,
+};
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
 pub use subquery_rewrite::rewrite_subquery_optimizations;

@@ -396,3 +396,80 @@ fn test_parse_natural_cross_join_complex() {
     );
     assert!(result.is_ok(), "Parse failed: {:?}", result.err());
 }
+
+// ========================================================================
+// Legacy Comma-Join ON Syntax Tests (#4369)
+// ========================================================================
+
+#[test]
+fn test_parse_legacy_comma_join_on() {
+    // SQLite legacy syntax: FROM t1, t2 ON condition behaves like INNER JOIN
+    let result = Parser::parse_sql("SELECT * FROM t1, t2 ON t1.a = t2.b;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, condition, natural, .. } => {
+                // Legacy comma-join with ON should be treated as INNER JOIN
+                assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
+                assert!(!*natural);
+                assert!(condition.is_some(), "Expected ON condition");
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_legacy_comma_join_on_multiple_tables() {
+    // Multiple comma-joins with ON clauses
+    let result = Parser::parse_sql("SELECT * FROM t1, t2 ON t1.a = t2.b, t3 ON t2.c = t3.d;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            match select.from.as_ref().unwrap() {
+                vibesql_ast::FromClause::Join {
+                    join_type, left, condition, ..
+                } => {
+                    // Outermost join (t1,t2) JOIN t3
+                    assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
+                    assert!(condition.is_some());
+
+                    // Inner join should also be Inner with condition
+                    match left.as_ref() {
+                        vibesql_ast::FromClause::Join { join_type: inner_type, condition: inner_cond, .. } => {
+                            assert_eq!(*inner_type, vibesql_ast::JoinType::Inner);
+                            assert!(inner_cond.is_some());
+                        }
+                        _ => panic!("Expected nested JOIN"),
+                    }
+                }
+                _ => panic!("Expected JOIN"),
+            }
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_comma_without_on_still_cross_join() {
+    // Plain comma without ON should still be CROSS JOIN
+    let result = Parser::parse_sql("SELECT * FROM t1, t2;");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, condition, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::Cross);
+                assert!(condition.is_none());
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}

@@ -71,16 +71,16 @@ pub(in crate::evaluator::functions) fn octet_length(
     }
 }
 
-/// LENGTH(str) - Alias for byte length (commonly used)
-/// Note: In many SQL implementations, LENGTH returns byte count
+/// LENGTH(str) - Return string length (SQLite compatible)
+/// SQLite's LENGTH() accepts any type, converting to string first.
+/// Returns byte count for strings, digit count for integers, etc.
 pub(in crate::evaluator::functions) fn length(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     if args.len() != 1 {
-        return Err(ExecutorError::UnsupportedFeature(format!(
-            "LENGTH requires exactly 1 argument, got {}",
-            args.len()
-        )));
+        return Err(ExecutorError::UnsupportedFeature(
+            "wrong number of arguments to function length()".to_string(),
+        ));
     }
 
     match &args[0] {
@@ -88,9 +88,51 @@ pub(in crate::evaluator::functions) fn length(
         vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
             Ok(vibesql_types::SqlValue::Integer(s.len() as i64))
         }
-        val => Err(ExecutorError::UnsupportedFeature(format!(
-            "LENGTH requires string argument, got {:?}",
-            val
-        ))),
+        // SQLite converts non-string types to string first
+        vibesql_types::SqlValue::Integer(n) => {
+            Ok(vibesql_types::SqlValue::Integer(n.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Smallint(n) => {
+            Ok(vibesql_types::SqlValue::Integer(n.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Bigint(n) => {
+            Ok(vibesql_types::SqlValue::Integer(n.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Unsigned(n) => {
+            Ok(vibesql_types::SqlValue::Integer(n.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Float(f) => {
+            Ok(vibesql_types::SqlValue::Integer(f.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Real(f) => {
+            Ok(vibesql_types::SqlValue::Integer(f.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Double(f) => {
+            Ok(vibesql_types::SqlValue::Integer(f.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Numeric(f) => {
+            Ok(vibesql_types::SqlValue::Integer(f.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Boolean(b) => {
+            // SQLite represents booleans as 0/1
+            let s = if *b { "1" } else { "0" };
+            Ok(vibesql_types::SqlValue::Integer(s.len() as i64))
+        }
+        vibesql_types::SqlValue::Date(d) => {
+            Ok(vibesql_types::SqlValue::Integer(d.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Timestamp(ts) => {
+            Ok(vibesql_types::SqlValue::Integer(ts.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Time(t) => {
+            Ok(vibesql_types::SqlValue::Integer(t.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Interval(i) => {
+            Ok(vibesql_types::SqlValue::Integer(i.to_string().len() as i64))
+        }
+        vibesql_types::SqlValue::Vector(v) => {
+            // For vectors, return the number of dimensions
+            Ok(vibesql_types::SqlValue::Integer(v.len() as i64))
+        }
     }
 }
