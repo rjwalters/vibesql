@@ -41,6 +41,7 @@ impl ColumnRef {
         }
     }
 
+    #[cfg(test)]
     pub fn qualified(table: &str, column: &str) -> Self {
         Self {
             table: Some(table.to_lowercase()),
@@ -48,6 +49,7 @@ impl ColumnRef {
         }
     }
 
+    #[cfg(test)]
     pub fn unqualified(column: &str) -> Self {
         Self { table: None, column: column.to_lowercase() }
     }
@@ -412,6 +414,64 @@ pub fn project_rows(
             vibesql_storage::Row::new(projected_values)
         })
         .collect()
+}
+
+/// Create a projected schema that only includes the specified column indices
+///
+/// This creates a new CombinedSchema where column indices are remapped to
+/// their positions in the projection. This is essential so that the evaluator
+/// can correctly resolve column references against the projected rows.
+///
+/// Returns a new schema and a mapping from (table, column) -> new_index
+pub fn project_schema(
+    schema: &crate::schema::CombinedSchema,
+    indices: &[usize],
+) -> crate::schema::CombinedSchema {
+    use crate::schema::TableKey;
+    use std::collections::HashMap;
+
+    // Build a mapping from old_index -> new_index
+    let index_map: HashMap<usize, usize> = indices
+        .iter()
+        .enumerate()
+        .map(|(new_idx, &old_idx)| (old_idx, new_idx))
+        .collect();
+
+    // Create new table schemas with remapped indices
+    let mut new_table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)> = HashMap::new();
+
+    for (table_key, (start_index, table_schema)) in &schema.table_schemas {
+        let mut new_columns = Vec::new();
+        let mut min_new_idx: Option<usize> = None;
+
+        for (col_offset, column) in table_schema.columns.iter().enumerate() {
+            let old_idx = start_index + col_offset;
+            if let Some(&new_idx) = index_map.get(&old_idx) {
+                new_columns.push((new_idx, column.clone()));
+                min_new_idx = Some(min_new_idx.map_or(new_idx, |m| m.min(new_idx)));
+            }
+        }
+
+        // Only include tables that have at least one column in the projection
+        if !new_columns.is_empty() {
+            // Sort columns by their new index to maintain order
+            new_columns.sort_by_key(|(idx, _)| *idx);
+
+            let new_start = min_new_idx.unwrap_or(0);
+            let columns: Vec<_> = new_columns.into_iter().map(|(_, col)| col).collect();
+            let new_table_schema = vibesql_catalog::TableSchema::new(
+                table_schema.name.clone(),
+                columns,
+            );
+
+            new_table_schemas.insert(table_key.clone(), (new_start, new_table_schema));
+        }
+    }
+
+    crate::schema::CombinedSchema {
+        table_schemas: new_table_schemas,
+        total_columns: indices.len(),
+    }
 }
 
 #[cfg(test)]

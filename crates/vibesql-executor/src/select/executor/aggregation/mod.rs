@@ -12,7 +12,10 @@ use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::compiled_pivot::PivotAggregateGroup,
-    optimizer::optimize_where_clause,
+    optimizer::{
+        collect_required_columns, compute_projection_indices, optimize_where_clause, project_rows,
+        project_schema,
+    },
     pipeline::ExecutionContext,
     select::{
         cte::CteResult,
@@ -142,6 +145,48 @@ impl SelectExecutor<'_> {
         // This allows SELECT * and SELECT table.* to work with GROUP BY/aggregates
         let expanded_select_list =
             self.expand_wildcards_for_aggregation(&stmt.select_list, &schema)?;
+
+        // Column pruning optimization (#4355): Project only needed columns for GROUP BY
+        // This reduces memory and CPU overhead for multi-way JOIN queries (e.g., TPC-H Q7)
+        // by narrowing rows from e.g. 54 columns to ~14 columns before GROUP BY processing.
+        let (filtered_rows, schema) = {
+            let required_cols = collect_required_columns(
+                &expanded_select_list,
+                stmt.group_by.as_ref(),
+                stmt.having.as_ref(),
+            );
+
+            if let Some(indices) = compute_projection_indices(&required_cols, &schema) {
+                // Only prune if it reduces column count significantly (>20% reduction)
+                if indices.len() < schema.total_columns * 4 / 5 {
+                    log::debug!(
+                        "Column pruning: {} -> {} columns ({:.0}% reduction)",
+                        schema.total_columns,
+                        indices.len(),
+                        (1.0 - indices.len() as f64 / schema.total_columns as f64) * 100.0
+                    );
+                    let pruned_rows = project_rows(filtered_rows, &indices);
+                    let pruned_schema = project_schema(&schema, &indices);
+                    (pruned_rows, pruned_schema)
+                } else {
+                    (filtered_rows, schema)
+                }
+            } else {
+                (filtered_rows, schema)
+            }
+        };
+
+        // Re-create evaluator with potentially pruned schema
+        let mut ctx = ExecutionContext::new(&schema, self.database);
+        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+            ctx = ctx.with_outer_context(outer_row, outer_schema);
+        } else if let Some(proc_ctx) = self.procedural_context {
+            ctx = ctx.with_procedural_context(proc_ctx);
+        }
+        if let Some(cte_context) = cte_ctx {
+            ctx = ctx.with_cte_context(cte_context);
+        }
+        let evaluator = ctx.create_evaluator();
 
         // Detect and set up pivot aggregate optimization (#3136)
         // This detects patterns like: SUM(CASE WHEN col='A' THEN val END), SUM(CASE WHEN col='B'
