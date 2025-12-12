@@ -511,8 +511,10 @@ where
         utils::build_column_permutation(&table_names, &optimal_order, &table_column_counts);
 
     // Reorder rows according to the permutation
+    // Issue #4370: Preserve row_ids when reordering columns for ROWID support
     let reorder_start = std::time::Instant::now();
     let rows = result.data.into_rows();
+
     let reordered_rows: Vec<vibesql_storage::Row> = rows
         .into_iter()
         .map(|row| {
@@ -520,7 +522,14 @@ where
             for &idx in &column_permutation {
                 new_values.push(row.values[idx].clone());
             }
-            vibesql_storage::Row::new(new_values)
+            // Preserve row_ids from the original row (issue #4370)
+            if let Some(row_ids) = row.row_ids {
+                vibesql_storage::Row::with_row_ids(new_values, row_ids)
+            } else if let Some(row_id) = row.row_id {
+                vibesql_storage::Row::with_row_id(new_values, row_id)
+            } else {
+                vibesql_storage::Row::new(new_values)
+            }
         })
         .collect();
     let reorder_time = reorder_start.elapsed();

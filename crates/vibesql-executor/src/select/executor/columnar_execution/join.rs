@@ -86,6 +86,13 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
+        // ROWID pseudo-column references require row-oriented execution (#4370)
+        // Columnar batches don't track per-row ROWIDs, so we fall back when ROWID is referenced
+        if select_list_has_rowid(&stmt.select_list) {
+            log::debug!("Columnar join: skipping - ROWID pseudo-column not supported");
+            return Ok(None);
+        }
+
         // Must have a FROM clause with JOINs
         let from_clause = match &stmt.from {
             Some(from) => from,
@@ -420,5 +427,83 @@ impl SelectExecutor<'_> {
         }
 
         Ok(Some(current_batch))
+    }
+}
+
+/// Check if the SELECT list contains ROWID pseudo-column references
+///
+/// ROWID, _rowid_, and oid are SQLite-compatible pseudo-columns that require
+/// row-oriented execution to track row IDs through JOINs. This function detects
+/// when these are referenced so the columnar join path can fall back.
+fn select_list_has_rowid(select_list: &[SelectItem]) -> bool {
+    select_list.iter().any(|item| match item {
+        SelectItem::Expression { expr, .. } => expression_has_rowid(expr),
+        SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
+    })
+}
+
+/// Check if an expression contains ROWID pseudo-column references
+fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
+    match expr {
+        vibesql_ast::Expression::ColumnRef { column, .. } => {
+            let lower = column.to_lowercase();
+            lower == "rowid" || lower == "_rowid_" || lower == "oid"
+        }
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+            expression_has_rowid(left) || expression_has_rowid(right)
+        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => expression_has_rowid(expr),
+        vibesql_ast::Expression::Function { args, .. } => {
+            args.iter().any(expression_has_rowid)
+        }
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| expression_has_rowid(e))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(expression_has_rowid)
+                        || expression_has_rowid(&w.result)
+                })
+                || else_result.as_ref().is_some_and(|e| expression_has_rowid(e))
+        }
+        vibesql_ast::Expression::InList { expr, values, .. } => {
+            expression_has_rowid(expr) || values.iter().any(expression_has_rowid)
+        }
+        vibesql_ast::Expression::Between { expr, low, high, .. } => {
+            expression_has_rowid(expr) || expression_has_rowid(low) || expression_has_rowid(high)
+        }
+        vibesql_ast::Expression::IsNull { expr, .. } => expression_has_rowid(expr),
+        vibesql_ast::Expression::Cast { expr, .. } => expression_has_rowid(expr),
+        vibesql_ast::Expression::RowValueConstructor(exprs) => {
+            exprs.iter().any(expression_has_rowid)
+        }
+        // These variants don't contain column references that could be ROWID
+        vibesql_ast::Expression::Literal(_)
+        | vibesql_ast::Expression::Placeholder(_)
+        | vibesql_ast::Expression::NumberedPlaceholder(_)
+        | vibesql_ast::Expression::NamedPlaceholder(_)
+        | vibesql_ast::Expression::Conjunction(_)
+        | vibesql_ast::Expression::Disjunction(_)
+        | vibesql_ast::Expression::AggregateFunction { .. }
+        | vibesql_ast::Expression::IsDistinctFrom { .. }
+        | vibesql_ast::Expression::IsTruthValue { .. }
+        | vibesql_ast::Expression::Wildcard
+        | vibesql_ast::Expression::ScalarSubquery(_)
+        | vibesql_ast::Expression::In { .. }
+        | vibesql_ast::Expression::Position { .. }
+        | vibesql_ast::Expression::Trim { .. }
+        | vibesql_ast::Expression::Extract { .. }
+        | vibesql_ast::Expression::Like { .. }
+        | vibesql_ast::Expression::Exists { .. }
+        | vibesql_ast::Expression::QuantifiedComparison { .. }
+        | vibesql_ast::Expression::CurrentDate
+        | vibesql_ast::Expression::CurrentTime { .. }
+        | vibesql_ast::Expression::CurrentTimestamp { .. }
+        | vibesql_ast::Expression::Interval { .. }
+        | vibesql_ast::Expression::Default
+        | vibesql_ast::Expression::DuplicateKeyValue { .. }
+        | vibesql_ast::Expression::WindowFunction { .. }
+        | vibesql_ast::Expression::NextValue { .. }
+        | vibesql_ast::Expression::MatchAgainst { .. }
+        | vibesql_ast::Expression::PseudoVariable { .. }
+        | vibesql_ast::Expression::SessionVariable { .. } => false,
     }
 }

@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 
 use super::{
-    batch_combine_rows,
+    batch_combine_rows, batch_combine_rows_with_table_names,
     build::{build_hash_table_composite_parallel, build_hash_table_parallel, CompositeKey},
     columnar::{
         hash_join_indices_columnar, hash_join_indices_columnar_multi,
@@ -45,6 +45,10 @@ pub(in crate::select::join) fn hash_join_inner(
     // Note: No memory limit check here. Hash join is already O(n+m) time and O(smaller_table)
     // space, which is optimal for equijoins. We cannot predict output size accurately anyway.
 
+    // Extract table names for ROWID tracking (issue #4370)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
+
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
@@ -54,11 +58,11 @@ pub(in crate::select::join) fn hash_join_inner(
     let right_slice = right.as_slice();
 
     // Choose build and probe sides (build hash table on smaller table)
-    let (build_rows, probe_rows, build_col_idx, probe_col_idx, left_is_build) =
+    let (build_rows, probe_rows, build_col_idx, probe_col_idx, left_is_build, build_table_names, probe_table_names) =
         if left_slice.len() <= right_slice.len() {
-            (left_slice, right_slice, left_col_idx, right_col_idx, true)
+            (left_slice, right_slice, left_col_idx, right_col_idx, true, &left_table_names, &right_table_names)
         } else {
-            (right_slice, left_slice, right_col_idx, left_col_idx, false)
+            (right_slice, left_slice, right_col_idx, left_col_idx, false, &right_table_names, &left_table_names)
         };
 
     // Fast path: Try columnar hash join for integer or string keys
@@ -104,7 +108,7 @@ pub(in crate::select::join) fn hash_join_inner(
                 );
                 return Ok(FromResult::from_rows(
                     combined_schema,
-                    batch_combine_rows(build_rows, probe_rows, &pairs, left_is_build),
+                    batch_combine_rows_with_table_names(build_rows, probe_rows, &pairs, left_is_build, build_table_names, probe_table_names),
                 ));
             }
         }
@@ -132,7 +136,8 @@ pub(in crate::select::join) fn hash_join_inner(
 
     // Materialization phase: Create combined rows from index pairs using batch combine
     // This optimizes allocation by pre-computing combined row size
-    let result_rows = batch_combine_rows(build_rows, probe_rows, &join_pairs, left_is_build);
+    // Pass table names for ROWID tracking (issue #4370)
+    let result_rows = batch_combine_rows_with_table_names(build_rows, probe_rows, &join_pairs, left_is_build, build_table_names, probe_table_names);
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
@@ -156,15 +161,19 @@ pub(in crate::select::join) fn hash_join_inner_multi(
     left_col_indices: &[usize],
     right_col_indices: &[usize],
 ) -> Result<FromResult, ExecutorError> {
+    // Get table names for ROWID tracking (Issue #4370)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
+
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
     // Choose build and probe sides (build hash table on smaller table)
-    let (build_rows, probe_rows, build_col_indices, probe_col_indices, left_is_build) =
+    let (build_rows, probe_rows, build_col_indices, probe_col_indices, left_is_build, build_table_names, probe_table_names) =
         if left.rows().len() <= right.rows().len() {
-            (left.rows(), right.rows(), left_col_indices, right_col_indices, true)
+            (left.rows(), right.rows(), left_col_indices, right_col_indices, true, &left_table_names, &right_table_names)
         } else {
-            (right.rows(), left.rows(), right_col_indices, left_col_indices, false)
+            (right.rows(), left.rows(), right_col_indices, left_col_indices, false, &right_table_names, &left_table_names)
         };
 
     // Fast path: Try columnar hash join for integer keys
@@ -215,7 +224,7 @@ pub(in crate::select::join) fn hash_join_inner_multi(
                     .collect();
                 return Ok(FromResult::from_rows(
                     combined_schema,
-                    batch_combine_rows(build_rows, probe_rows, &pairs, left_is_build),
+                    batch_combine_rows_with_table_names(build_rows, probe_rows, &pairs, left_is_build, build_table_names, probe_table_names),
                 ));
             }
         }
@@ -243,7 +252,7 @@ pub(in crate::select::join) fn hash_join_inner_multi(
 
     // Materialization phase: Create combined rows from index pairs using batch combine
     // This optimizes allocation by pre-computing combined row size
-    let result_rows = batch_combine_rows(build_rows, probe_rows, &join_pairs, left_is_build);
+    let result_rows = batch_combine_rows_with_table_names(build_rows, probe_rows, &join_pairs, left_is_build, build_table_names, probe_table_names);
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
@@ -267,6 +276,10 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
 ) -> Result<FromResult, ExecutorError> {
     use ahash::AHashMap;
     use vibesql_types::SqlValue;
+
+    // Get table names for ROWID tracking (Issue #4370)
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
 
     // Extract right table name and schema for combining
     let right_table_name = right
@@ -339,9 +352,10 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
                 .collect();
 
             // Swap pairs for batch_combine_rows (see comment below)
+            // For arithmetic join: right is build side, left is probe side
             let swapped_pairs: Vec<(usize, usize)> =
                 pairs.into_iter().map(|(left, right)| (right, left)).collect();
-            let result_rows = batch_combine_rows(right_slice, left_slice, &swapped_pairs, false);
+            let result_rows = batch_combine_rows_with_table_names(right_slice, left_slice, &swapped_pairs, false, &right_table_names, &left_table_names);
             return Ok(FromResult::from_rows(combined_schema, result_rows));
         }
     }
@@ -371,9 +385,10 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     // - build_rows = right_slice (the side we built hash table on)
     // - probe_rows = left_slice (the side we probed with)
     // - But pairs are (left_idx, right_idx), so we need to swap for batch_combine_rows
+    // For arithmetic join: right is build side, left is probe side
     let swapped_pairs: Vec<(usize, usize)> =
         pairs.into_iter().map(|(left, right)| (right, left)).collect();
-    let result_rows = batch_combine_rows(right_slice, left_slice, &swapped_pairs, false);
+    let result_rows = batch_combine_rows_with_table_names(right_slice, left_slice, &swapped_pairs, false, &right_table_names, &left_table_names);
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
 }
