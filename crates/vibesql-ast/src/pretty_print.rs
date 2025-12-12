@@ -1121,6 +1121,7 @@ mod tests {
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -1155,6 +1156,7 @@ mod tests {
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
@@ -1187,6 +1189,7 @@ mod tests {
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -1210,11 +1213,13 @@ mod tests {
                 name: "orders".to_string(),
                 alias: Some("o".to_string()),
                 column_aliases: None,
+                quoted: false,
             }),
             right: Box::new(FromClause::Table {
                 name: "customers".to_string(),
                 alias: Some("c".to_string()),
                 column_aliases: None,
+                quoted: false,
             }),
             join_type: JoinType::Inner,
             condition: Some(Expression::BinaryOp {
