@@ -12,9 +12,11 @@ sqllogictest-files/
 │   └── joins.slt    # INNER/LEFT JOIN operations
 ├── dml/             # Data Manipulation Language
 │   └── insert.slt   # INSERT operations (single, multi-row)
-└── functions/       # Built-in functions
-    ├── string.slt   # String functions (UPPER, LOWER, SUBSTRING, etc.)
-    └── math.slt     # Math functions (ABS, FLOOR, CEILING, MOD)
+├── functions/       # Built-in functions
+│   ├── string.slt   # String functions (UPPER, LOWER, SUBSTRING, etc.)
+│   └── math.slt     # Math functions (ABS, FLOOR, CEILING, MOD)
+└── identifiers/     # Identifier handling
+    └── case_sensitivity.slt  # SQL:1999 case sensitivity tests
 ```
 
 ## Running Tests
@@ -63,15 +65,16 @@ SELECT * FROM test
 
 ## Current Status
 
-**6 test files** covering:
+**7 test files** covering:
 - ✅ Basic SELECT, INSERT, DROP operations
 - ✅ WHERE clause predicates (comparison, BETWEEN, IN)
 - ✅ JOIN operations (INNER, LEFT)
 - ✅ Aggregate functions with GROUP BY
 - ✅ String functions (UPPER, LOWER, SUBSTRING, TRIM, CHAR_LENGTH)
 - ✅ Math functions (ABS, FLOOR, CEILING, MOD)
+- ✅ SQL:1999 case sensitivity (unquoted identifiers are case-insensitive)
 
-**Pass Rate**: 100% (6/6 tests passing)
+**Pass Rate**: 100% (7/7 tests passing)
 
 ## Adding New Tests
 
