@@ -24,7 +24,7 @@ use rusqlite::Connection as SqliteConn;
 use vibesql_storage::Database as VibeDB;
 use vibesql_types::Date;
 
-use super::data::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
+use vibesql_bench_common::tpch::{TPCHData, NATIONS, PRIORITIES, REGIONS, SEGMENTS, SHIP_MODES};
 
 /// Batch size for bulk inserts - matches TPC-DS for consistency
 const BATCH_SIZE: usize = 5000;

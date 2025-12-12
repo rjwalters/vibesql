@@ -1,8 +1,8 @@
 //! Sysbench OLTP Benchmark Module
 //!
 //! This module provides sysbench-compatible OLTP benchmarks including:
-//! - Data generation for sbtest tables
-//! - Schema creation and data loading
+//! - Data generation (from `vibesql-bench-common`)
+//! - Schema creation and data loading (`schema` module - engine-specific)
 //! - OLTP query workloads (point select, insert, read/write mix, range queries)
 //!
 //! The schema matches the standard sysbench OLTP schema:
@@ -11,11 +11,13 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-pub mod data;
+// Engine-specific schema loading code (stays here due to vibesql dependencies)
 pub mod schema;
 
-// Re-export commonly used items for convenience
-pub use data::SysbenchData;
+// Re-export data generators from shared crate
+pub use vibesql_bench_common::sysbench::{SysbenchData, DEFAULT_TABLE_SIZE};
+
+// Re-export schema loaders
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
 #[cfg(feature = "mysql")]

@@ -51,8 +51,17 @@ use tokio::{net::TcpListener, runtime::Runtime, sync::oneshot};
 // PostgreSQL wire protocol client
 use tokio_postgres::NoTls;
 #[cfg(feature = "mysql")]
-use tpcc::schema::load_mysql;
-use tpcc::{data::TPCCRng, schema::load_vibesql, transactions::*};
+use tpcc::load_mysql;
+use tpcc::{
+    load_vibesql, TPCCRng,
+    // Transaction types and generators
+    TPCCExecutor, VibesqlTransactionExecutor,
+    NewOrderInput, PaymentInput, OrderStatusInput, DeliveryInput, StockLevelInput,
+    TransactionResult, TPCCWorkload, TPCCBenchmarkResults,
+    generate_new_order_input, generate_payment_input, generate_order_status_input,
+    generate_delivery_input, generate_stock_level_input,
+    print_profile_summary, reset_profile_counters,
+};
 
 /// Default port for vibesql-server (different from other server benchmarks to avoid conflicts)
 /// - 15432: sysbench_server
