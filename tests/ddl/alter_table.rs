@@ -35,6 +35,7 @@ fn create_populated_table(db: &mut Database) {
         ]
         .into(),
         row_id: None,
+        row_ids: None,
     };
     table.insert(row1).expect("Failed to insert row");
 
@@ -47,6 +48,7 @@ fn create_populated_table(db: &mut Database) {
         ]
         .into(),
         row_id: None,
+        row_ids: None,
     };
     table.insert(row2).expect("Failed to insert row");
 }
@@ -292,6 +294,7 @@ fn test_set_not_null_with_nulls_error() {
         ]
         .into(),
         row_id: None,
+        row_ids: None,
     };
     table.insert(row).expect("Failed to insert row");
 
