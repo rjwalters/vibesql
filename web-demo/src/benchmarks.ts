@@ -577,6 +577,16 @@ const SUITE_CONFIGS: Record<BenchmarkSuite, SuiteConfig> = {
         content: pI18n('bench-sysbench-srv-disc-mysql'),
       },
       {
+        title: t('bench-sysbench-srv-disc-perf-title'),
+        content: bulletsI18n([
+          { labelKey: 'bench-sysbench-srv-disc-perf-arch', descKey: 'bench-sysbench-srv-disc-perf-storage' },
+          { labelKey: 'bench-bullet-concurrency', descKey: 'bench-sysbench-srv-disc-perf-locking' },
+          { labelKey: 'bench-bullet-protocol', descKey: 'bench-sysbench-srv-disc-perf-protocol' },
+          { labelKey: 'bench-bullet-writes', descKey: 'bench-sysbench-srv-disc-perf-writes' },
+          { labelKey: 'bench-bullet-reads', descKey: 'bench-sysbench-srv-disc-perf-reads' },
+        ]),
+      },
+      {
         title: t('bench-sysbench-srv-disc-roadmap-title'),
         content: bulletsI18n([
           { labelKey: 'bench-bullet-connection-pooling', descKey: 'bench-sysbench-srv-disc-pooling' },
