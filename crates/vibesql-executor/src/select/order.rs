@@ -8,11 +8,62 @@ use rayon::slice::ParallelSliceMut;
 use super::grouping::compare_sql_values;
 #[cfg(feature = "parallel")]
 use super::parallel::ParallelConfig;
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
+use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
 
 /// Row with optional sort keys for ORDER BY
 pub(super) type RowWithSortKeys =
     (vibesql_storage::Row, Option<Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>>);
+
+/// Count the number of columns in a SELECT list after wildcard expansion
+///
+/// This correctly handles:
+/// - Regular expressions: count as 1 column each
+/// - Wildcard (`SELECT *`): expands to all columns from the schema
+/// - Qualified wildcards (`SELECT table.*`): expands to all columns from that table
+///
+/// # Arguments
+/// * `select_list` - The SELECT list items
+/// * `schema` - Optional schema for wildcard expansion. If None, wildcards count as 1.
+fn count_select_columns(
+    select_list: &[vibesql_ast::SelectItem],
+    schema: Option<&CombinedSchema>,
+) -> usize {
+    let mut count = 0;
+    for item in select_list {
+        match item {
+            vibesql_ast::SelectItem::Wildcard { .. } => {
+                // Expand wildcard to all columns from schema
+                if let Some(s) = schema {
+                    // Count all columns from all tables in the schema
+                    for (_, table_schema) in s.table_schemas.values() {
+                        count += table_schema.columns.len();
+                    }
+                } else {
+                    // No schema available, count as 1
+                    count += 1;
+                }
+            }
+            vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
+                // Expand qualified wildcard to all columns from the specified table
+                if let Some(s) = schema {
+                    if let Some((_, table_schema)) = s.get_table(qualifier) {
+                        count += table_schema.columns.len();
+                    } else {
+                        // Table not found, count as 1 (error will be caught elsewhere)
+                        count += 1;
+                    }
+                } else {
+                    // No schema available, count as 1
+                    count += 1;
+                }
+            }
+            vibesql_ast::SelectItem::Expression { .. } => {
+                count += 1;
+            }
+        }
+    }
+    count
+}
 
 /// Apply ORDER BY sorting to rows
 ///
@@ -30,6 +81,9 @@ pub(super) fn apply_order_by(
     evaluator: &CombinedExpressionEvaluator,
     select_list: &[vibesql_ast::SelectItem],
 ) -> Result<Vec<RowWithSortKeys>, ExecutorError> {
+    // Get schema for proper wildcard expansion when counting columns (#4413)
+    let schema = evaluator.schema();
+
     // Evaluate ORDER BY expressions for each row
     for (row, sort_keys) in &mut rows {
         // Clear CSE cache before evaluating this row's ORDER BY expressions
@@ -40,7 +94,9 @@ pub(super) fn apply_order_by(
         for (term_index, order_item) in order_by.iter().enumerate() {
             // Check if ORDER BY expression is a SELECT list alias or matches an aliased column
             // Evaluator handles window functions via window_mapping if present
-            let expr_to_eval = resolve_order_by_alias(&order_item.expr, select_list, term_index)?;
+            // Pass schema for proper wildcard expansion in column count validation
+            let expr_to_eval =
+                resolve_order_by_alias(&order_item.expr, select_list, term_index, Some(schema))?;
             let key_value = evaluator.eval(expr_to_eval.as_ref(), row)?;
             keys.push((key_value, order_item.direction.clone()));
         }
@@ -112,23 +168,35 @@ pub(super) fn apply_order_by(
 /// 4. Complex expressions containing GROUPING() - recursively resolves sub-expressions
 /// 5. Otherwise - returns the original expression (for expressions not matching aliases)
 ///
-/// Returns an error if a numeric column position is out of range (0 or > select_list.len())
+/// Returns an error if a numeric column position is out of range (0 or > column count)
+///
+/// # Arguments
+/// * `order_expr` - The ORDER BY expression to resolve
+/// * `select_list` - The SELECT list items
+/// * `term_index` - 0-indexed position of this ORDER BY term (for error messages)
+/// * `schema` - Optional schema for proper wildcard expansion when counting columns (#4413)
 pub(crate) fn resolve_order_by_for_aggregates(
     order_expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],
     term_index: usize, // 0-indexed position of this ORDER BY term
+    schema: Option<&CombinedSchema>,
 ) -> Result<vibesql_ast::Expression, ExecutorError> {
+    // Count actual columns after wildcard expansion (#4413)
+    // Note: For aggregate queries, wildcards are typically not present, but we
+    // handle them for consistency
+    let column_count = count_select_columns(select_list, schema);
+
     // Validate numeric column positions at the TOP LEVEL ONLY
     // (nested integer literals like `WHERE x = 0` are not column positions)
 
     // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
         // Validate the column position
-        if *pos <= 0 || (*pos as usize) > select_list.len() {
+        if *pos <= 0 || (*pos as usize) > column_count {
             return Err(ExecutorError::OrderByOutOfRange {
                 term_position: term_index + 1, // Convert to 1-indexed for error message
                 column_number: *pos,
-                select_list_len: select_list.len(),
+                select_list_len: column_count,
             });
         }
         let idx = (*pos as usize) - 1;
@@ -158,7 +226,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
             return Err(ExecutorError::OrderByOutOfRange {
                 term_position: term_index + 1,
                 column_number: -*pos,
-                select_list_len: select_list.len(),
+                select_list_len: column_count,
             });
         }
     }
@@ -372,27 +440,112 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
 ///    to the alias
 /// 4. Otherwise - returns the original ORDER BY expression
 ///
-/// Returns an error if a numeric column position is out of range (0 or > select_list.len())
+/// Returns an error if a numeric column position is out of range (0 or > column count)
+///
+/// # Arguments
+/// * `order_expr` - The ORDER BY expression to resolve
+/// * `select_list` - The SELECT list items
+/// * `term_index` - 0-indexed position of this ORDER BY term (for error messages)
+/// * `schema` - Optional schema for proper wildcard expansion when counting columns (#4413)
 pub(crate) fn resolve_order_by_alias<'a>(
     order_expr: &'a vibesql_ast::Expression,
     select_list: &'a [vibesql_ast::SelectItem],
     term_index: usize, // 0-indexed position of this ORDER BY term
+    schema: Option<&CombinedSchema>,
 ) -> Result<Cow<'a, vibesql_ast::Expression>, ExecutorError> {
+    // Count actual columns after wildcard expansion (#4413)
+    let column_count = count_select_columns(select_list, schema);
+
     // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
-        // Validate the column position
-        if *pos <= 0 || (*pos as usize) > select_list.len() {
+        // Validate the column position against expanded column count
+        if *pos <= 0 || (*pos as usize) > column_count {
             return Err(ExecutorError::OrderByOutOfRange {
                 term_position: term_index + 1, // Convert to 1-indexed for error message
                 column_number: *pos,
-                select_list_len: select_list.len(),
+                select_list_len: column_count,
             });
         }
-        // Valid column position, return the expression at that position
-        let idx = (*pos as usize) - 1;
-        if let vibesql_ast::SelectItem::Expression { expr, .. } = &select_list[idx] {
-            return Ok(Cow::Borrowed(expr));
+
+        // Map the 1-based position to the corresponding select_list item
+        // accounting for wildcard expansion
+        let target_col = (*pos as usize) - 1; // 0-indexed target column position
+        let mut current_col = 0;
+
+        for item in select_list {
+            match item {
+                vibesql_ast::SelectItem::Wildcard { .. } => {
+                    // Count how many columns this wildcard expands to
+                    let wildcard_cols = if let Some(s) = schema {
+                        s.table_schemas.values().map(|(_, ts)| ts.columns.len()).sum()
+                    } else {
+                        1
+                    };
+
+                    if target_col < current_col + wildcard_cols {
+                        // The position is within this wildcard's expanded columns
+                        // Return a ColumnRef to the N-th column from the schema
+                        if let Some(s) = schema {
+                            let offset_in_wildcard = target_col - current_col;
+                            // Collect all columns from all tables in schema order
+                            let mut all_columns: Vec<(usize, String)> = Vec::new();
+                            for (start_idx, table_schema) in s.table_schemas.values() {
+                                for (i, col) in table_schema.columns.iter().enumerate() {
+                                    all_columns.push((start_idx + i, col.name.clone()));
+                                }
+                            }
+                            all_columns.sort_by_key(|(idx, _)| *idx);
+
+                            if offset_in_wildcard < all_columns.len() {
+                                let col_name = all_columns[offset_in_wildcard].1.clone();
+                                return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                                    table: None,
+                                    column: col_name,
+                                }));
+                            }
+                        }
+                        // Fallback: shouldn't reach here if schema is available
+                        break;
+                    }
+                    current_col += wildcard_cols;
+                }
+                vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
+                    // Count how many columns this qualified wildcard expands to
+                    let qualified_cols = if let Some(s) = schema {
+                        s.get_table(qualifier).map(|(_, ts)| ts.columns.len()).unwrap_or(1)
+                    } else {
+                        1
+                    };
+
+                    if target_col < current_col + qualified_cols {
+                        // The position is within this qualified wildcard's columns
+                        if let Some(s) = schema {
+                            if let Some((_, table_schema)) = s.get_table(qualifier) {
+                                let offset = target_col - current_col;
+                                if offset < table_schema.columns.len() {
+                                    let col_name = table_schema.columns[offset].name.clone();
+                                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                                        table: None,
+                                        column: col_name,
+                                    }));
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    current_col += qualified_cols;
+                }
+                vibesql_ast::SelectItem::Expression { expr, .. } => {
+                    if target_col == current_col {
+                        // This is a regular expression, return it directly
+                        return Ok(Cow::Borrowed(expr));
+                    }
+                    current_col += 1;
+                }
+            }
         }
+
+        // Fallback: return original expression (shouldn't reach here normally)
     }
 
     // Check for negative numeric column position (ORDER BY -1 parsed as UnaryOp { Minus, Integer(1) })
@@ -408,7 +561,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
             return Err(ExecutorError::OrderByOutOfRange {
                 term_position: term_index + 1,
                 column_number: -*pos,
-                select_list_len: select_list.len(),
+                select_list_len: column_count,
             });
         }
     }

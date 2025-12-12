@@ -215,10 +215,12 @@ impl SelectExecutor<'_> {
                 // Resolve ORDER BY expression to result schema column names
                 // For aggregates, we need ColumnRef expressions to look up computed values
                 // in the result schema, not re-evaluate aggregate expressions
+                // Note: Pass None for schema since aggregate queries don't have wildcards (#4413)
                 let resolved_expr = crate::select::order::resolve_order_by_for_aggregates(
                     &order_item.expr,
                     expanded_select_list,
                     term_index,
+                    None,
                 )?;
                 let key_value = result_evaluator.eval(&resolved_expr, &row)?;
                 sort_keys.push((key_value, order_item.direction.clone()));
