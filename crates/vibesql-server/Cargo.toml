@@ -107,6 +107,8 @@ tokio-test = "0.4"
 tokio-postgres = "0.7"
 tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", features = ["stream"] }
+# Shared benchmark infrastructure
+vibesql-bench-common = { version = "0.1.3", path = "../vibesql-bench-common" }
 # Additional dependencies for server benchmarks (moved from vibesql-executor)
 rand_chacha = "0.9"
 rusqlite = { version = "0.37", features = ["bundled"] }

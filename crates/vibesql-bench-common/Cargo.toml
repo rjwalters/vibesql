@@ -1,0 +1,16 @@
+[package]
+name = "vibesql-bench-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared benchmark infrastructure for vibesql benchmarks"
+keywords = ["sql", "database", "benchmark", "tpch", "tpcc"]
+categories = ["database"]
+publish = false
+
+[dependencies]
+# Random number generation for Sysbench data
+rand = "0.9"
+rand_chacha = "0.9"
