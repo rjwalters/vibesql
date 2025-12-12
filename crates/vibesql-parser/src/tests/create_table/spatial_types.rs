@@ -17,7 +17,7 @@ fn test_parse_create_table_multipolygon() {
 
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "multipolygon");
+                    assert_eq!(type_name, "MULTIPOLYGON");
                 }
                 _ => panic!(
                     "Expected UserDefined MULTIPOLYGON, got {:?}",
@@ -27,7 +27,7 @@ fn test_parse_create_table_multipolygon() {
 
             match &create.columns[1].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "multipolygon");
+                    assert_eq!(type_name, "MULTIPOLYGON");
                 }
                 _ => panic!(
                     "Expected UserDefined MULTIPOLYGON, got {:?}",
@@ -60,15 +60,16 @@ fn test_parse_create_table_all_spatial_types() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 8);
 
+            // Identifiers preserve original case from SQL
             let expected_types = [
-                "point",
-                "linestring",
-                "polygon",
-                "multipoint",
-                "multilinestring",
-                "multipolygon",
-                "geometry",
-                "geometrycollection",
+                "POINT",
+                "LINESTRING",
+                "POLYGON",
+                "MULTIPOINT",
+                "MULTILINESTRING",
+                "MULTIPOLYGON",
+                "GEOMETRY",
+                "GEOMETRYCOLLECTION",
             ];
 
             for (i, expected_type) in expected_types.iter().enumerate() {
@@ -93,7 +94,7 @@ fn test_parse_create_table_all_spatial_types() {
 
 #[test]
 fn test_spatial_types_case_insensitive() {
-    // Test lowercase, uppercase, and mixed case
+    // Test lowercase, uppercase, and mixed case - all should parse
     let lowercase_result = Parser::parse_sql("CREATE TABLE t1(c1 multipolygon);");
     let uppercase_result = Parser::parse_sql("CREATE TABLE t2(c1 MULTIPOLYGON);");
     let mixed_result = Parser::parse_sql("CREATE TABLE t3(c1 MultiPolygon);");
@@ -102,7 +103,7 @@ fn test_spatial_types_case_insensitive() {
     assert!(uppercase_result.is_ok(), "uppercase should parse");
     assert!(mixed_result.is_ok(), "mixed case should parse");
 
-    // All should produce the same normalized type
+    // Each preserves original case from SQL
     if let Ok(vibesql_ast::Statement::CreateTable(t1)) = lowercase_result {
         if let Ok(vibesql_ast::Statement::CreateTable(t2)) = uppercase_result {
             if let Ok(vibesql_ast::Statement::CreateTable(t3)) = mixed_result {
@@ -113,9 +114,10 @@ fn test_spatial_types_case_insensitive() {
                         vibesql_types::DataType::UserDefined { type_name: name2 },
                         vibesql_types::DataType::UserDefined { type_name: name3 },
                     ) => {
-                        assert_eq!(name1, "multipolygon", "Should normalize to lowercase");
-                        assert_eq!(name2, "multipolygon", "Should normalize to lowercase");
-                        assert_eq!(name3, "multipolygon", "Should normalize to lowercase");
+                        // Each preserves original case from SQL text
+                        assert_eq!(name1, "multipolygon", "Should preserve lowercase");
+                        assert_eq!(name2, "MULTIPOLYGON", "Should preserve uppercase");
+                        assert_eq!(name3, "MultiPolygon", "Should preserve mixed case");
                     }
                     _ => panic!("Expected UserDefined types for all variants"),
                 }
@@ -164,7 +166,7 @@ fn test_sqllogictest_multipolygon_with_comment() {
             assert_eq!(create.columns[0].name, "c1");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "multipolygon");
+                    assert_eq!(type_name, "MULTIPOLYGON");
                 }
                 _ => panic!(
                     "Expected UserDefined MULTIPOLYGON, got {:?}",
@@ -177,7 +179,7 @@ fn test_sqllogictest_multipolygon_with_comment() {
             assert_eq!(create.columns[1].name, "c2");
             match &create.columns[1].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "multipolygon");
+                    assert_eq!(type_name, "MULTIPOLYGON");
                 }
                 _ => panic!(
                     "Expected UserDefined MULTIPOLYGON, got {:?}",
@@ -203,7 +205,7 @@ fn test_sqllogictest_multipolygon_basic() {
 
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "multipolygon");
+                    assert_eq!(type_name, "MULTIPOLYGON");
                 }
                 _ => panic!(
                     "Expected UserDefined MULTIPOLYGON, got {:?}",
@@ -213,7 +215,7 @@ fn test_sqllogictest_multipolygon_basic() {
 
             match &create.columns[1].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "multipolygon");
+                    assert_eq!(type_name, "MULTIPOLYGON");
                 }
                 _ => panic!(
                     "Expected UserDefined MULTIPOLYGON, got {:?}",

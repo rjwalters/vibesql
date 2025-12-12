@@ -18,9 +18,9 @@ fn test_parse_northwind_categories_table() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "categories");
+            assert_eq!(create.table_name, "Categories");
             assert_eq!(create.columns.len(), 3);
-            assert_eq!(create.columns[0].name, "categoryid");
+            assert_eq!(create.columns[0].name, "CategoryID");
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],

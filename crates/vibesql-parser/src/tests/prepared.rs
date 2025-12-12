@@ -60,8 +60,8 @@ fn test_parse_prepare_with_param_types() {
             assert_eq!(stmt.name, "my_insert");
             let param_types = stmt.param_types.expect("Expected param_types");
             assert_eq!(param_types.len(), 2);
-            assert_eq!(param_types[0], "int");
-            assert_eq!(param_types[1], "varchar");
+            assert_eq!(param_types[0], "INT");
+            assert_eq!(param_types[1], "VARCHAR");
         }
         other => panic!("Expected Prepare, got {:?}", other),
     }

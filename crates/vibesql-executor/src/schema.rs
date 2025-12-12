@@ -265,6 +265,51 @@ impl CombinedSchema {
     ) {
         self.table_schemas.insert(name.into(), (start_index, schema));
     }
+
+    /// Get the original column name from the schema for a column reference.
+    ///
+    /// SQLite preserves the schema column name (not the query identifier case)
+    /// when returning column names in results. This method looks up the column
+    /// in the schema and returns the original name.
+    ///
+    /// # Arguments
+    /// * `table` - Optional table name for qualified references (e.g., "t1" in "t1.col")
+    /// * `column` - Column name to look up (case-insensitive)
+    ///
+    /// # Returns
+    /// The original column name from the schema, or the input column name if not found.
+    pub fn get_original_column_name(&self, table: Option<&str>, column: &str) -> String {
+        if let Some(table_name) = table {
+            // Qualified column reference (table.column)
+            let key = TableKey::new(table_name);
+            if let Some((_start_index, schema)) = self.table_schemas.get(&key) {
+                if let Some(idx) = schema.get_column_index(column) {
+                    return schema.columns[idx].name.clone();
+                }
+            }
+        } else {
+            // Unqualified column reference - search all tables
+            // Find the match with the lowest start_index (leftmost table)
+            let mut best_match: Option<(usize, String)> = None;
+            for (start_index, schema) in self.table_schemas.values() {
+                if let Some(idx) = schema.get_column_index(column) {
+                    let name = schema.columns[idx].name.clone();
+                    match &best_match {
+                        None => best_match = Some((*start_index, name)),
+                        Some((current_start, _)) if *start_index < *current_start => {
+                            best_match = Some((*start_index, name));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some((_, name)) = best_match {
+                return name;
+            }
+        }
+        // Fallback: return the input column name if not found in schema
+        column.to_string()
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema

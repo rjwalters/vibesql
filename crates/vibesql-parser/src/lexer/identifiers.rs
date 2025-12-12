@@ -13,9 +13,10 @@ impl<'a> Lexer<'a> {
     /// - For identifiers <= 32 bytes that need case conversion, uses a stack buffer
     /// - Only allocates when the token is confirmed to be an identifier (not a keyword)
     ///
-    /// SQL:1999 case-sensitivity:
-    /// - Keywords are matched case-insensitively (converted to uppercase for lookup)
-    /// - Unquoted identifiers are normalized to LOWERCASE (per SQL:1999 standard)
+    /// **Case handling**: Keywords are matched case-insensitively (using uppercase),
+    /// but identifiers preserve their original case from the SQL text. This matches
+    /// SQLite's behavior where `SELECT col FROM t` returns "col" as the column name
+    /// (preserving the case from the query for display purposes).
     pub(super) fn tokenize_identifier_or_keyword(&mut self) -> Result<Token, LexerError> {
         let start = self.position();
 
@@ -32,13 +33,13 @@ impl<'a> Lexer<'a> {
         let text = self.slice_from(start);
 
         // Keywords are case-insensitive (checked with uppercase)
-        // Identifiers are normalized to lowercase per SQL:1999
+        // Identifiers preserve their original case for display
         if text.len() <= STACK_BUF_SIZE {
             let mut upper_buf = [0u8; STACK_BUF_SIZE];
             for (i, b) in text.bytes().enumerate() {
                 upper_buf[i] = b.to_ascii_uppercase();
             }
-            // SAFETY: Converting ASCII to uppercase/lowercase produces valid UTF-8.
+            // SAFETY: Converting ASCII to uppercase produces valid UTF-8.
             let upper = unsafe { std::str::from_utf8_unchecked(&upper_buf[..text.len()]) };
 
             // Try keyword lookup first (case-insensitive)
@@ -46,15 +47,15 @@ impl<'a> Lexer<'a> {
                 return Ok(Token::Keyword(keyword));
             }
 
-            // Not a keyword - normalize identifier to lowercase per SQL:1999
-            Ok(Token::Identifier(text.to_ascii_lowercase()))
+            // Not a keyword - preserve original case from SQL text
+            Ok(Token::Identifier(text.to_string()))
         } else {
             // Long identifier - fall back to heap allocation
             let upper_text = text.to_ascii_uppercase();
             match keywords::map_keyword(&upper_text) {
                 Some(keyword) => Ok(Token::Keyword(keyword)),
-                // Normalize identifier to lowercase per SQL:1999
-                None => Ok(Token::Identifier(text.to_ascii_lowercase())),
+                // Not a keyword - preserve original case from SQL text
+                None => Ok(Token::Identifier(text.to_string())),
             }
         }
     }

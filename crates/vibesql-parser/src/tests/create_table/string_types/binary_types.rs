@@ -18,7 +18,7 @@ fn test_parse_varbinary_with_size() {
             assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "varbinary");
+                    assert_eq!(type_name, "VARBINARY");
                 }
                 _ => panic!("Expected VARBINARY user-defined data type"),
             }
@@ -41,7 +41,7 @@ fn test_parse_varbinary_with_size_and_space() {
             assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "varbinary");
+                    assert_eq!(type_name, "VARBINARY");
                 }
                 _ => panic!("Expected VARBINARY user-defined data type"),
             }
@@ -64,7 +64,7 @@ fn test_parse_varbinary_without_size() {
             assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "varbinary");
+                    assert_eq!(type_name, "VARBINARY");
                 }
                 _ => panic!("Expected VARBINARY user-defined data type"),
             }
@@ -87,7 +87,7 @@ fn test_parse_binary_with_size() {
             assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "binary");
+                    assert_eq!(type_name, "BINARY");
                 }
                 _ => panic!("Expected BINARY user-defined data type"),
             }
@@ -110,7 +110,7 @@ fn test_parse_binary_with_size_and_space() {
             assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "binary");
+                    assert_eq!(type_name, "BINARY");
                 }
                 _ => panic!("Expected BINARY user-defined data type"),
             }
@@ -133,7 +133,7 @@ fn test_parse_binary_without_size() {
             assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "binary");
+                    assert_eq!(type_name, "BINARY");
                 }
                 _ => panic!("Expected BINARY user-defined data type"),
             }
@@ -156,7 +156,7 @@ fn test_parse_varbinary_with_key_constraint() {
             assert_eq!(create.columns[0].name, "c1");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
-                    assert_eq!(type_name, "varbinary");
+                    assert_eq!(type_name, "VARBINARY");
                 }
                 _ => panic!("Expected VARBINARY user-defined data type"),
             }

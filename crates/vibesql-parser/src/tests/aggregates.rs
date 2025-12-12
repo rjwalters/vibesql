@@ -16,7 +16,7 @@ fn test_parse_count_star() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
-                        assert_eq!(name, "count");
+                        assert_eq!(name, "COUNT");
                         assert!(!(*distinct));
                         assert_eq!(args.len(), 1);
                         // COUNT(*) is represented as a special wildcard expression
@@ -40,7 +40,7 @@ fn test_parse_count_column() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
-                    assert_eq!(name, "count");
+                    assert_eq!(name, "COUNT");
                     assert!(!(*distinct));
                     assert_eq!(args.len(), 1);
                     match &args[0] {
@@ -66,7 +66,7 @@ fn test_parse_sum_function() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
-                    assert_eq!(name, "sum");
+                    assert_eq!(name, "SUM");
                     assert!(!(*distinct));
                     assert_eq!(args.len(), 1);
                 }
@@ -88,7 +88,7 @@ fn test_parse_avg_function() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::AggregateFunction { name, .. } => {
-                    assert_eq!(name, "avg");
+                    assert_eq!(name, "AVG");
                 }
                 _ => panic!("Expected AVG aggregate function"),
             },
@@ -112,7 +112,7 @@ fn test_parse_min_max_functions() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::AggregateFunction { name, .. } => {
-                        assert_eq!(name, "min");
+                        assert_eq!(name, "MIN");
                     }
                     _ => panic!("Expected MIN aggregate function"),
                 },
@@ -123,7 +123,7 @@ fn test_parse_min_max_functions() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::AggregateFunction { name, .. } => {
-                        assert_eq!(name, "max");
+                        assert_eq!(name, "MAX");
                     }
                     _ => panic!("Expected MAX aggregate function"),
                 },
@@ -149,7 +149,6 @@ fn test_parse_scalar_min_max_functions() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        // SQL:1999 normalizes function names to lowercase
                         assert_eq!(name, "min");
                         assert_eq!(args.len(), 2, "min(11, 22) should have 2 arguments");
                     }
@@ -165,7 +164,6 @@ fn test_parse_scalar_min_max_functions() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        // SQL:1999 normalizes function names to lowercase
                         assert_eq!(name, "max");
                         assert_eq!(args.len(), 3, "max(1, 2, 3) should have 3 arguments");
                     }
@@ -192,7 +190,7 @@ fn test_parse_aggregate_with_alias() {
             vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                 match expr {
                     vibesql_ast::Expression::AggregateFunction { name, .. } => {
-                        assert_eq!(name, "count");
+                        assert_eq!(name, "COUNT");
                     }
                     _ => panic!("Expected aggregate function"),
                 }
@@ -215,7 +213,7 @@ fn test_parse_aggregate_with_alias_without_as() {
             vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                 match expr {
                     vibesql_ast::Expression::AggregateFunction { name, .. } => {
-                        assert_eq!(name, "count");
+                        assert_eq!(name, "COUNT");
                     }
                     _ => panic!("Expected aggregate function"),
                 }

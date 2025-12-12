@@ -176,7 +176,8 @@ fn test_parse_position_with_function() {
                         // Check that string is a Function expression
                         match &**string {
                             vibesql_ast::Expression::Function { name, args, character_unit: _ } => {
-                                assert_eq!(name, "lower");
+                                // LOWER is a keyword/function name, stored uppercase
+                                assert_eq!(name, "LOWER");
                                 assert_eq!(args.len(), 1);
                             }
                             _ => panic!("Expected Function expression in string"),

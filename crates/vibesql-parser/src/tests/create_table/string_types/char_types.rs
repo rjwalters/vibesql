@@ -74,7 +74,7 @@ fn test_parse_char_without_length() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "a");
+            assert_eq!(create.columns[0].name, "A");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 1 } => {} // Success - defaults to 1
                 _ => panic!("Expected CHAR(1) data type"),
@@ -94,7 +94,7 @@ fn test_parse_character_without_length() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "a");
+            assert_eq!(create.columns[0].name, "A");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 1 } => {} // Success - defaults to 1
                 _ => panic!("Expected CHARACTER(1) data type"),

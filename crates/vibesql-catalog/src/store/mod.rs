@@ -92,11 +92,9 @@ impl Catalog {
             current_charset: "UTF8".to_string(),
             current_collation: None,
             current_timezone: "UTC".to_string(),
-            // Default to case-insensitive identifiers (SQL:1999 compliant)
-            // The parser normalizes unquoted identifiers to lowercase per SQL:1999
-            // and preserves case for delimited identifiers. We use case-insensitive
-            // mode so that `normalize_identifier` will convert to lowercase,
-            // matching how identifiers are stored via TableIdentifier.
+            // Default to case-insensitive identifiers (SQLite-compatible)
+            // The parser preserves original case from SQL text. We use case-insensitive
+            // mode so lookups work regardless of case in queries.
             case_sensitive_identifiers: false,
         };
 

@@ -79,10 +79,8 @@ fn test_parse_create_table_with_invalid_storage_format() {
     assert!(result.is_err(), "Should fail to parse invalid STORAGE format");
 
     let err = result.unwrap_err();
-    // Use case-insensitive matching since error message may use uppercase
-    let err_lower = err.message.to_lowercase();
     assert!(
-        err_lower.contains("row") || err_lower.contains("columnar"),
+        err.message.contains("ROW") || err.message.contains("columnar"),
         "Error message should mention valid formats: {}",
         err.message
     );

@@ -97,9 +97,9 @@ fn test_column_names_functions() {
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns.len(), 2);
-        // Function names are lowercased per SQL:1999
-        assert!(result.columns[0].contains("count"));
-        assert!(result.columns[1].contains("avg"));
+        // Function names preserve original case from SQL
+        assert!(result.columns[0].contains("COUNT"));
+        assert!(result.columns[1].contains("AVG"));
         assert_eq!(result.rows.len(), 1);
     } else {
         panic!("Expected SELECT statement");
