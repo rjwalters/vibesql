@@ -520,9 +520,9 @@ mod tests {
     fn test_case_insensitive_lookup() {
         // Verify that the function can be used with case-insensitive matching
         let deps = extract_table_dependencies("SELECT * FROM Users").unwrap();
-        // Parser normalizes to uppercase
-        assert!(deps.contains("users"));
-        // Users can do case-insensitive matching by uppercasing their search term
+        // Parser preserves original case from SQL text
+        assert!(deps.contains("Users"));
+        // Users can do case-insensitive matching using eq_ignore_ascii_case
         assert!(deps.iter().any(|t| t.eq_ignore_ascii_case("users")));
     }
 }

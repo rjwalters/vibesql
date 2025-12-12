@@ -12,7 +12,7 @@ fn test_create_schema_basic() {
 
     match stmt {
         Statement::CreateSchema(create_stmt) => {
-            assert_eq!(create_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(create_stmt.schema_name, "test_schema");
             assert!(!create_stmt.if_not_exists);
             assert!(create_stmt.schema_elements.is_empty());
         }
@@ -27,7 +27,7 @@ fn test_create_schema_if_not_exists() {
 
     match stmt {
         Statement::CreateSchema(create_stmt) => {
-            assert_eq!(create_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(create_stmt.schema_name, "test_schema");
             assert!(create_stmt.if_not_exists);
             assert!(create_stmt.schema_elements.is_empty());
         }
@@ -42,7 +42,8 @@ fn test_create_schema_qualified_name() {
 
     match stmt {
         Statement::CreateSchema(create_stmt) => {
-            assert_eq!(create_stmt.schema_name, "CATALOG.TEST_SCHEMA");
+            // "catalog" is a keyword, so it's converted to uppercase per keyword handling
+            assert_eq!(create_stmt.schema_name, "CATALOG.test_schema");
             assert!(!create_stmt.if_not_exists);
             assert!(create_stmt.schema_elements.is_empty());
         }
@@ -58,14 +59,14 @@ fn test_create_schema_with_table() {
 
     match stmt {
         Statement::CreateSchema(create_stmt) => {
-            assert_eq!(create_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(create_stmt.schema_name, "test_schema");
             assert!(!create_stmt.if_not_exists);
             assert_eq!(create_stmt.schema_elements.len(), 1);
 
             // Check that the table element is parsed
             match &create_stmt.schema_elements[0] {
                 vibesql_ast::SchemaElement::CreateTable(table_stmt) => {
-                    assert_eq!(table_stmt.table_name, "USERS");
+                    assert_eq!(table_stmt.table_name, "users");
                     assert_eq!(table_stmt.columns.len(), 2);
                 }
             }
@@ -81,7 +82,7 @@ fn test_drop_schema_basic() {
 
     match stmt {
         Statement::DropSchema(drop_stmt) => {
-            assert_eq!(drop_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(drop_stmt.schema_name, "test_schema");
             assert!(!drop_stmt.if_exists);
             assert!(!drop_stmt.cascade); // RESTRICT is default
         }
@@ -96,7 +97,7 @@ fn test_drop_schema_if_exists() {
 
     match stmt {
         Statement::DropSchema(drop_stmt) => {
-            assert_eq!(drop_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(drop_stmt.schema_name, "test_schema");
             assert!(drop_stmt.if_exists);
             assert!(!drop_stmt.cascade);
         }
@@ -111,7 +112,7 @@ fn test_drop_schema_cascade() {
 
     match stmt {
         Statement::DropSchema(drop_stmt) => {
-            assert_eq!(drop_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(drop_stmt.schema_name, "test_schema");
             assert!(!drop_stmt.if_exists);
             assert!(drop_stmt.cascade);
         }
@@ -126,7 +127,7 @@ fn test_drop_schema_restrict() {
 
     match stmt {
         Statement::DropSchema(drop_stmt) => {
-            assert_eq!(drop_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(drop_stmt.schema_name, "test_schema");
             assert!(!drop_stmt.if_exists);
             assert!(!drop_stmt.cascade);
         }
@@ -141,7 +142,7 @@ fn test_drop_schema_if_exists_cascade() {
 
     match stmt {
         Statement::DropSchema(drop_stmt) => {
-            assert_eq!(drop_stmt.schema_name, "TEST_SCHEMA");
+            assert_eq!(drop_stmt.schema_name, "test_schema");
             assert!(drop_stmt.if_exists);
             assert!(drop_stmt.cascade);
         }
@@ -156,7 +157,8 @@ fn test_drop_schema_qualified_name() {
 
     match stmt {
         Statement::DropSchema(drop_stmt) => {
-            assert_eq!(drop_stmt.schema_name, "CATALOG.TEST_SCHEMA");
+            // "catalog" is a keyword, so it's converted to uppercase per keyword handling
+            assert_eq!(drop_stmt.schema_name, "CATALOG.test_schema");
             assert!(!drop_stmt.if_exists);
             assert!(!drop_stmt.cascade);
         }
@@ -170,7 +172,7 @@ fn test_set_schema() {
     match Parser::parse_sql(sql) {
         Ok(stmt) => match stmt {
             Statement::SetSchema(set_stmt) => {
-                assert_eq!(set_stmt.schema_name, "TEST_SCHEMA");
+                assert_eq!(set_stmt.schema_name, "test_schema");
             }
             _ => panic!("Expected SetSchema statement, got {:?}", stmt),
         },
@@ -185,7 +187,8 @@ fn test_set_schema_qualified() {
 
     match stmt {
         Statement::SetSchema(set_stmt) => {
-            assert_eq!(set_stmt.schema_name, "CATALOG.TEST_SCHEMA");
+            // "catalog" is a keyword, so it's converted to uppercase per keyword handling
+            assert_eq!(set_stmt.schema_name, "CATALOG.test_schema");
         }
         _ => panic!("Expected SetSchema statement, got {:?}", stmt),
     }
@@ -261,14 +264,14 @@ fn test_create_schema_complex_example() {
 
     match stmt {
         Statement::CreateSchema(create_stmt) => {
-            assert_eq!(create_stmt.schema_name, "LIBRARY");
+            assert_eq!(create_stmt.schema_name, "library");
             assert!(!create_stmt.if_not_exists);
             assert_eq!(create_stmt.schema_elements.len(), 2);
 
             // Check first table (books)
             match &create_stmt.schema_elements[0] {
                 vibesql_ast::SchemaElement::CreateTable(table_stmt) => {
-                    assert_eq!(table_stmt.table_name, "BOOKS");
+                    assert_eq!(table_stmt.table_name, "books");
                     assert_eq!(table_stmt.columns.len(), 3);
                 }
             }
@@ -276,7 +279,7 @@ fn test_create_schema_complex_example() {
             // Check second table (authors)
             match &create_stmt.schema_elements[1] {
                 vibesql_ast::SchemaElement::CreateTable(table_stmt) => {
-                    assert_eq!(table_stmt.table_name, "AUTHORS");
+                    assert_eq!(table_stmt.table_name, "authors");
                     assert_eq!(table_stmt.columns.len(), 2);
                 }
             }
