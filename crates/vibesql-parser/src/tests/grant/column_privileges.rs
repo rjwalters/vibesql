@@ -136,7 +136,7 @@ fn test_parse_grant_update_column_qualified_table() {
                 grant_stmt.privileges[0],
                 PrivilegeType::Update(Some(vec!["salary".to_string()]))
             );
-            assert_eq!(grant_stmt.object_name.to_string(), "HR.EMPLOYEES");
+            assert_eq!(grant_stmt.object_name.to_string(), "hr.employees");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }

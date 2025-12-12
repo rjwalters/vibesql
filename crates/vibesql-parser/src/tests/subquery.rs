@@ -155,7 +155,7 @@ fn test_parse_scalar_subquery_in_where() {
                             match &subquery.select_list[0] {
                                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                                     Expression::AggregateFunction { name, .. } => {
-                                        assert_eq!(name.to_uppercase(), "avg");
+                                        assert_eq!(name, "avg");
                                     }
                                     _ => panic!("Expected aggregate function call in subquery"),
                                 },
@@ -203,7 +203,7 @@ fn test_parse_scalar_subquery_in_select() {
                         match &subquery.select_list[0] {
                             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                                 Expression::AggregateFunction { name, .. } => {
-                                    assert_eq!(name.to_uppercase(), "count");
+                                    assert_eq!(name, "count");
                                 }
                                 _ => panic!("Expected aggregate function"),
                             },

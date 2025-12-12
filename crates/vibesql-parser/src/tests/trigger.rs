@@ -214,10 +214,12 @@ fn test_create_trigger_body_preserved_as_valid_sql() {
             match &trigger.triggered_action {
                 TriggerAction::RawSql(body) => {
                     // Verify the body contains valid SQL that can be re-parsed
-                    assert!(body.contains("select"), "Body should contain SELECT keyword");
+                    // Use case-insensitive checks since raw SQL keywords may be uppercase
+                    let body_lower = body.to_lowercase();
+                    assert!(body_lower.contains("select"), "Body should contain SELECT keyword");
                     assert!(body.contains("1"), "Body should contain the number 1");
-                    assert!(body.contains("begin"), "Body should contain BEGIN");
-                    assert!(body.contains("end"), "Body should contain END");
+                    assert!(body_lower.contains("begin"), "Body should contain BEGIN");
+                    assert!(body_lower.contains("end"), "Body should contain END");
                     // Most importantly: body should NOT contain debug format like "Keyword(Select)"
                     assert!(
                         !body.contains("Keyword("),

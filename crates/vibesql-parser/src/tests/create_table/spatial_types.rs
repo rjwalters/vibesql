@@ -113,9 +113,9 @@ fn test_spatial_types_case_insensitive() {
                         vibesql_types::DataType::UserDefined { type_name: name2 },
                         vibesql_types::DataType::UserDefined { type_name: name3 },
                     ) => {
-                        assert_eq!(name1, "multipolygon", "Should normalize to uppercase");
-                        assert_eq!(name2, "multipolygon", "Should normalize to uppercase");
-                        assert_eq!(name3, "multipolygon", "Should normalize to uppercase");
+                        assert_eq!(name1, "multipolygon", "Should normalize to lowercase");
+                        assert_eq!(name2, "multipolygon", "Should normalize to lowercase");
+                        assert_eq!(name3, "multipolygon", "Should normalize to lowercase");
                     }
                     _ => panic!("Expected UserDefined types for all variants"),
                 }
@@ -131,9 +131,12 @@ fn test_unknown_type_still_fails() {
     assert!(result.is_err(), "Unknown non-spatial types should fail");
 
     if let Err(e) = result {
+        // Use case-insensitive matching since the error message may have different case
         assert!(
-            e.to_string().contains("Unknown data type: UNKNOWNTYPE"),
-            "Error should mention unknown type"
+            e.to_string().to_lowercase().contains("unknown data type")
+                && e.to_string().to_lowercase().contains("unknowntype"),
+            "Error should mention unknown type, got: {}",
+            e.to_string()
         );
     }
 }

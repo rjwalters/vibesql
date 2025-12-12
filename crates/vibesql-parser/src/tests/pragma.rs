@@ -104,7 +104,7 @@ fn test_pragma_with_string_value() {
             assert!(stmt.database.is_none());
             assert_eq!(stmt.name, "journal_mode");
             match &stmt.value {
-                Some(PragmaValue::String(v)) => assert_eq!(v, "delete"),
+                Some(PragmaValue::String(v)) => assert_eq!(v, "DELETE"),
                 other => panic!("Expected String value, got: {:?}", other),
             }
         }

@@ -268,7 +268,7 @@ fn test_keyword_in_select_into() {
         error_msg
     );
     assert!(
-        error_msg.contains("select") || error_msg.contains("Select"),
+        error_msg.to_lowercase().contains("select"),
         "Error should mention the keyword SELECT, got: {}",
         error_msg
     );
@@ -291,7 +291,7 @@ fn test_keyword_in_next_value_for() {
         error_msg
     );
     assert!(
-        error_msg.contains("select") || error_msg.contains("Select"),
+        error_msg.to_lowercase().contains("select"),
         "Error should mention the keyword SELECT, got: {}",
         error_msg
     );
@@ -308,7 +308,7 @@ fn test_keyword_table_in_select_into() {
         error_msg
     );
     assert!(
-        error_msg.contains("table") || error_msg.contains("Table"),
+        error_msg.to_lowercase().contains("table"),
         "Error should mention the keyword TABLE, got: {}",
         error_msg
     );
@@ -385,7 +385,7 @@ fn test_error_message_includes_suggestion() {
     // 3. Suggestion to use delimited identifiers
     assert!(error_msg.contains("reserved keyword"), "Missing 'reserved keyword' in: {}", error_msg);
     assert!(
-        error_msg.contains("where") || error_msg.contains("Where"),
+        error_msg.to_lowercase().contains("where"),
         "Missing keyword name in: {}",
         error_msg
     );

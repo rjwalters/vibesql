@@ -388,8 +388,8 @@ fn test_parse_binary_literal_lowercase() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
-                    // b'01010101' = byte 0x55 = "u"
-                    assert_eq!(s.as_str(), "u");
+                    // b'01010101' = byte 0x55 = "U"
+                    assert_eq!(s.as_str(), "U");
                 }
                 _ => panic!("Expected VARCHAR literal"),
             },
@@ -409,8 +409,8 @@ fn test_parse_binary_literal_uppercase() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
-                    // B'01000001' = byte 0x41 = "a"
-                    assert_eq!(s.as_str(), "a");
+                    // B'01000001' = byte 0x41 = "A"
+                    assert_eq!(s.as_str(), "A");
                 }
                 _ => panic!("Expected VARCHAR literal"),
             },

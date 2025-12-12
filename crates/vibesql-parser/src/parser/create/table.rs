@@ -56,8 +56,9 @@ impl Parser {
                     c
                 }
                 // Allow unreserved keywords (like TIMESTAMP, DATE, TIME, INTERVAL) as column names
+                // SQL:1999: normalize to lowercase when used as unquoted identifier
                 Token::Keyword(kw) if kw.can_be_identifier() => {
-                    let col_name = format!("{}", kw); // Already uppercase from Display impl
+                    let col_name = format!("{}", kw).to_lowercase();
                     self.advance();
                     col_name
                 }

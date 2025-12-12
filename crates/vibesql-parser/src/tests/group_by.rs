@@ -307,7 +307,7 @@ fn test_parse_grouping_function() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "grouping");
+                        assert_eq!(name, "grouping");
                         assert_eq!(args.len(), 1);
                     }
                     _ => panic!("Expected GROUPING function"),

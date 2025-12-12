@@ -18,15 +18,10 @@ impl<'a> Lexer<'a> {
     /// - Unquoted identifiers are normalized to LOWERCASE (per SQL:1999 standard)
     pub(super) fn tokenize_identifier_or_keyword(&mut self) -> Result<Token, LexerError> {
         let start = self.position();
-        let mut needs_case_conversion = false;
 
         while !self.is_eof() {
             let ch = self.current_char();
             if ch.is_ascii_alphanumeric() || ch == '_' {
-                // Track if we have mixed case that needs conversion
-                if ch.is_ascii_lowercase() || ch.is_ascii_uppercase() {
-                    needs_case_conversion = true;
-                }
                 self.advance();
             } else {
                 break;

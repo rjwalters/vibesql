@@ -107,7 +107,7 @@ fn test_create_view_qualified_name() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MYSCHEMA.MY_VIEW");
+        assert_eq!(stmt.view_name, "myschema.my_view");
     } else {
         panic!("Expected CreateView statement");
     }
@@ -200,7 +200,7 @@ fn test_drop_view_qualified_name() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MYSCHEMA.MY_VIEW");
+        assert_eq!(stmt.view_name, "myschema.my_view");
     } else {
         panic!("Expected DropView statement");
     }
