@@ -25,6 +25,7 @@ fn test_count_star_without_from() {
                 args: vec![vibesql_ast::Expression::Wildcard],
             },
             alias: None,
+            source_text: None,
         }],
         from: None, // No FROM clause
         where_clause: None,
@@ -77,6 +78,7 @@ fn test_count_star_in_expression_without_from() {
                 }),
             },
             alias: None,
+            source_text: None,
         }],
         from: None, // No FROM clause
         where_clause: None,
@@ -163,6 +165,7 @@ fn test_complex_expression_without_from() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: div,
             alias: Some("col2".to_string()),
+            source_text: None,
         }],
         from: None, // No FROM clause - this is the key issue!
         where_clause: None,
