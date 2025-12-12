@@ -32,6 +32,9 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Note: Aggregate argument validation is done in execute_with_ctes() to catch
+        // all execution paths. See issue #4367.
+
         // Fast path: Simple COUNT(*) without filtering
         // This optimization avoids materializing all rows when we just need the count
         if let Some(table_name) = self.is_simple_count_star(stmt) {

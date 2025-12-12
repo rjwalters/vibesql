@@ -198,11 +198,12 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
 
             // Check for wildcard in non-COUNT aggregates
             let has_wildcard = args.iter().any(|arg| {
-                matches!(arg, Expression::Wildcard)
-                    || matches!(
-                        arg,
-                        Expression::ColumnRef { table: None, column } if column == "*"
-                    )
+                let is_wildcard = matches!(arg, Expression::Wildcard);
+                let is_star_ref = matches!(
+                    arg,
+                    Expression::ColumnRef { table: None, column } if column == "*"
+                );
+                is_wildcard || is_star_ref
             });
 
             match upper.as_str() {
@@ -213,21 +214,21 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                 }
                 "MIN" | "MAX" => {
                     if has_wildcard || arg_count == 0 {
-                        Some(name.clone())
+                        Some(name.clone()) // Preserve original case for SQLite-compatible error
                     } else {
                         None
                     }
                 }
                 "SUM" | "AVG" | "TOTAL" => {
                     if has_wildcard || arg_count == 0 || arg_count > 1 {
-                        Some(name.clone())
+                        Some(name.clone()) // Preserve original case for SQLite-compatible error
                     } else {
                         None
                     }
                 }
                 "GROUP_CONCAT" => {
                     if arg_count == 0 || arg_count > 2 {
-                        Some(name.clone())
+                        Some(name.clone()) // Preserve original case for SQLite-compatible error
                     } else {
                         None
                     }
@@ -255,7 +256,7 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                         // count(a, b) without DISTINCT is wrong
                         // Regular count without DISTINCT can only have 0-1 args
                         if arg_count > 1 {
-                            Some(name.clone())
+                            Some(name.clone()) // Preserve original case
                         } else {
                             None
                         }
@@ -263,21 +264,21 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                     "MIN" | "MAX" => {
                         // Multi-arg min/max are scalar, so only check single arg case
                         if arg_count <= 1 && (has_wildcard || arg_count == 0) {
-                            Some(name.clone())
+                            Some(name.clone()) // Preserve original case
                         } else {
                             None
                         }
                     }
                     "SUM" | "AVG" | "TOTAL" => {
                         if has_wildcard || arg_count == 0 || arg_count > 1 {
-                            Some(name.clone())
+                            Some(name.clone()) // Preserve original case
                         } else {
                             None
                         }
                     }
                     "GROUP_CONCAT" => {
                         if arg_count == 0 || arg_count > 2 {
-                            Some(name.clone())
+                            Some(name.clone()) // Preserve original case
                         } else {
                             None
                         }
@@ -334,10 +335,10 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
 }
 
 /// Find the first aggregate function in an expression
-/// Returns the function name if found, None otherwise
+/// Returns the function name (original case preserved) if found, None otherwise
 fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::AggregateFunction { name, .. } => Some(name.clone()),
+        Expression::AggregateFunction { name, .. } => Some(name.clone()), // Preserve original case
         Expression::Function { name, args, .. } => {
             // Check if this function is a built-in aggregate
             // Note: MIN/MAX with multiple args are scalar functions in SQLite
@@ -347,7 +348,7 @@ fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
                     // Multi-arg min/max are scalar, not aggregate
                     None
                 } else {
-                    Some(name.clone())
+                    Some(name.clone()) // Preserve original case
                 }
             } else {
                 // Check function arguments recursively
@@ -613,6 +614,25 @@ pub fn validate_select_columns_with_context(
     Ok(())
 }
 
+/// Validate aggregate function argument counts in SELECT list
+///
+/// This validates that aggregate functions have the correct number of arguments:
+/// - MIN, MAX, SUM, AVG, TOTAL require exactly 1 argument (no wildcard)
+/// - COUNT allows 0-1 arguments (supports *)
+/// - GROUP_CONCAT requires 1-2 arguments
+///
+/// Returns an error with SQLite-compatible message if validation fails.
+pub fn validate_aggregate_arguments(select_list: &[SelectItem]) -> Result<(), ExecutorError> {
+    for item in select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            if let Some(agg_name) = check_aggregate_arg_count(expr) {
+                return Err(ExecutorError::WrongNumberOfArguments { function_name: agg_name });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate column references in SELECT list and WHERE clause against schema
 ///
 /// Simple validation without procedural context - used for standard SELECT queries.
@@ -752,6 +772,60 @@ mod tests {
         };
 
         let result = validate_select_columns(&select_list, Some(&where_clause), &schema);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_min_star_invalid() {
+        // MIN(*) should be invalid - returns error with function name (preserving original case)
+        let expr = Expression::AggregateFunction {
+            name: "MIN".to_string(),
+            distinct: false,
+            args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
+        };
+        let result = check_aggregate_arg_count(&expr);
+        assert!(result.is_some(), "MIN(*) should be invalid");
+        assert_eq!(result.unwrap(), "MIN"); // Preserves original case
+    }
+
+    #[test]
+    fn test_max_star_invalid() {
+        // MAX(*) should be invalid
+        let expr = Expression::AggregateFunction {
+            name: "MAX".to_string(),
+            distinct: false,
+            args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
+        };
+        let result = check_aggregate_arg_count(&expr);
+        assert!(result.is_some(), "MAX(*) should be invalid");
+        assert_eq!(result.unwrap(), "MAX"); // Preserves original case
+    }
+
+    #[test]
+    fn test_min_no_args_invalid() {
+        // MIN() with no arguments should be invalid
+        let expr = Expression::AggregateFunction {
+            name: "MIN".to_string(),
+            distinct: false,
+            args: vec![],
+        };
+        let result = check_aggregate_arg_count(&expr);
+        assert!(result.is_some(), "MIN() should be invalid");
+        assert_eq!(result.unwrap(), "MIN"); // Preserves original case
+    }
+
+    #[test]
+    fn test_validate_aggregate_arguments() {
+        // Test the public function
+        let select_list = vec![SelectItem::Expression {
+            expr: Expression::AggregateFunction {
+                name: "MIN".to_string(),
+                distinct: false,
+                args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
+            },
+            alias: None,
+        }];
+        let result = super::validate_aggregate_arguments(&select_list);
         assert!(result.is_err());
     }
 }

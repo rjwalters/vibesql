@@ -353,9 +353,8 @@ impl CombinedExpressionEvaluator<'_> {
             // Aggregate functions - should be evaluated in aggregation context
             vibesql_ast::Expression::AggregateFunction { name, .. } => {
                 // SQLite-compatible error message for aggregate misuse
-                Err(ExecutorError::MisuseOfAggregate {
-                    function_name: name.clone(),
-                })
+                // Preserve original case to match SQLite behavior
+                Err(ExecutorError::MisuseOfAggregate { function_name: name.clone() })
             }
 
             // Full-text search

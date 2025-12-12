@@ -32,7 +32,7 @@ fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Resu
             // min() and max() with * is wrong number of args
             if has_wildcard || arg_count == 0 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(),
+                    function_name: name.to_string(), // Preserve original case
                 });
             }
             // min/max with > 1 arg becomes scalar function, handled elsewhere
@@ -42,12 +42,12 @@ fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Resu
             // These require exactly 1 argument, no wildcard allowed
             if has_wildcard || arg_count == 0 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(),
+                    function_name: name.to_string(), // Preserve original case
                 });
             }
             if arg_count > 1 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(),
+                    function_name: name.to_string(), // Preserve original case
                 });
             }
             Ok(())
@@ -56,7 +56,7 @@ fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Resu
             // GROUP_CONCAT requires 1 or 2 arguments
             if arg_count == 0 || arg_count > 2 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(),
+                    function_name: name.to_string(), // Preserve original case
                 });
             }
             Ok(())
@@ -65,7 +65,7 @@ fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Resu
             // Unknown aggregate functions require at least 1 argument
             if arg_count == 0 {
                 return Err(ExecutorError::WrongNumberOfArguments {
-                    function_name: name.to_string(),
+                    function_name: name.to_string(), // Preserve original case
                 });
             }
             Ok(())
@@ -198,7 +198,7 @@ pub(super) fn evaluate(
     // This should be caught by validate_aggregate_args above, but keep as safety net
     if args.len() != 1 {
         return Err(ExecutorError::WrongNumberOfArguments {
-            function_name: name.to_string(),
+            function_name: name.to_string(), // Preserve original case
         });
     }
 

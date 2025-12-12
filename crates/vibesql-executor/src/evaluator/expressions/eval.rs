@@ -277,9 +277,8 @@ impl ExpressionEvaluator<'_> {
 
             vibesql_ast::Expression::AggregateFunction { name, .. } => {
                 // SQLite-compatible error message for aggregate misuse
-                Err(ExecutorError::MisuseOfAggregate {
-                    function_name: name.clone(),
-                })
+                // Preserve original case to match SQLite behavior
+                Err(ExecutorError::MisuseOfAggregate { function_name: name.clone() })
             }
 
             // NEXT VALUE FOR sequence expression
