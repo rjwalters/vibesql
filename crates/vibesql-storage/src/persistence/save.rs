@@ -144,8 +144,8 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for index_name in self.list_indexes() {
             // Skip primary key indexes - these are automatically created by the PRIMARY KEY
-            // constraint PK indexes follow the naming convention "PK_<table_name>"
-            if index_name.starts_with("PK_") {
+            // constraint. PK indexes follow the naming convention "pk_<table_name>" (lowercase)
+            if index_name.to_lowercase().starts_with("pk_") {
                 continue;
             }
             let metadata = self.get_index(&index_name).unwrap();

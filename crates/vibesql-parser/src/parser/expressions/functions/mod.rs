@@ -203,10 +203,12 @@ impl Parser {
         };
 
         // Return appropriate expression type
+        // SQL:1999 normalizes unquoted identifiers to lowercase
+        let normalized_name = first.to_lowercase();
         if is_aggregate {
-            Ok(Some(vibesql_ast::Expression::AggregateFunction { name: first, distinct, args }))
+            Ok(Some(vibesql_ast::Expression::AggregateFunction { name: normalized_name, distinct, args }))
         } else {
-            Ok(Some(vibesql_ast::Expression::Function { name: first, args, character_unit }))
+            Ok(Some(vibesql_ast::Expression::Function { name: normalized_name, args, character_unit }))
         }
     }
 }
