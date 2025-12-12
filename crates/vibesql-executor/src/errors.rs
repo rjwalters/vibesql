@@ -13,6 +13,11 @@ pub enum ExecutorError {
         column: String,
         available_tables: Vec<String>,
     },
+    /// Ambiguous column name in JOIN query (SQLite-compatible error)
+    /// Raised when an unqualified column reference matches columns in multiple tables
+    AmbiguousColumnName {
+        column_name: String,
+    },
     ColumnAlreadyExists(String),
     IndexNotFound(String),
     IndexAlreadyExists(String),
@@ -379,6 +384,10 @@ impl std::fmt::Display for ExecutorError {
                         available_tables = available.as_str()
                     )
                 )
+            }
+            ExecutorError::AmbiguousColumnName { column_name } => {
+                // SQLite-compatible error message format
+                write!(f, "ambiguous column name: {}", column_name)
             }
             ExecutorError::ColumnAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("executor-column-already-exists", name = name.as_str()))

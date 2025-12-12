@@ -536,14 +536,14 @@ fn test_q75_left_join_coalesce() {
         &db,
         r#"
         SELECT
-            item_sk,
+            lj_sales.item_sk,
             quantity,
             COALESCE(return_qty, 0) AS return_qty,
             quantity - COALESCE(return_qty, 0) AS net_qty,
             price - COALESCE(return_amt, 0.0) AS net_amt
         FROM lj_sales
         LEFT JOIN lj_returns ON lj_sales.item_sk = lj_returns.item_sk AND lj_sales.order_num = lj_returns.order_num
-        ORDER BY item_sk
+        ORDER BY lj_sales.item_sk
         "#,
     );
 
@@ -617,6 +617,10 @@ fn test_left_join_preserves_left_columns() {
 
 /// Test that unqualified column references in LEFT JOIN
 /// resolve to the LEFT table, not the RIGHT table (which would be NULL)
+/// Test LEFT JOIN column resolution behavior
+/// Per SQLite and SQL standard, unqualified column references that exist in multiple tables
+/// should result in an "ambiguous column name" error. Queries must use qualified references
+/// (e.g., sales_uk.item_sk) when joining tables with same-named columns.
 #[test]
 fn test_unqualified_column_in_left_join() {
     let mut db = Database::new();
@@ -664,37 +668,16 @@ fn test_unqualified_column_in_left_join() {
         println!("  {:?}", row);
     }
 
-    // Test 2: Unqualified reference (BUG: may incorrectly resolve to right table)
-    let results_unqualified = execute_query(
-        &db,
-        r#"
-        SELECT
-            item_sk,
-            quantity
-        FROM sales_uk
-        LEFT JOIN returns_uk ON sales_uk.item_sk = returns_uk.item_sk AND sales_uk.order_num = returns_uk.order_num
-        ORDER BY item_sk
-        "#,
-    );
-
-    println!("UNQUALIFIED column reference results:");
-    for row in &results_unqualified {
-        println!("  {:?}", row);
-    }
-
-    // Both should produce the same results!
-    // Specifically, item_sk should NEVER be NULL (it's from the left table)
+    // Verify qualified reference works and returns correct results
     assert_eq!(results_qualified.len(), 2);
-    assert_eq!(results_unqualified.len(), 2);
 
-    // Check item_sk is not null in unqualified case
-    for (i, row) in results_unqualified.iter().enumerate() {
+    // item_sk should NEVER be NULL (it's from the left table)
+    for (i, row) in results_qualified.iter().enumerate() {
         let item_sk = &row.values[0];
         println!("Row {}: item_sk = {:?}", i, item_sk);
-        // BUG: This may fail if item_sk resolves to returns_uk.item_sk instead of sales_uk.item_sk
         assert!(
             !matches!(item_sk, vibesql_types::SqlValue::Null),
-            "Row {}: item_sk should NOT be NULL (should resolve to sales_uk.item_sk), got {:?}",
+            "Row {}: item_sk should NOT be NULL (from left table), got {:?}",
             i,
             item_sk
         );
@@ -732,17 +715,17 @@ fn test_column_resolution_with_coalesce() {
     execute_insert(&mut db, "INSERT INTO sales_crc VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_crc VALUES (2, 200, 5)");
 
-    // Query with COALESCE (like Q75)
+    // Query with COALESCE (like Q75) - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_crc.item_sk,
             quantity,
             COALESCE(return_qty, 0) AS return_qty
         FROM sales_crc
         LEFT JOIN returns_crc ON sales_crc.item_sk = returns_crc.item_sk AND sales_crc.order_num = returns_crc.order_num
-        ORDER BY item_sk
+        ORDER BY sales_crc.item_sk
         "#,
     );
 
@@ -794,17 +777,17 @@ fn test_column_resolution_three_cols_no_expr() {
     execute_insert(&mut db, "INSERT INTO sales_3c VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_3c VALUES (2, 200, 5)");
 
-    // Query with 3 simple columns, no expressions
+    // Query with 3 simple columns, no expressions - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_3c.item_sk,
             quantity,
             return_qty
         FROM sales_3c
         LEFT JOIN returns_3c ON sales_3c.item_sk = returns_3c.item_sk AND sales_3c.order_num = returns_3c.order_num
-        ORDER BY item_sk
+        ORDER BY sales_3c.item_sk
         "#,
     );
 
@@ -856,17 +839,17 @@ fn test_column_resolution_expr_on_right_col() {
     execute_insert(&mut db, "INSERT INTO sales_roe VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_roe VALUES (2, 200, 5)");
 
-    // Query with expression on RIGHT table column
+    // Query with expression on RIGHT table column - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_roe.item_sk,
             quantity,
             return_qty + 1 AS return_qty_plus
         FROM sales_roe
         LEFT JOIN returns_roe ON sales_roe.item_sk = returns_roe.item_sk AND sales_roe.order_num = returns_roe.order_num
-        ORDER BY item_sk
+        ORDER BY sales_roe.item_sk
         "#,
     );
 
@@ -918,17 +901,17 @@ fn test_column_resolution_with_arithmetic() {
     execute_insert(&mut db, "INSERT INTO sales_arith VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_arith VALUES (2, 200, 5)");
 
-    // Query with arithmetic expression (but no COALESCE)
+    // Query with arithmetic expression (but no COALESCE) - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_arith.item_sk,
             quantity,
             quantity + 1 AS qty_plus_one
         FROM sales_arith
         LEFT JOIN returns_arith ON sales_arith.item_sk = returns_arith.item_sk AND sales_arith.order_num = returns_arith.order_num
-        ORDER BY item_sk
+        ORDER BY sales_arith.item_sk
         "#,
     );
 

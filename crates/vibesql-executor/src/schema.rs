@@ -222,6 +222,25 @@ impl CombinedSchema {
         }
     }
 
+    /// Check if an unqualified column reference is ambiguous
+    /// (i.e., exists in multiple tables in the schema)
+    ///
+    /// Returns true if the column exists in more than one table.
+    /// Only relevant for unqualified column references - qualified references
+    /// (with table prefix) are never ambiguous.
+    pub fn is_column_ambiguous(&self, column: &str) -> bool {
+        let mut match_count = 0;
+        for (_start_index, schema) in self.table_schemas.values() {
+            if schema.get_column_index(column).is_some() {
+                match_count += 1;
+                if match_count > 1 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Get a table schema by name (case-insensitive lookup)
     pub fn get_table(&self, table_name: &str) -> Option<&(usize, vibesql_catalog::TableSchema)> {
         self.table_schemas.get(&TableKey::new(table_name))
@@ -758,5 +777,170 @@ mod tests {
 
         let schema = builder.build();
         assert_eq!(schema.total_columns, 3);
+    }
+
+    // ==========================================================================
+    // Ambiguous Column Detection Tests (Issue #4391)
+    // ==========================================================================
+
+    #[test]
+    fn test_is_column_ambiguous_single_table() {
+        // Single table - no column can be ambiguous
+        let schema = CombinedSchema::from_table(
+            "test1".to_string(),
+            table_schema_with_columns(
+                "test1",
+                vec![("f1", DataType::Integer), ("f2", DataType::Integer)],
+            ),
+        );
+
+        assert!(!schema.is_column_ambiguous("f1"));
+        assert!(!schema.is_column_ambiguous("f2"));
+        assert!(!schema.is_column_ambiguous("nonexistent"));
+    }
+
+    #[test]
+    fn test_is_column_ambiguous_two_tables_no_overlap() {
+        // Two tables with different columns - no ambiguity
+        let test1 = CombinedSchema::from_table(
+            "test1".to_string(),
+            table_schema_with_columns(
+                "test1",
+                vec![("f1", DataType::Integer), ("f2", DataType::Integer)],
+            ),
+        );
+        let schema = CombinedSchema::combine(
+            test1,
+            "test2".to_string(),
+            table_schema_with_columns(
+                "test2",
+                vec![("f3", DataType::Integer), ("f4", DataType::Integer)],
+            ),
+        );
+
+        assert!(!schema.is_column_ambiguous("f1"));
+        assert!(!schema.is_column_ambiguous("f2"));
+        assert!(!schema.is_column_ambiguous("f3"));
+        assert!(!schema.is_column_ambiguous("f4"));
+    }
+
+    #[test]
+    fn test_is_column_ambiguous_two_tables_with_overlap() {
+        // Two tables with same column names - should be ambiguous
+        // This is the exact scenario from issue #4391:
+        // CREATE TABLE test1(f1, f2);
+        // CREATE TABLE test2(f1, f2);
+        // SELECT f1 FROM test1, test2;
+        let test1 = CombinedSchema::from_table(
+            "test1".to_string(),
+            table_schema_with_columns(
+                "test1",
+                vec![("f1", DataType::Integer), ("f2", DataType::Integer)],
+            ),
+        );
+        let schema = CombinedSchema::combine(
+            test1,
+            "test2".to_string(),
+            table_schema_with_columns(
+                "test2",
+                vec![("f1", DataType::Integer), ("f2", DataType::Integer)],
+            ),
+        );
+
+        // Both f1 and f2 exist in both tables - should be ambiguous
+        assert!(schema.is_column_ambiguous("f1"), "f1 should be ambiguous");
+        assert!(schema.is_column_ambiguous("f2"), "f2 should be ambiguous");
+
+        // Nonexistent columns are not ambiguous (they just don't exist)
+        assert!(!schema.is_column_ambiguous("f3"));
+    }
+
+    #[test]
+    fn test_is_column_ambiguous_case_insensitive() {
+        // Column names should be matched case-insensitively
+        let test1 = CombinedSchema::from_table(
+            "test1".to_string(),
+            table_schema_with_columns("test1", vec![("F1", DataType::Integer)]),
+        );
+        let schema = CombinedSchema::combine(
+            test1,
+            "test2".to_string(),
+            table_schema_with_columns("test2", vec![("f1", DataType::Integer)]),
+        );
+
+        // F1 and f1 should be considered the same column, so it's ambiguous
+        assert!(schema.is_column_ambiguous("f1"));
+        assert!(schema.is_column_ambiguous("F1"));
+        assert!(schema.is_column_ambiguous("F1")); // Mixed case
+    }
+
+    #[test]
+    fn test_is_column_ambiguous_partial_overlap() {
+        // Two tables where only some columns overlap
+        let test1 = CombinedSchema::from_table(
+            "test1".to_string(),
+            table_schema_with_columns(
+                "test1",
+                vec![("id", DataType::Integer), ("name", DataType::Varchar { max_length: None })],
+            ),
+        );
+        let schema = CombinedSchema::combine(
+            test1,
+            "test2".to_string(),
+            table_schema_with_columns(
+                "test2",
+                vec![
+                    ("id", DataType::Integer), // Same as test1
+                    ("value", DataType::Integer), // Different from test1
+                ],
+            ),
+        );
+
+        // id is in both tables - ambiguous
+        assert!(schema.is_column_ambiguous("id"));
+
+        // name only in test1, value only in test2 - not ambiguous
+        assert!(!schema.is_column_ambiguous("name"));
+        assert!(!schema.is_column_ambiguous("value"));
+    }
+
+    #[test]
+    fn test_is_column_ambiguous_three_tables() {
+        // Three tables where a column appears in multiple (but not all)
+        let t1 = CombinedSchema::from_table(
+            "t1".to_string(),
+            table_schema_with_columns(
+                "t1",
+                vec![("a", DataType::Integer), ("b", DataType::Integer)],
+            ),
+        );
+        let t1_t2 = CombinedSchema::combine(
+            t1,
+            "t2".to_string(),
+            table_schema_with_columns(
+                "t2",
+                vec![("b", DataType::Integer), ("c", DataType::Integer)],
+            ),
+        );
+        let schema = CombinedSchema::combine(
+            t1_t2,
+            "t3".to_string(),
+            table_schema_with_columns(
+                "t3",
+                vec![("c", DataType::Integer), ("d", DataType::Integer)],
+            ),
+        );
+
+        // a only in t1 - not ambiguous
+        assert!(!schema.is_column_ambiguous("a"));
+
+        // b in t1 and t2 - ambiguous
+        assert!(schema.is_column_ambiguous("b"));
+
+        // c in t2 and t3 - ambiguous
+        assert!(schema.is_column_ambiguous("c"));
+
+        // d only in t3 - not ambiguous
+        assert!(!schema.is_column_ambiguous("d"));
     }
 }
