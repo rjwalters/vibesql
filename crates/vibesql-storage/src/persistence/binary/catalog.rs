@@ -84,6 +84,15 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                     write_string(writer, col)?;
                 }
             }
+
+            // Write quoted flag for TableIdentifier (v4+)
+            // This enables SQL:1999 case-sensitivity to be preserved across save/load
+            let quoted = db
+                .catalog
+                .get_table_identifier(table_name)
+                .map(|id| id.is_quoted())
+                .unwrap_or(false);
+            write_bool(writer, quoted)?;
         }
     }
 
@@ -309,18 +318,24 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             None
         };
 
-        table_schemas.push((table_name, columns, primary_key));
+        // Read quoted flag for TableIdentifier (v4+)
+        // For older versions, default to unquoted (case-insensitive)
+        let quoted = if version >= 4 { read_bool(reader)? } else { false };
+
+        table_schemas.push((table_name, columns, primary_key, quoted));
     }
 
     // Create tables
-    for (table_name, columns, primary_key) in table_schemas {
+    for (table_name, columns, primary_key, quoted) in table_schemas {
         let schema = if let Some(pk_cols) = primary_key {
-            vibesql_catalog::TableSchema::with_primary_key(table_name, columns, pk_cols)
+            vibesql_catalog::TableSchema::with_primary_key(table_name.clone(), columns, pk_cols)
         } else {
-            vibesql_catalog::TableSchema::new(table_name, columns)
+            vibesql_catalog::TableSchema::new(table_name.clone(), columns)
         };
 
-        db.create_table(schema)
+        // Use TableIdentifier to preserve case-sensitivity semantics
+        let identifier = vibesql_catalog::TableIdentifier::from_canonical(table_name, quoted);
+        db.create_table_with_identifier(schema, identifier)
             .map_err(|e| StorageError::NotImplemented(format!("Failed to create table: {}", e)))?;
     }
 

@@ -275,6 +275,7 @@ impl Database {
             .collect();
 
         // Views - serialize view definitions
+        // Use view_def.name to preserve original case (list_views returns normalized keys)
         let views = self
             .catalog
             .list_views()
@@ -285,7 +286,7 @@ impl Database {
                         .sql_definition
                         .clone()
                         .unwrap_or_else(|| format!("{:#?}", view_def.query));
-                    JsonView { name: view_name, definition }
+                    JsonView { name: view_def.name.clone(), definition }
                 })
             })
             .collect();
