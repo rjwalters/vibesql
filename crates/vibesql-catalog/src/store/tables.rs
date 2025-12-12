@@ -26,7 +26,7 @@ impl super::Catalog {
                 let normalized_name = if self.case_sensitive_identifiers {
                     table_schema.name.clone()
                 } else {
-                    table_schema.name.to_uppercase()
+                    table_schema.name.to_lowercase()
                 };
 
                 let mut dependencies = HashSet::new();
@@ -34,7 +34,7 @@ impl super::Catalog {
                     let parent_table = if self.case_sensitive_identifiers {
                         fk.parent_table.clone()
                     } else {
-                        fk.parent_table.to_uppercase()
+                        fk.parent_table.to_lowercase()
                     };
                     // Skip self-references - they're allowed
                     if parent_table != normalized_name {
@@ -49,7 +49,7 @@ impl super::Catalog {
         let new_table_name = if self.case_sensitive_identifiers {
             new_table.name.clone()
         } else {
-            new_table.name.to_uppercase()
+            new_table.name.to_lowercase()
         };
 
         let mut new_dependencies = HashSet::new();
@@ -57,7 +57,7 @@ impl super::Catalog {
             let parent_table = if self.case_sensitive_identifiers {
                 fk.parent_table.clone()
             } else {
-                fk.parent_table.to_uppercase()
+                fk.parent_table.to_lowercase()
             };
             // Skip self-references - they're allowed
             if parent_table != new_table_name {
@@ -226,10 +226,10 @@ impl super::Catalog {
             }
         } else {
             // Case-insensitive: find schema key by comparing normalized names
-            let normalized_name = schema_name_for_lookup.to_uppercase();
+            let normalized_name = schema_name_for_lookup.to_lowercase();
             self.schemas
                 .keys()
-                .find(|key| key.to_uppercase() == normalized_name)
+                .find(|key| key.to_lowercase() == normalized_name)
                 .cloned()
                 .ok_or_else(|| CatalogError::SchemaNotFound(schema_name_for_lookup.to_string()))?
         };
@@ -246,7 +246,7 @@ impl super::Catalog {
                 let trigger_table = if case_sensitive {
                     trigger.table_name.clone()
                 } else {
-                    trigger.table_name.to_uppercase()
+                    trigger.table_name.to_lowercase()
                 };
                 trigger_table == normalized_table
             })
@@ -293,6 +293,17 @@ impl super::Catalog {
     /// Check if table exists (supports qualified names).
     pub fn table_exists(&self, name: &str) -> bool {
         self.get_table(name).is_some()
+    }
+
+    /// Check if table exists using SQL:1999 identifier semantics.
+    ///
+    /// Uses the `quoted` flag in the identifier to determine case-sensitivity:
+    /// - Quoted identifiers are case-sensitive (match exact canonical form)
+    /// - Unquoted identifiers are case-insensitive (lowercase canonical form)
+    pub fn table_exists_by_identifier(&self, identifier: &TableIdentifier) -> bool {
+        self.schemas.get(&self.current_schema).map_or(false, |schema| {
+            schema.table_exists_by_identifier(identifier)
+        })
     }
 }
 

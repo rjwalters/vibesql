@@ -70,8 +70,7 @@ impl TableIdentifier {
     /// # SQL:1999 Behavior
     ///
     /// - If `quoted` is `false`: The canonical form is lowercase-folded for
-    ///   case-insensitive comparison. This matches SQL:1999 behavior for
-    ///   unquoted (regular) identifiers.
+    ///   case-insensitive comparison.
     ///
     /// - If `quoted` is `true`: The canonical form preserves exact case for
     ///   case-sensitive comparison. This matches SQL:1999 behavior for
@@ -97,7 +96,7 @@ impl TableIdentifier {
             // Quoted identifiers preserve exact case (SQL:1999 delimited identifiers)
             name.to_string()
         } else {
-            // Unquoted identifiers fold to lowercase (SQL:1999 regular identifiers)
+            // Unquoted identifiers fold to lowercase for case-insensitive comparison
             name.to_ascii_lowercase()
         };
 
@@ -290,7 +289,12 @@ mod tests {
         assert_eq!(map.get(&lookup2), Some(&42));
         assert_eq!(map.get(&lookup3), Some(&42));
 
-        // Should NOT find with quoted different case
+        // Quoted "users" (lowercase) SHOULD find the value because it has the same canonical form
+        // (unquoted "users" → "users", quoted "users" → "users")
+        let quoted_lower = TableIdentifier::new("users", true);
+        assert_eq!(map.get(&quoted_lower), Some(&42));
+
+        // But quoted "USERS" (uppercase) should NOT find it
         let quoted_upper = TableIdentifier::new("USERS", true);
         assert_eq!(map.get(&quoted_upper), None);
     }
@@ -299,18 +303,18 @@ mod tests {
     fn test_hashmap_quoted_keys() {
         let mut map: HashMap<TableIdentifier, i32> = HashMap::new();
 
-        // Insert with quoted identifier
+        // Insert with quoted identifier "MyTable" (preserves case)
         let key = TableIdentifier::new("MyTable", true);
         map.insert(key, 42);
 
         // Should only find with exact case (quoted)
         let exact = TableIdentifier::new("MyTable", true);
         let wrong_case = TableIdentifier::new("mytable", true);
-        let unquoted = TableIdentifier::new("MyTable", false);
+        let unquoted = TableIdentifier::new("MyTable", false); // becomes "mytable"
 
         assert_eq!(map.get(&exact), Some(&42));
-        assert_eq!(map.get(&wrong_case), None);
-        assert_eq!(map.get(&unquoted), None);
+        assert_eq!(map.get(&wrong_case), None); // "mytable" != "MyTable"
+        assert_eq!(map.get(&unquoted), None); // "mytable" != "MyTable"
     }
 
     #[test]
@@ -399,9 +403,14 @@ mod tests {
         let first = TableIdentifier::new("test", false);
         let second = TableIdentifier::new("TEST", false);
         assert_eq!(first, second); // Same table, should conflict
+        assert_eq!(first.canonical(), "test"); // Both normalize to lowercase
 
-        // CREATE TABLE "TEST" (id INT);  -- Should OK: different table
+        // CREATE TABLE "TEST" (id INT);  -- Different table from unquoted!
         let quoted = TableIdentifier::new("TEST", true);
-        assert_ne!(first, quoted); // Different table, no conflict
+        assert_ne!(first, quoted); // Different table, no conflict (quoted "TEST" != "test")
+
+        // CREATE TABLE "test" (id INT);  -- Same canonical as unquoted test
+        let quoted_lower = TableIdentifier::new("test", true);
+        assert_eq!(first, quoted_lower); // Same canonical form
     }
 }
