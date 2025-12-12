@@ -91,6 +91,15 @@ impl CombinedExpressionEvaluator<'_> {
                             return Ok(value.clone());
                         }
                     }
+
+                    // Check for ambiguous unqualified column references (SQLite compatibility)
+                    // This must be checked BEFORE resolving the column, as SQLite requires
+                    // an error when a column name exists in multiple joined tables.
+                    if self.schema.is_column_ambiguous(column) {
+                        return Err(ExecutorError::AmbiguousColumnName {
+                            column_name: column.clone(),
+                        });
+                    }
                 }
 
                 // Try to resolve in inner schema first

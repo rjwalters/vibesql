@@ -185,6 +185,14 @@ fn validate_column_ref(
     schema: &CombinedSchema,
     outer_schema: Option<&CombinedSchema>,
 ) -> Result<(), ExecutorError> {
+    // Check for ambiguous unqualified column references (SQLite compatibility)
+    // This must be checked BEFORE resolving the column, as SQLite requires
+    // an error when a column name exists in multiple joined tables.
+    // Only applies to unqualified references - qualified ones (e.g., t1.col) are never ambiguous.
+    if col_ref.table.is_none() && schema.is_column_ambiguous(&col_ref.column) {
+        return Err(ExecutorError::AmbiguousColumnName { column_name: col_ref.column.clone() });
+    }
+
     // Check if column exists in inner schema
     if schema.get_column_index(col_ref.table.as_deref(), &col_ref.column).is_some() {
         return Ok(());
