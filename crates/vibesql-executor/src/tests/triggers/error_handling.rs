@@ -18,7 +18,7 @@ fn test_trigger_failure_causes_rollback() {
         trigger_name: "failing_trigger".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
-        table_name: "USERS".to_string(),
+        table_name: "users".to_string(),
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
@@ -30,7 +30,7 @@ fn test_trigger_failure_causes_rollback() {
 
     // Try to insert - should fail due to trigger error
     let insert = vibesql_ast::InsertStmt {
-        table_name: "USERS".to_string(),
+        table_name: "users".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -53,7 +53,7 @@ fn test_trigger_failure_causes_rollback() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "USERS".to_string(),
             alias: None,
             column_aliases: None,
@@ -84,7 +84,7 @@ fn test_recursion_prevention() {
         trigger_name: "recursive_trigger".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
-        table_name: "USERS".to_string(),
+        table_name: "users".to_string(),
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
@@ -96,7 +96,7 @@ fn test_recursion_prevention() {
 
     // Try to insert - should fail with recursion depth error
     let insert = vibesql_ast::InsertStmt {
-        table_name: "USERS".to_string(),
+        table_name: "users".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

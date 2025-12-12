@@ -153,13 +153,13 @@ impl IndexManager {
     /// This is an O(n) operation over all indexes but is useful for
     /// optimizing bulk insert operations when no indexes need updating.
     pub fn has_indexes_for_table(&self, table_name: &str) -> bool {
-        let search_name_upper = table_name.to_uppercase();
-        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
+        let search_name_lower = table_name.to_lowercase();
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
 
         self.indexes.values().any(|metadata| {
-            let stored_name_upper = metadata.table_name.to_uppercase();
+            let stored_name_lower = metadata.table_name.to_lowercase();
             let stored_table_only =
-                stored_name_upper.rsplit('.').next().unwrap_or(&stored_name_upper);
+                stored_name_lower.rsplit('.').next().unwrap_or(&stored_name_lower);
             stored_table_only == search_table_only
         })
     }

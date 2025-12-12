@@ -28,13 +28,13 @@ fn test_parse_simple_join() {
 
                     // Left should be users table
                     match **left {
-                        vibesql_ast::FromClause::Table { ref name, .. } if name == "USERS" => {} /* Success */
+                        vibesql_ast::FromClause::Table { ref name, .. } if name == "users" => {} /* Success */
                         _ => panic!("Expected left table to be 'users'"),
                     }
 
                     // Right should be orders table
                     match **right {
-                        vibesql_ast::FromClause::Table { ref name, .. } if name == "ORDERS" => {} /* Success */
+                        vibesql_ast::FromClause::Table { ref name, .. } if name == "orders" => {} /* Success */
                         _ => panic!("Expected right table to be 'orders'"),
                     }
 
@@ -91,7 +91,7 @@ fn test_parse_comma_separated_from() {
                     // Left should be tab0 table
                     match **left {
                         vibesql_ast::FromClause::Table { ref name, alias: None, .. }
-                            if name == "TAB0" => {} /* Success */
+                            if name == "tab0" => {} /* Success */
                         _ => panic!("Expected left table to be 'tab0'"),
                     }
 
@@ -99,7 +99,7 @@ fn test_parse_comma_separated_from() {
                     match **right {
                         vibesql_ast::FromClause::Table {
                             ref name, alias: Some(ref alias), ..
-                        } if name == "TAB1" && alias == "COR0" => {} // Success
+                        } if name == "tab1" && alias == "cor0" => {} // Success
                         _ => panic!("Expected right table to be 'tab1' with alias 'cor0'"),
                     }
 
@@ -212,7 +212,7 @@ fn test_parse_join_using_single_column() {
                 assert!(using_columns.is_some());
                 let cols = using_columns.as_ref().unwrap();
                 assert_eq!(cols.len(), 1);
-                assert_eq!(cols[0].to_uppercase(), "ID");
+                assert_eq!(cols[0], "id");
             }
             _ => panic!("Expected JOIN"),
         },
@@ -275,7 +275,7 @@ fn test_parse_parenthesized_join() {
                 vibesql_ast::FromClause::Join { left, right, .. } => {
                     // Left should be t1
                     match **left {
-                        vibesql_ast::FromClause::Table { ref name, .. } if name == "T1" => {}
+                        vibesql_ast::FromClause::Table { ref name, .. } if name == "t1" => {}
                         _ => panic!("Expected left table to be t1"),
                     }
                     // Right should be a JOIN

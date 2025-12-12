@@ -161,8 +161,8 @@ fn test_select_column_names_and_values_issue_3810() {
     let result = executor.execute("SELECT 1 as my_column, 'hello' as greeting").unwrap();
 
     // Column names should be the aliases, not "Column"
-    // Note: SQL standard normalizes unquoted identifiers to uppercase
-    assert_eq!(result.columns, vec!["MY_COLUMN", "GREETING"]);
+    // Note: SQL:1999 normalizes unquoted identifiers to lowercase
+    assert_eq!(result.columns, vec!["my_column", "greeting"]);
 
     // Values should be display format, not debug format
     assert_eq!(result.rows.len(), 1);
@@ -187,8 +187,8 @@ fn test_select_column_names_from_table() {
 
     let result = executor.execute("SELECT id, name FROM users").unwrap();
 
-    // Column names should match the table schema
-    assert_eq!(result.columns, vec!["ID", "NAME"]);
+    // Column names should match the table schema (lowercase per SQL:1999)
+    assert_eq!(result.columns, vec!["id", "name"]);
 
     // Values should be display format
     assert_eq!(result.rows[0][0], Some("1".to_string()));
@@ -204,8 +204,8 @@ fn test_select_wildcard_column_names() {
 
     let result = executor.execute("SELECT * FROM products").unwrap();
 
-    // Column names should be actual column names from table
-    assert_eq!(result.columns, vec!["SKU", "PRICE"]);
+    // Column names should be actual column names from table (lowercase per SQL:1999)
+    assert_eq!(result.columns, vec!["sku", "price"]);
     assert_eq!(result.rows[0][0], Some("ABC123".to_string()));
     assert_eq!(result.rows[0][1], Some("99".to_string()));
 }
@@ -240,8 +240,8 @@ fn test_show_tables_like_pattern() {
     executor.execute("CREATE TABLE user_roles (id INT PRIMARY KEY)").unwrap();
     executor.execute("CREATE TABLE products (id INT PRIMARY KEY)").unwrap();
 
-    let result = executor.execute("SHOW TABLES LIKE 'USER%'").unwrap();
-    // Should match USERS and USER_ROLES
+    let result = executor.execute("SHOW TABLES LIKE 'user%'").unwrap();
+    // Should match users and user_roles (lowercase per SQL:1999)
     assert_eq!(result.row_count, 2);
 }
 
@@ -288,8 +288,8 @@ fn test_show_columns_like_pattern() {
         .execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), nickname VARCHAR(50))")
         .unwrap();
 
-    let result = executor.execute("SHOW COLUMNS FROM users LIKE 'N%'").unwrap();
-    // Should match NAME and NICKNAME
+    let result = executor.execute("SHOW COLUMNS FROM users LIKE 'n%'").unwrap();
+    // Should match name and nickname (lowercase per SQL:1999)
     assert_eq!(result.row_count, 2);
 }
 
@@ -333,7 +333,7 @@ fn test_show_create_table() {
     // The CREATE TABLE statement should be in the second column
     let create_stmt = result.rows[0][1].as_ref().expect("CREATE TABLE output should not be NULL");
     assert!(create_stmt.contains("CREATE TABLE"));
-    assert!(create_stmt.contains("USERS")); // Table name is normalized to uppercase
+    assert!(create_stmt.contains("users")); // Table name is normalized to lowercase per SQL:1999
 }
 
 #[test]
@@ -362,8 +362,8 @@ fn test_describe_with_column_pattern() {
         .execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), email VARCHAR(200))")
         .unwrap();
 
-    let result = executor.execute("DESCRIBE users 'N%'").unwrap();
-    // Should only show NAME column (matching N%)
+    let result = executor.execute("DESCRIBE users 'n%'").unwrap();
+    // Should only show name column (lowercase per SQL:1999)
     assert_eq!(result.row_count, 1);
 }
 

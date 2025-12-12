@@ -15,7 +15,8 @@ impl Parser {
             }
             Token::Keyword(kw) if kw.can_be_identifier() => {
                 // Allow certain keywords (MONTH, YEAR, DAY, etc.) to be used as column names
-                let name = format!("{}", kw); // Uses Display impl, returns uppercase
+                // SQL:1999 normalizes unquoted identifiers to lowercase
+                let name = format!("{}", kw).to_lowercase();
                 self.advance();
                 name
             }
@@ -124,7 +125,8 @@ impl Parser {
                 }
                 Token::Keyword(kw) => {
                     // Allow keywords as column names when qualified (e.g., table.year)
-                    let column = kw.to_string();
+                    // SQL:1999 normalizes unquoted identifiers to lowercase
+                    let column = kw.to_string().to_lowercase();
                     self.advance();
                     column
                 }

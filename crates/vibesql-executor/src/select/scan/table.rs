@@ -32,6 +32,7 @@ use crate::{
         execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table,
     },
 };
+use vibesql_catalog::TableIdentifier;
 
 /// Minimum row count to benefit from SIMD columnar filtering
 /// Below this threshold, row-by-row filtering is faster due to conversion overhead
@@ -72,6 +73,50 @@ fn apply_column_aliases(
         return Ok(vibesql_catalog::TableSchema::new(schema.name.clone(), renamed_columns));
     }
     Ok(schema)
+}
+
+/// Execute a table scan with SQL:1999 identifier semantics
+///
+/// This is the new entry point that properly handles case-sensitivity based on
+/// whether the identifier was quoted in the original SQL.
+///
+/// # Arguments
+/// * `identifier` - TableIdentifier with proper case semantics
+/// * `alias` - Optional table alias
+/// * `column_aliases` - SQL:1999 E051-09: Optional column renaming (e.g., `FROM t AS a (x, y)`)
+/// * `cte_results` - CTE context for the query
+/// * `database` - Database reference
+/// * `where_clause` - Optional WHERE clause for filtering
+/// * `order_by` - Optional ORDER BY clause for index selection
+/// * `limit` - Optional LIMIT value for early termination optimization (#3253)
+/// * `outer_row` - Outer row for correlated subqueries
+/// * `outer_schema` - Outer schema for correlated subqueries
+pub(crate) fn execute_table_scan_with_identifier(
+    identifier: &TableIdentifier,
+    alias: Option<&String>,
+    column_aliases: Option<&Vec<String>>,
+    cte_results: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
+    where_clause: Option<&vibesql_ast::Expression>,
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    limit: Option<usize>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
+) -> Result<super::FromResult, ExecutorError> {
+    // Use the canonical form for table lookup (lowercase for unquoted, exact for quoted)
+    // CTE lookup in execute_table_scan is already case-insensitive
+    execute_table_scan(
+        identifier.canonical(),
+        alias,
+        column_aliases,
+        cte_results,
+        database,
+        where_clause,
+        order_by,
+        limit,
+        outer_row,
+        outer_schema,
+    )
 }
 
 /// Execute a table scan (handles CTEs, views, and regular tables)

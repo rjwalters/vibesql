@@ -29,8 +29,8 @@ fn test_table_already_exists_error() {
 
         if let Err(ExecutorError::TableAlreadyExists(name)) = result {
             assert!(
-                name == "USERS" || name == "public.USERS",
-                "Expected USERS or public.USERS, got: {}",
+                name == "users" || name == "public.users",
+                "Expected users or public.users, got: {}",
                 name
             );
             let error_msg = format!("{}", ExecutorError::TableAlreadyExists(name));
@@ -53,7 +53,7 @@ fn test_table_not_found_error() {
         assert!(result.is_err(), "Should fail with TableNotFound");
 
         if let Err(ExecutorError::TableNotFound(name)) = result {
-            assert_eq!(name, "NONEXISTENT_TABLE");
+            assert_eq!(name, "nonexistent_table");
             let error_msg = format!("{}", ExecutorError::TableNotFound(name));
             assert!(error_msg.contains("not found"));
         } else {
@@ -155,7 +155,7 @@ fn test_schema_already_exists_error() {
                 assert!(error_msg.contains("already exists"));
             }
             Err(ExecutorError::StorageError(msg)) if msg.contains("SchemaAlreadyExists") => {
-                assert!(msg.contains("MYSCHEMA"));
+                assert!(msg.contains("myschema"));
             }
             other => panic!("Expected SchemaAlreadyExists error, got: {:?}", other),
         }
@@ -179,7 +179,7 @@ fn test_schema_not_found_error() {
                 assert!(error_msg.contains("not found"));
             }
             Err(ExecutorError::StorageError(msg)) if msg.contains("SchemaNotFound") => {
-                assert!(msg.contains("NONEXISTENT_SCHEMA"));
+                assert!(msg.contains("nonexistent_schema"));
             }
             other => panic!("Expected SchemaNotFound error, got: {:?}", other),
         }
@@ -218,7 +218,7 @@ fn test_schema_not_empty_error() {
                 assert!(error_msg.contains("not empty"));
             }
             Err(ExecutorError::StorageError(msg)) if msg.contains("SchemaNotEmpty") => {
-                assert!(msg.contains("TESTSCHEMA"));
+                assert!(msg.contains("testschema"));
             }
             other => panic!("Expected SchemaNotEmpty error, got: {:?}", other),
         }

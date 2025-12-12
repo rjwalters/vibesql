@@ -18,7 +18,7 @@ fn test_parse_prepare_from_string() {
     match result.unwrap() {
         Statement::Prepare(stmt) => {
             // Identifiers are normalized to uppercase
-            assert_eq!(stmt.name, "MY_SELECT");
+            assert_eq!(stmt.name, "my_select");
             assert!(stmt.param_types.is_none());
             match stmt.statement {
                 PreparedStatementBody::SqlString(sql) => {
@@ -37,7 +37,7 @@ fn test_parse_prepare_as_select() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {
-            assert_eq!(stmt.name, "MY_STMT");
+            assert_eq!(stmt.name, "my_stmt");
             assert!(stmt.param_types.is_none());
             match stmt.statement {
                 PreparedStatementBody::ParsedStatement(inner) => {
@@ -57,11 +57,11 @@ fn test_parse_prepare_with_param_types() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {
-            assert_eq!(stmt.name, "MY_INSERT");
+            assert_eq!(stmt.name, "my_insert");
             let param_types = stmt.param_types.expect("Expected param_types");
             assert_eq!(param_types.len(), 2);
-            assert_eq!(param_types[0], "INT");
-            assert_eq!(param_types[1], "VARCHAR");
+            assert_eq!(param_types[0], "int");
+            assert_eq!(param_types[1], "varchar");
         }
         other => panic!("Expected Prepare, got {:?}", other),
     }
@@ -74,7 +74,7 @@ fn test_parse_prepare_as_insert() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {
-            assert_eq!(stmt.name, "MY_INSERT");
+            assert_eq!(stmt.name, "my_insert");
             match stmt.statement {
                 PreparedStatementBody::ParsedStatement(inner) => {
                     assert!(matches!(*inner, Statement::Insert(_)));
@@ -92,7 +92,7 @@ fn test_parse_prepare_as_update() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {
-            assert_eq!(stmt.name, "MY_UPDATE");
+            assert_eq!(stmt.name, "my_update");
             match stmt.statement {
                 PreparedStatementBody::ParsedStatement(inner) => {
                     assert!(matches!(*inner, Statement::Update(_)));
@@ -110,7 +110,7 @@ fn test_parse_prepare_as_delete() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Prepare(stmt) => {
-            assert_eq!(stmt.name, "MY_DELETE");
+            assert_eq!(stmt.name, "my_delete");
             match stmt.statement {
                 PreparedStatementBody::ParsedStatement(inner) => {
                     assert!(matches!(*inner, Statement::Delete(_)));
@@ -132,7 +132,7 @@ fn test_parse_execute_no_params() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Execute(stmt) => {
-            assert_eq!(stmt.name, "MY_SELECT");
+            assert_eq!(stmt.name, "my_select");
             assert!(stmt.params.is_empty());
         }
         other => panic!("Expected Execute, got {:?}", other),
@@ -145,7 +145,7 @@ fn test_parse_execute_using_params() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Execute(stmt) => {
-            assert_eq!(stmt.name, "MY_INSERT");
+            assert_eq!(stmt.name, "my_insert");
             assert_eq!(stmt.params.len(), 2);
         }
         other => panic!("Expected Execute, got {:?}", other),
@@ -158,7 +158,7 @@ fn test_parse_execute_parenthesized_params() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Execute(stmt) => {
-            assert_eq!(stmt.name, "MY_INSERT");
+            assert_eq!(stmt.name, "my_insert");
             assert_eq!(stmt.params.len(), 2);
         }
         other => panic!("Expected Execute, got {:?}", other),
@@ -171,7 +171,7 @@ fn test_parse_execute_empty_parentheses() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Execute(stmt) => {
-            assert_eq!(stmt.name, "MY_SELECT");
+            assert_eq!(stmt.name, "my_select");
             assert!(stmt.params.is_empty());
         }
         other => panic!("Expected Execute, got {:?}", other),
@@ -188,7 +188,7 @@ fn test_parse_deallocate_name() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Deallocate(stmt) => match stmt.target {
-            DeallocateTarget::Name(name) => assert_eq!(name, "MY_SELECT"),
+            DeallocateTarget::Name(name) => assert_eq!(name, "my_select"),
             _ => panic!("Expected Name target"),
         },
         other => panic!("Expected Deallocate, got {:?}", other),
@@ -201,7 +201,7 @@ fn test_parse_deallocate_prepare_name() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     match result.unwrap() {
         Statement::Deallocate(stmt) => match stmt.target {
-            DeallocateTarget::Name(name) => assert_eq!(name, "MY_SELECT"),
+            DeallocateTarget::Name(name) => assert_eq!(name, "my_select"),
             _ => panic!("Expected Name target"),
         },
         other => panic!("Expected Deallocate, got {:?}", other),

@@ -12,7 +12,7 @@ fn test_parse_set_catalog() {
 
     match stmt {
         vibesql_ast::Statement::SetCatalog(set_stmt) => {
-            assert_eq!(set_stmt.catalog_name, "MY_CATALOG");
+            assert_eq!(set_stmt.catalog_name, "my_catalog");
         }
         _ => panic!("Expected SetCatalog statement"),
     }

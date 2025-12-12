@@ -7,28 +7,28 @@ fn test_tokenize_simple_identifier() {
     let mut lexer = Lexer::new("users");
     let tokens = lexer.tokenize().unwrap();
     // Regular identifiers are normalized to uppercase
-    assert_eq!(tokens[0], Token::Identifier("USERS".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("users".to_string()));
 }
 
 #[test]
 fn test_tokenize_identifier_with_underscore() {
     let mut lexer = Lexer::new("user_id");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("USER_ID".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("user_id".to_string()));
 }
 
 #[test]
 fn test_tokenize_identifier_with_numbers() {
     let mut lexer = Lexer::new("table123");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("TABLE123".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("table123".to_string()));
 }
 
 #[test]
 fn test_tokenize_identifier_starting_with_underscore() {
     let mut lexer = Lexer::new("_internal");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("_INTERNAL".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("_internal".to_string()));
 }
 
 // ============================================================================
@@ -45,9 +45,9 @@ fn test_tokenize_delimited_identifier_simple() {
 
 #[test]
 fn test_tokenize_delimited_identifier_uppercase() {
-    let mut lexer = Lexer::new(r#""A""#);
+    let mut lexer = Lexer::new(r#""a""#);
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("A".to_string()));
+    assert_eq!(tokens[0], Token::DelimitedIdentifier("a".to_string()));
 }
 
 #[test]
@@ -66,18 +66,18 @@ fn test_tokenize_delimited_identifier_with_spaces() {
 
 #[test]
 fn test_tokenize_delimited_identifier_reserved_word() {
-    let mut lexer = Lexer::new(r#""SELECT""#);
+    let mut lexer = Lexer::new(r#""select""#);
     let tokens = lexer.tokenize().unwrap();
     // Reserved words can be used as delimited identifiers
-    assert_eq!(tokens[0], Token::DelimitedIdentifier("SELECT".to_string()));
+    assert_eq!(tokens[0], Token::DelimitedIdentifier("select".to_string()));
 }
 
 #[test]
 fn test_tokenize_delimited_identifier_with_escaped_quotes() {
-    let mut lexer = Lexer::new(r#""O""Reilly""#);
+    let mut lexer = Lexer::new(r#""o""Reilly""#);
     let tokens = lexer.tokenize().unwrap();
     // Doubled quotes become single quote in the identifier
-    assert_eq!(tokens[0], Token::DelimitedIdentifier(r#"O"Reilly"#.to_string()));
+    assert_eq!(tokens[0], Token::DelimitedIdentifier(r#"o"Reilly"#.to_string()));
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_tokenize_mixed_identifiers() {
     assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
     assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
     assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::Identifier("REGULARCOLUMN".to_string()));
+    assert_eq!(tokens[3], Token::Identifier("regularcolumn".to_string()));
     assert_eq!(tokens[4], Token::Keyword(Keyword::From));
     assert_eq!(tokens[5], Token::Keyword(Keyword::Table)); // "table" is a reserved keyword
 }
@@ -124,6 +124,7 @@ fn test_tokenize_backtick_identifier_simple() {
 fn test_tokenize_backtick_identifier_uppercase() {
     let mut lexer = Lexer::new("`A`");
     let tokens = lexer.tokenize().unwrap();
+    // Delimited identifiers preserve case per SQL:1999
     assert_eq!(tokens[0], Token::DelimitedIdentifier("A".to_string()));
 }
 
@@ -152,7 +153,7 @@ fn test_tokenize_backtick_identifier_with_special_chars() {
 fn test_tokenize_backtick_identifier_reserved_word() {
     let mut lexer = Lexer::new("`SELECT`");
     let tokens = lexer.tokenize().unwrap();
-    // Reserved words can be used as backtick identifiers
+    // Reserved words can be used as delimited identifiers, preserving case
     assert_eq!(tokens[0], Token::DelimitedIdentifier("SELECT".to_string()));
 }
 
@@ -187,7 +188,7 @@ fn test_tokenize_mixed_backtick_and_regular_identifiers() {
     assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
     assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
     assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::Identifier("REGULARCOLUMN".to_string()));
+    assert_eq!(tokens[3], Token::Identifier("regularcolumn".to_string()));
     assert_eq!(tokens[4], Token::Keyword(Keyword::From));
     assert_eq!(tokens[5], Token::DelimitedIdentifier("table_name".to_string()));
 }

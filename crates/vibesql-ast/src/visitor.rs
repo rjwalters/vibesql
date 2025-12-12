@@ -1067,8 +1067,8 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
 /// Transform a FROM clause
 fn transform_from_clause<V: ExpressionMutVisitor>(visitor: &mut V, from: FromClause) -> FromClause {
     match from {
-        FromClause::Table { name, alias, column_aliases } => {
-            FromClause::Table { name, alias, column_aliases }
+        FromClause::Table { name, alias, column_aliases, quoted } => {
+            FromClause::Table { name, alias, column_aliases, quoted }
         }
         FromClause::Subquery { query, alias, column_aliases } => FromClause::Subquery {
             query: Box::new(transform_select(visitor, *query)),

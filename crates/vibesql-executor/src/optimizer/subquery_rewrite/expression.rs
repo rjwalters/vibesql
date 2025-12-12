@@ -380,11 +380,14 @@ pub(super) fn rewrite_from_clause(
     rewrite_subquery_fn: &impl Fn(&SelectStmt) -> SelectStmt,
 ) -> vibesql_ast::FromClause {
     match from {
-        vibesql_ast::FromClause::Table { name, alias, .. } => vibesql_ast::FromClause::Table {
-            name: name.clone(),
-            alias: alias.clone(),
-            column_aliases: None,
-        },
+        vibesql_ast::FromClause::Table { name, alias, quoted, .. } => {
+            vibesql_ast::FromClause::Table {
+                name: name.clone(),
+                alias: alias.clone(),
+                column_aliases: None,
+                quoted: *quoted,
+            }
+        }
         vibesql_ast::FromClause::Join {
             left,
             right,

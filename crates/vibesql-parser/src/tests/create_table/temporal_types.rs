@@ -234,10 +234,10 @@ fn test_temporal_keywords_as_column_names() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 4);
-            assert_eq!(create.columns[0].name, "TIMESTAMP");
-            assert_eq!(create.columns[1].name, "DATE");
-            assert_eq!(create.columns[2].name, "TIME");
-            assert_eq!(create.columns[3].name, "INTERVAL");
+            assert_eq!(create.columns[0].name, "timestamp");
+            assert_eq!(create.columns[1].name, "date");
+            assert_eq!(create.columns[2].name, "time");
+            assert_eq!(create.columns[3].name, "interval");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -263,9 +263,9 @@ fn test_timestamp_column_with_constraints() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 3);
-            assert_eq!(create.columns[0].name, "RUN_ID");
-            assert_eq!(create.columns[1].name, "TIMESTAMP");
-            assert_eq!(create.columns[2].name, "WORKERS");
+            assert_eq!(create.columns[0].name, "run_id");
+            assert_eq!(create.columns[1].name, "timestamp");
+            assert_eq!(create.columns[2].name, "workers");
 
             // Verify timestamp column has NOT NULL
             assert!(!create.columns[1].nullable, "timestamp column should be NOT NULL");
@@ -282,7 +282,7 @@ fn test_date_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "DATE");
+            assert_eq!(create.columns[0].name, "date");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -296,7 +296,7 @@ fn test_time_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "TIME");
+            assert_eq!(create.columns[0].name, "time");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -310,7 +310,7 @@ fn test_interval_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "INTERVAL");
+            assert_eq!(create.columns[0].name, "interval");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -363,7 +363,7 @@ fn test_parse_create_table_datetime_with_constraints() {
             }
 
             // Verify second column: c2 DATETIME NULL (uppercased because not in backticks)
-            assert_eq!(create.columns[1].name, "C2");
+            assert_eq!(create.columns[1].name, "c2");
             match create.columns[1].data_type {
                 vibesql_types::DataType::Timestamp { with_timezone: false } => {} // Success
                 _ => panic!(
@@ -389,7 +389,7 @@ fn test_parse_create_table_year() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             match &create.columns[0].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "year" => {} /* Success */
                 _ => panic!(
                     "Expected YEAR to map to UserDefined type, got {:?}",
                     create.columns[0].data_type
@@ -415,7 +415,7 @@ fn test_parse_create_table_year_with_constraints() {
             // Verify first column: c1 YEAR KEY
             assert_eq!(create.columns[0].name, "c1");
             match &create.columns[0].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "year" => {} /* Success */
                 _ => panic!(
                     "Expected c1 to be YEAR (UserDefined), got {:?}",
                     create.columns[0].data_type
@@ -423,9 +423,9 @@ fn test_parse_create_table_year_with_constraints() {
             }
 
             // Verify second column: c2 YEAR NULL (uppercased because not in backticks)
-            assert_eq!(create.columns[1].name, "C2");
+            assert_eq!(create.columns[1].name, "c2");
             match &create.columns[1].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "year" => {} /* Success */
                 _ => panic!(
                     "Expected c2 to be YEAR (UserDefined), got {:?}",
                     create.columns[1].data_type
@@ -449,7 +449,7 @@ fn test_type_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "TYPE");
+            assert_eq!(create.columns[0].name, "type");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -464,7 +464,7 @@ fn test_sql_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "SQL");
+            assert_eq!(create.columns[0].name, "sql");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -488,11 +488,11 @@ fn test_type_and_sql_as_column_names_together() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 5);
-            assert_eq!(create.columns[0].name, "TYPE");
-            assert_eq!(create.columns[1].name, "NAME");
-            assert_eq!(create.columns[2].name, "TBL_NAME");
-            assert_eq!(create.columns[3].name, "ROOTPAGE");
-            assert_eq!(create.columns[4].name, "SQL");
+            assert_eq!(create.columns[0].name, "type");
+            assert_eq!(create.columns[1].name, "name");
+            assert_eq!(create.columns[2].name, "tbl_name");
+            assert_eq!(create.columns[3].name, "rootpage");
+            assert_eq!(create.columns[4].name, "sql");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -512,7 +512,7 @@ fn test_type_column_with_constraints() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[1].name, "TYPE");
+            assert_eq!(create.columns[1].name, "type");
             assert!(!create.columns[1].nullable, "type column should be NOT NULL");
         }
         _ => panic!("Expected CREATE TABLE statement"),

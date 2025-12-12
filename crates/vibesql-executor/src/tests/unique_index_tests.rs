@@ -101,7 +101,7 @@ fn test_unique_index_basic_insert_enforcement() {
     match result.unwrap_err() {
         vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
             assert!(msg.contains("UNIQUE constraint"));
-            assert!(msg.contains("IDX_USERS_EMAIL")); // Index names are normalized to uppercase
+            assert!(msg.contains("idx_users_email")); // Index names are normalized to lowercase
         }
         e => panic!("Expected UniqueConstraintViolation, got {:?}", e),
     }
@@ -245,7 +245,7 @@ fn test_unique_index_composite_key() {
     match result.unwrap_err() {
         vibesql_storage::StorageError::UniqueConstraintViolation(msg) => {
             assert!(msg.contains("UNIQUE constraint"));
-            assert!(msg.contains("IDX_USERS_NAME")); // Index names are normalized to uppercase
+            assert!(msg.contains("idx_users_name")); // Index names are normalized to lowercase
         }
         e => panic!("Expected UniqueConstraintViolation, got {:?}", e),
     }
@@ -364,7 +364,7 @@ fn test_unique_index_update_enforcement() {
             eprintln!("Error message: {}", msg);
             assert!(msg.contains("UNIQUE constraint"), "Message: {}", msg);
             assert!(
-                msg.contains("IDX_USERS_EMAIL") || msg.contains("idx_users_email"),
+                msg.contains("idx_users_email") || msg.contains("idx_users_email"),
                 "Message: {}",
                 msg
             ); // Index names should be normalized to uppercase

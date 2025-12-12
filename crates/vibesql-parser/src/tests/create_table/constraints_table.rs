@@ -26,8 +26,8 @@ fn test_parse_create_table_with_table_level_primary_key() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 2);
-                    assert_eq!(columns[0].column_name, "ORDER_ID");
-                    assert_eq!(columns[1].column_name, "PRODUCT_ID");
+                    assert_eq!(columns[0].column_name, "order_id");
+                    assert_eq!(columns[1].column_name, "product_id");
                 }
                 _ => panic!("Expected PRIMARY KEY constraint"),
             }
@@ -64,10 +64,10 @@ fn test_parse_create_table_with_foreign_key() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0], "CUSTOMER_ID");
-                    assert_eq!(references_table, "CUSTOMERS");
+                    assert_eq!(columns[0], "customer_id");
+                    assert_eq!(references_table, "customers");
                     assert_eq!(references_columns.len(), 1);
-                    assert_eq!(references_columns[0], "ID");
+                    assert_eq!(references_columns[0], "id");
                     assert!(on_delete.is_none());
                     assert!(on_update.is_none());
                 }
@@ -105,8 +105,8 @@ fn test_parse_create_table_with_foreign_key_on_delete_update() {
                         },
                     ..
                 } => {
-                    assert_eq!(table, "PARENT");
-                    assert_eq!(col, "ID");
+                    assert_eq!(table, "parent");
+                    assert_eq!(col, "id");
                     assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
                     assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::SetNull));
                 }
@@ -145,10 +145,10 @@ fn test_parse_create_table_with_table_foreign_key_on_delete_update() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0], "CUSTOMER_ID");
-                    assert_eq!(references_table, "CUSTOMERS");
+                    assert_eq!(columns[0], "customer_id");
+                    assert_eq!(references_table, "customers");
                     assert_eq!(references_columns.len(), 1);
-                    assert_eq!(references_columns[0], "ID");
+                    assert_eq!(references_columns[0], "id");
                     assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::NoAction));
                     assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::SetDefault));
                 }
@@ -210,8 +210,8 @@ fn test_parse_create_table_with_table_level_unique() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 2);
-                    assert_eq!(columns[0].column_name, "EMAIL");
-                    assert_eq!(columns[1].column_name, "USERNAME");
+                    assert_eq!(columns[0].column_name, "email");
+                    assert_eq!(columns[1].column_name, "username");
                 }
                 _ => panic!("Expected UNIQUE constraint"),
             }
@@ -256,7 +256,7 @@ fn test_parse_create_table_with_indexed_column_prefix() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T7");
+            assert_eq!(create.table_name, "t7");
             assert_eq!(create.table_constraints.len(), 1);
             match &create.table_constraints[0] {
                 vibesql_ast::TableConstraint {
@@ -264,7 +264,7 @@ fn test_parse_create_table_with_indexed_column_prefix() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0].column_name, "A");
+                    assert_eq!(columns[0].column_name, "a");
                     assert_eq!(columns[0].prefix_length, Some(1));
                 }
                 _ => panic!("Expected UNIQUE constraint"),
@@ -289,7 +289,7 @@ fn test_parse_create_table_with_primary_key_prefix() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0].column_name, "NAME");
+                    assert_eq!(columns[0].column_name, "name");
                     assert_eq!(columns[0].prefix_length, Some(50));
                 }
                 _ => panic!("Expected PRIMARY KEY constraint"),
@@ -307,10 +307,10 @@ fn test_parse_create_index_with_column_prefix() {
 
     match stmt {
         vibesql_ast::Statement::CreateIndex(create_idx) => {
-            assert_eq!(create_idx.index_name, "IDX1");
-            assert_eq!(create_idx.table_name, "USERS");
+            assert_eq!(create_idx.index_name, "idx1");
+            assert_eq!(create_idx.table_name, "users");
             assert_eq!(create_idx.columns.len(), 1);
-            assert_eq!(create_idx.columns[0].column_name, "EMAIL");
+            assert_eq!(create_idx.columns[0].column_name, "email");
             assert_eq!(create_idx.columns[0].prefix_length, Some(50));
         }
         _ => panic!("Expected CREATE INDEX statement"),

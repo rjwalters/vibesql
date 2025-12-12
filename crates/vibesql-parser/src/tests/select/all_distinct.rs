@@ -62,7 +62,7 @@ fn test_parse_select_all_from_table() {
             assert!(select.from.is_some());
             match &select.from.as_ref().unwrap() {
                 vibesql_ast::FromClause::Table { name, alias, .. } => {
-                    assert_eq!(name, "T");
+                    assert_eq!(name, "t");
                     assert!(alias.is_none());
                 }
                 _ => panic!("Expected table in FROM clause"),

@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(prepared.param_count(), 0);
         // Arena parser stores table names in uppercase
         assert!(
-            prepared.tables().contains("USERS"),
+            prepared.tables().contains("users"),
             "Expected 'USERS' in tables {:?}",
             prepared.tables()
         );
@@ -543,7 +543,7 @@ mod tests {
 
         assert_eq!(prepared.param_count(), 1);
         // Arena parser stores table names in uppercase
-        assert!(prepared.tables().contains("USERS"));
+        assert!(prepared.tables().contains("users"));
     }
 
     #[test]
@@ -574,7 +574,7 @@ mod tests {
 
         let tables = prepared.tables();
         // Arena parser stores table names in uppercase
-        assert!(tables.contains("USERS"), "Expected 'USERS' in {:?}", tables);
-        assert!(tables.contains("ORDERS"), "Expected 'ORDERS' in {:?}", tables);
+        assert!(tables.contains("users"), "Expected 'USERS' in {:?}", tables);
+        assert!(tables.contains("orders"), "Expected 'ORDERS' in {:?}", tables);
     }
 }

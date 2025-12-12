@@ -19,10 +19,10 @@ fn test_create_schema_with_embedded_table() {
         assert!(result.is_ok(), "Failed to execute: {:?}", result.err());
 
         // Verify schema was created
-        assert!(db.catalog.schema_exists("TEST_SCHEMA"));
+        assert!(db.catalog.schema_exists("test_schema"));
 
         // Verify table was created in the schema
-        assert!(db.catalog.table_exists("TEST_SCHEMA.USERS"));
+        assert!(db.catalog.table_exists("test_schema.users"));
     } else {
         panic!("Expected CreateSchema statement");
     }
@@ -42,11 +42,11 @@ fn test_create_schema_with_multiple_tables() {
         assert!(result.is_ok(), "Failed to execute: {:?}", result.err());
 
         // Verify schema was created
-        assert!(db.catalog.schema_exists("MYSCHEMA"));
+        assert!(db.catalog.schema_exists("myschema"));
 
         // Verify both tables were created
-        assert!(db.catalog.table_exists("MYSCHEMA.T1"));
-        assert!(db.catalog.table_exists("MYSCHEMA.T2"));
+        assert!(db.catalog.table_exists("myschema.t1"));
+        assert!(db.catalog.table_exists("myschema.t2"));
     } else {
         panic!("Expected CreateSchema statement");
     }
@@ -66,7 +66,7 @@ fn test_create_schema_no_elements_still_works() {
         assert!(result.is_ok(), "Failed to execute: {:?}", result.err());
 
         // Verify schema was created
-        assert!(db.catalog.schema_exists("SIMPLE"));
+        assert!(db.catalog.schema_exists("simple"));
     } else {
         panic!("Expected CreateSchema statement");
     }
@@ -82,8 +82,8 @@ fn test_create_schema_rollback_on_first_element_failure() {
     if let Statement::CreateSchema(create_schema_stmt) = stmt {
         let result = SchemaExecutor::execute_create_schema(&create_schema_stmt, &mut db);
         assert!(result.is_ok());
-        assert!(db.catalog.schema_exists("APP"));
-        assert!(db.catalog.table_exists("APP.ITEMS"));
+        assert!(db.catalog.schema_exists("app"));
+        assert!(db.catalog.table_exists("app.items"));
     }
 
     // Now try to create a schema with a table that conflicts with the existing table
@@ -98,11 +98,11 @@ fn test_create_schema_rollback_on_first_element_failure() {
         // Check if it failed (depends on whether catalog validates duplicate table names)
         if result.is_err() {
             // Verify schema was rolled back if error occurred
-            assert!(!db.catalog.schema_exists("APP2"), "Schema should be rolled back");
+            assert!(!db.catalog.schema_exists("app2"), "Schema should be rolled back");
         } else {
             // If no error, both schemas should exist with separate tables
-            assert!(db.catalog.schema_exists("APP2"));
-            assert!(db.catalog.table_exists("APP2.ITEMS"));
+            assert!(db.catalog.schema_exists("app2"));
+            assert!(db.catalog.table_exists("app2.items"));
         }
     } else {
         panic!("Expected CreateSchema statement");
@@ -152,9 +152,9 @@ fn test_create_schema_success_commits_all_elements() {
         assert!(result.is_ok(), "Expected success: {:?}", result.err());
 
         // Verify all elements were committed
-        assert!(db.catalog.schema_exists("RETAIL"), "Schema should exist");
-        assert!(db.catalog.table_exists("RETAIL.PRODUCTS"), "First table should exist");
-        assert!(db.catalog.table_exists("RETAIL.INVENTORY"), "Second table should exist");
+        assert!(db.catalog.schema_exists("retail"), "Schema should exist");
+        assert!(db.catalog.table_exists("retail.products"), "First table should exist");
+        assert!(db.catalog.table_exists("retail.inventory"), "Second table should exist");
     } else {
         panic!("Expected CreateSchema statement");
     }
@@ -176,15 +176,15 @@ fn test_create_schema_rollback_with_duplicate_table_name() {
 
         // Print result for debugging
         eprintln!("Result: {:?}", result);
-        eprintln!("Schema exists: {}", db.catalog.schema_exists("WAREHOUSE"));
-        eprintln!("Table exists: {}", db.catalog.table_exists("WAREHOUSE.ITEMS"));
+        eprintln!("Schema exists: {}", db.catalog.schema_exists("warehouse"));
+        eprintln!("Table exists: {}", db.catalog.table_exists("warehouse.items"));
 
         // Should fail due to duplicate table name
         assert!(result.is_err(), "Expected error due to duplicate table name, got: {:?}", result);
 
         // Verify rollback
-        assert!(!db.catalog.schema_exists("WAREHOUSE"), "Schema should be rolled back");
-        assert!(!db.catalog.table_exists("WAREHOUSE.ITEMS"), "Table should not exist");
+        assert!(!db.catalog.schema_exists("warehouse"), "Schema should be rolled back");
+        assert!(!db.catalog.table_exists("warehouse.items"), "Table should not exist");
     } else {
         panic!("Expected CreateSchema statement");
     }

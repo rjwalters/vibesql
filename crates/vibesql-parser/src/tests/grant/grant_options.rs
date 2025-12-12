@@ -16,8 +16,8 @@ fn test_parse_grant_with_grant_option() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Select(None));
             assert_eq!(grant_stmt.object_type, ObjectType::Table);
-            assert_eq!(grant_stmt.object_name.to_string(), "USERS");
-            assert_eq!(grant_stmt.grantees, vec!["MANAGER"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "users");
+            assert_eq!(grant_stmt.grantees, vec!["manager"]);
             assert!(grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -48,8 +48,8 @@ fn test_parse_grant_schema_with_grant_option() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Usage);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "PUBLIC");
-            assert_eq!(grant_stmt.grantees, vec!["USER_ROLE"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "public");
+            assert_eq!(grant_stmt.grantees, vec!["user_role"]);
             assert!(grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),

@@ -28,8 +28,8 @@ fn test_parse_grant_execute_on_function() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::Function);
-            assert_eq!(grant_stmt.object_name.to_string(), "MY_FUNC");
-            assert_eq!(grant_stmt.grantees, vec!["USER_ROLE"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "my_func");
+            assert_eq!(grant_stmt.grantees, vec!["user_role"]);
             assert!(!grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -46,8 +46,8 @@ fn test_parse_grant_execute_on_procedure() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::Procedure);
-            assert_eq!(grant_stmt.object_name.to_string(), "PROC_NAME");
-            assert_eq!(grant_stmt.grantees, vec!["USER1"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "proc_name");
+            assert_eq!(grant_stmt.grantees, vec!["user1"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -63,7 +63,7 @@ fn test_parse_grant_execute_on_routine() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::Routine);
-            assert_eq!(grant_stmt.object_name.to_string(), "ROUTINE_NAME");
+            assert_eq!(grant_stmt.object_name.to_string(), "routine_name");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -79,7 +79,7 @@ fn test_parse_grant_execute_on_method() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::Method);
-            assert_eq!(grant_stmt.object_name.to_string(), "METHOD_NAME");
+            assert_eq!(grant_stmt.object_name.to_string(), "method_name");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -95,7 +95,7 @@ fn test_parse_grant_execute_on_constructor_method() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::ConstructorMethod);
-            assert_eq!(grant_stmt.object_name.to_string(), "METHOD_NAME");
+            assert_eq!(grant_stmt.object_name.to_string(), "method_name");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -111,7 +111,7 @@ fn test_parse_grant_execute_on_static_method() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::StaticMethod);
-            assert_eq!(grant_stmt.object_name.to_string(), "METHOD_NAME");
+            assert_eq!(grant_stmt.object_name.to_string(), "method_name");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -127,7 +127,7 @@ fn test_parse_grant_execute_on_instance_method() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::InstanceMethod);
-            assert_eq!(grant_stmt.object_name.to_string(), "METHOD_NAME");
+            assert_eq!(grant_stmt.object_name.to_string(), "method_name");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -144,7 +144,7 @@ fn test_parse_grant_execute_implicit_routine() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Execute);
             assert_eq!(grant_stmt.object_type, ObjectType::Routine);
-            assert_eq!(grant_stmt.object_name.to_string(), "MY_FUNC");
+            assert_eq!(grant_stmt.object_name.to_string(), "my_func");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }

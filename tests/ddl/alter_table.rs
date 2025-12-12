@@ -25,7 +25,7 @@ fn create_populated_table(db: &mut Database) {
     create_test_table(db);
 
     // Insert test data
-    let table = db.get_table_mut("USERS").unwrap();
+    let table = db.get_table_mut("users").unwrap();
     let row1 = Row {
         values: vec![
             SqlValue::Integer(1),
@@ -73,8 +73,8 @@ fn test_add_column_basic() {
             assert!(result.unwrap().to_uppercase().contains("STATUS"));
 
             // Verify column was added
-            let table = db.get_table("USERS").unwrap();
-            assert!(table.schema.has_column("STATUS"));
+            let table = db.get_table("users").unwrap();
+            assert!(table.schema.has_column("status"));
         }
         _ => panic!("Expected AlterTable statement"),
     }
@@ -92,8 +92,8 @@ fn test_add_column_to_populated_table() {
         AlterTableExecutor::execute(&alter_stmt, &mut db).expect("ADD COLUMN should succeed");
 
         // Verify existing rows have NULL for new column
-        let table = db.get_table("USERS").unwrap();
-        let status_idx = table.schema.get_column_index("STATUS").unwrap();
+        let table = db.get_table("users").unwrap();
+        let status_idx = table.schema.get_column_index("status").unwrap();
 
         for row in table.scan() {
             assert_eq!(row.values[status_idx], SqlValue::Null);
@@ -150,8 +150,8 @@ fn test_drop_column_basic() {
             assert!(result.unwrap().to_uppercase().contains("AGE"));
 
             // Verify column was removed
-            let table = db.get_table("USERS").unwrap();
-            assert!(!table.schema.has_column("AGE"));
+            let table = db.get_table("users").unwrap();
+            assert!(!table.schema.has_column("age"));
         }
         _ => panic!("Expected AlterTable statement"),
     }
@@ -206,8 +206,8 @@ fn test_drop_column_primary_key_error() {
     create_test_table(&mut db);
 
     // Verify primary key is set up
-    let table = db.get_table("USERS").unwrap();
-    let has_pk = table.schema.is_column_in_primary_key("ID");
+    let table = db.get_table("users").unwrap();
+    let has_pk = table.schema.is_column_in_primary_key("id");
 
     // Try to drop column that's part of PRIMARY KEY
     let sql = "ALTER TABLE users DROP COLUMN id";
@@ -233,7 +233,7 @@ fn test_drop_column_removes_data() {
     create_populated_table(&mut db);
 
     // Get column count before drop
-    let table = db.get_table("USERS").unwrap();
+    let table = db.get_table("users").unwrap();
     let col_count_before = table.schema.columns.len();
 
     let sql = "ALTER TABLE users DROP COLUMN email";
@@ -243,9 +243,9 @@ fn test_drop_column_removes_data() {
         AlterTableExecutor::execute(&alter_stmt, &mut db).expect("DROP COLUMN should succeed");
 
         // Verify column and data removed
-        let table = db.get_table("USERS").unwrap();
+        let table = db.get_table("users").unwrap();
         assert_eq!(table.schema.columns.len(), col_count_before - 1);
-        assert!(!table.schema.has_column("EMAIL"));
+        assert!(!table.schema.has_column("email"));
 
         // Verify rows have correct number of values
         for row in table.scan() {
@@ -271,8 +271,8 @@ fn test_set_not_null_empty_table() {
         assert!(result.is_ok(), "SET NOT NULL on empty table should succeed");
 
         // Verify column is now NOT NULL
-        let table = db.get_table("USERS").unwrap();
-        let col_idx = table.schema.get_column_index("EMAIL").unwrap();
+        let table = db.get_table("users").unwrap();
+        let col_idx = table.schema.get_column_index("email").unwrap();
         let col = &table.schema.columns[col_idx];
         assert!(!col.nullable, "Column should be NOT NULL");
     }
@@ -284,7 +284,7 @@ fn test_set_not_null_with_nulls_error() {
     create_test_table(&mut db);
 
     // Insert row with NULL in email
-    let table = db.get_table_mut("USERS").unwrap();
+    let table = db.get_table_mut("users").unwrap();
     let row = Row {
         values: vec![
             SqlValue::Integer(1),
@@ -330,8 +330,8 @@ fn test_drop_not_null() {
         assert!(result.is_ok(), "DROP NOT NULL should succeed");
 
         // Verify column is now nullable
-        let table = db.get_table("USERS").unwrap();
-        let col_idx = table.schema.get_column_index("EMAIL").unwrap();
+        let table = db.get_table("users").unwrap();
+        let col_idx = table.schema.get_column_index("email").unwrap();
         let col = &table.schema.columns[col_idx];
         assert!(col.nullable, "Column should be nullable");
     }
@@ -381,8 +381,8 @@ fn test_set_default_basic() {
         assert!(result.is_ok(), "SET DEFAULT should succeed");
 
         // Verify default was set in schema
-        let table = db.get_table("USERS").unwrap();
-        let name_idx = table.schema.get_column_index("NAME").unwrap();
+        let table = db.get_table("users").unwrap();
+        let name_idx = table.schema.get_column_index("name").unwrap();
         let name_col = &table.schema.columns[name_idx];
         assert!(name_col.default_value.is_some(), "Default should be set");
     }
@@ -401,8 +401,8 @@ fn test_set_default_numeric() {
         assert!(result.is_ok(), "SET DEFAULT with number should succeed");
 
         // Verify default was set
-        let table = db.get_table("USERS").unwrap();
-        let age_idx = table.schema.get_column_index("AGE").unwrap();
+        let table = db.get_table("users").unwrap();
+        let age_idx = table.schema.get_column_index("age").unwrap();
         assert!(table.schema.columns[age_idx].default_value.is_some());
     }
 }
@@ -428,8 +428,8 @@ fn test_drop_default_basic() {
         assert!(result.is_ok(), "DROP DEFAULT should succeed");
 
         // Verify default was removed
-        let table = db.get_table("USERS").unwrap();
-        let name_idx = table.schema.get_column_index("NAME").unwrap();
+        let table = db.get_table("users").unwrap();
+        let name_idx = table.schema.get_column_index("name").unwrap();
         let name_col = &table.schema.columns[name_idx];
         assert!(name_col.default_value.is_none(), "Default should be removed");
     }
@@ -480,7 +480,7 @@ fn test_add_check_constraint() {
         assert!(result.is_ok(), "ADD CHECK CONSTRAINT should succeed");
 
         // Verify constraint was added
-        let table = db.get_table("USERS").unwrap();
+        let table = db.get_table("users").unwrap();
         assert!(!table.schema.check_constraints.is_empty(), "CHECK constraint should be added");
     }
 }
@@ -498,7 +498,7 @@ fn test_add_unique_constraint() {
         assert!(result.is_ok(), "ADD UNIQUE CONSTRAINT should succeed");
 
         // Verify constraint was added
-        let table = db.get_table("USERS").unwrap();
+        let table = db.get_table("users").unwrap();
         assert!(!table.schema.unique_constraints.is_empty(), "UNIQUE constraint should be added");
     }
 }
@@ -524,7 +524,7 @@ fn test_drop_check_constraint() {
         assert!(result.is_ok(), "DROP CONSTRAINT should succeed");
 
         // Verify constraint was removed
-        let table = db.get_table("USERS").unwrap();
+        let table = db.get_table("users").unwrap();
         assert!(table.schema.check_constraints.is_empty(), "CHECK constraint should be removed");
     }
 }
@@ -556,8 +556,8 @@ fn test_add_column_with_default() {
         assert!(result.is_ok(), "ADD COLUMN with DEFAULT should succeed");
 
         // Verify column was added with default
-        let table = db.get_table("USERS").unwrap();
-        let status_idx = table.schema.get_column_index("STATUS").unwrap();
+        let table = db.get_table("users").unwrap();
+        let status_idx = table.schema.get_column_index("status").unwrap();
 
         // Check schema has default
         assert!(table.schema.columns[status_idx].default_value.is_some());
@@ -639,11 +639,11 @@ fn test_multiple_alter_operations() {
     }
 
     // Verify final schema
-    let table = db.get_table("USERS").unwrap();
-    assert!(table.schema.has_column("STATUS"));
-    assert!(!table.schema.has_column("AGE"));
+    let table = db.get_table("users").unwrap();
+    assert!(table.schema.has_column("status"));
+    assert!(!table.schema.has_column("age"));
 
-    let status_idx = table.schema.get_column_index("STATUS").unwrap();
+    let status_idx = table.schema.get_column_index("status").unwrap();
     let status_col = &table.schema.columns[status_idx];
     assert!(!status_col.nullable);
 }

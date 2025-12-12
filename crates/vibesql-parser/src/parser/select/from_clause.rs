@@ -227,7 +227,7 @@ impl Parser {
                 Ok(result)
             }
             Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
-                let name = self.parse_qualified_identifier()?;
+                let table = self.parse_table_ref()?;
 
                 // Check for optional alias
                 // Parse optional table alias - keywords allowed after AS (e.g., FROM t AS year)
@@ -272,7 +272,12 @@ impl Parser {
                 let column_aliases =
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
-                Ok(vibesql_ast::FromClause::Table { name, alias, column_aliases })
+                Ok(vibesql_ast::FromClause::Table {
+                    name: table.name,
+                    alias,
+                    column_aliases,
+                    quoted: table.quoted,
+                })
             }
             _ => Err(ParseError {
                 message: "Expected table name or subquery in FROM clause".to_string(),

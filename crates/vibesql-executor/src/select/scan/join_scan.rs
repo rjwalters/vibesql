@@ -837,9 +837,9 @@ fn parse_semi_join_condition(
     let conjuncts = flatten_conjuncts(cond);
 
     let left_tables: HashSet<String> =
-        left_result.schema.table_schemas.keys().map(|s| s.to_uppercase()).collect();
+        left_result.schema.table_schemas.keys().map(|s| s.to_lowercase()).collect();
 
-    let right_table_upper = right_table_name.to_uppercase();
+    let right_table_lower = right_table_name.to_lowercase();
 
     let mut equi_join: Option<EquiJoinInfo> = None;
     let mut right_only_preds: Vec<vibesql_ast::Expression> = Vec::new();
@@ -858,20 +858,20 @@ fn parse_semi_join_condition(
             ) = (left.as_ref(), right.as_ref())
             {
                 // Determine which column is from left and which from right
-                let left_tbl_upper = left_tbl.as_ref().map(|s| s.to_uppercase());
-                let right_tbl_upper = right_tbl.as_ref().map(|s| s.to_uppercase());
+                let left_tbl_lower = left_tbl.as_ref().map(|s| s.to_lowercase());
+                let right_tbl_lower = right_tbl.as_ref().map(|s| s.to_lowercase());
 
-                let left_col_upper = left_col.to_uppercase();
+                let left_col_lower = left_col.to_lowercase();
 
                 // Check if left_col is from left tables and right_col is from right table
                 // When table qualifier is None, check if column exists in any left table's schema
                 let left_is_left =
-                    left_tbl_upper.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false)
+                    left_tbl_lower.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false)
                         || left_result.schema.table_schemas.values().any(|(_, schema)| {
-                            schema.columns.iter().any(|c| c.name.to_uppercase() == left_col_upper)
+                            schema.columns.iter().any(|c| c.name.to_lowercase() == left_col_lower)
                         });
                 let right_is_right =
-                    right_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
+                    right_tbl_lower.as_ref().map(|t| t == &right_table_lower).unwrap_or(true);
 
                 if left_is_left && right_is_right && equi_join.is_none() {
                     equi_join = Some(EquiJoinInfo {
@@ -883,9 +883,9 @@ fn parse_semi_join_condition(
 
                 // Check the reverse: right_col from left, left_col from right
                 let right_is_left =
-                    right_tbl_upper.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false);
+                    right_tbl_lower.as_ref().map(|t| left_tables.contains(t)).unwrap_or(false);
                 let left_is_right =
-                    left_tbl_upper.as_ref().map(|t| t == &right_table_upper).unwrap_or(true);
+                    left_tbl_lower.as_ref().map(|t| t == &right_table_lower).unwrap_or(true);
 
                 if right_is_left && left_is_right && equi_join.is_none() {
                     equi_join = Some(EquiJoinInfo {
@@ -931,7 +931,7 @@ fn extract_constant_prefix_for_pk(
 
     // Flatten and look for equality predicates with constants
     let conjuncts = flatten_conjuncts(filter);
-    let join_key_upper = join_key_col.to_uppercase();
+    let join_key_upper = join_key_col.to_lowercase();
 
     for pred in conjuncts {
         if let vibesql_ast::Expression::BinaryOp {
@@ -946,9 +946,9 @@ fn extract_constant_prefix_for_pk(
                 vibesql_ast::Expression::Literal(value),
             ) = (left.as_ref(), right.as_ref())
             {
-                let col_upper = column.to_uppercase();
+                let col_upper = column.to_lowercase();
                 // Only add if it's a PK column and not the join key
-                if pk_columns.iter().any(|pk| pk.to_uppercase() == col_upper)
+                if pk_columns.iter().any(|pk| pk.to_lowercase() == col_upper)
                     && col_upper != join_key_upper
                 {
                     constants.insert(col_upper, value.clone());
@@ -961,8 +961,8 @@ fn extract_constant_prefix_for_pk(
                 vibesql_ast::Expression::ColumnRef { column, .. },
             ) = (left.as_ref(), right.as_ref())
             {
-                let col_upper = column.to_uppercase();
-                if pk_columns.iter().any(|pk| pk.to_uppercase() == col_upper)
+                let col_upper = column.to_lowercase();
+                if pk_columns.iter().any(|pk| pk.to_lowercase() == col_upper)
                     && col_upper != join_key_upper
                 {
                     constants.insert(col_upper, value.clone());
@@ -980,11 +980,11 @@ fn build_lookup_key_template(
     join_key_col: &str,
     constant_prefix: &HashMap<String, vibesql_types::SqlValue>,
 ) -> Option<Vec<KeySlot>> {
-    let join_key_upper = join_key_col.to_uppercase();
+    let join_key_upper = join_key_col.to_lowercase();
     let mut template = Vec::with_capacity(pk_columns.len());
 
     for pk_col in pk_columns {
-        let pk_upper = pk_col.to_uppercase();
+        let pk_upper = pk_col.to_lowercase();
 
         if pk_upper == join_key_upper {
             template.push(KeySlot::JoinKey);
@@ -1009,7 +1009,7 @@ fn build_residual_filter(
         None => return None,
     };
 
-    let pk_upper: HashSet<String> = pk_columns.iter().map(|s| s.to_uppercase()).collect();
+    let pk_upper: HashSet<String> = pk_columns.iter().map(|s| s.to_lowercase()).collect();
     let conjuncts = flatten_conjuncts(filter);
 
     // Keep predicates that are NOT equality on PK columns
@@ -1025,14 +1025,14 @@ fn build_residual_filter(
             {
                 // Check if it's col = literal or literal = col
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = left.as_ref() {
-                    if pk_upper.contains(&column.to_uppercase())
+                    if pk_upper.contains(&column.to_lowercase())
                         && matches!(right.as_ref(), vibesql_ast::Expression::Literal(_))
                     {
                         return false; // Filter out, covered by PK lookup
                     }
                 }
                 if let vibesql_ast::Expression::ColumnRef { column, .. } = right.as_ref() {
-                    if pk_upper.contains(&column.to_uppercase())
+                    if pk_upper.contains(&column.to_lowercase())
                         && matches!(left.as_ref(), vibesql_ast::Expression::Literal(_))
                     {
                         return false; // Filter out, covered by PK lookup
@@ -1048,12 +1048,12 @@ fn build_residual_filter(
 
 /// Find the index of a column in the schema
 fn find_column_index(schema: &CombinedSchema, col_name: &str) -> Option<usize> {
-    let col_upper = col_name.to_uppercase();
+    let col_upper = col_name.to_lowercase();
     let mut offset = 0;
 
     for (_, table_schema) in schema.table_schemas.values() {
         for (idx, col) in table_schema.columns.iter().enumerate() {
-            if col.name.to_uppercase() == col_upper {
+            if col.name.to_lowercase() == col_upper {
                 return Some(offset + idx);
             }
         }
@@ -1117,7 +1117,7 @@ fn try_prefix_scan_semi_join(
     }
 
     // Find an index on the right table that starts with the join key column
-    let right_col_upper = equi_join.right_col.to_uppercase();
+    let right_col_upper = equi_join.right_col.to_lowercase();
     let index_names = database.list_indexes_for_table(&right_table_name);
 
     // Find an index where the first column is the join key
@@ -1125,7 +1125,7 @@ fn try_prefix_scan_semi_join(
     for index_name in &index_names {
         if let Some(idx_metadata) = database.get_index(index_name) {
             if let Some(first_col) = idx_metadata.columns.first() {
-                if first_col.column_name.to_uppercase() == right_col_upper {
+                if first_col.column_name.to_lowercase() == right_col_upper {
                     usable_index_name = Some(index_name.clone());
                     break;
                 }

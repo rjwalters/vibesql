@@ -9,7 +9,7 @@ fn test_create_procedure_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "ADD_USER");
+        assert_eq!(stmt.procedure_name, "add_user");
         assert_eq!(stmt.parameters.len(), 1);
     } else {
         panic!("Expected CreateProcedure statement");
@@ -23,7 +23,7 @@ fn test_create_function_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateFunction(stmt)) = result {
-        assert_eq!(stmt.function_name, "DOUBLE_IT");
+        assert_eq!(stmt.function_name, "double_it");
         assert_eq!(stmt.parameters.len(), 1);
     } else {
         panic!("Expected CreateFunction statement");
@@ -37,7 +37,7 @@ fn test_drop_procedure() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "ADD_USER");
+        assert_eq!(stmt.procedure_name, "add_user");
         assert!(stmt.if_exists);
     } else {
         panic!("Expected DropProcedure statement");
@@ -51,7 +51,7 @@ fn test_drop_function() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropFunction(stmt)) = result {
-        assert_eq!(stmt.function_name, "DOUBLE_IT");
+        assert_eq!(stmt.function_name, "double_it");
         assert!(stmt.if_exists);
     } else {
         panic!("Expected DropFunction statement");
@@ -65,7 +65,7 @@ fn test_drop_procedure_without_if_exists() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "ADD_USER");
+        assert_eq!(stmt.procedure_name, "add_user");
         assert!(!stmt.if_exists);
     } else {
         panic!("Expected DropProcedure statement");
@@ -79,7 +79,7 @@ fn test_call_statement() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::Call(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "ADD_USER");
+        assert_eq!(stmt.procedure_name, "add_user");
         assert_eq!(stmt.arguments.len(), 1);
     } else {
         panic!("Expected Call statement");
@@ -93,7 +93,7 @@ fn test_create_procedure_multiple_parameters() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "UPDATE_STATUS");
+        assert_eq!(stmt.procedure_name, "update_status");
         assert_eq!(stmt.parameters.len(), 3);
     } else {
         panic!("Expected CreateProcedure statement");
@@ -107,7 +107,7 @@ fn test_create_function_with_parameters() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateFunction(stmt)) = result {
-        assert_eq!(stmt.function_name, "ADD_PRICES");
+        assert_eq!(stmt.function_name, "add_prices");
         assert_eq!(stmt.parameters.len(), 2);
     } else {
         panic!("Expected CreateFunction statement");
@@ -121,7 +121,7 @@ fn test_procedure_with_if_statement() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "CHECK_STATUS");
+        assert_eq!(stmt.procedure_name, "check_status");
     } else {
         panic!("Expected CreateProcedure statement");
     }
@@ -134,7 +134,7 @@ fn test_procedure_with_while_loop() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "COUNT_UP");
+        assert_eq!(stmt.procedure_name, "count_up");
     } else {
         panic!("Expected CreateProcedure statement");
     }
@@ -147,7 +147,7 @@ fn test_procedure_with_declare() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "TEST_DECLARE");
+        assert_eq!(stmt.procedure_name, "test_declare");
     } else {
         panic!("Expected CreateProcedure statement");
     }
@@ -160,7 +160,7 @@ fn test_call_with_multiple_arguments() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::Call(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "UPDATE_STATUS");
+        assert_eq!(stmt.procedure_name, "update_status");
         assert_eq!(stmt.arguments.len(), 3);
     } else {
         panic!("Expected Call statement");
@@ -174,7 +174,7 @@ fn test_procedure_with_set_statement() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateProcedure(stmt)) = result {
-        assert_eq!(stmt.procedure_name, "ADD_ONE");
+        assert_eq!(stmt.procedure_name, "add_one");
     } else {
         panic!("Expected CreateProcedure statement");
     }

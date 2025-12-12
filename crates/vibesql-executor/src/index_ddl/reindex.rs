@@ -105,6 +105,7 @@ mod tests {
             ],
             table_constraints: vec![],
             table_options: vec![],
+            quoted: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();

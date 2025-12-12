@@ -11,7 +11,7 @@ fn test_create_schema_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateSchema(stmt)) = result {
-        assert_eq!(stmt.schema_name, "MYSCHEMA");
+        assert_eq!(stmt.schema_name, "myschema");
         assert_eq!(stmt.schema_elements.len(), 0);
         assert!(!stmt.if_not_exists);
     } else {
@@ -26,14 +26,14 @@ fn test_create_schema_with_embedded_table() {
 
     match result {
         Ok(vibesql_ast::Statement::CreateSchema(stmt)) => {
-            assert_eq!(stmt.schema_name, "S");
+            assert_eq!(stmt.schema_name, "s");
             assert_eq!(stmt.schema_elements.len(), 1);
 
             match &stmt.schema_elements[0] {
                 SchemaElement::CreateTable(table_stmt) => {
-                    assert_eq!(table_stmt.table_name, "T");
+                    assert_eq!(table_stmt.table_name, "t");
                     assert_eq!(table_stmt.columns.len(), 1);
-                    assert_eq!(table_stmt.columns[0].name, "A");
+                    assert_eq!(table_stmt.columns[0].name, "a");
                 }
             }
         }
@@ -49,20 +49,20 @@ fn test_create_schema_with_multiple_tables() {
 
     match result {
         Ok(vibesql_ast::Statement::CreateSchema(stmt)) => {
-            assert_eq!(stmt.schema_name, "MYSCHEMA");
+            assert_eq!(stmt.schema_name, "myschema");
             assert_eq!(stmt.schema_elements.len(), 2);
 
             // Check first table
             match &stmt.schema_elements[0] {
                 SchemaElement::CreateTable(table_stmt) => {
-                    assert_eq!(table_stmt.table_name, "T1");
+                    assert_eq!(table_stmt.table_name, "t1");
                 }
             }
 
             // Check second table
             match &stmt.schema_elements[1] {
                 SchemaElement::CreateTable(table_stmt) => {
-                    assert_eq!(table_stmt.table_name, "T2");
+                    assert_eq!(table_stmt.table_name, "t2");
                 }
             }
         }

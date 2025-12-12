@@ -115,7 +115,7 @@ fn test_parse_case_with_alias() {
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::Select(select) = stmt {
         if let vibesql_ast::SelectItem::Expression { alias, .. } = &select.select_list[0] {
-            assert_eq!(*alias, Some("PRICE_CATEGORY".to_string()));
+            assert_eq!(*alias, Some("price_category".to_string()));
         }
     }
 }
@@ -244,7 +244,7 @@ fn test_parse_case_web_demo_query() {
                 assert!(operand.is_none(), "Should be searched CASE");
                 assert_eq!(when_clauses.len(), 2);
                 assert!(else_result.is_some());
-                assert_eq!(*alias, Some("PRICE_CATEGORY".to_string()));
+                assert_eq!(*alias, Some("price_category".to_string()));
             } else {
                 panic!("Expected Case expression");
             }

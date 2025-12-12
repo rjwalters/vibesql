@@ -15,11 +15,11 @@ fn create_test_db() -> Database {
     let mut db = Database::new();
 
     let schema = TableSchema::new(
-        "USERS".to_string(),
+        "users".to_string(),
         vec![
-            ColumnSchema::new("ID".to_string(), DataType::Integer, false),
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
             ColumnSchema::new(
-                "NAME".to_string(),
+                "name".to_string(),
                 DataType::Varchar { max_length: Some(100) },
                 true,
             ),
@@ -29,12 +29,12 @@ fn create_test_db() -> Database {
 
     // Insert test data
     db.insert_row(
-        "USERS",
+        "users",
         Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Alice"))]),
     )
     .unwrap();
     db.insert_row(
-        "USERS",
+        "users",
         Row::new(vec![SqlValue::Integer(2), SqlValue::Varchar(StringValue::from("Bob"))]),
     )
     .unwrap();
@@ -257,7 +257,7 @@ fn test_procedure_lifecycle() {
     }
 
     // Verify procedure exists via function_exists (they share the namespace)
-    assert!(db.catalog.procedure_exists("TEST_PROC"), "Procedure should exist after creation");
+    assert!(db.catalog.procedure_exists("test_proc"), "Procedure should exist after creation");
 
     // Drop the procedure
     let drop_sql = "DROP PROCEDURE test_proc";
@@ -267,7 +267,7 @@ fn test_procedure_lifecycle() {
     }
 
     // Verify procedure was dropped
-    assert!(!db.catalog.procedure_exists("TEST_PROC"), "Procedure should not exist after drop");
+    assert!(!db.catalog.procedure_exists("test_proc"), "Procedure should not exist after drop");
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn test_function_lifecycle() {
     }
 
     // Verify function exists
-    assert!(db.catalog.function_exists("ADD_ONE"), "Function should exist after creation");
+    assert!(db.catalog.function_exists("add_one"), "Function should exist after creation");
 
     // Drop the function
     let drop_sql = "DROP FUNCTION add_one";
@@ -309,7 +309,7 @@ fn test_function_lifecycle() {
     }
 
     // Verify function was dropped
-    assert!(!db.catalog.function_exists("ADD_ONE"), "Function should not exist after drop");
+    assert!(!db.catalog.function_exists("add_one"), "Function should not exist after drop");
 }
 
 #[test]

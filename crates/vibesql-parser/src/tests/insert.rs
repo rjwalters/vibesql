@@ -12,10 +12,10 @@ fn test_parse_insert_basic() {
 
     match stmt {
         vibesql_ast::Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "USERS");
+            assert_eq!(insert.table_name, "users");
             assert_eq!(insert.columns.len(), 2);
-            assert_eq!(insert.columns[0], "ID");
-            assert_eq!(insert.columns[1], "NAME");
+            assert_eq!(insert.columns[0], "id");
+            assert_eq!(insert.columns[1], "name");
             match &insert.source {
                 vibesql_ast::InsertSource::Values(values) => {
                     assert_eq!(values.len(), 1); // One row
@@ -36,7 +36,7 @@ fn test_insert_with_default() {
 
     match stmt {
         vibesql_ast::Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "USERS");
+            assert_eq!(insert.table_name, "users");
             match &insert.source {
                 vibesql_ast::InsertSource::Values(values) => {
                     assert_eq!(values.len(), 1); // One row
@@ -71,7 +71,7 @@ fn test_insert_multiple_defaults() {
 
     match stmt {
         vibesql_ast::Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "T");
+            assert_eq!(insert.table_name, "t");
             match &insert.source {
                 vibesql_ast::InsertSource::Values(values) => {
                     assert_eq!(values.len(), 1); // One row
@@ -111,7 +111,7 @@ fn test_parse_insert_multiple_rows() {
 
     match stmt {
         vibesql_ast::Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "USERS");
+            assert_eq!(insert.table_name, "users");
             match &insert.source {
                 vibesql_ast::InsertSource::Values(values) => {
                     assert_eq!(values.len(), 2); // Two rows
@@ -131,7 +131,7 @@ fn test_parse_insert_with_default() {
 
     match stmt {
         vibesql_ast::Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "USERS");
+            assert_eq!(insert.table_name, "users");
             assert_eq!(insert.columns.len(), 2);
             match &insert.source {
                 vibesql_ast::InsertSource::Values(values) => {

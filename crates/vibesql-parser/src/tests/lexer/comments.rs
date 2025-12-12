@@ -51,7 +51,7 @@ fn test_comment_with_sql_keywords() {
             Token::Keyword(Keyword::Select),
             Token::Symbol('*'),
             Token::Keyword(Keyword::From),
-            Token::Identifier("USERS".to_string()),
+            Token::Identifier("users".to_string()),
             Token::Eof,
         ]
     );
@@ -88,7 +88,7 @@ fn test_default_demo_sql() {
             Token::Keyword(Keyword::Select),
             Token::Symbol('*'),
             Token::Keyword(Keyword::From),
-            Token::Identifier("EMPLOYEES".to_string()),
+            Token::Identifier("employees".to_string()),
             Token::Semicolon,
             Token::Eof,
         ]
