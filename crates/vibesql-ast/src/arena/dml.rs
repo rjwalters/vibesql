@@ -32,6 +32,9 @@ pub enum ConflictClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt<'arena> {
     pub table_name: Symbol,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub quoted: bool,
     pub columns: BumpVec<'arena, Symbol>,
     pub source: InsertSource<'arena>,
     /// Conflict resolution strategy (None = fail on conflict)
@@ -57,6 +60,9 @@ pub enum WhereClause<'arena> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStmt<'arena> {
     pub table_name: Symbol,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub quoted: bool,
     pub assignments: BumpVec<'arena, Assignment<'arena>>,
     pub where_clause: Option<WhereClause<'arena>>,
 }
@@ -78,5 +84,8 @@ pub struct DeleteStmt<'arena> {
     /// If true, DELETE FROM ONLY (excludes derived tables in table inheritance)
     pub only: bool,
     pub table_name: Symbol,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub quoted: bool,
     pub where_clause: Option<WhereClause<'arena>>,
 }

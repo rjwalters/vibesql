@@ -1181,6 +1181,7 @@ fn transform_mixed_grouping_item<V: ExpressionMutVisitor>(
 pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertStmt) -> InsertStmt {
     InsertStmt {
         table_name: stmt.table_name,
+        quoted: stmt.quoted,
         columns: stmt.columns,
         source: match stmt.source {
             InsertSource::Values(rows) => InsertSource::Values(
@@ -1209,6 +1210,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
 pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateStmt) -> UpdateStmt {
     UpdateStmt {
         table_name: stmt.table_name,
+        quoted: stmt.quoted,
         assignments: stmt
             .assignments
             .into_iter()
@@ -1228,6 +1230,7 @@ pub fn transform_delete<V: ExpressionMutVisitor>(visitor: &mut V, stmt: DeleteSt
     DeleteStmt {
         only: stmt.only,
         table_name: stmt.table_name,
+        quoted: stmt.quoted,
         where_clause: stmt.where_clause.map(|w| match w {
             WhereClause::Condition(expr) => {
                 WhereClause::Condition(transform_expression(visitor, expr))

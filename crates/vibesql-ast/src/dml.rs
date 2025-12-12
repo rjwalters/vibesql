@@ -30,6 +30,9 @@ pub enum ConflictClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt {
     pub table_name: String,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub quoted: bool,
     pub columns: Vec<String>,
     pub source: InsertSource,
     /// Conflict resolution strategy (None = fail on conflict)
@@ -55,6 +58,9 @@ pub enum WhereClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStmt {
     pub table_name: String,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub quoted: bool,
     pub assignments: Vec<Assignment>,
     pub where_clause: Option<WhereClause>,
 }
@@ -76,5 +82,8 @@ pub struct DeleteStmt {
     /// If true, DELETE FROM ONLY (excludes derived tables in table inheritance)
     pub only: bool,
     pub table_name: String,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub quoted: bool,
     pub where_clause: Option<WhereClause>,
 }

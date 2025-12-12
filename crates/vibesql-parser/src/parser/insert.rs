@@ -25,12 +25,17 @@ impl Parser {
 
         self.expect_keyword(Keyword::Into)?;
 
-        // Parse table name (support both regular and delimited identifiers)
-        let table_name = match self.peek() {
-            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
                 let table = name.clone();
                 self.advance();
-                table
+                (table, false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let table = name.clone();
+                self.advance();
+                (table, true)
             }
             _ => {
                 return Err(ParseError {
@@ -132,6 +137,7 @@ impl Parser {
 
         Ok(vibesql_ast::InsertStmt {
             table_name,
+            quoted,
             columns,
             source,
             conflict_clause,
@@ -146,12 +152,17 @@ impl Parser {
         self.expect_keyword(Keyword::Replace)?;
         self.expect_keyword(Keyword::Into)?;
 
-        // Parse table name
-        let table_name = match self.peek() {
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
             Token::Identifier(name) => {
                 let table = name.clone();
                 self.advance();
-                table
+                (table, false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let table = name.clone();
+                self.advance();
+                (table, true)
             }
             _ => {
                 return Err(ParseError {
@@ -259,6 +270,7 @@ impl Parser {
 
         Ok(vibesql_ast::InsertStmt {
             table_name,
+            quoted,
             columns,
             source,
             conflict_clause: Some(vibesql_ast::ConflictClause::Replace),
