@@ -12,11 +12,12 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
 
     // If no explicit column list is provided, derive column names from the query
     // This ensures views with SELECT * preserve original column names
+    // Use simple column names (without table prefix) for view schema compatibility
     let columns = if stmt.columns.is_none() {
         // Execute the query once to derive column names
         use crate::select::SelectExecutor;
         let executor = SelectExecutor::new(db);
-        let result = executor.execute_with_columns(&stmt.query)?;
+        let result = executor.execute_with_simple_columns(&stmt.query)?;
         Some(result.columns)
     } else {
         stmt.columns.clone()

@@ -310,6 +310,57 @@ impl CombinedSchema {
         // Fallback: return the input column name if not found in schema
         column.to_string()
     }
+
+    /// Get the fully qualified column name with original table name prefix.
+    ///
+    /// This follows SQLite's `full_column_names=ON` behavior where column names
+    /// in results are prefixed with the original table name from the schema.
+    ///
+    /// For example, if a table was created as `CREATE TABLE test1(f1 int)` and
+    /// queried with `SELECT a.f1 FROM test1 a`, this returns `test1.f1` (using
+    /// the original table name "test1", not the alias "a").
+    ///
+    /// # Arguments
+    /// * `table` - Optional table alias/name for qualified references
+    /// * `column` - Column name to look up (case-insensitive)
+    ///
+    /// # Returns
+    /// The fully qualified column name in `table.column` format, or just the
+    /// column name if the table is not found.
+    pub fn get_full_column_name(&self, table: Option<&str>, column: &str) -> String {
+        if let Some(table_name) = table {
+            // Qualified column reference (table.column)
+            let key = TableKey::new(table_name);
+            if let Some((_start_index, schema)) = self.table_schemas.get(&key) {
+                if let Some(idx) = schema.get_column_index(column) {
+                    // Use the original table name from the schema
+                    return format!("{}.{}", schema.name, schema.columns[idx].name);
+                }
+            }
+        } else {
+            // Unqualified column reference - search all tables
+            // Find the match with the lowest start_index (leftmost table)
+            let mut best_match: Option<(usize, String, String)> = None;
+            for (start_index, schema) in self.table_schemas.values() {
+                if let Some(idx) = schema.get_column_index(column) {
+                    let table_name = schema.name.clone();
+                    let col_name = schema.columns[idx].name.clone();
+                    match &best_match {
+                        None => best_match = Some((*start_index, table_name, col_name)),
+                        Some((current_start, _, _)) if *start_index < *current_start => {
+                            best_match = Some((*start_index, table_name, col_name));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some((_, table_name, col_name)) = best_match {
+                return format!("{}.{}", table_name, col_name);
+            }
+        }
+        // Fallback: return the input column name if not found in schema
+        column.to_string()
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema

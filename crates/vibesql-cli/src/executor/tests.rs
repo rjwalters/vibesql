@@ -180,15 +180,15 @@ fn test_select_column_names_and_values_issue_3810() {
 
 #[test]
 fn test_select_column_names_from_table() {
-    // Verify column names are derived correctly preserving original case (SQLite compatibility)
+    // Verify column names include table prefix (full_column_names format)
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50))").unwrap();
     executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
 
     let result = executor.execute("SELECT id, name FROM users").unwrap();
 
-    // Column names should match the table schema (lowercase per SQL:1999)
-    assert_eq!(result.columns, vec!["id", "name"]);
+    // Column names include table prefix (full_column_names format)
+    assert_eq!(result.columns, vec!["users.id", "users.name"]);
 
     // Values should be display format
     assert_eq!(result.rows[0][0], Some("1".to_string()));
@@ -197,15 +197,15 @@ fn test_select_column_names_from_table() {
 
 #[test]
 fn test_select_wildcard_column_names() {
-    // Verify SELECT * returns actual column names
+    // Verify SELECT * returns column names with table prefix
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE products (sku VARCHAR(20) PRIMARY KEY, price INT)").unwrap();
     executor.execute("INSERT INTO products VALUES ('ABC123', 99)").unwrap();
 
     let result = executor.execute("SELECT * FROM products").unwrap();
 
-    // Column names should be actual column names from table (lowercase per SQL:1999)
-    assert_eq!(result.columns, vec!["sku", "price"]);
+    // Column names include table prefix (full_column_names format)
+    assert_eq!(result.columns, vec!["products.sku", "products.price"]);
     assert_eq!(result.rows[0][0], Some("ABC123".to_string()));
     assert_eq!(result.rows[0][1], Some("99".to_string()));
 }

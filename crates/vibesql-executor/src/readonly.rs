@@ -269,7 +269,8 @@ mod tests {
         let result = db.query("SELECT name FROM users WHERE id = 2").unwrap();
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.columns.len(), 1);
-        assert_eq!(result.columns[0].to_lowercase(), "name");
+        // Column names now include table prefix (full_column_names format)
+        assert_eq!(result.columns[0].to_lowercase(), "users.name");
         assert_eq!(result.rows[0].values[0], SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     }
 

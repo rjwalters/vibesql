@@ -204,8 +204,11 @@ fn test_inner_join_with_group_by_count() {
     // Should have 3 departments with employees
     assert_eq!(result.rows.len(), 3);
 
-    // Verify column names
-    assert_eq!(result.columns, vec!["dept_name".to_string(), "emp_count".to_string()]);
+    // Verify column names (now include table prefix per full_column_names format)
+    assert_eq!(
+        result.columns,
+        vec!["departments.dept_name".to_string(), "emp_count".to_string()]
+    );
 
     // Verify the results (Engineering: 2, Sales: 2, HR: 1)
     // Order is not guaranteed without ORDER BY, so we'll find each department

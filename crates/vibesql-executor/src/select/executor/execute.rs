@@ -322,8 +322,51 @@ impl SelectExecutor<'_> {
             None
         };
 
-        // Derive column names from the SELECT list
+        // Derive column names from the SELECT list (with table prefix for display)
         let columns = self.derive_column_names(&stmt.select_list, from_result.as_ref())?;
+
+        // Execute the query to get rows
+        let rows = self.execute(stmt)?;
+
+        Ok(SelectResult { columns, rows })
+    }
+
+    /// Execute SELECT statement and return results with simple column names
+    ///
+    /// This is similar to `execute_with_columns` but returns column names without
+    /// table prefixes. This is used for internal purposes like view creation
+    /// where the full table.column format would cause column lookup issues.
+    pub fn execute_with_simple_columns(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+    ) -> Result<SelectResult, ExecutorError> {
+        // Execute the FROM clause to get combined schema
+        let from_result = if let Some(from_clause) = &stmt.from {
+            let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
+                execute_ctes(with_clause, |query, cte_ctx| self.execute_with_ctes(query, cte_ctx))?
+            } else {
+                HashMap::new()
+            };
+            // If we have access to outer query's CTEs (for subqueries/derived tables), merge them
+            if let Some(outer_cte_ctx) = self.cte_context {
+                for (name, result) in outer_cte_ctx {
+                    cte_results.entry(name.clone()).or_insert_with(|| result.clone());
+                }
+            }
+            Some(self.execute_from_with_where(
+                from_clause,
+                &cte_results,
+                stmt.where_clause.as_ref(),
+                stmt.order_by.as_deref(),
+                stmt.limit,
+                Some(&stmt.select_list),
+            )?)
+        } else {
+            None
+        };
+
+        // Derive column names from the SELECT list (without table prefix)
+        let columns = self.derive_simple_column_names(&stmt.select_list, from_result.as_ref())?;
 
         // Execute the query to get rows
         let rows = self.execute(stmt)?;

@@ -44,8 +44,8 @@ fn test_column_names_simple_select() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT id, name FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // SQL:1999 normalizes unquoted identifiers to lowercase
-        assert_eq!(result.columns, vec!["id", "name"]);
+        // Column names include table prefix (full_column_names format)
+        assert_eq!(result.columns, vec!["employees.id", "employees.name"]);
         assert_eq!(result.rows.len(), 3);
     } else {
         panic!("Expected SELECT statement");
@@ -79,8 +79,16 @@ fn test_column_names_star_expansion() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // SQL:1999 normalizes unquoted identifiers to lowercase
-        assert_eq!(result.columns, vec!["id", "name", "department", "salary"]);
+        // Column names include table prefix (full_column_names format)
+        assert_eq!(
+            result.columns,
+            vec![
+                "employees.id",
+                "employees.name",
+                "employees.department",
+                "employees.salary"
+            ]
+        );
         assert_eq!(result.rows.len(), 3);
     } else {
         panic!("Expected SELECT statement");
@@ -135,8 +143,8 @@ fn test_column_names_mixed() {
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns.len(), 3);
-        // SQL:1999 normalizes unquoted identifiers to lowercase
-        assert_eq!(result.columns[0], "id");
+        // Column names include table prefix (full_column_names format)
+        assert_eq!(result.columns[0], "employees.id");
         assert_eq!(result.columns[1], "emp_name");
         // Third column is an expression
         assert!(result.columns[2].contains("salary") || result.columns[2].contains("*"));
