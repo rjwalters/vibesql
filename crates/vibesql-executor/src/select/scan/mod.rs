@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use super::{cte::CteResult, join::FromResult};
 use crate::errors::ExecutorError;
+use vibesql_catalog::TableIdentifier;
 
 // Strategy modules
 pub(crate) mod bloom_context;
@@ -129,9 +130,11 @@ where
 
     // Fall back to standard execution (recursive left-deep joins)
     match from {
-        vibesql_ast::FromClause::Table { name, alias, column_aliases } => {
-            table::execute_table_scan(
-                name,
+        vibesql_ast::FromClause::Table { name, alias, column_aliases, quoted } => {
+            // Create TableIdentifier with proper case semantics based on quoted flag
+            let identifier = TableIdentifier::new(name, *quoted);
+            table::execute_table_scan_with_identifier(
+                &identifier,
                 alias.as_ref(),
                 column_aliases.as_ref(),
                 cte_results,

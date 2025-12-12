@@ -29,7 +29,7 @@ pub(super) struct JoinConditionWithType {
 /// Flatten a nested join tree into a list of table references
 pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
     match from {
-        FromClause::Table { name, alias, column_aliases } => {
+        FromClause::Table { name, alias, column_aliases, .. } => {
             tables.push(TableRef {
                 name: name.clone(),
                 alias: alias.clone(),

@@ -40,7 +40,7 @@ fn test_not_is_null_precedence() {
                     match &**inner_expr {
                         Expression::ColumnRef { table, column } => {
                             assert_eq!(*table, None);
-                            assert_eq!(column.to_uppercase(), "COL0");
+                            assert_eq!(column, "col0");
                         }
                         _ => panic!("Expected column reference, got {:?}", inner_expr),
                     }
@@ -81,7 +81,7 @@ fn test_is_not_null_parsing() {
             match &**expr {
                 Expression::ColumnRef { table, column } => {
                     assert_eq!(*table, None);
-                    assert_eq!(column.to_uppercase(), "COL0");
+                    assert_eq!(column, "col0");
                 }
                 _ => panic!("Expected column reference, got {:?}", expr),
             }

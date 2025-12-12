@@ -292,7 +292,7 @@ mod tests {
             let tables = extract_tables_from_select(&select);
             assert_eq!(tables.len(), 1);
             // Parser uppercases identifiers
-            assert!(tables.contains("USERS"));
+            assert!(tables.contains("users"));
         } else {
             panic!("Expected SELECT statement");
         }
@@ -307,8 +307,8 @@ mod tests {
             let tables = extract_tables_from_select(&select);
             assert_eq!(tables.len(), 2);
             // Parser uppercases identifiers
-            assert!(tables.contains("USERS"));
-            assert!(tables.contains("ORDERS"));
+            assert!(tables.contains("users"));
+            assert!(tables.contains("orders"));
         } else {
             panic!("Expected SELECT statement");
         }
@@ -323,7 +323,7 @@ mod tests {
             let tables = extract_tables_from_select(&select);
             assert_eq!(tables.len(), 1);
             // Should extract just the table name, not the schema
-            assert!(tables.contains("USERS"));
+            assert!(tables.contains("users"));
         } else {
             panic!("Expected SELECT statement");
         }
@@ -337,7 +337,7 @@ mod tests {
         if let vibesql_ast::Statement::Select(select) = stmt {
             let tables = extract_tables_from_select(&select);
             assert_eq!(tables.len(), 1);
-            assert!(tables.contains("USERS"));
+            assert!(tables.contains("users"));
         } else {
             panic!("Expected SELECT statement");
         }
@@ -350,7 +350,7 @@ mod tests {
         let tables = extract_tables_from_statement(&stmt);
 
         assert_eq!(tables.len(), 1);
-        assert!(tables.contains("USERS"));
+        assert!(tables.contains("users"));
     }
 
     #[test]
@@ -360,7 +360,7 @@ mod tests {
         let tables = extract_tables_from_statement(&stmt);
 
         assert_eq!(tables.len(), 1);
-        assert!(tables.contains("USERS"));
+        assert!(tables.contains("users"));
     }
 
     #[test]
@@ -370,6 +370,6 @@ mod tests {
         let tables = extract_tables_from_statement(&stmt);
 
         assert_eq!(tables.len(), 1);
-        assert!(tables.contains("USERS"));
+        assert!(tables.contains("users"));
     }
 }

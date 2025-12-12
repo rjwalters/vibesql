@@ -57,8 +57,9 @@ fn test_all_greater_than_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -80,8 +81,9 @@ fn test_all_greater_than_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -157,8 +159,9 @@ fn test_any_less_than_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -180,8 +183,9 @@ fn test_any_less_than_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -258,8 +262,9 @@ fn test_some_equals_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -281,8 +286,9 @@ fn test_some_equals_basic() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -353,8 +359,9 @@ fn test_all_with_empty_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -376,8 +383,9 @@ fn test_all_with_empty_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -448,8 +456,9 @@ fn test_any_with_empty_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -471,8 +480,9 @@ fn test_any_with_empty_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -550,8 +560,9 @@ fn test_all_with_null_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -573,8 +584,9 @@ fn test_all_with_null_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -641,8 +653,9 @@ fn test_all_with_null_left_value() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t2".to_string(),
             alias: None,
             column_aliases: None,
@@ -664,8 +677,9 @@ fn test_all_with_null_left_value() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,

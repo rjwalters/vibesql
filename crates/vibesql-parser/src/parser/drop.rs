@@ -26,14 +26,14 @@ impl Parser {
             false
         };
 
-        // Parse table name (supports schema.table)
-        let table_name = self.parse_qualified_identifier()?;
+        // Parse table name with quoted flag (supports schema.table)
+        let table = self.parse_table_ref()?;
 
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
             self.advance();
         }
 
-        Ok(vibesql_ast::DropTableStmt { table_name, if_exists })
+        Ok(vibesql_ast::DropTableStmt { table_name: table.name, if_exists, quoted: table.quoted })
     }
 }

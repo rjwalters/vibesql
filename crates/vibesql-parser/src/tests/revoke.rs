@@ -23,8 +23,8 @@ fn test_revoke_basic_select() {
     assert!(!stmt.grant_option_for);
     assert_eq!(stmt.privileges, vec![PrivilegeType::Select(None)]);
     assert_eq!(stmt.object_type, ObjectType::Table);
-    assert_eq!(stmt.object_name, "USERS");
-    assert_eq!(stmt.grantees, vec!["MANAGER"]);
+    assert_eq!(stmt.object_name, "users");
+    assert_eq!(stmt.grantees, vec!["manager"]);
     assert_eq!(stmt.granted_by, None);
     assert_eq!(stmt.cascade_option, CascadeOption::None);
 }
@@ -38,7 +38,7 @@ fn test_revoke_multiple_privileges() {
     assert!(stmt.privileges.contains(&PrivilegeType::Select(None)));
     assert!(stmt.privileges.contains(&PrivilegeType::Insert(None)));
     assert!(stmt.privileges.contains(&PrivilegeType::Update(None)));
-    assert_eq!(stmt.grantees, vec!["CLERK"]);
+    assert_eq!(stmt.grantees, vec!["clerk"]);
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn test_revoke_multiple_grantees() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Select(None)]);
-    assert_eq!(stmt.grantees, vec!["USER1", "USER2", "USER3"]);
+    assert_eq!(stmt.grantees, vec!["user1", "user2", "user3"]);
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_revoke_all_privileges() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::AllPrivileges]);
-    assert_eq!(stmt.grantees, vec!["ADMIN"]);
+    assert_eq!(stmt.grantees, vec!["admin"]);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn test_revoke_all_without_privileges_keyword() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::AllPrivileges]);
-    assert_eq!(stmt.grantees, vec!["ROLE1"]);
+    assert_eq!(stmt.grantees, vec!["role1"]);
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_revoke_with_cascade() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Select(None)]);
-    assert_eq!(stmt.grantees, vec!["MANAGER"]);
+    assert_eq!(stmt.grantees, vec!["manager"]);
     assert_eq!(stmt.cascade_option, CascadeOption::Cascade);
 }
 
@@ -84,7 +84,7 @@ fn test_revoke_with_restrict() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Insert(None)]);
-    assert_eq!(stmt.grantees, vec!["CLERK"]);
+    assert_eq!(stmt.grantees, vec!["clerk"]);
     assert_eq!(stmt.cascade_option, CascadeOption::Restrict);
 }
 
@@ -95,7 +95,7 @@ fn test_revoke_grant_option_for() {
 
     assert!(stmt.grant_option_for);
     assert_eq!(stmt.privileges, vec![PrivilegeType::Select(None)]);
-    assert_eq!(stmt.grantees, vec!["MANAGER"]);
+    assert_eq!(stmt.grantees, vec!["manager"]);
 }
 
 #[test]
@@ -104,8 +104,8 @@ fn test_revoke_granted_by() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Select(None)]);
-    assert_eq!(stmt.grantees, vec!["ANALYST"]);
-    assert_eq!(stmt.granted_by, Some("ADMIN".to_string()));
+    assert_eq!(stmt.grantees, vec!["analyst"]);
+    assert_eq!(stmt.granted_by, Some("admin".to_string()));
 }
 
 #[test]
@@ -115,8 +115,8 @@ fn test_revoke_schema_privilege() {
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Usage]);
     assert_eq!(stmt.object_type, ObjectType::Schema);
-    assert_eq!(stmt.object_name, "PUBLIC");
-    assert_eq!(stmt.grantees, vec!["USER1"]);
+    assert_eq!(stmt.object_name, "public");
+    assert_eq!(stmt.grantees, vec!["user1"]);
 }
 
 #[test]
@@ -126,8 +126,8 @@ fn test_revoke_create_on_schema() {
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Create]);
     assert_eq!(stmt.object_type, ObjectType::Schema);
-    assert_eq!(stmt.object_name, "TEST_SCHEMA");
-    assert_eq!(stmt.grantees, vec!["DEVELOPER"]);
+    assert_eq!(stmt.object_name, "test_schema");
+    assert_eq!(stmt.grantees, vec!["developer"]);
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_revoke_without_table_keyword() {
 
     // Should default to TABLE when not specified
     assert_eq!(stmt.object_type, ObjectType::Table);
-    assert_eq!(stmt.object_name, "USERS");
+    assert_eq!(stmt.object_name, "users");
 }
 
 #[test]
@@ -150,9 +150,9 @@ fn test_revoke_complex_combination() {
     assert!(stmt.privileges.contains(&PrivilegeType::Select(None)));
     assert!(stmt.privileges.contains(&PrivilegeType::Insert(None)));
     assert_eq!(stmt.object_type, ObjectType::Table);
-    assert_eq!(stmt.object_name, "SENSITIVE_DATA");
-    assert_eq!(stmt.grantees, vec!["ROLE1", "ROLE2"]);
-    assert_eq!(stmt.granted_by, Some("ADMIN".to_string()));
+    assert_eq!(stmt.object_name, "sensitive_data");
+    assert_eq!(stmt.grantees, vec!["role1", "role2"]);
+    assert_eq!(stmt.granted_by, Some("admin".to_string()));
     assert_eq!(stmt.cascade_option, CascadeOption::Cascade);
 }
 
@@ -162,7 +162,7 @@ fn test_revoke_delete_privilege() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::Delete]);
-    assert_eq!(stmt.grantees, vec!["AUDITOR"]);
+    assert_eq!(stmt.grantees, vec!["auditor"]);
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn test_revoke_references_privilege() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::References(None)]);
-    assert_eq!(stmt.object_name, "PARENT_TABLE");
+    assert_eq!(stmt.object_name, "parent_table");
 }
 
 // SQL:1999 Core Feature E081-06: REFERENCES privilege tests
@@ -183,8 +183,8 @@ fn test_revoke_references_basic() {
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::References(None)]);
     assert_eq!(stmt.object_type, ObjectType::Table);
-    assert_eq!(stmt.object_name, "USERS");
-    assert_eq!(stmt.grantees, vec!["MANAGER"]);
+    assert_eq!(stmt.object_name, "users");
+    assert_eq!(stmt.grantees, vec!["manager"]);
 }
 
 #[test]
@@ -193,8 +193,8 @@ fn test_revoke_references_with_cascade() {
     let stmt = parse_revoke(sql);
 
     assert_eq!(stmt.privileges, vec![PrivilegeType::References(None)]);
-    assert_eq!(stmt.object_name, "ORDERS");
-    assert_eq!(stmt.grantees, vec!["MANAGER"]);
+    assert_eq!(stmt.object_name, "orders");
+    assert_eq!(stmt.grantees, vec!["manager"]);
     assert_eq!(stmt.cascade_option, CascadeOption::Cascade);
 }
 
@@ -205,8 +205,8 @@ fn test_revoke_grant_option_for_references() {
 
     assert!(stmt.grant_option_for);
     assert_eq!(stmt.privileges, vec![PrivilegeType::References(None)]);
-    assert_eq!(stmt.object_name, "PRODUCTS");
-    assert_eq!(stmt.grantees, vec!["ADMIN"]);
+    assert_eq!(stmt.object_name, "products");
+    assert_eq!(stmt.grantees, vec!["admin"]);
 }
 
 // Issue #561: REVOKE on FUNCTION, PROCEDURE, ROUTINE objects
@@ -222,8 +222,8 @@ fn test_revoke_execute_on_function() {
             assert_eq!(revoke_stmt.privileges.len(), 1);
             assert_eq!(revoke_stmt.privileges[0], vibesql_ast::PrivilegeType::Execute);
             assert_eq!(revoke_stmt.object_type, vibesql_ast::ObjectType::Function);
-            assert_eq!(revoke_stmt.object_name.to_string(), "MY_FUNC");
-            assert_eq!(revoke_stmt.grantees, vec!["USER_ROLE"]);
+            assert_eq!(revoke_stmt.object_name.to_string(), "my_func");
+            assert_eq!(revoke_stmt.grantees, vec!["user_role"]);
         }
         other => panic!("Expected Revoke statement, got {:?}", other),
     }
@@ -239,7 +239,7 @@ fn test_revoke_execute_on_procedure() {
         vibesql_ast::Statement::Revoke(revoke_stmt) => {
             assert_eq!(revoke_stmt.privileges[0], vibesql_ast::PrivilegeType::Execute);
             assert_eq!(revoke_stmt.object_type, vibesql_ast::ObjectType::Procedure);
-            assert_eq!(revoke_stmt.object_name.to_string(), "PROC_NAME");
+            assert_eq!(revoke_stmt.object_name.to_string(), "proc_name");
         }
         other => panic!("Expected Revoke statement, got {:?}", other),
     }
@@ -255,7 +255,7 @@ fn test_revoke_execute_on_routine() {
         vibesql_ast::Statement::Revoke(revoke_stmt) => {
             assert_eq!(revoke_stmt.privileges[0], vibesql_ast::PrivilegeType::Execute);
             assert_eq!(revoke_stmt.object_type, vibesql_ast::ObjectType::Routine);
-            assert_eq!(revoke_stmt.object_name.to_string(), "ROUTINE_NAME");
+            assert_eq!(revoke_stmt.object_name.to_string(), "routine_name");
         }
         other => panic!("Expected Revoke statement, got {:?}", other),
     }
@@ -271,7 +271,7 @@ fn test_revoke_execute_on_method() {
         vibesql_ast::Statement::Revoke(revoke_stmt) => {
             assert_eq!(revoke_stmt.privileges[0], vibesql_ast::PrivilegeType::Execute);
             assert_eq!(revoke_stmt.object_type, vibesql_ast::ObjectType::Method);
-            assert_eq!(revoke_stmt.object_name.to_string(), "METHOD_NAME");
+            assert_eq!(revoke_stmt.object_name.to_string(), "method_name");
         }
         other => panic!("Expected Revoke statement, got {:?}", other),
     }

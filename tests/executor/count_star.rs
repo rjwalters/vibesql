@@ -50,7 +50,7 @@ fn test_count_star_in_multiplication() {
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab2".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -113,7 +113,7 @@ fn test_count_star_in_addition() {
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab2".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -187,7 +187,7 @@ fn test_count_star_complex_expression() {
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab2".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -270,7 +270,7 @@ fn test_count_star_with_unary_operators() {
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab1".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -336,7 +336,7 @@ fn test_count_star_with_negative_unary() {
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab1".to_string(),
             alias: None,
-            column_aliases: None,
+            column_aliases: None, quoted: false,
         }),
         where_clause: None,
         group_by: None,

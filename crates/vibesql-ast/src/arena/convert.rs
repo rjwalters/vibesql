@@ -440,13 +440,16 @@ impl<'a, 'arena> Converter<'a, 'arena> {
 
     fn convert_from_clause(&self, from: &arena_select::FromClause<'arena>) -> FromClause {
         match from {
-            arena_select::FromClause::Table { name, alias, column_aliases } => FromClause::Table {
-                name: self.resolve(*name),
-                alias: self.resolve_opt(*alias),
-                column_aliases: column_aliases
-                    .as_ref()
-                    .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
-            },
+            arena_select::FromClause::Table { name, alias, column_aliases, quoted } => {
+                FromClause::Table {
+                    name: self.resolve(*name),
+                    alias: self.resolve_opt(*alias),
+                    column_aliases: column_aliases
+                        .as_ref()
+                        .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+                    quoted: *quoted,
+                }
+            }
             arena_select::FromClause::Join {
                 left,
                 right,

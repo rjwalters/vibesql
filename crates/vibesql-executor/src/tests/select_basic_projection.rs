@@ -50,7 +50,7 @@ fn test_select_star() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -128,7 +128,7 @@ fn test_select_specific_columns() {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() },
                 alias: None, source_text: None },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,

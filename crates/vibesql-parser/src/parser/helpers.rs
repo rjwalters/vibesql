@@ -158,17 +158,33 @@ impl Parser {
 
     /// Parse a qualified identifier (schema.table or just table)
     pub(super) fn parse_qualified_identifier(&mut self) -> Result<String, ParseError> {
-        // Parse first identifier
-        let first_part = match self.peek() {
-            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+        let table_ref = self.parse_table_ref()?;
+        Ok(table_ref.name)
+    }
+
+    /// Parse a table reference with quoted flag (schema.table or just table)
+    ///
+    /// Returns a TableRef that includes whether the identifier was quoted (delimited).
+    /// This is important for SQL:1999 case-sensitivity semantics:
+    /// - Unquoted identifiers are case-insensitive
+    /// - Quoted identifiers are case-sensitive
+    pub(super) fn parse_table_ref(&mut self) -> Result<vibesql_ast::TableRef, ParseError> {
+        // Parse first identifier and track if it was quoted
+        let (first_part, first_quoted) = match self.peek() {
+            Token::Identifier(name) => {
                 let identifier = name.clone();
                 self.advance();
-                identifier
+                (identifier, false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let identifier = name.clone();
+                self.advance();
+                (identifier, true)
             }
             Token::Keyword(keyword) => {
                 let identifier = keyword.to_string();
                 self.advance();
-                identifier
+                (identifier, false) // Keywords are treated as unquoted
             }
             _ => return Err(ParseError { message: "Expected identifier".to_string() }),
         };
@@ -176,24 +192,34 @@ impl Parser {
         // Check if there's a dot followed by another identifier
         if self.peek() == &Token::Symbol('.') {
             self.advance(); // consume the dot
-            let second_part = match self.peek() {
-                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+            let (second_part, second_quoted) = match self.peek() {
+                Token::Identifier(name) => {
                     let identifier = name.clone();
                     self.advance();
-                    identifier
+                    (identifier, false)
+                }
+                Token::DelimitedIdentifier(name) => {
+                    let identifier = name.clone();
+                    self.advance();
+                    (identifier, true)
                 }
                 Token::Keyword(keyword) => {
                     let identifier = keyword.to_string();
                     self.advance();
-                    identifier
+                    (identifier, false)
                 }
                 _ => {
                     return Err(ParseError { message: "Expected identifier after '.'".to_string() })
                 }
             };
-            Ok(format!("{}.{}", first_part, second_part))
+            // For qualified names, the table part's quoted status matters most
+            // If either part is quoted, we consider the whole reference quoted
+            Ok(vibesql_ast::TableRef::new(
+                format!("{}.{}", first_part, second_part),
+                first_quoted || second_quoted,
+            ))
         } else {
-            Ok(first_part)
+            Ok(vibesql_ast::TableRef::new(first_part, first_quoted))
         }
     }
 

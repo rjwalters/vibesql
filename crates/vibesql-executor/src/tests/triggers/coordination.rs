@@ -123,6 +123,7 @@ fn test_before_trigger_executes_first() {
         }],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
     CreateTableExecutor::execute(&counter_stmt, &mut db).expect("Failed to create counter table");
 
@@ -175,7 +176,7 @@ fn test_before_trigger_executes_first() {
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "COUNTER".to_string(),
             alias: None,
             column_aliases: None,
@@ -201,7 +202,7 @@ fn test_before_trigger_executes_first() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "USERS".to_string(),
             alias: None,
             column_aliases: None,

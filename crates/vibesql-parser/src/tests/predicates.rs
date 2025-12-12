@@ -24,7 +24,7 @@ fn test_double_equals_sqlite_compat() {
                 // Check left is 'id'
                 match *left {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "ID");
+                        assert_eq!(column, "id");
                     }
                     _ => panic!("Expected ColumnRef for left"),
                 }
@@ -78,7 +78,7 @@ fn test_between_integer() {
                 match *expr {
                     vibesql_ast::Expression::ColumnRef { table, column } => {
                         assert_eq!(table, None);
-                        assert_eq!(column, "AGE");
+                        assert_eq!(column, "age");
                     }
                     _ => panic!("Expected ColumnRef for expr"),
                 }
@@ -124,7 +124,7 @@ fn test_not_between() {
                 match *expr {
                     vibesql_ast::Expression::ColumnRef { table, column } => {
                         assert_eq!(table, None);
-                        assert_eq!(column, "PRICE");
+                        assert_eq!(column, "price");
                     }
                     _ => panic!("Expected ColumnRef for expr"),
                 }
@@ -153,7 +153,7 @@ fn test_between_with_expressions() {
                 // Verify expr is 'total'
                 match *expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "TOTAL");
+                        assert_eq!(column, "total");
                     }
                     _ => panic!("Expected ColumnRef"),
                 }
@@ -192,7 +192,7 @@ fn test_between_with_column_references() {
                 // Verify low is min_val
                 match *low {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "MIN_VAL");
+                        assert_eq!(column, "min_val");
                     }
                     _ => panic!("Expected ColumnRef for low"),
                 }
@@ -200,7 +200,7 @@ fn test_between_with_column_references() {
                 // Verify high is max_val
                 match *high {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "MAX_VAL");
+                        assert_eq!(column, "max_val");
                     }
                     _ => panic!("Expected ColumnRef for high"),
                 }
@@ -248,7 +248,7 @@ fn test_between_symmetric() {
                 // Check expr is 'x'
                 match *expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "X");
+                        assert_eq!(column, "x");
                     }
                     _ => panic!("Expected ColumnRef for expr"),
                 }

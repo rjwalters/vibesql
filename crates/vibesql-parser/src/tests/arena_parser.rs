@@ -22,7 +22,7 @@ fn test_arena_parse_delete_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, interner) = result.unwrap();
-    assert_eq!(interner.resolve(stmt.table_name), "USERS");
+    assert_eq!(interner.resolve(stmt.table_name), "users");
     assert!(!stmt.only);
     assert!(stmt.where_clause.is_none());
 }
@@ -35,7 +35,7 @@ fn test_arena_parse_delete_with_where() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, interner) = result.unwrap();
-    assert_eq!(interner.resolve(stmt.table_name), "USERS");
+    assert_eq!(interner.resolve(stmt.table_name), "users");
     assert!(stmt.where_clause.is_some());
 }
 
@@ -48,7 +48,7 @@ fn test_arena_parse_delete_with_only() {
 
     let (stmt, interner) = result.unwrap();
     assert!(stmt.only);
-    assert_eq!(interner.resolve(stmt.table_name), "USERS");
+    assert_eq!(interner.resolve(stmt.table_name), "users");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_arena_parse_delete_convert_to_standard() {
     // Convert to standard AST using the Converter
     let converter = Converter::new(&interner);
     let std_stmt: DeleteStmt = converter.convert_delete(arena_stmt);
-    assert_eq!(std_stmt.table_name, "USERS");
+    assert_eq!(std_stmt.table_name, "users");
     assert!(matches!(std_stmt.where_clause, Some(WhereClause::Condition(_))));
 }
 
@@ -76,9 +76,9 @@ fn test_arena_parse_update_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, interner) = result.unwrap();
-    assert_eq!(interner.resolve(stmt.table_name), "USERS");
+    assert_eq!(interner.resolve(stmt.table_name), "users");
     assert_eq!(stmt.assignments.len(), 1);
-    assert_eq!(interner.resolve(stmt.assignments[0].column), "NAME");
+    assert_eq!(interner.resolve(stmt.assignments[0].column), "name");
     assert!(stmt.where_clause.is_none());
 }
 
@@ -91,8 +91,8 @@ fn test_arena_parse_update_multiple_assignments() {
 
     let (stmt, interner) = result.unwrap();
     assert_eq!(stmt.assignments.len(), 2);
-    assert_eq!(interner.resolve(stmt.assignments[0].column), "NAME");
-    assert_eq!(interner.resolve(stmt.assignments[1].column), "AGE");
+    assert_eq!(interner.resolve(stmt.assignments[0].column), "name");
+    assert_eq!(interner.resolve(stmt.assignments[1].column), "age");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn test_arena_parse_update_convert_to_standard() {
     // Convert to standard AST using the Converter
     let converter = Converter::new(&interner);
     let std_stmt: UpdateStmt = converter.convert_update(arena_stmt);
-    assert_eq!(std_stmt.table_name, "USERS");
+    assert_eq!(std_stmt.table_name, "users");
     assert_eq!(std_stmt.assignments.len(), 2);
     assert!(matches!(std_stmt.where_clause, Some(WhereClause::Condition(_))));
 }
@@ -132,10 +132,10 @@ fn test_arena_parse_insert_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     let (stmt, interner) = result.unwrap();
-    assert_eq!(interner.resolve(stmt.table_name), "USERS");
+    assert_eq!(interner.resolve(stmt.table_name), "users");
     assert_eq!(stmt.columns.len(), 2);
-    assert_eq!(interner.resolve(stmt.columns[0]), "NAME");
-    assert_eq!(interner.resolve(stmt.columns[1]), "AGE");
+    assert_eq!(interner.resolve(stmt.columns[0]), "name");
+    assert_eq!(interner.resolve(stmt.columns[1]), "age");
 
     match &stmt.source {
         vibesql_ast::arena::InsertSource::Values(rows) => {
@@ -231,7 +231,7 @@ fn test_arena_parse_insert_convert_to_standard() {
     // Convert to standard AST using the Converter
     let converter = Converter::new(&interner);
     let std_stmt: InsertStmt = converter.convert_insert(arena_stmt);
-    assert_eq!(std_stmt.table_name, "USERS");
+    assert_eq!(std_stmt.table_name, "users");
     assert_eq!(std_stmt.columns.len(), 2);
     assert!(matches!(std_stmt.source, InsertSource::Values(_)));
 }

@@ -11,7 +11,7 @@ fn test_create_character_set_minimal() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "UTF8");
+            assert_eq!(create_stmt.charset_name, "utf8");
             assert_eq!(create_stmt.source, None);
             assert_eq!(create_stmt.collation, None);
         }
@@ -28,7 +28,7 @@ fn test_create_character_set_with_as() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "MY_CHARSET");
+            assert_eq!(create_stmt.charset_name, "my_charset");
             assert_eq!(create_stmt.source, None);
             assert_eq!(create_stmt.collation, None);
         }
@@ -45,8 +45,8 @@ fn test_create_character_set_with_get() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "MY_CHARSET");
-            assert_eq!(create_stmt.source, Some("UTF8".to_string()));
+            assert_eq!(create_stmt.charset_name, "my_charset");
+            assert_eq!(create_stmt.source, Some("utf8".to_string()));
             assert_eq!(create_stmt.collation, None);
         }
         _ => panic!("Expected CreateCharacterSet statement, got: {:?}", stmt),
@@ -62,9 +62,9 @@ fn test_create_character_set_with_collation() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "MY_CHARSET");
+            assert_eq!(create_stmt.charset_name, "my_charset");
             assert_eq!(create_stmt.source, None);
-            assert_eq!(create_stmt.collation, Some("UNICODE".to_string()));
+            assert_eq!(create_stmt.collation, Some("unicode".to_string()));
         }
         _ => panic!("Expected CreateCharacterSet statement, got: {:?}", stmt),
     }
@@ -79,9 +79,9 @@ fn test_create_character_set_full_syntax() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "MY_CHARSET");
-            assert_eq!(create_stmt.source, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.collation, Some("UNICODE".to_string()));
+            assert_eq!(create_stmt.charset_name, "my_charset");
+            assert_eq!(create_stmt.source, Some("utf8".to_string()));
+            assert_eq!(create_stmt.collation, Some("unicode".to_string()));
         }
         _ => panic!("Expected CreateCharacterSet statement, got: {:?}", stmt),
     }
@@ -96,9 +96,9 @@ fn test_create_character_set_without_as() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCharacterSet(create_stmt) => {
-            assert_eq!(create_stmt.charset_name, "MY_CHARSET");
-            assert_eq!(create_stmt.source, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.collation, Some("UNICODE".to_string()));
+            assert_eq!(create_stmt.charset_name, "my_charset");
+            assert_eq!(create_stmt.source, Some("utf8".to_string()));
+            assert_eq!(create_stmt.collation, Some("unicode".to_string()));
         }
         _ => panic!("Expected CreateCharacterSet statement, got: {:?}", stmt),
     }
@@ -113,7 +113,7 @@ fn test_drop_character_set() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::DropCharacterSet(drop_stmt) => {
-            assert_eq!(drop_stmt.charset_name, "MY_CHARSET");
+            assert_eq!(drop_stmt.charset_name, "my_charset");
         }
         _ => panic!("Expected DropCharacterSet statement, got: {:?}", stmt),
     }

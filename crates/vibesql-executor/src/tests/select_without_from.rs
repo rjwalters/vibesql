@@ -497,7 +497,7 @@ fn test_hex_literal_in_subquery_without_from() {
             values: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
+                    from: Some(vibesql_ast::FromClause::Table { quoted: false,
                         name: "t1".to_string(),
                         alias: None,
                         column_aliases: None,
@@ -600,7 +600,7 @@ fn test_binary_literal_in_subquery_without_from() {
             values: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                    from: Some(vibesql_ast::FromClause::Table {
+                    from: Some(vibesql_ast::FromClause::Table { quoted: false,
                         name: "t1".to_string(),
                         alias: None,
                         column_aliases: None,
@@ -671,8 +671,9 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -685,7 +686,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
             values: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-                from: Some(vibesql_ast::FromClause::Table {
+                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,

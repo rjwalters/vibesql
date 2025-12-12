@@ -65,8 +65,9 @@ fn test_not_in_select_where() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -146,8 +147,9 @@ fn test_not_with_equality() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -256,7 +258,7 @@ fn test_not_in_delete_where() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,
@@ -326,8 +328,9 @@ fn test_not_with_null() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "tab0".to_string(),
             alias: None,
             column_aliases: None,

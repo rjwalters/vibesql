@@ -47,9 +47,9 @@ fn test_select_star_with_derived_columns() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
-            alias: Some(vec!["C".to_string(), "D".to_string()]),
+            alias: Some(vec!["c".to_string(), "d".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -65,7 +65,7 @@ fn test_select_star_with_derived_columns() {
     let result = executor.execute_with_columns(&stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -112,9 +112,9 @@ fn test_select_qualified_star_with_derived_columns() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::QualifiedWildcard {
             qualifier: "t1".to_string(),
-            alias: Some(vec!["C".to_string(), "D".to_string()]),
+            alias: Some(vec!["c".to_string(), "d".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -130,7 +130,7 @@ fn test_select_qualified_star_with_derived_columns() {
     let result = executor.execute_with_columns(&stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -178,9 +178,9 @@ fn test_derived_columns_count_mismatch() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
-            alias: Some(vec!["C".to_string(), "D".to_string(), "E".to_string()]),
+            alias: Some(vec!["c".to_string(), "d".to_string(), "e".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -249,9 +249,9 @@ fn test_select_distinct_star_with_derived_columns() {
             values: None,
         distinct: true, // DISTINCT
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
-            alias: Some(vec!["C".to_string(), "D".to_string()]),
+            alias: Some(vec!["c".to_string(), "d".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -267,7 +267,7 @@ fn test_select_distinct_star_with_derived_columns() {
     let result = executor.execute_with_columns(&stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check DISTINCT worked - only 1 row
     assert_eq!(result.rows.len(), 1);
@@ -316,7 +316,7 @@ fn test_select_star_alias_with_table_alias() {
             qualifier: "alias_name".to_string(),
             alias: Some(vec!["X".to_string(), "Y".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: Some("alias_name".to_string()),
             column_aliases: None,
@@ -383,7 +383,7 @@ fn test_select_wildcard_with_derived_column_list() {
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -430,7 +430,7 @@ fn test_select_all_wildcard_with_derived_column_list() {
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -485,7 +485,7 @@ fn test_select_distinct_wildcard_with_derived_column_list() {
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check DISTINCT works - should have only 1 row
     assert_eq!(result.rows.len(), 1);
@@ -532,7 +532,7 @@ fn test_select_qualified_wildcard_with_derived_column_list() {
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -581,7 +581,7 @@ fn test_select_alias_wildcard_with_derived_column_list() {
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
     // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);

@@ -12,9 +12,9 @@ fn test_parse_update_basic() {
 
     match stmt {
         vibesql_ast::Statement::Update(update) => {
-            assert_eq!(update.table_name, "USERS");
+            assert_eq!(update.table_name, "users");
             assert_eq!(update.assignments.len(), 1);
-            assert_eq!(update.assignments[0].column, "NAME");
+            assert_eq!(update.assignments[0].column, "name");
             assert!(update.where_clause.is_some());
         }
         _ => panic!("Expected UPDATE statement"),
@@ -29,10 +29,10 @@ fn test_parse_update_multiple_columns() {
 
     match stmt {
         vibesql_ast::Statement::Update(update) => {
-            assert_eq!(update.table_name, "USERS");
+            assert_eq!(update.table_name, "users");
             assert_eq!(update.assignments.len(), 2);
-            assert_eq!(update.assignments[0].column, "NAME");
-            assert_eq!(update.assignments[1].column, "AGE");
+            assert_eq!(update.assignments[0].column, "name");
+            assert_eq!(update.assignments[1].column, "age");
         }
         _ => panic!("Expected UPDATE statement"),
     }
@@ -46,9 +46,9 @@ fn test_parse_update_with_default() {
 
     match stmt {
         vibesql_ast::Statement::Update(update) => {
-            assert_eq!(update.table_name, "USERS");
+            assert_eq!(update.table_name, "users");
             assert_eq!(update.assignments.len(), 1);
-            assert_eq!(update.assignments[0].column, "NAME");
+            assert_eq!(update.assignments[0].column, "name");
             // Value should be DEFAULT
             assert!(matches!(update.assignments[0].value, vibesql_ast::Expression::Default));
         }
@@ -64,7 +64,7 @@ fn test_parse_update_multiple_defaults() {
 
     match stmt {
         vibesql_ast::Statement::Update(update) => {
-            assert_eq!(update.table_name, "USERS");
+            assert_eq!(update.table_name, "users");
             assert_eq!(update.assignments.len(), 2);
             // Both values should be DEFAULT
             assert!(matches!(update.assignments[0].value, vibesql_ast::Expression::Default));

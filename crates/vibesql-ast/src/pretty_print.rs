@@ -864,8 +864,13 @@ impl ToSql for SelectItem {
 impl ToSql for FromClause {
     fn to_sql(&self) -> String {
         match self {
-            FromClause::Table { name, alias, column_aliases } => {
-                let mut result = format_identifier(name);
+            FromClause::Table { name, alias, column_aliases, quoted } => {
+                // Format name with quotes if it was originally quoted
+                let mut result = if *quoted {
+                    format!("\"{}\"", name.replace('"', "\"\""))
+                } else {
+                    format_identifier(name)
+                };
                 if let Some(a) = alias {
                     result.push_str(&format!(" AS {}", format_identifier(a)));
                     if let Some(cols) = column_aliases {
@@ -1117,6 +1122,7 @@ mod tests {
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -1153,6 +1159,7 @@ mod tests {
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
@@ -1186,6 +1193,7 @@ mod tests {
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
+                quoted: false,
             }),
             where_clause: None,
             group_by: None,
@@ -1209,11 +1217,13 @@ mod tests {
                 name: "orders".to_string(),
                 alias: Some("o".to_string()),
                 column_aliases: None,
+                quoted: false,
             }),
             right: Box::new(FromClause::Table {
                 name: "customers".to_string(),
                 alias: Some("c".to_string()),
                 column_aliases: None,
+                quoted: false,
             }),
             join_type: JoinType::Inner,
             condition: Some(Expression::BinaryOp {

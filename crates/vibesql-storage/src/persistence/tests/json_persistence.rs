@@ -888,7 +888,7 @@ fn test_json_index_roundtrip() {
     // Verify index exists
     let indexes = loaded_db.list_indexes();
     assert!(
-        indexes.iter().any(|idx| idx.to_uppercase() == "IDX_NAME"),
+        indexes.iter().any(|idx| idx.to_lowercase() == "idx_name"),
         "Index not found in loaded database. Available indexes: {:?}, Available tables: {:?}",
         indexes,
         tables
@@ -942,6 +942,7 @@ fn test_json_view_preservation() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef { table: None, column: "active".to_string() }),
@@ -1025,6 +1026,7 @@ fn test_json_view_preservation_without_sql_definition() {
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,

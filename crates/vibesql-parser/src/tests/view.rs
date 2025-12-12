@@ -9,7 +9,7 @@ fn test_create_view_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(stmt.columns.is_none());
         assert!(!stmt.with_check_option);
     } else {
@@ -24,13 +24,13 @@ fn test_create_view_with_column_list() {
 
     match result {
         Ok(vibesql_ast::Statement::CreateView(stmt)) => {
-            assert_eq!(stmt.view_name, "EMP_VIEW");
+            assert_eq!(stmt.view_name, "emp_view");
             assert!(stmt.columns.is_some());
             let cols = stmt.columns.unwrap();
             assert_eq!(cols.len(), 3);
-            assert_eq!(cols[0], "ID");
-            assert_eq!(cols[1], "NAME");
-            assert_eq!(cols[2], "DEPT");
+            assert_eq!(cols[0], "id");
+            assert_eq!(cols[1], "name");
+            assert_eq!(cols[2], "dept");
             assert!(!stmt.with_check_option);
         }
         Ok(other) => panic!("Expected CreateView, got: {:?}", other),
@@ -45,7 +45,7 @@ fn test_create_view_with_where_clause() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "ACTIVE_USERS");
+        assert_eq!(stmt.view_name, "active_users");
         assert!(stmt.columns.is_none());
         assert!(!stmt.with_check_option);
         // Query contains WHERE clause
@@ -62,7 +62,7 @@ fn test_create_view_with_join() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "ORDER_DETAILS");
+        assert_eq!(stmt.view_name, "order_details");
         // Query contains FROM clause with JOIN
         assert!(stmt.query.from.is_some());
     } else {
@@ -77,7 +77,7 @@ fn test_create_view_with_group_by() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "DEPT_SUMMARY");
+        assert_eq!(stmt.view_name, "dept_summary");
         // Query contains GROUP BY
         assert!(stmt.query.group_by.is_some());
     } else {
@@ -93,7 +93,7 @@ fn test_create_view_with_check_option() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "ACTIVE_USERS");
+        assert_eq!(stmt.view_name, "active_users");
         assert!(stmt.with_check_option);
     } else {
         panic!("Expected CreateView statement");
@@ -107,7 +107,7 @@ fn test_create_view_qualified_name() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MYSCHEMA.MY_VIEW");
+        assert_eq!(stmt.view_name, "myschema.my_view");
     } else {
         panic!("Expected CreateView statement");
     }
@@ -120,7 +120,7 @@ fn test_drop_view_simple() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(!stmt.if_exists);
         assert!(!stmt.cascade);
         assert!(!stmt.restrict); // Neither CASCADE nor RESTRICT specified
@@ -136,7 +136,7 @@ fn test_drop_view_if_exists() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(stmt.if_exists);
         assert!(!stmt.cascade);
         assert!(!stmt.restrict);
@@ -152,7 +152,7 @@ fn test_drop_view_cascade() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(!stmt.if_exists);
         assert!(stmt.cascade);
         assert!(!stmt.restrict);
@@ -168,7 +168,7 @@ fn test_drop_view_restrict() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(!stmt.if_exists);
         assert!(!stmt.cascade);
         assert!(stmt.restrict); // RESTRICT explicitly specified
@@ -184,7 +184,7 @@ fn test_drop_view_if_exists_cascade() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(stmt.if_exists);
         assert!(stmt.cascade);
         assert!(!stmt.restrict);
@@ -200,7 +200,7 @@ fn test_drop_view_qualified_name() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::DropView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MYSCHEMA.MY_VIEW");
+        assert_eq!(stmt.view_name, "myschema.my_view");
     } else {
         panic!("Expected DropView statement");
     }
@@ -213,7 +213,7 @@ fn test_create_temp_view() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "VIEW2");
+        assert_eq!(stmt.view_name, "view2");
         assert!(stmt.temporary);
         assert!(!stmt.or_replace);
     } else {
@@ -228,7 +228,7 @@ fn test_create_temporary_view() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "VIEW3");
+        assert_eq!(stmt.view_name, "view3");
         assert!(stmt.temporary);
         assert!(!stmt.or_replace);
     } else {
@@ -243,7 +243,7 @@ fn test_create_or_replace_temp_view() {
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
     if let Ok(vibesql_ast::Statement::CreateView(stmt)) = result {
-        assert_eq!(stmt.view_name, "MY_VIEW");
+        assert_eq!(stmt.view_name, "my_view");
         assert!(stmt.temporary);
         assert!(stmt.or_replace);
     } else {

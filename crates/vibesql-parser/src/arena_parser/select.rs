@@ -418,15 +418,23 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(FromClause::Subquery { query, alias, column_aliases });
         }
 
-        // Regular table reference
-        let name = if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            self.advance();
-            self.intern(&name)
-        } else {
-            return Err(ParseError {
-                message: format!("Expected table name, found {:?}", self.peek()),
-            });
+        // Regular table reference - check for both regular and delimited identifiers
+        let (name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), true)
+            }
+            _ => {
+                return Err(ParseError {
+                    message: format!("Expected table name, found {:?}", self.peek()),
+                });
+            }
         };
 
         // Check for alias
@@ -464,7 +472,7 @@ impl<'arena> ArenaParser<'arena> {
         // Parse optional column aliases: (col1, col2, ...)
         let column_aliases = if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
-        Ok(FromClause::Table { name, alias, column_aliases })
+        Ok(FromClause::Table { name, alias, column_aliases, quoted })
     }
 
     /// Parse GROUP BY clause.

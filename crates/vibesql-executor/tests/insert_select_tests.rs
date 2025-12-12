@@ -52,6 +52,7 @@ fn test_insert_from_select_basic() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -135,6 +136,7 @@ fn test_insert_from_select_with_where() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
@@ -222,6 +224,7 @@ fn test_insert_from_select_column_mismatch() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -334,6 +337,7 @@ fn test_insert_from_select_with_aggregates() {
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,

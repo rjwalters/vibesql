@@ -5,7 +5,8 @@ use vibesql_ast::{BinaryOperator, GroupByClause, JoinType, SelectItem};
 use super::*;
 
 fn simple_table_from(name: &str) -> FromClause {
-    FromClause::Table { name: name.to_string(), alias: None, column_aliases: None }
+    FromClause::Table { name: name.to_string(), alias: None, column_aliases: None ,
+                quoted: false,}
 }
 
 fn column_ref(column: &str) -> Expression {
@@ -310,6 +311,7 @@ fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
         name: name.to_string(),
         alias: Some(alias.to_string()),
         column_aliases: None,
+    quoted: false,
     }
 }
 

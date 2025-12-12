@@ -3,15 +3,15 @@
 //! Tests the case_sensitive_identifiers setting in the catalog which controls
 //! whether table and view lookups are case-sensitive or case-insensitive.
 //!
-//! Default behavior (case_sensitive_identifiers = true, SQL:1999 compliant):
-//! - Lookups are case-sensitive (SQL standard)
-//! - The parser normalizes unquoted identifiers to uppercase
-//! - Delimited identifiers preserve their exact case
-//! - "users" and "USERS" are different tables
-//!
-//! When case_sensitive_identifiers = false (MySQL compatible mode):
+//! Default behavior (case_sensitive_identifiers = false, SQL:1999 compliant):
 //! - Lookups are case-insensitive
+//! - The parser normalizes unquoted identifiers to lowercase
+//! - Delimited identifiers preserve their exact case
 //! - "users", "USERS", "Users" all refer to the same table
+//!
+//! When case_sensitive_identifiers = true (strict mode):
+//! - Lookups are case-sensitive
+//! - "users" and "USERS" are different tables
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Database;
@@ -22,11 +22,7 @@ use vibesql_types::DataType;
 fn test_table_lookup_case_insensitive_when_enabled() {
     let mut db = Database::new();
 
-    // Default is case-sensitive (SQL:1999 compliant)
-    assert!(db.catalog.is_case_sensitive_identifiers());
-
-    // Enable case-insensitive mode for this test
-    db.catalog.set_case_sensitive_identifiers(false);
+    // Default is case-insensitive (SQL:1999 compliant - identifiers normalized to lowercase)
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
     // Create table with lowercase name
@@ -183,15 +179,12 @@ fn test_case_sensitive_mode() {
 fn test_toggle_case_sensitivity() {
     let mut db = Database::new();
 
-    // Default is case-sensitive (SQL:1999 compliant)
-    assert!(db.catalog.is_case_sensitive_identifiers());
-
-    // Start in case-insensitive mode for this test
-    db.catalog.set_case_sensitive_identifiers(false);
+    // Default is case-insensitive (SQL:1999 compliant - identifiers normalized to lowercase)
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
     // Create table in case-insensitive mode with uppercase name
-    // This will ensure it's stored as "ORDERS" after normalization
+    // The table name "ORDERS" is normalized to "orders" when stored because
+    // we're in case-insensitive mode
     let schema = TableSchema::new(
         "ORDERS".to_string(),
         vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
@@ -207,14 +200,15 @@ fn test_toggle_case_sensitivity() {
     assert!(db.catalog.is_case_sensitive_identifiers());
 
     // Now lookups should be case-sensitive
-    // The table is stored as "ORDERS" (since it was created with uppercase)
-    assert!(db.catalog.get_table("orders").is_none());
-    assert!(db.catalog.get_table("ORDERS").is_some());
+    // The table was stored as "orders" (lowercase) because it was created in case-insensitive mode
+    // So "orders" finds it but "ORDERS" does not
+    assert!(db.catalog.get_table("orders").is_some());
+    assert!(db.catalog.get_table("ORDERS").is_none());
 
     // Switch back to case-insensitive
     db.catalog.set_case_sensitive_identifiers(false);
 
-    // Should work again
+    // Should work again (both normalize to "orders")
     assert!(db.catalog.get_table("orders").is_some());
     assert!(db.catalog.get_table("ORDERS").is_some());
 }
@@ -264,6 +258,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -321,6 +316,7 @@ fn test_drop_view_case_insensitive_when_enabled() {
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,
@@ -380,6 +376,7 @@ fn test_view_case_sensitive_mode() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,

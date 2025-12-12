@@ -125,6 +125,7 @@ mod eliminate_unused_tables_tests {
             name: name.to_string(),
             alias: alias.map(|a| a.to_string()),
             column_aliases: None,
+        quoted: false,
         }
     }
 

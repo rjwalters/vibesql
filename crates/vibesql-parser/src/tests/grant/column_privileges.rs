@@ -15,10 +15,10 @@ fn test_parse_grant_update_column_single() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Update(Some(vec!["SALARY".to_string()]))
+                PrivilegeType::Update(Some(vec!["salary".to_string()]))
             );
-            assert_eq!(grant_stmt.object_name.to_string(), "EMPLOYEES");
-            assert_eq!(grant_stmt.grantees, vec!["MANAGER"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "employees");
+            assert_eq!(grant_stmt.grantees, vec!["manager"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -36,9 +36,9 @@ fn test_parse_grant_update_columns_multiple() {
             assert_eq!(
                 grant_stmt.privileges[0],
                 PrivilegeType::Update(Some(vec![
-                    "SALARY".to_string(),
-                    "BONUS".to_string(),
-                    "COMMISSION".to_string()
+                    "salary".to_string(),
+                    "bonus".to_string(),
+                    "commission".to_string()
                 ]))
             );
         }
@@ -57,9 +57,9 @@ fn test_parse_grant_references_column_single() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::References(Some(vec!["ID".to_string()]))
+                PrivilegeType::References(Some(vec!["id".to_string()]))
             );
-            assert_eq!(grant_stmt.object_name.to_string(), "USERS");
+            assert_eq!(grant_stmt.object_name.to_string(), "users");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -77,8 +77,8 @@ fn test_parse_grant_references_columns_multiple() {
             assert_eq!(
                 grant_stmt.privileges[0],
                 PrivilegeType::References(Some(vec![
-                    "USER_ID".to_string(),
-                    "ACCOUNT_ID".to_string()
+                    "user_id".to_string(),
+                    "account_id".to_string()
                 ]))
             );
         }
@@ -98,7 +98,7 @@ fn test_parse_grant_mixed_table_and_column_privileges() {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Select(None));
             assert_eq!(
                 grant_stmt.privileges[1],
-                PrivilegeType::Update(Some(vec!["SALARY".to_string()]))
+                PrivilegeType::Update(Some(vec!["salary".to_string()]))
             );
             assert_eq!(grant_stmt.privileges[2], PrivilegeType::Delete);
         }
@@ -116,7 +116,7 @@ fn test_parse_grant_update_column_with_grant_option() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Update(Some(vec!["SALARY".to_string()]))
+                PrivilegeType::Update(Some(vec!["salary".to_string()]))
             );
             assert!(grant_stmt.with_grant_option);
         }
@@ -134,9 +134,9 @@ fn test_parse_grant_update_column_qualified_table() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Update(Some(vec!["SALARY".to_string()]))
+                PrivilegeType::Update(Some(vec!["salary".to_string()]))
             );
-            assert_eq!(grant_stmt.object_name.to_string(), "HR.EMPLOYEES");
+            assert_eq!(grant_stmt.object_name.to_string(), "hr.employees");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -152,7 +152,7 @@ fn test_parse_grant_update_column_case_insensitive() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Update(Some(vec!["SALARY".to_string()]))
+                PrivilegeType::Update(Some(vec!["salary".to_string()]))
             );
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -201,10 +201,10 @@ fn test_parse_grant_select_column_single() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Select(Some(vec!["NAME".to_string()]))
+                PrivilegeType::Select(Some(vec!["name".to_string()]))
             );
-            assert_eq!(grant_stmt.object_name.to_string(), "USERS");
-            assert_eq!(grant_stmt.grantees, vec!["ANALYST"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "users");
+            assert_eq!(grant_stmt.grantees, vec!["analyst"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -223,9 +223,9 @@ fn test_parse_grant_select_columns_multiple() {
             assert_eq!(
                 grant_stmt.privileges[0],
                 PrivilegeType::Select(Some(vec![
-                    "ID".to_string(),
-                    "NAME".to_string(),
-                    "EMAIL".to_string()
+                    "id".to_string(),
+                    "name".to_string(),
+                    "email".to_string()
                 ]))
             );
         }
@@ -245,10 +245,10 @@ fn test_parse_grant_insert_column_single() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Insert(Some(vec!["NAME".to_string()]))
+                PrivilegeType::Insert(Some(vec!["name".to_string()]))
             );
-            assert_eq!(grant_stmt.object_name.to_string(), "USERS");
-            assert_eq!(grant_stmt.grantees, vec!["DATA_ENTRY"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "users");
+            assert_eq!(grant_stmt.grantees, vec!["data_entry"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -267,9 +267,9 @@ fn test_parse_grant_insert_columns_multiple() {
             assert_eq!(
                 grant_stmt.privileges[0],
                 PrivilegeType::Insert(Some(vec![
-                    "ID".to_string(),
-                    "NAME".to_string(),
-                    "EMAIL".to_string()
+                    "id".to_string(),
+                    "name".to_string(),
+                    "email".to_string()
                 ]))
             );
         }
@@ -319,11 +319,11 @@ fn test_parse_grant_mixed_select_insert_column_privileges() {
             assert_eq!(grant_stmt.privileges.len(), 3);
             assert_eq!(
                 grant_stmt.privileges[0],
-                PrivilegeType::Select(Some(vec!["ID".to_string(), "NAME".to_string()]))
+                PrivilegeType::Select(Some(vec!["id".to_string(), "name".to_string()]))
             );
             assert_eq!(
                 grant_stmt.privileges[1],
-                PrivilegeType::Insert(Some(vec!["EMAIL".to_string()]))
+                PrivilegeType::Insert(Some(vec!["email".to_string()]))
             );
             assert_eq!(grant_stmt.privileges[2], PrivilegeType::Update(None));
         }

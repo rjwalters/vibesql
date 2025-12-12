@@ -24,7 +24,7 @@ fn test_parse_in_subquery() {
                     match *expr {
                         Expression::ColumnRef { table, column } => {
                             assert_eq!(table, None);
-                            assert_eq!(column, "ID");
+                            assert_eq!(column, "id");
                         }
                         _ => panic!("Expected ColumnRef"),
                     }
@@ -54,7 +54,7 @@ fn test_parse_not_in_subquery() {
                     match *expr {
                         Expression::ColumnRef { table, column } => {
                             assert_eq!(table, None);
-                            assert_eq!(column, "STATUS");
+                            assert_eq!(column, "status");
                         }
                         _ => panic!("Expected ColumnRef"),
                     }
@@ -81,7 +81,7 @@ fn test_parse_in_subquery_simple_column() {
                     match *expr {
                         Expression::ColumnRef { table, column } => {
                             assert_eq!(table, None);
-                            assert_eq!(column, "USER_ID");
+                            assert_eq!(column, "user_id");
                         }
                         _ => panic!("Expected ColumnRef, got {:?}", expr),
                     }
@@ -155,7 +155,7 @@ fn test_parse_scalar_subquery_in_where() {
                             match &subquery.select_list[0] {
                                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                                     Expression::AggregateFunction { name, .. } => {
-                                        assert_eq!(name.to_uppercase(), "AVG");
+                                        assert_eq!(name, "avg");
                                     }
                                     _ => panic!("Expected aggregate function call in subquery"),
                                 },
@@ -187,7 +187,7 @@ fn test_parse_scalar_subquery_in_select() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "ID");
+                        assert_eq!(column, "id");
                     }
                     _ => panic!("Expected column reference"),
                 },
@@ -203,7 +203,7 @@ fn test_parse_scalar_subquery_in_select() {
                         match &subquery.select_list[0] {
                             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                                 Expression::AggregateFunction { name, .. } => {
-                                    assert_eq!(name.to_uppercase(), "COUNT");
+                                    assert_eq!(name, "count");
                                 }
                                 _ => panic!("Expected aggregate function"),
                             },
@@ -258,7 +258,7 @@ fn test_parse_derived_table_with_explicit_alias() {
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.from {
             Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
-                assert_eq!(alias, "SUBQ");
+                assert_eq!(alias, "subq");
             }
             _ => panic!("Expected Subquery in FROM clause"),
         },

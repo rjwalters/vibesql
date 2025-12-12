@@ -11,7 +11,7 @@ fn test_create_collation_minimal() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
+            assert_eq!(create_stmt.collation_name, "my_collation");
             assert_eq!(create_stmt.character_set, None);
             assert_eq!(create_stmt.source_collation, None);
             assert_eq!(create_stmt.pad_space, None);
@@ -29,8 +29,8 @@ fn test_create_collation_with_for() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
-            assert_eq!(create_stmt.character_set, Some("UTF8".to_string()));
+            assert_eq!(create_stmt.collation_name, "my_collation");
+            assert_eq!(create_stmt.character_set, Some("utf8".to_string()));
             assert_eq!(create_stmt.source_collation, None);
             assert_eq!(create_stmt.pad_space, None);
         }
@@ -47,9 +47,9 @@ fn test_create_collation_with_from() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
+            assert_eq!(create_stmt.collation_name, "my_collation");
             assert_eq!(create_stmt.character_set, None);
-            assert_eq!(create_stmt.source_collation, Some("UNICODE".to_string()));
+            assert_eq!(create_stmt.source_collation, Some("unicode".to_string()));
             assert_eq!(create_stmt.pad_space, None);
         }
         _ => panic!("Expected CreateCollation statement, got: {:?}", stmt),
@@ -65,7 +65,7 @@ fn test_create_collation_with_from_string_literal() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
+            assert_eq!(create_stmt.collation_name, "my_collation");
             assert_eq!(create_stmt.character_set, None);
             assert_eq!(create_stmt.source_collation, Some("de_DE".to_string()));
             assert_eq!(create_stmt.pad_space, None);
@@ -83,7 +83,7 @@ fn test_create_collation_with_pad_space() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
+            assert_eq!(create_stmt.collation_name, "my_collation");
             assert_eq!(create_stmt.character_set, None);
             assert_eq!(create_stmt.source_collation, None);
             assert_eq!(create_stmt.pad_space, Some(true));
@@ -101,7 +101,7 @@ fn test_create_collation_with_no_pad() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
+            assert_eq!(create_stmt.collation_name, "my_collation");
             assert_eq!(create_stmt.character_set, None);
             assert_eq!(create_stmt.source_collation, None);
             assert_eq!(create_stmt.pad_space, Some(false));
@@ -119,9 +119,9 @@ fn test_create_collation_full_syntax() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
-            assert_eq!(create_stmt.character_set, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.source_collation, Some("UNICODE".to_string()));
+            assert_eq!(create_stmt.collation_name, "my_collation");
+            assert_eq!(create_stmt.character_set, Some("utf8".to_string()));
+            assert_eq!(create_stmt.source_collation, Some("unicode".to_string()));
             assert_eq!(create_stmt.pad_space, Some(true));
         }
         _ => panic!("Expected CreateCollation statement, got: {:?}", stmt),
@@ -137,9 +137,9 @@ fn test_create_collation_full_with_no_pad() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateCollation(create_stmt) => {
-            assert_eq!(create_stmt.collation_name, "MY_COLLATION");
-            assert_eq!(create_stmt.character_set, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.source_collation, Some("UNICODE".to_string()));
+            assert_eq!(create_stmt.collation_name, "my_collation");
+            assert_eq!(create_stmt.character_set, Some("utf8".to_string()));
+            assert_eq!(create_stmt.source_collation, Some("unicode".to_string()));
             assert_eq!(create_stmt.pad_space, Some(false));
         }
         _ => panic!("Expected CreateCollation statement, got: {:?}", stmt),
@@ -155,7 +155,7 @@ fn test_drop_collation() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::DropCollation(drop_stmt) => {
-            assert_eq!(drop_stmt.collation_name, "MY_COLLATION");
+            assert_eq!(drop_stmt.collation_name, "my_collation");
         }
         _ => panic!("Expected DropCollation statement, got: {:?}", stmt),
     }

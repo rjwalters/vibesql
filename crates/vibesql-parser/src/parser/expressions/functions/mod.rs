@@ -39,13 +39,14 @@ impl Parser {
             | Token::Keyword(Keyword::GroupingId) => {
                 // Peek ahead to see if this is followed by '('
                 // Don't consume the keyword unless we're sure it's a function
+                // SQL:1999 normalizes unquoted identifiers (including function names) to lowercase
                 let keyword_name = match self.peek() {
-                    Token::Keyword(Keyword::Left) => "LEFT",
-                    Token::Keyword(Keyword::Right) => "RIGHT",
-                    Token::Keyword(Keyword::Replace) => "REPLACE",
-                    Token::Keyword(Keyword::Schema) => "SCHEMA",
-                    Token::Keyword(Keyword::Grouping) => "GROUPING",
-                    Token::Keyword(Keyword::GroupingId) => "GROUPING_ID",
+                    Token::Keyword(Keyword::Left) => "left",
+                    Token::Keyword(Keyword::Right) => "right",
+                    Token::Keyword(Keyword::Replace) => "replace",
+                    Token::Keyword(Keyword::Schema) => "schema",
+                    Token::Keyword(Keyword::Grouping) => "grouping",
+                    Token::Keyword(Keyword::GroupingId) => "grouping_id",
                     _ => unreachable!(),
                 };
 

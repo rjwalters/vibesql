@@ -332,6 +332,7 @@ mod tests {
                 name: "employees".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: None,
             group_by: None,

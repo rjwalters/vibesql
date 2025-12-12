@@ -14,7 +14,8 @@ fn test_drop_table_basic() {
         CreateTableExecutor::execute(&stmt, &mut db).unwrap();
     }
 
-    assert!(db.catalog.table_exists("USERS"));
+    // SQL:1999 normalizes unquoted identifiers to lowercase
+    assert!(db.catalog.table_exists("users"));
 
     // Drop the table
     let drop_sql = "DROP TABLE users;";
@@ -23,12 +24,12 @@ fn test_drop_table_basic() {
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
         let result = DropTableExecutor::execute(&stmt, &mut db);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Table 'USERS' dropped successfully");
+        assert_eq!(result.unwrap(), "Table 'users' dropped successfully");
     }
 
     // Verify table is gone
-    assert!(!db.catalog.table_exists("USERS"));
-    assert!(db.get_table("USERS").is_none());
+    assert!(!db.catalog.table_exists("users"));
+    assert!(db.get_table("users").is_none());
 }
 
 #[test]
@@ -51,7 +52,7 @@ fn test_drop_table_if_exists_when_exists() {
         assert!(stmt.if_exists);
         let result = DropTableExecutor::execute(&stmt, &mut db);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Table 'PRODUCTS' dropped successfully");
+        assert_eq!(result.unwrap(), "Table 'products' dropped successfully");
     }
 
     assert!(!db.catalog.table_exists("products"));
@@ -69,7 +70,7 @@ fn test_drop_table_if_exists_when_not_exists() {
         assert!(stmt.if_exists);
         let result = DropTableExecutor::execute(&stmt, &mut db);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Table 'NONEXISTENT' does not exist (IF EXISTS specified)");
+        assert_eq!(result.unwrap(), "Table 'nonexistent' does not exist (IF EXISTS specified)");
     }
 }
 
@@ -109,8 +110,8 @@ fn test_drop_table_with_data() {
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
 
-    // Verify data exists
-    assert_eq!(db.get_table("ORDERS").unwrap().row_count(), 2);
+    // Verify data exists (lowercase per SQL:1999)
+    assert_eq!(db.get_table("orders").unwrap().row_count(), 2);
 
     // Drop table
     let drop_sql = "DROP TABLE orders;";
@@ -122,8 +123,8 @@ fn test_drop_table_with_data() {
     }
 
     // Verify table and data are gone
-    assert!(!db.catalog.table_exists("ORDERS"));
-    assert!(db.get_table("ORDERS").is_none());
+    assert!(!db.catalog.table_exists("orders"));
+    assert!(db.get_table("orders").is_none());
 }
 
 #[test]
@@ -146,7 +147,8 @@ fn test_drop_and_recreate_table() {
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
 
-    assert_eq!(db.get_table("TEST_TEMP").unwrap().row_count(), 1);
+    // SQL:1999 normalizes to lowercase
+    assert_eq!(db.get_table("test_temp").unwrap().row_count(), 1);
 
     // Drop table
     let drop_sql = "DROP TABLE test_temp;";
@@ -164,10 +166,10 @@ fn test_drop_and_recreate_table() {
         CreateTableExecutor::execute(&stmt, &mut db).unwrap();
     }
 
-    // New table should be empty
-    assert!(db.catalog.table_exists("TEST_TEMP"));
-    assert_eq!(db.get_table("TEST_TEMP").unwrap().row_count(), 0);
-    assert_eq!(db.get_table("TEST_TEMP").unwrap().schema.column_count(), 2);
+    // New table should be empty (lowercase per SQL:1999)
+    assert!(db.catalog.table_exists("test_temp"));
+    assert_eq!(db.get_table("test_temp").unwrap().row_count(), 0);
+    assert_eq!(db.get_table("test_temp").unwrap().schema.column_count(), 2);
 }
 
 #[test]
@@ -255,7 +257,8 @@ fn test_drop_table_if_exists_parser() {
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
-        assert_eq!(stmt.table_name, "MYTABLE");
+        // SQL:1999 normalizes unquoted identifiers to lowercase
+        assert_eq!(stmt.table_name, "mytable");
         assert!(stmt.if_exists);
     } else {
         panic!("Expected DropTable statement");
@@ -269,7 +272,8 @@ fn test_drop_table_without_if_exists_parser() {
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
-        assert_eq!(stmt.table_name, "MYTABLE");
+        // SQL:1999 normalizes unquoted identifiers to lowercase
+        assert_eq!(stmt.table_name, "mytable");
         assert!(!stmt.if_exists);
     } else {
         panic!("Expected DropTable statement");
@@ -293,12 +297,13 @@ fn test_drop_table_with_underscores() {
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
-        assert_eq!(stmt.table_name, "USER_PROFILES");
+        // SQL:1999 normalizes unquoted identifiers to lowercase
+        assert_eq!(stmt.table_name, "user_profiles");
         let result = DropTableExecutor::execute(&stmt, &mut db);
         assert!(result.is_ok());
     }
 
-    assert!(!db.catalog.table_exists("USER_PROFILES"));
+    assert!(!db.catalog.table_exists("user_profiles"));
 }
 
 #[test]
@@ -324,8 +329,8 @@ fn test_drop_table_integration_workflow() {
         assert_eq!(rows, 3);
     }
 
-    // 3. Verify data
-    assert_eq!(db.get_table("CUSTOMERS").unwrap().row_count(), 3);
+    // 3. Verify data (lowercase per SQL:1999)
+    assert_eq!(db.get_table("customers").unwrap().row_count(), 3);
 
     // 4. Drop table
     let drop_sql = "DROP TABLE customers;";
@@ -334,11 +339,11 @@ fn test_drop_table_integration_workflow() {
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
         let result = DropTableExecutor::execute(&stmt, &mut db);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Table 'CUSTOMERS' dropped successfully");
+        assert_eq!(result.unwrap(), "Table 'customers' dropped successfully");
     }
 
     // 5. Verify table is completely gone
-    assert!(!db.catalog.table_exists("CUSTOMERS"));
-    assert!(db.get_table("CUSTOMERS").is_none());
+    assert!(!db.catalog.table_exists("customers"));
+    assert!(db.get_table("customers").is_none());
     assert_eq!(db.list_tables().len(), 0);
 }

@@ -19,8 +19,8 @@ fn test_parse_grant_case_insensitive() {
 
     match result.unwrap() {
         Statement::Grant(grant_stmt) => {
-            assert_eq!(grant_stmt.object_name.to_string(), "EMPLOYEES");
-            assert_eq!(grant_stmt.grantees, vec!["CLERK"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "employees");
+            assert_eq!(grant_stmt.grantees, vec!["clerk"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -34,7 +34,7 @@ fn test_parse_grant_qualified_table_name() {
 
     match result.unwrap() {
         Statement::Grant(grant_stmt) => {
-            assert_eq!(grant_stmt.object_name.to_string(), "PUBLIC.USERS");
+            assert_eq!(grant_stmt.object_name.to_string(), "public.users");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -51,7 +51,7 @@ fn test_parse_grant_multiple_grantees() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Select(None));
             assert_eq!(grant_stmt.grantees.len(), 3);
-            assert_eq!(grant_stmt.grantees, vec!["ROLE1", "ROLE2", "ROLE3"]);
+            assert_eq!(grant_stmt.grantees, vec!["role1", "role2", "role3"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -69,7 +69,7 @@ fn test_parse_grant_multiple_privileges_and_grantees() {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Select(None));
             assert_eq!(grant_stmt.privileges[1], PrivilegeType::Insert(None));
             assert_eq!(grant_stmt.grantees.len(), 2);
-            assert_eq!(grant_stmt.grantees, vec!["R1", "R2"]);
+            assert_eq!(grant_stmt.grantees, vec!["r1", "r2"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -87,8 +87,8 @@ fn test_parse_grant_usage_implicit_schema() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Usage);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "MY_SCHEMA");
-            assert_eq!(grant_stmt.grantees, vec!["USER_ROLE"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "my_schema");
+            assert_eq!(grant_stmt.grantees, vec!["user_role"]);
             assert!(!grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -106,8 +106,8 @@ fn test_parse_grant_select_implicit_table() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Select(None));
             assert_eq!(grant_stmt.object_type, ObjectType::Table);
-            assert_eq!(grant_stmt.object_name.to_string(), "USERS");
-            assert_eq!(grant_stmt.grantees, vec!["MANAGER"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "users");
+            assert_eq!(grant_stmt.grantees, vec!["manager"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -124,8 +124,8 @@ fn test_parse_grant_usage_implicit_schema_with_grant_option() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Usage);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "TEST_SCHEMA");
-            assert_eq!(grant_stmt.grantees, vec!["ADMIN"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "test_schema");
+            assert_eq!(grant_stmt.grantees, vec!["admin"]);
             assert!(grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -143,7 +143,7 @@ fn test_parse_grant_insert_implicit_table() {
         Statement::Grant(grant_stmt) => {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Insert(None));
             assert_eq!(grant_stmt.object_type, ObjectType::Table);
-            assert_eq!(grant_stmt.object_name.to_string(), "ORDERS");
+            assert_eq!(grant_stmt.object_name.to_string(), "orders");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }

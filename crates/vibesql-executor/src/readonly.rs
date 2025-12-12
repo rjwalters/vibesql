@@ -627,14 +627,14 @@ mod shared_database_tests {
         let result_before = db.query("SELECT COUNT(*) FROM users").await.unwrap();
         assert_eq!(result_before.rows[0].values[0], SqlValue::Integer(2));
 
-        // Perform a write (table name is uppercased due to case_sensitive_identifiers=false)
+        // Perform a write (table name is lowercased for case-insensitive lookup)
         {
             let mut guard = db.write().await;
             let row = Row::new(vec![
                 SqlValue::Integer(3),
                 SqlValue::Varchar(arcstr::ArcStr::from("Charlie")),
             ]);
-            guard.insert_row("USERS", row).unwrap();
+            guard.insert_row("users", row).unwrap();
         }
 
         // Read should see the new data

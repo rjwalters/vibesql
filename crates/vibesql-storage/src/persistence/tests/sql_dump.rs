@@ -291,11 +291,11 @@ fn test_sql_dump_with_indexes() {
 
     // Verify SQL contains CREATE INDEX statements
     let content = std::fs::read_to_string(path).unwrap();
-    // Index names are normalized to uppercase
-    assert!(content.contains("CREATE INDEX IDX_NAME"), "Should contain CREATE INDEX IDX_NAME");
+    // Index names are normalized to lowercase
+    assert!(content.contains("CREATE INDEX idx_name"), "Should contain CREATE INDEX idx_name");
     assert!(
-        content.contains("CREATE UNIQUE INDEX IDX_EMAIL_UNIQUE"),
-        "Should contain CREATE UNIQUE INDEX IDX_EMAIL_UNIQUE"
+        content.contains("CREATE UNIQUE INDEX idx_email_unique"),
+        "Should contain CREATE UNIQUE INDEX idx_email_unique"
     );
     assert!(content.contains("ON public.test_indexes"), "Should reference test_indexes table");
     assert!(content.contains("Asc"), "Index direction should be included");

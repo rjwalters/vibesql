@@ -11,7 +11,7 @@ fn test_create_role() {
 
     match result {
         Statement::CreateRole(stmt) => {
-            assert_eq!(stmt.role_name, "MANAGER");
+            assert_eq!(stmt.role_name, "manager");
         }
         _ => panic!("Expected CreateRole statement"),
     }
@@ -24,7 +24,7 @@ fn test_create_role_case_insensitive() {
 
     match result {
         Statement::CreateRole(stmt) => {
-            assert_eq!(stmt.role_name, "ANALYST");
+            assert_eq!(stmt.role_name, "analyst");
         }
         _ => panic!("Expected CreateRole statement"),
     }
@@ -37,7 +37,7 @@ fn test_drop_role() {
 
     match result {
         Statement::DropRole(stmt) => {
-            assert_eq!(stmt.role_name, "MANAGER");
+            assert_eq!(stmt.role_name, "manager");
         }
         _ => panic!("Expected DropRole statement"),
     }
@@ -50,7 +50,7 @@ fn test_drop_role_case_insensitive() {
 
     match result {
         Statement::DropRole(stmt) => {
-            assert_eq!(stmt.role_name, "ANALYST");
+            assert_eq!(stmt.role_name, "analyst");
         }
         _ => panic!("Expected DropRole statement"),
     }

@@ -466,6 +466,7 @@ mod tests {
                 name: "tab0".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,

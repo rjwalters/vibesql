@@ -73,8 +73,9 @@ fn test_distinct_removes_duplicate_rows() {
                 table: None,
                 column: "category".to_string(),
             },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -193,7 +194,7 @@ fn test_distinct_with_multiple_columns() {
                 },
                 alias: None, source_text: None },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "orders".to_string(),
             alias: None,
             column_aliases: None,
@@ -281,8 +282,9 @@ fn test_distinct_with_null_values() {
                 table: None,
                 column: "description".to_string(),
             },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
@@ -347,7 +349,7 @@ fn test_distinct_false_preserves_duplicates() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -431,8 +433,9 @@ fn test_distinct_with_where_clause() {
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "role".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -528,8 +531,9 @@ fn test_distinct_with_order_by() {
                 table: None,
                 column: "category".to_string(),
             },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,

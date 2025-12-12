@@ -13,7 +13,7 @@ fn test_pragma_simple() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "TABLE_INFO");
+            assert_eq!(stmt.name, "table_info");
             assert!(stmt.value.is_none());
         }
         other => panic!("Expected Pragma, got: {:?}", other),
@@ -29,9 +29,9 @@ fn test_pragma_with_function_value() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "TABLE_INFO");
+            assert_eq!(stmt.name, "table_info");
             match &stmt.value {
-                Some(PragmaValue::Identifier(v)) => assert_eq!(v, "USERS"),
+                Some(PragmaValue::Identifier(v)) => assert_eq!(v, "users"),
                 other => panic!("Expected Identifier value, got: {:?}", other),
             }
         }
@@ -48,7 +48,7 @@ fn test_pragma_with_assignment() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "CACHE_SIZE");
+            assert_eq!(stmt.name, "cache_size");
             match &stmt.value {
                 Some(PragmaValue::Number(v)) => assert_eq!(v, "2000"),
                 other => panic!("Expected Number value, got: {:?}", other),
@@ -66,8 +66,8 @@ fn test_pragma_with_database_qualifier() {
 
     match result.unwrap() {
         Statement::Pragma(stmt) => {
-            assert_eq!(stmt.database.as_deref(), Some("MAIN"));
-            assert_eq!(stmt.name, "CACHE_SIZE");
+            assert_eq!(stmt.database.as_deref(), Some("main"));
+            assert_eq!(stmt.name, "cache_size");
             assert!(stmt.value.is_none());
         }
         other => panic!("Expected Pragma, got: {:?}", other),
@@ -82,8 +82,8 @@ fn test_pragma_with_database_and_assignment() {
 
     match result.unwrap() {
         Statement::Pragma(stmt) => {
-            assert_eq!(stmt.database.as_deref(), Some("MAIN"));
-            assert_eq!(stmt.name, "CACHE_SIZE");
+            assert_eq!(stmt.database.as_deref(), Some("main"));
+            assert_eq!(stmt.name, "cache_size");
             match &stmt.value {
                 Some(PragmaValue::Number(v)) => assert_eq!(v, "5000"),
                 other => panic!("Expected Number value, got: {:?}", other),
@@ -102,7 +102,7 @@ fn test_pragma_with_string_value() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "JOURNAL_MODE");
+            assert_eq!(stmt.name, "journal_mode");
             match &stmt.value {
                 Some(PragmaValue::String(v)) => assert_eq!(v, "DELETE"),
                 other => panic!("Expected String value, got: {:?}", other),
@@ -121,9 +121,9 @@ fn test_pragma_with_identifier_value() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "SYNCHRONOUS");
+            assert_eq!(stmt.name, "synchronous");
             match &stmt.value {
-                Some(PragmaValue::Identifier(v)) => assert_eq!(v, "OFF"),
+                Some(PragmaValue::Identifier(v)) => assert_eq!(v, "off"),
                 other => panic!("Expected Identifier value, got: {:?}", other),
             }
         }
@@ -140,7 +140,7 @@ fn test_pragma_with_negative_number() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "CACHE_SIZE");
+            assert_eq!(stmt.name, "cache_size");
             match &stmt.value {
                 Some(PragmaValue::SignedNumber(v)) => assert_eq!(v, "-2000"),
                 other => panic!("Expected SignedNumber value, got: {:?}", other),
@@ -159,7 +159,7 @@ fn test_pragma_encoding() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "ENCODING");
+            assert_eq!(stmt.name, "encoding");
             match &stmt.value {
                 Some(PragmaValue::String(v)) => assert_eq!(v, "UTF-8"),
                 other => panic!("Expected String value, got: {:?}", other),
@@ -178,7 +178,7 @@ fn test_pragma_integrity_check() {
     match result.unwrap() {
         Statement::Pragma(stmt) => {
             assert!(stmt.database.is_none());
-            assert_eq!(stmt.name, "INTEGRITY_CHECK");
+            assert_eq!(stmt.name, "integrity_check");
             assert!(stmt.value.is_none());
         }
         other => panic!("Expected Pragma, got: {:?}", other),

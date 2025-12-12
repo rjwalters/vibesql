@@ -20,7 +20,7 @@ fn test_parse_group_by_single_column() {
                 GroupByClause::Simple(exprs) => {
                     assert_eq!(exprs.len(), 1);
                     match &exprs[0] {
-                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "NAME" => {}
+                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "name" => {}
                         _ => panic!("Expected column reference 'name'"),
                     }
                 }
@@ -46,12 +46,12 @@ fn test_parse_group_by_multiple_columns() {
                 GroupByClause::Simple(exprs) => {
                     assert_eq!(exprs.len(), 2);
                     match &exprs[0] {
-                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "DEPT" => {}
+                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "dept" => {}
                         _ => panic!("Expected column reference 'dept'"),
                     }
                     match &exprs[1] {
                         vibesql_ast::Expression::ColumnRef { column, .. }
-                            if column == "USER_ROLE" => {}
+                            if column == "user_role" => {}
                         _ => panic!("Expected column reference 'user_role'"),
                     }
                 }
@@ -120,8 +120,8 @@ fn test_parse_group_by_qualified_columns() {
                     assert_eq!(exprs.len(), 1);
                     match &exprs[0] {
                         vibesql_ast::Expression::ColumnRef { table, column } => {
-                            assert_eq!(table.as_ref().unwrap(), "U");
-                            assert_eq!(column, "DEPT");
+                            assert_eq!(table.as_ref().unwrap(), "u");
+                            assert_eq!(column, "dept");
                         }
                         _ => panic!("Expected qualified column reference"),
                     }
@@ -174,14 +174,14 @@ fn test_parse_group_by_rollup() {
                         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "YEAR"),
+                        }) => assert_eq!(column, "year"),
                         _ => panic!("Expected column reference 'year'"),
                     }
                     match &elements[1] {
                         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "QUARTER"),
+                        }) => assert_eq!(column, "quarter"),
                         _ => panic!("Expected column reference 'quarter'"),
                     }
                 }
@@ -211,14 +211,14 @@ fn test_parse_group_by_cube() {
                         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "REGION"),
+                        }) => assert_eq!(column, "region"),
                         _ => panic!("Expected column reference 'region'"),
                     }
                     match &elements[1] {
                         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "PRODUCT"),
+                        }) => assert_eq!(column, "product"),
                         _ => panic!("Expected column reference 'product'"),
                     }
                 }
@@ -307,7 +307,7 @@ fn test_parse_grouping_function() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "GROUPING");
+                        assert_eq!(name, "grouping");
                         assert_eq!(args.len(), 1);
                     }
                     _ => panic!("Expected GROUPING function"),
@@ -381,7 +381,7 @@ fn test_parse_group_by_mixed_simple_with_rollup() {
                         MixedGroupingItem::Simple(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "REGION"),
+                        }) => assert_eq!(column, "region"),
                         _ => panic!("Expected simple column 'region'"),
                     }
                     // Second item should be ROLLUP(year, quarter)

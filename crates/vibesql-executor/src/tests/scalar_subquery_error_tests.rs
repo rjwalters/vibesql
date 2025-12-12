@@ -44,8 +44,9 @@ fn test_scalar_subquery_error_multiple_rows() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -68,8 +69,9 @@ fn test_scalar_subquery_error_multiple_rows() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -148,7 +150,7 @@ fn test_scalar_subquery_error_multiple_columns() {
                 },
                 alias: None, source_text: None },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -171,8 +173,9 @@ fn test_scalar_subquery_error_multiple_columns() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
-            alias: None, source_text: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+            alias: None,
+        }],
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,

@@ -89,7 +89,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             name.to_string()
         } else {
-            name.to_uppercase()
+            name.to_lowercase()
         };
 
         // Get qualified table name for index cleanup
@@ -129,7 +129,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             table_name.to_string()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         // First try direct lookup, then try with schema prefix if needed
@@ -199,7 +199,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             table_name.to_string()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         // First try direct lookup, then try with schema prefix if needed
@@ -402,7 +402,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             table_name.clone()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         // Try to find the table with normalized name or qualified name
@@ -576,7 +576,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             table_name.to_string()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         // First try direct lookup, then try with schema prefix if needed
@@ -628,7 +628,7 @@ impl Operations {
     /// List all indexes for a specific table
     pub fn list_indexes_for_table(&self, table_name: &str) -> Vec<String> {
         // Normalize for case-insensitive comparison
-        let normalized_search = table_name.to_uppercase();
+        let normalized_search = table_name.to_lowercase();
 
         self.index_manager
             .list_indexes()
@@ -638,7 +638,7 @@ impl Operations {
                     .get_index(index_name)
                     .map(|metadata| {
                         // Normalize both sides for comparison
-                        metadata.table_name.to_uppercase() == normalized_search
+                        metadata.table_name.to_lowercase() == normalized_search
                     })
                     .unwrap_or(false)
             })
@@ -648,15 +648,15 @@ impl Operations {
     /// Check if a column has any user-defined index (B-tree or spatial)
     #[inline]
     pub fn has_index_on_column(&self, table_name: &str, column_name: &str) -> bool {
-        let normalized_table = table_name.to_uppercase();
-        let normalized_column = column_name.to_uppercase();
+        let normalized_table = table_name.to_lowercase();
+        let normalized_column = column_name.to_lowercase();
 
         // Check B-tree indexes
         for index_name in self.index_manager.list_indexes() {
             if let Some(metadata) = self.index_manager.get_index(&index_name) {
-                if metadata.table_name.to_uppercase() == normalized_table {
+                if metadata.table_name.to_lowercase() == normalized_table {
                     for col in &metadata.columns {
-                        if col.column_name.to_uppercase() == normalized_column {
+                        if col.column_name.to_lowercase() == normalized_column {
                             return true;
                         }
                     }
@@ -666,8 +666,8 @@ impl Operations {
 
         // Check spatial indexes
         for (metadata, _) in self.spatial_indexes.values() {
-            if metadata.table_name.to_uppercase() == normalized_table
-                && metadata.column_name.to_uppercase() == normalized_column
+            if metadata.table_name.to_lowercase() == normalized_table
+                && metadata.column_name.to_lowercase() == normalized_column
             {
                 return true;
             }
@@ -680,9 +680,9 @@ impl Operations {
     // Spatial Index Methods
     // ========================================================================
 
-    /// Normalize an index name to uppercase for case-insensitive comparison
+    /// Normalize an index name to lowercase for case-insensitive comparison
     fn normalize_index_name(name: &str) -> String {
-        name.to_uppercase()
+        name.to_lowercase()
     }
 
     /// Create a spatial index
@@ -725,7 +725,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             table_name.clone()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         // Try to find the table with normalized name or qualified name
@@ -837,7 +837,7 @@ impl Operations {
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
             table_name.clone()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         // Try to find the table with normalized name or qualified name
@@ -987,20 +987,20 @@ impl Operations {
     /// and unqualified ("table") names.
     pub fn drop_spatial_indexes_for_table(&mut self, table_name: &str) -> Vec<String> {
         // Normalize for case-insensitive comparison
-        let search_name_upper = table_name.to_uppercase();
+        let search_name_lower = table_name.to_lowercase();
 
         // Extract just the table name part if qualified (e.g., "public.users" -> "users")
-        let search_table_only = search_name_upper.rsplit('.').next().unwrap_or(&search_name_upper);
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
 
         let indexes_to_drop: Vec<String> = self
             .spatial_indexes
             .iter()
             .filter(|(_, (metadata, _))| {
-                let stored_upper = metadata.table_name.to_uppercase();
-                let stored_table_only = stored_upper.rsplit('.').next().unwrap_or(&stored_upper);
+                let stored_lower = metadata.table_name.to_lowercase();
+                let stored_table_only = stored_lower.rsplit('.').next().unwrap_or(&stored_lower);
 
                 // Match if full names match OR unqualified parts match
-                stored_upper == search_name_upper || stored_table_only == search_table_only
+                stored_lower == search_name_lower || stored_table_only == search_table_only
             })
             .map(|(name, _)| name.clone())
             .collect();

@@ -35,6 +35,81 @@ pub mod arena;
 pub mod pretty_print;
 pub mod visitor;
 
+// ============================================================================
+// Table Reference (with case-sensitivity info)
+// ============================================================================
+
+/// A reference to a table name with case-sensitivity information.
+///
+/// This struct captures whether an identifier was quoted (delimited) in the
+/// original SQL, which is necessary for correct SQL:1999 case handling:
+///
+/// - **Unquoted identifiers**: Case-insensitive (e.g., `MyTable`, `mytable`, `MYTABLE` are equivalent)
+/// - **Quoted identifiers**: Case-sensitive (e.g., `"MyTable"` is different from `"mytable"`)
+///
+/// # Example
+///
+/// ```
+/// use vibesql_ast::TableRef;
+///
+/// // Unquoted: case-insensitive
+/// let unquoted = TableRef::new("MyTable".to_string(), false);
+///
+/// // Quoted: case-sensitive
+/// let quoted = TableRef::new("MyTable".to_string(), true);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRef {
+    /// The table name as written in the SQL
+    pub name: String,
+    /// Whether the identifier was quoted (delimited) in the original SQL.
+    /// - `true`: Quoted identifier (case-sensitive), e.g., `"MyTable"`
+    /// - `false`: Unquoted identifier (case-insensitive), e.g., `MyTable`
+    pub quoted: bool,
+}
+
+impl TableRef {
+    /// Create a new table reference.
+    pub fn new(name: String, quoted: bool) -> Self {
+        Self { name, quoted }
+    }
+
+    /// Create an unquoted (case-insensitive) table reference.
+    pub fn unquoted(name: String) -> Self {
+        Self { name, quoted: false }
+    }
+
+    /// Create a quoted (case-sensitive) table reference.
+    pub fn quoted(name: String) -> Self {
+        Self { name, quoted: true }
+    }
+}
+
+impl From<String> for TableRef {
+    /// Create an unquoted table reference from a String (for backward compatibility).
+    fn from(name: String) -> Self {
+        Self::unquoted(name)
+    }
+}
+
+impl From<&str> for TableRef {
+    /// Create an unquoted table reference from a &str (for backward compatibility).
+    fn from(name: &str) -> Self {
+        Self::unquoted(name.to_string())
+    }
+}
+
+impl std::fmt::Display for TableRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.quoted {
+            // Quote the identifier in output
+            write!(f, "\"{}\"", self.name.replace('"', "\"\""))
+        } else {
+            write!(f, "{}", self.name)
+        }
+    }
+}
+
 mod ddl;
 mod dml;
 mod expression;

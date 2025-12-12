@@ -244,11 +244,16 @@ pub enum SelectItem {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromClause {
     Table {
+        /// Table name (possibly qualified as schema.table)
         name: String,
         alias: Option<String>,
         /// SQL:1999 Feature E051-09: Optional column renaming in table alias
         /// Example: `FROM t AS myalias (x, y)` renames columns to x, y
         column_aliases: Option<Vec<String>>,
+        /// Whether the identifier was quoted (delimited) in the original SQL.
+        /// - `true`: Quoted identifier (case-sensitive), e.g., `"MyTable"`
+        /// - `false`: Unquoted identifier (case-insensitive), e.g., `MyTable`
+        quoted: bool,
     },
     Join {
         left: Box<FromClause>,

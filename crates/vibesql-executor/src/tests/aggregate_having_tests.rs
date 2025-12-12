@@ -154,7 +154,7 @@ fn test_having_clause() {
                 },
                 alias: None, source_text: None },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
