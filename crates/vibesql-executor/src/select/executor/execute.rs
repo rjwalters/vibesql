@@ -44,6 +44,11 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Validate aggregate function argument counts FIRST (issue #4367)
+        // This catches errors like max(), min(*), sum(*) before any execution
+        // Must happen before any fast paths or strategy selection
+        super::validation::validate_aggregate_arguments(&stmt.select_list)?;
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
@@ -353,6 +358,9 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Note: Aggregate argument validation is done in execute() at the entry point.
+        // See issue #4367.
+
         #[cfg(feature = "profile-q6")]
         let _execute_ctes_start = std::time::Instant::now();
 

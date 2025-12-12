@@ -275,9 +275,11 @@ impl ExpressionEvaluator<'_> {
                 "Window functions should be evaluated separately".to_string(),
             )),
 
-            vibesql_ast::Expression::AggregateFunction { .. } => Err(ExecutorError::UnsupportedExpression(
-                "Aggregate functions should be evaluated in aggregation context".to_string(),
-            )),
+            vibesql_ast::Expression::AggregateFunction { name, .. } => {
+                // SQLite-compatible error message for aggregate misuse
+                // Preserve original case to match SQLite behavior
+                Err(ExecutorError::MisuseOfAggregate { function_name: name.clone() })
+            }
 
             // NEXT VALUE FOR sequence expression
             // TODO: Implement proper sequence evaluation
