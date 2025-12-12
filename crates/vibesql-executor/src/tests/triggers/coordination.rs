@@ -173,8 +173,7 @@ fn test_before_trigger_executes_first() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { column: "value".to_string(), table: None },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table { quoted: false,

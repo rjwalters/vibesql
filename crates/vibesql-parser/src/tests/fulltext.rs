@@ -106,7 +106,7 @@ fn test_parse_match_against_in_select_list() {
         assert_eq!(select.select_list.len(), 3);
 
         // Check the third item (MATCH expression with alias)
-        if let vibesql_ast::SelectItem::Expression { expr, alias } = &select.select_list[2] {
+        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select.select_list[2] {
             if let vibesql_ast::Expression::MatchAgainst { columns, .. } = expr {
                 assert_eq!(columns.len(), 2);
                 assert_eq!(*alias, Some("relevance".to_string()));

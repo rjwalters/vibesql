@@ -1028,8 +1028,12 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
             .select_list
             .into_iter()
             .map(|item| match item {
-                SelectItem::Expression { expr, alias } => {
-                    SelectItem::Expression { expr: transform_expression(visitor, expr), alias }
+                SelectItem::Expression { expr, alias, source_text } => {
+                    SelectItem::Expression {
+                        expr: transform_expression(visitor, expr),
+                        alias,
+                        source_text,
+                    }
                 }
                 other => other,
             })
@@ -1515,6 +1519,7 @@ mod tests {
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(SqlValue::Integer(1)),
                 alias: None,
+                source_text: None,
             }],
             into_table: None,
             into_variables: None,

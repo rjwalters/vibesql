@@ -89,7 +89,7 @@ impl SelectIntoExecutor {
                         "SELECT table.* is not supported in SELECT INTO statements".to_string(),
                     ));
                 }
-                SelectItem::Expression { expr, alias } => {
+                SelectItem::Expression { expr, alias, .. } => {
                     // Column name: use alias if present, otherwise derive from expression
                     let column_name = if let Some(alias) = alias {
                         alias.clone()

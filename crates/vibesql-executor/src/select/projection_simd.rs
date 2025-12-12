@@ -63,7 +63,7 @@ fn extract_simple_column_indices(
     for item in columns {
         match item {
             // Simple column reference: expr is ColumnRef
-            SelectItem::Expression { expr, alias: _ } => {
+            SelectItem::Expression { expr, alias: _ , .. } => {
                 if let Expression::ColumnRef { table, column } = expr {
                     // Resolve column index from schema
                     if let Some(idx) = resolve_column_index(table.as_deref(), column, schema) {
@@ -207,8 +207,7 @@ mod tests {
 
         let columns = vec![SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(SqlValue::Integer(42)),
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let evaluator = create_test_evaluator();
         let schema = create_test_schema();
@@ -230,8 +229,7 @@ mod tests {
 
         let columns = vec![SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let evaluator = create_test_evaluator();
         let schema = create_test_schema();
@@ -254,8 +252,7 @@ mod tests {
         // SELECT b FROM test (just column b)
         let columns = vec![SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let evaluator = create_test_evaluator();
         let schema = create_test_schema();
@@ -288,12 +285,10 @@ mod tests {
         let columns = vec![
             SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
-                alias: None,
-            },
+                alias: None, source_text: None },
             SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ];
 
         let evaluator = create_test_evaluator();

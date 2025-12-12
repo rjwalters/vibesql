@@ -298,4 +298,40 @@ impl Parser {
 
         Ok(Some(aliases))
     }
+
+    /// Reconstruct source text from tokens in a range.
+    ///
+    /// This reconstructs the original SQL text from the tokens consumed during
+    /// expression parsing. Used for preserving original expression text as column
+    /// names when no alias is provided (SQLite compatibility).
+    ///
+    /// Note: This won't preserve exact whitespace, but will preserve identifier
+    /// case and operator adjacency (e.g., `f1+F2` becomes `f1+F2`, not `(F1 + F2)`).
+    pub(super) fn reconstruct_source_text(
+        &self,
+        start_pos: usize,
+        end_pos: usize,
+    ) -> Option<String> {
+        if start_pos >= end_pos || start_pos >= self.tokens.len() {
+            return None;
+        }
+
+        // Reconstruct the source text by joining tokens with their to_sql representation
+        let mut result = String::new();
+        let end = end_pos.min(self.tokens.len());
+
+        for i in start_pos..end {
+            let token = &self.tokens[i];
+            if matches!(token, Token::Eof) {
+                break;
+            }
+            result.push_str(&token.to_sql());
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
 }

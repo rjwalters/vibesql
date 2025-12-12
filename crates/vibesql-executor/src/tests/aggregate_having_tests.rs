@@ -142,8 +142,7 @@ fn test_having_clause() {
                     table: None,
                     column: "dept".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "SUM".to_string(),
@@ -153,8 +152,7 @@ fn test_having_clause() {
                     }],
                     character_unit: None,
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "sales".to_string(),

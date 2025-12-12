@@ -694,7 +694,7 @@ mod tests {
                 distinct: false,
             }),
         };
-        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None }];
+        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None , source_text: None }];
 
         // fallback_aggregation should return UnsupportedFeature for non-empty rows
         let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);
@@ -726,7 +726,7 @@ mod tests {
                 distinct: false,
             }),
         };
-        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None }];
+        let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None , source_text: None }];
 
         // fallback_aggregation should work for empty rows (returns -0 = 0)
         let result = pipeline.fallback_aggregation(input, &select_items, None, None, &ctx);

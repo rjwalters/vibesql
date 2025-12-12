@@ -24,7 +24,7 @@ fn test_parse_cast_integer_to_varchar() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
@@ -51,7 +51,7 @@ fn test_parse_cast_varchar_to_integer() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
@@ -78,7 +78,7 @@ fn test_parse_cast_to_signed() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
@@ -105,7 +105,7 @@ fn test_parse_cast_to_unsigned() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
@@ -151,7 +151,7 @@ fn test_parse_cast_to_double_precision() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
@@ -178,7 +178,7 @@ fn test_parse_cast_to_numeric() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {
@@ -205,7 +205,7 @@ fn test_parse_cast_to_date() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     match expr {
                         vibesql_ast::Expression::Cast { expr: _, data_type } => {
                             match data_type {

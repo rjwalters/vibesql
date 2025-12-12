@@ -928,10 +928,12 @@ fn test_json_view_preservation() {
             SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                 alias: None,
+                source_text: None,
             },
             SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                 alias: None,
+                source_text: None,
             },
         ],
         into_table: None,

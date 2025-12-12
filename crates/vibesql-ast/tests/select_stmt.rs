@@ -42,10 +42,12 @@ fn test_select_with_columns() {
             SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                 alias: None,
+                source_text: None,
             },
             SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                 alias: None,
+                source_text: None,
             },
         ],
         into_table: None,
@@ -72,6 +74,7 @@ fn test_select_with_alias() {
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "id".to_string() },
             alias: Some("user_id".to_string()),
+            source_text: None,
         }],
         into_table: None,
         into_variables: None,
@@ -193,6 +196,7 @@ fn test_select_distinct() {
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "country".to_string() },
             alias: None,
+            source_text: None,
         }],
         into_table: None,
         into_variables: None,
@@ -225,6 +229,7 @@ fn test_select_with_group_by() {
                 character_unit: None,
             },
             alias: None,
+            source_text: None,
         }],
         into_table: None,
         into_variables: None,

@@ -38,7 +38,7 @@ pub fn resolve_group_by_alias(
     if let Expression::ColumnRef { table: None, column } = group_expr {
         // Search for matching alias in SELECT list (case-insensitive)
         for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
+            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
                 if alias_name.eq_ignore_ascii_case(column) {
                     // Found matching alias, use the SELECT list expression
                     return expr.clone();
@@ -90,7 +90,7 @@ mod tests {
     }
 
     fn select_item(expr: Expression, alias: Option<&str>) -> SelectItem {
-        SelectItem::Expression { expr, alias: alias.map(|s| s.to_string()) }
+        SelectItem::Expression { expr, alias: alias.map(|s| s.to_string()), source_text: None }
     }
 
     #[test]

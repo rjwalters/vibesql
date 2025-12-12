@@ -238,14 +238,14 @@ mod tests {
     fn test_simple_select() {
         let deps = extract_table_dependencies("SELECT * FROM users").unwrap();
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
     fn test_select_with_alias() {
         let deps = extract_table_dependencies("SELECT u.id, u.name FROM users AS u").unwrap();
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
@@ -255,8 +255,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
     }
 
     #[test]
@@ -266,8 +266,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
     }
 
     #[test]
@@ -280,9 +280,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 3);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
-        assert!(deps.contains("PRODUCTS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
+        assert!(deps.contains("products"));
     }
 
     #[test]
@@ -292,7 +292,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
@@ -302,8 +302,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
     }
 
     #[test]
@@ -313,8 +313,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
     }
 
     #[test]
@@ -326,8 +326,8 @@ mod tests {
         .unwrap();
         // CTE defines ACTIVE_USERS, but it references USERS table
         // The CTE name is also included since it appears in FROM clause
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ACTIVE_USERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("active_users"));
     }
 
     #[test]
@@ -341,8 +341,8 @@ mod tests {
              JOIN recent_orders o ON u.id = o.user_id",
         )
         .unwrap();
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
     }
 
     #[test]
@@ -352,8 +352,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ADMINS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("admins"));
     }
 
     #[test]
@@ -363,8 +363,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("GUESTS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("guests"));
     }
 
     #[test]
@@ -374,8 +374,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("PREMIUM_MEMBERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("premium_members"));
     }
 
     #[test]
@@ -385,8 +385,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("BANNED_USERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("banned_users"));
     }
 
     #[test]
@@ -396,8 +396,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
     }
 
     #[test]
@@ -417,10 +417,10 @@ mod tests {
              ORDER BY ro.total_spent DESC",
         )
         .unwrap();
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("ORDERS"));
-        assert!(deps.contains("REVIEWS"));
-        assert!(deps.contains("PREMIUM_MEMBERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("orders"));
+        assert!(deps.contains("reviews"));
+        assert!(deps.contains("premium_members"));
     }
 
     #[test]
@@ -428,8 +428,8 @@ mod tests {
         let deps =
             extract_table_dependencies("SELECT * FROM products CROSS JOIN categories").unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("PRODUCTS"));
-        assert!(deps.contains("CATEGORIES"));
+        assert!(deps.contains("products"));
+        assert!(deps.contains("categories"));
     }
 
     #[test]
@@ -442,14 +442,14 @@ mod tests {
         .unwrap();
         // Self-join still only references one table
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("EMPLOYEES"));
+        assert!(deps.contains("employees"));
     }
 
     #[test]
     fn test_insert_statement() {
         let deps = extract_table_dependencies("INSERT INTO users (name) VALUES ('Alice')").unwrap();
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
@@ -459,8 +459,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("ARCHIVE_USERS"));
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("archive_users"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
@@ -468,14 +468,14 @@ mod tests {
         let deps =
             extract_table_dependencies("UPDATE users SET active = FALSE WHERE id = 1").unwrap();
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
     fn test_delete_statement() {
         let deps = extract_table_dependencies("DELETE FROM users WHERE id = 1").unwrap();
         assert_eq!(deps.len(), 1);
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
     }
 
     #[test]
@@ -501,8 +501,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("USERS"));
-        assert!(deps.contains("PREMIUM_MEMBERS"));
+        assert!(deps.contains("users"));
+        assert!(deps.contains("premium_members"));
     }
 
     #[test]
@@ -512,8 +512,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("PRODUCTS"));
-        assert!(deps.contains("PRICE_HISTORY"));
+        assert!(deps.contains("products"));
+        assert!(deps.contains("price_history"));
     }
 
     #[test]
@@ -521,7 +521,7 @@ mod tests {
         // Verify that the function can be used with case-insensitive matching
         let deps = extract_table_dependencies("SELECT * FROM Users").unwrap();
         // Parser normalizes to uppercase
-        assert!(deps.contains("USERS"));
+        assert!(deps.contains("users"));
         // Users can do case-insensitive matching by uppercasing their search term
         assert!(deps.iter().any(|t| t.eq_ignore_ascii_case("users")));
     }

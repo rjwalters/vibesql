@@ -37,8 +37,7 @@ fn test_update_where_scalar_subquery_equal() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "min_salary".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -116,8 +115,7 @@ fn test_update_where_scalar_subquery_less_than() {
                 args: vec![Expression::ColumnRef { table: None, column: "salary".to_string() }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -189,8 +187,7 @@ fn test_update_where_subquery_returns_null() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "max_salary".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -272,8 +269,7 @@ fn test_update_where_subquery_with_aggregate() {
                 args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -364,8 +360,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "target".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -390,8 +385,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {

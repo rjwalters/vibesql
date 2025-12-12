@@ -689,15 +689,13 @@ fn test_inner_join_null_values_dont_match() {
                     table: Some("t1".to_string()),
                     column: "name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
                     table: Some("t2".to_string()),
                     column: "value".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table { quoted: false,

@@ -405,7 +405,7 @@ fn analyze_select_list(select_list: &[SelectItem]) -> Option<ProjectionPlan> {
                 // table.* - fall back for now
                 return None;
             }
-            SelectItem::Expression { expr, alias } => {
+            SelectItem::Expression { expr, alias, .. } => {
                 let column_name = match expr {
                     Expression::ColumnRef { column, table: None } => column.clone(),
                     Expression::ColumnRef { column, table: Some(_) } => {

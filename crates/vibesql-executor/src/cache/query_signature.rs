@@ -149,7 +149,7 @@ impl QuerySignature {
                     "QUALIFIED_WILDCARD".hash(hasher);
                     qualifier.hash(hasher);
                 }
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     Self::hash_expression(expr, hasher);
                     alias.hash(hasher);
                 }
@@ -601,7 +601,7 @@ impl QuerySignature {
                     "QUALIFIED_WILDCARD".hash(hasher);
                     qualifier.hash(hasher);
                 }
-                ArenaSelectItem::Expression { expr, alias } => {
+                ArenaSelectItem::Expression { expr, alias, .. } => {
                     Self::hash_arena_expression(expr, hasher);
                     alias.hash(hasher);
                 }
@@ -1096,8 +1096,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -1126,8 +1125,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -1170,8 +1168,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -1200,8 +1197,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {

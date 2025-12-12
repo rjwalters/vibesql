@@ -239,7 +239,7 @@ fn test_parse_case_web_demo_query() {
         assert_eq!(select.select_list.len(), 3);
 
         // Third item should be the CASE expression
-        if let vibesql_ast::SelectItem::Expression { expr, alias } = &select.select_list[2] {
+        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select.select_list[2] {
             if let vibesql_ast::Expression::Case { operand, when_clauses, else_result } = expr {
                 assert!(operand.is_none(), "Should be searched CASE");
                 assert_eq!(when_clauses.len(), 2);

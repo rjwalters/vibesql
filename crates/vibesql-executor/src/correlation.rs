@@ -459,8 +459,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -499,8 +498,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: None,
@@ -534,8 +532,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: None,

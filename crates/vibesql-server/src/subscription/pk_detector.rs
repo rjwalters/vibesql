@@ -390,7 +390,7 @@ fn map_columns_to_result_positions(
                     current_pos += 1; // Assume at least one column
                 }
             }
-            SelectItem::Expression { expr, alias: _ } => {
+            SelectItem::Expression { expr, alias: _, .. } => {
                 // Check if this expression is a column reference
                 if let Some(col_name) = extract_column_name(expr, table_alias) {
                     if pk_column_names.contains(&col_name.to_lowercase()) {

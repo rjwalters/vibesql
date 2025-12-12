@@ -261,7 +261,7 @@ impl SelectExecutor<'_> {
                         }
                     }
                 }
-                SelectItem::Expression { expr, alias: col_alias } => {
+                SelectItem::Expression { expr, alias: col_alias , .. } => {
                     // Use alias if provided, otherwise derive from expression
                     let col_name = if let Some(a) = col_alias {
                         a.clone()

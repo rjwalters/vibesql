@@ -36,7 +36,7 @@ use vibesql_ast::arena::{
     Statement, Symbol, UpdateStmt,
 };
 
-use crate::{keywords::Keyword, Lexer, ParseError, Token};
+use crate::{keywords::Keyword, lexer::Span, Lexer, ParseError, Token};
 
 /// Arena-based SQL parser.
 ///
@@ -47,6 +47,10 @@ use crate::{keywords::Keyword, Lexer, ParseError, Token};
 /// - Single deallocation when arena is dropped
 pub struct ArenaParser<'arena> {
     tokens: Vec<Token>,
+    /// Byte spans for each token, used to extract original source text
+    spans: Vec<Span>,
+    /// Original SQL input string, used with spans to extract source text
+    input: &'arena str,
     position: usize,
     placeholder_count: usize,
     arena: &'arena Bump,
@@ -54,10 +58,31 @@ pub struct ArenaParser<'arena> {
 }
 
 impl<'arena> ArenaParser<'arena> {
-    /// Create a new arena parser from tokens.
+    /// Create a new arena parser from tokens with spans and original input.
+    pub fn new_with_spans(
+        tokens: Vec<Token>,
+        spans: Vec<Span>,
+        input: &'arena str,
+        arena: &'arena Bump,
+    ) -> Self {
+        ArenaParser {
+            tokens,
+            spans,
+            input,
+            position: 0,
+            placeholder_count: 0,
+            arena,
+            interner: ArenaInterner::new(arena),
+        }
+    }
+
+    /// Create a new arena parser from tokens (legacy constructor without spans).
+    /// Source text reconstruction will fall back to token-based reconstruction.
     pub fn new(tokens: Vec<Token>, arena: &'arena Bump) -> Self {
         ArenaParser {
             tokens,
+            spans: Vec::new(), // No spans available
+            input: "",        // No original input
             position: 0,
             placeholder_count: 0,
             arena,
@@ -81,10 +106,14 @@ impl<'arena> ArenaParser<'arena> {
     /// UPDATE, DELETE), DDL (CREATE, DROP, ALTER), and transaction statements.
     pub fn parse_sql(input: &str, arena: &'arena Bump) -> Result<Statement<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens =
-            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
-        let mut parser = ArenaParser::new(tokens, arena);
+        let (tokens, spans): (Vec<_>, Vec<_>) = tokens_with_spans.into_iter().unzip();
+        let input_in_arena = arena.alloc_str(input);
+
+        let mut parser = ArenaParser::new_with_spans(tokens, spans, input_in_arena, arena);
         parser.parse_statement()
     }
 
@@ -96,10 +125,14 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<&'arena SelectStmt<'arena>, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens =
-            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
-        let mut parser = ArenaParser::new(tokens, arena);
+        let (tokens, spans): (Vec<_>, Vec<_>) = tokens_with_spans.into_iter().unzip();
+        let input_in_arena = arena.alloc_str(input);
+
+        let mut parser = ArenaParser::new_with_spans(tokens, spans, input_in_arena, arena);
         parser.parse_select_statement()
     }
 
@@ -111,10 +144,14 @@ impl<'arena> ArenaParser<'arena> {
         arena: &'arena Bump,
     ) -> Result<(&'arena SelectStmt<'arena>, ArenaInterner<'arena>), ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens =
-            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
-        let mut parser = ArenaParser::new(tokens, arena);
+        let (tokens, spans): (Vec<_>, Vec<_>) = tokens_with_spans.into_iter().unzip();
+        let input_in_arena = arena.alloc_str(input);
+
+        let mut parser = ArenaParser::new_with_spans(tokens, spans, input_in_arena, arena);
         let stmt = parser.parse_select_statement()?;
         Ok((stmt, parser.into_interner()))
     }
@@ -616,6 +653,60 @@ impl<'arena> ArenaParser<'arena> {
             }
         }
     }
+
+    /// Reconstruct source text from tokens in a range.
+    ///
+    /// This reconstructs the original SQL text from the tokens consumed during
+    /// expression parsing. Used for preserving original expression text as column
+    /// names when no alias is provided (SQLite compatibility).
+    ///
+    /// When spans are available, extracts directly from the original input to
+    /// preserve exact case and formatting. Falls back to token-based reconstruction
+    /// (which uppercases identifiers) when spans are not available.
+    pub(crate) fn reconstruct_source_text(
+        &self,
+        start_pos: usize,
+        end_pos: usize,
+    ) -> Option<&'arena str> {
+        if start_pos >= end_pos || start_pos >= self.tokens.len() {
+            return None;
+        }
+
+        // If we have spans, extract the original source text directly
+        if !self.spans.is_empty() && start_pos < self.spans.len() && end_pos <= self.spans.len() {
+            let start_byte = self.spans[start_pos].start;
+            // Use end_pos - 1 because end_pos is exclusive (points past the last token)
+            let end_byte = if end_pos > 0 && end_pos <= self.spans.len() {
+                self.spans[end_pos - 1].end
+            } else {
+                self.spans[self.spans.len() - 1].end
+            };
+
+            if start_byte < end_byte && end_byte <= self.input.len() {
+                let source_text = &self.input[start_byte..end_byte];
+                return Some(self.arena.alloc_str(source_text));
+            }
+        }
+
+        // Fall back to token-based reconstruction (won't preserve case)
+        let mut result = String::new();
+        let end = end_pos.min(self.tokens.len());
+
+        for i in start_pos..end {
+            let token = &self.tokens[i];
+            if matches!(token, Token::Eof) {
+                break;
+            }
+            result.push_str(&token.to_sql());
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            // Allocate the string in the arena and return a reference
+            Some(self.arena.alloc_str(&result))
+        }
+    }
 }
 
 // ============================================================================
@@ -646,10 +737,14 @@ impl<'arena> ArenaParser<'arena> {
 pub fn parse_select_to_owned(input: &str) -> Result<vibesql_ast::SelectStmt, ParseError> {
     let arena = Bump::new();
     let mut lexer = Lexer::new(input);
-    let tokens =
-        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+    let tokens_with_spans = lexer
+        .tokenize_with_spans()
+        .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
-    let mut parser = ArenaParser::new(tokens, &arena);
+    let (tokens, spans): (Vec<_>, Vec<_>) = tokens_with_spans.into_iter().unzip();
+    let input_in_arena = arena.alloc_str(input);
+
+    let mut parser = ArenaParser::new_with_spans(tokens, spans, input_in_arena, &arena);
     let arena_stmt = parser.parse_select_statement()?;
     let converter = Converter::new(parser.interner());
     Ok(converter.convert_select(arena_stmt))

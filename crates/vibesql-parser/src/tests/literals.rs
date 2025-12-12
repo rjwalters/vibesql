@@ -22,7 +22,7 @@ fn test_parse_date_literal() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(s)) => {
                         assert_eq!(s.to_string(), "2024-01-01");
                     }
@@ -78,7 +78,7 @@ fn test_parse_time_literal() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Time(s)) => {
                         assert_eq!(s.to_string(), "14:30:00");
                     }
@@ -111,7 +111,7 @@ fn test_parse_time_literal_with_fractional_seconds() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Time(s)) => {
                     assert_eq!(s.to_string(), "14:30:00.123");
                 }
@@ -137,7 +137,7 @@ fn test_parse_timestamp_literal() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(s)) => {
                         assert_eq!(s.to_string(), "2024-01-01 14:30:00");
                     }
@@ -158,7 +158,7 @@ fn test_parse_timestamp_literal_with_fractional_seconds() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(s)) => {
                     assert_eq!(s.to_string(), "2024-01-01 14:30:00.123456");
                 }
@@ -192,7 +192,7 @@ fn test_parse_interval_year_literal() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Interval(s)) => {
                         assert_eq!(s.to_string(), "5 YEAR");
                     }
@@ -231,7 +231,7 @@ fn test_parse_interval_year_to_month_literal() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Interval(s)) => {
                     assert_eq!(s.to_string(), "1-6 YEAR TO MONTH");
                 }
@@ -257,7 +257,7 @@ fn test_parse_interval_day_to_second_literal() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Interval(s)) => {
                     assert_eq!(s.to_string(), "5 12:30:45 DAY TO SECOND");
                 }
@@ -311,7 +311,7 @@ fn test_parse_hex_literal_lowercase() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                     vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
                         // x'303132' = bytes [0x30, 0x31, 0x32] = "012"
                         assert_eq!(s.as_str(), "012");
@@ -333,7 +333,7 @@ fn test_parse_hex_literal_uppercase() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
                     // X'48656C6C6F' = "Hello"
                     assert_eq!(s.as_str(), "Hello");
@@ -354,7 +354,7 @@ fn test_parse_hex_literal_empty() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
                     assert_eq!(s.as_str(), "");
                 }
@@ -386,7 +386,7 @@ fn test_parse_binary_literal_lowercase() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
                     // b'01010101' = byte 0x55 = "U"
                     assert_eq!(s.as_str(), "U");
@@ -407,7 +407,7 @@ fn test_parse_binary_literal_uppercase() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => match expr {
+            vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => match expr {
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
                     // B'01000001' = byte 0x41 = "A"
                     assert_eq!(s.as_str(), "A");

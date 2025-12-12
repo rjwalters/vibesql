@@ -170,8 +170,7 @@ mod tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "region".to_string() },
-                    alias: None,
-                },
+                    alias: None, source_text: None },
                 SelectItem::Expression {
                     expr: Expression::AggregateFunction {
                         name: "SUM".to_string(),
@@ -188,8 +187,7 @@ mod tests {
                             }),
                         }],
                     },
-                    alias: None,
-                },
+                    alias: None, source_text: None },
             ],
             into_table: None,
             into_variables: None,
@@ -239,8 +237,7 @@ mod tests {
                         }),
                     }],
                 },
-                alias: Some("total".to_string()),
-            }],
+                alias: Some("total".to_string()), source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -339,8 +336,7 @@ mod tests {
                     distinct: false,
                     args: vec![Expression::Wildcard],
                 },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -379,8 +375,7 @@ mod tests {
                         column: "quantity".to_string(),
                     }),
                 },
-                alias: Some("total".to_string()),
-            }],
+                alias: Some("total".to_string()), source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -411,12 +406,10 @@ mod tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "id".to_string() },
-                    alias: None,
-                },
+                    alias: None, source_text: None },
                 SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "name".to_string() },
-                    alias: None,
-                },
+                    alias: None, source_text: None },
             ],
             into_table: None,
             into_variables: None,

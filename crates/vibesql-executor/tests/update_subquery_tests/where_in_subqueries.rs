@@ -52,8 +52,7 @@ fn test_update_where_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -137,8 +136,7 @@ fn test_update_where_not_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -215,8 +213,7 @@ fn test_update_where_subquery_empty_result() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -303,8 +300,7 @@ fn test_update_where_complex_subquery_condition() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -397,8 +393,7 @@ fn test_update_where_multiple_rows_in_subquery() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {

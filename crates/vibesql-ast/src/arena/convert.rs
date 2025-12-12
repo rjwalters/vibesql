@@ -428,10 +428,13 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     alias: alias.as_ref().map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
                 }
             }
-            arena_select::SelectItem::Expression { expr, alias } => SelectItem::Expression {
-                expr: self.convert_expression(expr),
-                alias: self.resolve_opt(*alias),
-            },
+            arena_select::SelectItem::Expression { expr, alias, source_text } => {
+                SelectItem::Expression {
+                    expr: self.convert_expression(expr),
+                    alias: self.resolve_opt(*alias),
+                    source_text: source_text.map(|s| s.to_string()),
+                }
+            }
         }
     }
 

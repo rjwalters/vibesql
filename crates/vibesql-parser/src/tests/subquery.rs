@@ -107,7 +107,7 @@ fn test_parse_scalar_subquery_simple() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     // Should be a ScalarSubquery
                     match expr {
                         Expression::ScalarSubquery(subquery) => {

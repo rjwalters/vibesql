@@ -148,8 +148,7 @@ fn test_inner_join_with_group_by_count() {
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "COUNT".to_string(),
@@ -159,8 +158,7 @@ fn test_inner_join_with_group_by_count() {
                     }],
                     character_unit: None,
                 },
-                alias: Some("emp_count".to_string()),
-            },
+                alias: Some("emp_count".to_string()), source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
@@ -257,8 +255,7 @@ fn test_left_join_with_group_by_avg_salary() {
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "AVG".to_string(),
@@ -268,8 +265,7 @@ fn test_left_join_with_group_by_avg_salary() {
                     }],
                     character_unit: None,
                 },
-                alias: Some("avg_salary".to_string()),
-            },
+                alias: Some("avg_salary".to_string()), source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
@@ -367,8 +363,7 @@ fn test_join_group_by_with_having() {
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "COUNT".to_string(),
@@ -378,8 +373,7 @@ fn test_join_group_by_with_having() {
                     }],
                     character_unit: None,
                 },
-                alias: Some("emp_count".to_string()),
-            },
+                alias: Some("emp_count".to_string()), source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
@@ -470,16 +464,14 @@ fn test_join_group_by_multiple_aggregates() {
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "COUNT".to_string(),
                     args: vec![vibesql_ast::Expression::Wildcard],
                     character_unit: None,
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "MIN".to_string(),
@@ -489,8 +481,7 @@ fn test_join_group_by_multiple_aggregates() {
                     }],
                     character_unit: None,
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "MAX".to_string(),
@@ -500,8 +491,7 @@ fn test_join_group_by_multiple_aggregates() {
                     }],
                     character_unit: None,
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
