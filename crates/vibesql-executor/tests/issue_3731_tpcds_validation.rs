@@ -715,17 +715,17 @@ fn test_column_resolution_with_coalesce() {
     execute_insert(&mut db, "INSERT INTO sales_crc VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_crc VALUES (2, 200, 5)");
 
-    // Query with COALESCE (like Q75)
+    // Query with COALESCE (like Q75) - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_crc.item_sk,
             quantity,
             COALESCE(return_qty, 0) AS return_qty
         FROM sales_crc
         LEFT JOIN returns_crc ON sales_crc.item_sk = returns_crc.item_sk AND sales_crc.order_num = returns_crc.order_num
-        ORDER BY item_sk
+        ORDER BY sales_crc.item_sk
         "#,
     );
 
@@ -777,17 +777,17 @@ fn test_column_resolution_three_cols_no_expr() {
     execute_insert(&mut db, "INSERT INTO sales_3c VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_3c VALUES (2, 200, 5)");
 
-    // Query with 3 simple columns, no expressions
+    // Query with 3 simple columns, no expressions - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_3c.item_sk,
             quantity,
             return_qty
         FROM sales_3c
         LEFT JOIN returns_3c ON sales_3c.item_sk = returns_3c.item_sk AND sales_3c.order_num = returns_3c.order_num
-        ORDER BY item_sk
+        ORDER BY sales_3c.item_sk
         "#,
     );
 
@@ -839,17 +839,17 @@ fn test_column_resolution_expr_on_right_col() {
     execute_insert(&mut db, "INSERT INTO sales_roe VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_roe VALUES (2, 200, 5)");
 
-    // Query with expression on RIGHT table column
+    // Query with expression on RIGHT table column - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_roe.item_sk,
             quantity,
             return_qty + 1 AS return_qty_plus
         FROM sales_roe
         LEFT JOIN returns_roe ON sales_roe.item_sk = returns_roe.item_sk AND sales_roe.order_num = returns_roe.order_num
-        ORDER BY item_sk
+        ORDER BY sales_roe.item_sk
         "#,
     );
 
@@ -901,17 +901,17 @@ fn test_column_resolution_with_arithmetic() {
     execute_insert(&mut db, "INSERT INTO sales_arith VALUES (2, 200, 20)");
     execute_insert(&mut db, "INSERT INTO returns_arith VALUES (2, 200, 5)");
 
-    // Query with arithmetic expression (but no COALESCE)
+    // Query with arithmetic expression (but no COALESCE) - use qualified item_sk to avoid ambiguity
     let results = execute_query(
         &db,
         r#"
         SELECT
-            item_sk,
+            sales_arith.item_sk,
             quantity,
             quantity + 1 AS qty_plus_one
         FROM sales_arith
         LEFT JOIN returns_arith ON sales_arith.item_sk = returns_arith.item_sk AND sales_arith.order_num = returns_arith.order_num
-        ORDER BY item_sk
+        ORDER BY sales_arith.item_sk
         "#,
     );
 
