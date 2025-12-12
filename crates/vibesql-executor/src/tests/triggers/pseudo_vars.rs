@@ -37,7 +37,7 @@ fn test_new_in_insert_trigger() {
         trigger_name: "log_new_employee".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
-        table_name: "EMPLOYEES".to_string(), // Use uppercase to match parser normalization
+        table_name: "employees".to_string(), // Use lowercase to match parser normalization
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
@@ -113,7 +113,7 @@ fn test_old_and_new_in_update_trigger() {
         trigger_name: "log_salary_change".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Update(None), // No specific column list
-        table_name: "EMPLOYEES".to_string(), // Use uppercase to match parser normalization
+        table_name: "employees".to_string(), // Use lowercase to match parser normalization
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(
@@ -189,7 +189,7 @@ fn test_old_in_delete_trigger() {
         trigger_name: "log_deletion".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Delete,
-        table_name: "EMPLOYEES".to_string(), // Use uppercase to match parser normalization
+        table_name: "employees".to_string(), // Use lowercase to match parser normalization
         granularity: TriggerGranularity::Row,
         when_condition: None,
         triggered_action: TriggerAction::RawSql(

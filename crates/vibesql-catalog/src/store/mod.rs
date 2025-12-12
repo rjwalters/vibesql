@@ -93,9 +93,8 @@ impl Catalog {
             current_collation: None,
             current_timezone: "UTC".to_string(),
             // Default to case-insensitive identifiers (SQLite-compatible)
-            // The parser preserves original case from the SQL text for identifiers,
-            // matching SQLite behavior. Lookups use case-insensitive matching so
-            // 'SELECT * FROM users' works regardless of how the table was created.
+            // The parser preserves original case from SQL text. We use case-insensitive
+            // mode so lookups work regardless of case in queries.
             case_sensitive_identifiers: false,
         };
 
@@ -120,7 +119,7 @@ impl Catalog {
         if self.case_sensitive_identifiers {
             identifier.to_string()
         } else {
-            identifier.to_uppercase()
+            identifier.to_lowercase()
         }
     }
 

@@ -29,7 +29,7 @@ fn test_nested_comparisons() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,

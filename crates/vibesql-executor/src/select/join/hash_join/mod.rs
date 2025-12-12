@@ -33,27 +33,10 @@ pub(super) use outer::{hash_join_left_outer, hash_join_left_outer_multi};
 // Re-export FromResult type for use in submodules
 pub(super) use super::FromResult;
 
-/// Batch combine rows from join index pairs with optimized allocation
-///
-/// This function reduces allocation overhead by:
-/// 1. Pre-allocating the result vector with exact capacity
-/// 2. Pre-computing combined row size to avoid repeated capacity calculations
-///
-/// For large join results (e.g., 60K rows in TPC-H Q19), this provides
-/// significant performance improvement over per-row allocations.
-pub(super) fn batch_combine_rows(
-    build_rows: &[vibesql_storage::Row],
-    probe_rows: &[vibesql_storage::Row],
-    join_pairs: &[(usize, usize)],
-    left_is_build: bool,
-) -> Vec<vibesql_storage::Row> {
-    batch_combine_rows_with_table_names(build_rows, probe_rows, join_pairs, left_is_build, &[], &[])
-}
-
 /// Batch combine rows from join index pairs, preserving ROWIDs for each table
 ///
-/// This extended version of batch_combine_rows also tracks row IDs per table
-/// for JOIN operations, enabling qualified ROWID references like `t1.rowid`.
+/// This function tracks row IDs per table for JOIN operations,
+/// enabling qualified ROWID references like `t1.rowid`.
 ///
 /// # Arguments
 /// * `build_rows` - Rows from the build side of the join

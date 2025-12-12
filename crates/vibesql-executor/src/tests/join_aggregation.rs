@@ -163,12 +163,12 @@ fn test_inner_join_with_group_by_count() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "departments".to_string(),
                 alias: Some("d".to_string()),
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "employees".to_string(),
                 alias: Some("e".to_string()),
                 column_aliases: None,
@@ -272,12 +272,12 @@ fn test_left_join_with_group_by_avg_salary() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "departments".to_string(),
                 alias: Some("d".to_string()),
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "employees".to_string(),
                 alias: Some("e".to_string()),
                 column_aliases: None,
@@ -382,12 +382,12 @@ fn test_join_group_by_with_having() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "departments".to_string(),
                 alias: Some("d".to_string()),
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "employees".to_string(),
                 alias: Some("e".to_string()),
                 column_aliases: None,
@@ -504,12 +504,12 @@ fn test_join_group_by_multiple_aggregates() {
             },
         ],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "departments".to_string(),
                 alias: Some("d".to_string()),
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "employees".to_string(),
                 alias: Some("e".to_string()),
                 column_aliases: None,

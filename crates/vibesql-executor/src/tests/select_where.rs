@@ -57,7 +57,7 @@ fn test_select_with_where() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
@@ -145,7 +145,7 @@ fn test_select_with_and_condition() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -240,7 +240,7 @@ fn test_select_with_or_condition() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
@@ -333,7 +333,7 @@ fn test_select_with_null_in_where() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "data".to_string(),
             alias: None,
             column_aliases: None,

@@ -7,22 +7,27 @@ impl Parser {
     pub(in crate::parser) fn parse_data_type(
         &mut self,
     ) -> Result<vibesql_types::DataType, ParseError> {
-        let type_upper = match self.peek() {
-            Token::Identifier(type_name) => type_name.to_uppercase(),
-            Token::Keyword(Keyword::Date) => "DATE".to_string(),
-            Token::Keyword(Keyword::Time) => "TIME".to_string(),
-            Token::Keyword(Keyword::Timestamp) => "TIMESTAMP".to_string(),
-            Token::Keyword(Keyword::Interval) => "INTERVAL".to_string(),
-            Token::Keyword(Keyword::Character) => "CHARACTER".to_string(),
-            Token::Keyword(Keyword::Boolean) => "BOOLEAN".to_string(),
+        // Get the type name from the token. Note that identifiers are already
+        // normalized to lowercase by the lexer, so we use uppercase for matching
+        // but store the lowercase form.
+        let type_name = match self.peek() {
+            Token::Identifier(name) => name.clone(),
+            Token::Keyword(Keyword::Date) => "date".to_string(),
+            Token::Keyword(Keyword::Time) => "time".to_string(),
+            Token::Keyword(Keyword::Timestamp) => "timestamp".to_string(),
+            Token::Keyword(Keyword::Interval) => "interval".to_string(),
+            Token::Keyword(Keyword::Character) => "character".to_string(),
+            Token::Keyword(Keyword::Boolean) => "boolean".to_string(),
             // MySQL-specific types that are keywords
-            Token::Keyword(Keyword::Set) => "SET".to_string(),
-            Token::Keyword(Keyword::Year) => "YEAR".to_string(),
-            Token::Keyword(Keyword::Fixed) => "FIXED".to_string(),
+            Token::Keyword(Keyword::Set) => "set".to_string(),
+            Token::Keyword(Keyword::Year) => "year".to_string(),
+            Token::Keyword(Keyword::Fixed) => "fixed".to_string(),
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();
 
+        // Use uppercase for matching to support case-insensitive type names
+        let type_upper = type_name.to_uppercase();
         match type_upper.as_str() {
             "INTEGER" | "INT" => Ok(vibesql_types::DataType::Integer),
             "SIGNED" => Ok(vibesql_types::DataType::Integer), /* MySQL-specific: SIGNED is
@@ -180,7 +185,7 @@ impl Parser {
             "YEAR" => {
                 // MySQL YEAR type - stores years from 1901-2155
                 // Treated as a user-defined type for compatibility
-                Ok(vibesql_types::DataType::UserDefined { type_name: "YEAR".to_string() })
+                Ok(vibesql_types::DataType::UserDefined { type_name: "year".to_string() })
             }
             "INTERVAL" => {
                 // Parse INTERVAL start_field [TO end_field]
@@ -467,7 +472,7 @@ impl Parser {
                     self.expect_token(Token::RParen)?;
                 }
 
-                Ok(vibesql_types::DataType::UserDefined { type_name: type_upper })
+                Ok(vibesql_types::DataType::UserDefined { type_name })
             }
             "ENUM" | "SET" => {
                 // MySQL ENUM and SET types take a list of values in parentheses
@@ -502,7 +507,7 @@ impl Parser {
                     }
                 }
 
-                Ok(vibesql_types::DataType::UserDefined { type_name: type_upper })
+                Ok(vibesql_types::DataType::UserDefined { type_name })
             }
             "NATIONAL" => {
                 // NATIONAL VARCHAR, NATIONAL CHARACTER, NATIONAL CHAR
@@ -649,9 +654,9 @@ impl Parser {
             _ => {
                 // Check if this is a known non-standard type that we should support
                 if Self::is_supported_extension_type(&type_upper) {
-                    Ok(vibesql_types::DataType::UserDefined { type_name: type_upper })
+                    Ok(vibesql_types::DataType::UserDefined { type_name })
                 } else {
-                    Err(ParseError { message: format!("Unknown data type: {}", type_upper) })
+                    Err(ParseError { message: format!("Unknown data type: {}", type_name) })
                 }
             }
         }

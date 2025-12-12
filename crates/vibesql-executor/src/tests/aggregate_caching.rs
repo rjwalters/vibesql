@@ -91,7 +91,7 @@ fn test_repeated_count_star_cached() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr: final_expr, alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -165,7 +165,7 @@ fn test_repeated_sum_cached() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression { expr, alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "sales".to_string(),
             alias: None,
             column_aliases: None,
@@ -283,7 +283,7 @@ fn test_cache_cleared_between_groups() {
             },
             vibesql_ast::SelectItem::Expression { expr: doubled_count, alias: None },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "items".to_string(),
             alias: None,
             column_aliases: None,
@@ -374,7 +374,7 @@ fn test_distinct_aggregates_not_confused() {
                 alias: Some("count_distinct".to_string()),
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "values".to_string(),
             alias: None,
             column_aliases: None,

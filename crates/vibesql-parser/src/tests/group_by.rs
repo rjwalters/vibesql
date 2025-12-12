@@ -174,14 +174,14 @@ fn test_parse_group_by_rollup() {
                         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "YEAR"),
+                        }) => assert_eq!(column, "year"),
                         _ => panic!("Expected column reference 'year'"),
                     }
                     match &elements[1] {
                         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
                             column,
                             ..
-                        }) => assert_eq!(column, "QUARTER"),
+                        }) => assert_eq!(column, "quarter"),
                         _ => panic!("Expected column reference 'quarter'"),
                     }
                 }
@@ -307,7 +307,7 @@ fn test_parse_grouping_function() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "GROUPING");
+                        assert_eq!(name, "grouping");
                         assert_eq!(args.len(), 1);
                     }
                     _ => panic!("Expected GROUPING function"),

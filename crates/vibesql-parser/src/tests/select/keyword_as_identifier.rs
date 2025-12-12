@@ -17,8 +17,8 @@ fn test_column_m_in_select() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        // M is a keyword, so stored in uppercase
-                        assert_eq!(column, "M");
+                        // Identifiers preserve original case from SQL
+                        assert_eq!(column, "m");
                     }
                     _ => panic!("Expected ColumnRef, got {:?}", expr),
                 },
@@ -55,9 +55,10 @@ fn test_column_m_in_create_table() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 5);
             let column_names: Vec<&str> = create.columns.iter().map(|c| c.name.as_str()).collect();
+            // Identifiers preserve original case from SQL
             assert!(
-                column_names.contains(&"M"),
-                "Column 'M' not found in columns: {:?}",
+                column_names.contains(&"m"),
+                "Column 'm' not found in columns: {:?}",
                 column_names
             );
         }

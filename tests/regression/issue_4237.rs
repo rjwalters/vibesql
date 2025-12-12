@@ -146,7 +146,7 @@ fn test_composite_primary_key_in_sql_dump() {
 
     let dump_content = fs::read_to_string(path).unwrap();
     assert!(
-        dump_content.contains("PRIMARY KEY (A, B)"),
+        dump_content.contains("PRIMARY KEY (a, b)"),
         "SQL dump should contain composite PRIMARY KEY: {}",
         dump_content
     );

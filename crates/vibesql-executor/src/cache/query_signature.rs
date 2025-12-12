@@ -1104,6 +1104,7 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
@@ -1133,6 +1134,7 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
@@ -1176,6 +1178,7 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
@@ -1205,6 +1208,7 @@ mod tests {
                 name: "tab".to_string(),
                 alias: None,
                 column_aliases: None,
+            quoted: false,
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::LessThan, // Different operator!

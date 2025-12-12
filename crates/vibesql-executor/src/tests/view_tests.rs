@@ -45,7 +45,7 @@ mod tests {
                 .expect("Failed to create view");
 
             // Verify view was created (use uppercase since parser normalizes identifiers)
-            assert!(db.catalog.get_view("ACTIVE_USERS").is_some());
+            assert!(db.catalog.get_view("active_users").is_some());
         } else {
             panic!("Expected CreateView statement");
         }
@@ -71,7 +71,7 @@ mod tests {
                 .expect("Failed to create or replace view");
 
             // Verify view still exists (use uppercase)
-            assert!(db.catalog.get_view("TEST_VIEW").is_some());
+            assert!(db.catalog.get_view("test_view").is_some());
         }
     }
 
@@ -137,7 +137,7 @@ mod tests {
                 .expect("Failed to create view");
         }
 
-        assert!(db.catalog.get_view("TEST_VIEW").is_some());
+        assert!(db.catalog.get_view("test_view").is_some());
 
         // Drop view
         let drop_view_sql = "DROP VIEW test_view";
@@ -147,7 +147,7 @@ mod tests {
         }
 
         // Verify view was dropped
-        assert!(db.catalog.get_view("TEST_VIEW").is_none());
+        assert!(db.catalog.get_view("test_view").is_none());
     }
 
     #[test]
@@ -174,12 +174,10 @@ mod tests {
             advanced_objects::execute_create_view(&view_stmt, &mut db)
                 .expect("Failed to create view");
 
-            // View name lookup is case-insensitive
             let view = db.catalog.get_view("USER_SUMMARY").expect("View not found");
             assert!(view.columns.is_some());
             let cols = view.columns.as_ref().unwrap();
             assert_eq!(cols.len(), 2);
-            // Column names preserve original case from SQL (SQLite-compatible)
             assert_eq!(cols[0], "user_id");
             assert_eq!(cols[1], "full_name");
         }
@@ -273,6 +271,6 @@ mod tests {
 
         // Both views should be dropped
         assert!(db.catalog.get_view("ALL_USERS").is_none());
-        assert!(db.catalog.get_view("ACTIVE_USERS").is_none());
+        assert!(db.catalog.get_view("active_users").is_none());
     }
 }

@@ -5,9 +5,9 @@ impl Parser {
     pub(super) fn parse_update_statement(&mut self) -> Result<vibesql_ast::UpdateStmt, ParseError> {
         self.expect_keyword(Keyword::Update)?;
 
-        // Parse table name
+        // Parse table name (support both regular and delimited identifiers)
         let table_name = match self.peek() {
-            Token::Identifier(name) => {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                 let table = name.clone();
                 self.advance();
                 table
@@ -23,9 +23,9 @@ impl Parser {
         // Parse assignments
         let mut assignments = Vec::new();
         loop {
-            // Parse column name
+            // Parse column name (support both regular and delimited identifiers)
             let column = match self.peek() {
-                Token::Identifier(col) => {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
                     let c = col.clone();
                     self.advance();
                     c

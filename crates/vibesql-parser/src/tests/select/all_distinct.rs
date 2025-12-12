@@ -62,6 +62,7 @@ fn test_parse_select_all_from_table() {
             assert!(select.from.is_some());
             match &select.from.as_ref().unwrap() {
                 vibesql_ast::FromClause::Table { name, alias, .. } => {
+                    // Identifiers preserve original case from SQL (uppercase T)
                     assert_eq!(name, "T");
                     assert!(alias.is_none());
                 }

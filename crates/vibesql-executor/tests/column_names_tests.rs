@@ -44,7 +44,7 @@ fn test_column_names_simple_select() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT id, name FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // Column names now preserve original case from schema
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(result.columns, vec!["id", "name"]);
         assert_eq!(result.rows.len(), 3);
     } else {
@@ -63,7 +63,7 @@ fn test_column_names_with_alias() {
     .unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // Alias names preserve original case from query
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(result.columns, vec!["employee_name", "annual_salary"]);
         assert_eq!(result.rows.len(), 3);
     } else {
@@ -79,7 +79,7 @@ fn test_column_names_star_expansion() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // Column names preserve original case from schema
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(result.columns, vec!["id", "name", "department", "salary"]);
         assert_eq!(result.rows.len(), 3);
     } else {
@@ -97,6 +97,7 @@ fn test_column_names_functions() {
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns.len(), 2);
+        // Function names preserve original case from SQL
         assert!(result.columns[0].contains("COUNT"));
         assert!(result.columns[1].contains("AVG"));
         assert_eq!(result.rows.len(), 1);
@@ -134,6 +135,7 @@ fn test_column_names_mixed() {
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
         assert_eq!(result.columns.len(), 3);
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(result.columns[0], "id");
         assert_eq!(result.columns[1], "emp_name");
         // Third column is an expression
@@ -154,6 +156,7 @@ fn test_column_names_function_with_alias() {
             .unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(result.columns, vec!["total_employees"]);
         assert_eq!(result.rows.len(), 1);
     } else {

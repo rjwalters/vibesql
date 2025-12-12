@@ -22,7 +22,7 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPT_DIR.parent
 CHECKSUMS_FILE = SCRIPT_DIR / "benchmark_query_checksums.json"
 
-TPCH_QUERIES_FILE = REPO_ROOT / "crates/vibesql-executor/benches/tpch/queries.rs"
+TPCH_QUERIES_FILE = REPO_ROOT / "crates/vibesql-bench-common/src/tpch/queries.rs"
 TPCDS_QUERIES_FILE = REPO_ROOT / "crates/vibesql-executor/benches/tpcds/queries.rs"
 
 

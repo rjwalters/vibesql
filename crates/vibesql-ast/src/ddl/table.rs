@@ -133,10 +133,13 @@ pub enum RowFormat {
 pub struct CreateTableStmt {
     /// If true, don't error if the table already exists
     pub if_not_exists: bool,
+    /// Table name (possibly qualified as schema.table)
     pub table_name: String,
     pub columns: Vec<ColumnDef>,
     pub table_constraints: Vec<TableConstraint>,
     pub table_options: Vec<TableOption>,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    pub quoted: bool,
 }
 
 /// Column definition
@@ -215,8 +218,11 @@ pub enum TableConstraintKind {
 /// DROP TABLE statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropTableStmt {
+    /// Table name (possibly qualified as schema.table)
     pub table_name: String,
     pub if_exists: bool,
+    /// Whether the table name was quoted (delimited) in the original SQL.
+    pub quoted: bool,
 }
 
 /// CASCADE option for TRUNCATE TABLE

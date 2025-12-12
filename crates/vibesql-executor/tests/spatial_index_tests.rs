@@ -33,6 +33,7 @@ fn test_create_spatial_index_basic() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -91,6 +92,7 @@ fn test_spatial_index_multiple_columns_error() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -147,6 +149,7 @@ fn test_drop_spatial_index() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -204,6 +207,7 @@ fn test_spatial_index_if_not_exists() {
         ],
         table_constraints: vec![],
         table_options: vec![],
+            quoted: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

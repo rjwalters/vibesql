@@ -116,6 +116,7 @@ fn test_parse_delete_only_with_parentheses_and_current_of() {
     match stmt {
         vibesql_ast::Statement::Delete(delete) => {
             assert!(delete.only, "ONLY flag should be true");
+            // Identifiers preserve original case from SQL
             assert_eq!(delete.table_name, "TABLE_E121_07_01_01");
             assert!(delete.where_clause.is_some());
             match delete.where_clause.unwrap() {

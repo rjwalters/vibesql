@@ -58,7 +58,7 @@ fn test_table_local_predicate_applied_at_scan() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -139,12 +139,12 @@ fn test_multi_table_with_local_predicates() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
             left: Box::new(vibesql_ast::FromClause::Join {
-                left: Box::new(vibesql_ast::FromClause::Table {
+                left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                     name: "t1".to_string(),
                     alias: None,
                     column_aliases: None,
                 }),
-                right: Box::new(vibesql_ast::FromClause::Table {
+                right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                     name: "t2".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -154,7 +154,7 @@ fn test_multi_table_with_local_predicates() {
                 using_columns: None,
                 natural: false,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "t3".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -287,12 +287,12 @@ fn test_table_local_predicate_with_explicit_join() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table {
+            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "orders".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table {
+            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
                 name: "customers".to_string(),
                 alias: None,
                 column_aliases: None,
@@ -395,7 +395,7 @@ fn test_table_local_predicate_with_multiple_conditions() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,

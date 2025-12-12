@@ -12,24 +12,25 @@ use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::{DataType, SqlValue};
 
-/// Sets up a PRODUCTS table for DELETE testing
+/// Sets up a products table for DELETE testing
 fn setup_products_table(db: &mut Database) {
+    // SQL:1999 normalizes unquoted identifiers to lowercase
     let schema = TableSchema::with_primary_key(
-        "PRODUCTS".to_string(),
+        "products".to_string(),
         vec![
-            ColumnSchema::new("ID".to_string(), DataType::Integer, false),
-            ColumnSchema::new("NAME".to_string(), DataType::Varchar { max_length: Some(50) }, true),
-            ColumnSchema::new("PRICE".to_string(), DataType::Integer, true),
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, true),
+            ColumnSchema::new("price".to_string(), DataType::Integer, true),
         ],
-        vec!["ID".to_string()], // ID is PRIMARY KEY
+        vec!["id".to_string()], // id is PRIMARY KEY
     );
     db.create_table(schema).unwrap();
 }
 
-/// Helper to insert a row into PRODUCTS table
+/// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     db.insert_row(
-        "PRODUCTS",
+        "products",
         vibesql_storage::Row::new(vec![
             SqlValue::Integer(id),
             SqlValue::Varchar(arcstr::ArcStr::from(name)),
@@ -68,7 +69,7 @@ fn test_delete_invalidates_columnar_cache() {
     insert_product(&mut db, 3, "Gizmo", 300);
 
     // Warm the columnar cache
-    let initial_columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let initial_columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(initial_columnar.row_count(), 3);
 
     // Verify initial cache statistics
@@ -76,7 +77,7 @@ fn test_delete_invalidates_columnar_cache() {
     assert_eq!(initial_stats.conversions, 1, "Should have done one conversion");
 
     // Verify initial data in the columnar cache
-    let price_col = initial_columnar.get_column("PRICE").expect("Column should exist");
+    let price_col = initial_columnar.get_column("price").expect("Column should exist");
     let prices: Vec<i64> = (0..3)
         .map(|i| match price_col.get(i) {
             SqlValue::Integer(v) => v,
@@ -90,12 +91,12 @@ fn test_delete_invalidates_columnar_cache() {
     assert_eq!(deleted, 1, "Should delete 1 row");
 
     // Get columnar data again - should reflect the updated data (without deleted row)
-    let updated_columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let updated_columnar = db.get_columnar("products").unwrap().expect("Table should exist");
 
     // After DELETE: row 1 (Widget, 100) is removed
     assert_eq!(updated_columnar.row_count(), 2, "Should have 2 rows after DELETE");
 
-    let updated_price_col = updated_columnar.get_column("PRICE").expect("Column should exist");
+    let updated_price_col = updated_columnar.get_column("price").expect("Column should exist");
     let updated_prices: Vec<i64> = (0..2)
         .map(|i| match updated_price_col.get(i) {
             SqlValue::Integer(v) => v,
@@ -132,11 +133,11 @@ fn test_delete_invalidates_prewarmed_cache() {
     insert_product(&mut db, 3, "Item C", 100);
 
     // Pre-warm the cache
-    let warmed = db.pre_warm_columnar_cache(&["PRODUCTS"]).unwrap();
+    let warmed = db.pre_warm_columnar_cache(&["products"]).unwrap();
     assert_eq!(warmed, 1, "Should warm 1 table");
 
     // Verify pre-warmed data
-    let initial_columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let initial_columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(initial_columnar.row_count(), 3);
 
     // Cache hit should have occurred for the second access
@@ -144,15 +145,15 @@ fn test_delete_invalidates_prewarmed_cache() {
     assert_eq!(stats_after_get.hits, 1, "Second get should be a cache hit");
 
     // DELETE to remove Item A
-    let deleted = delete_sql(&mut db, "DELETE FROM PRODUCTS WHERE ID = 1");
+    let deleted = delete_sql(&mut db, "DELETE FROM products WHERE id = 1");
     assert_eq!(deleted, 1);
 
     // Get columnar data - should reflect updated values, not stale cache
-    let updated_columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let updated_columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(updated_columnar.row_count(), 2, "Should have 2 rows after DELETE");
 
     // Verify the deleted row's price is gone
-    let price_col = updated_columnar.get_column("PRICE").expect("Column should exist");
+    let price_col = updated_columnar.get_column("price").expect("Column should exist");
     let has_deleted_price = (0..2).any(|i| matches!(price_col.get(i), SqlValue::Integer(50)));
     assert!(!has_deleted_price, "Deleted price 50 should NOT be visible after DELETE");
 
@@ -174,17 +175,17 @@ fn test_delete_multiple_rows_invalidates_cache() {
     insert_product(&mut db, 4, "Cheap 3", 30);
 
     // Warm cache
-    let _ = db.get_columnar("PRODUCTS").unwrap();
+    let _ = db.get_columnar("products").unwrap();
 
     // Delete all cheap products (price < 100)
-    let deleted = delete_sql(&mut db, "DELETE FROM PRODUCTS WHERE PRICE < 100");
+    let deleted = delete_sql(&mut db, "DELETE FROM products WHERE price < 100");
     assert_eq!(deleted, 3, "Should delete 3 cheap products");
 
     // Verify cache reflects the deletion
-    let columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(columnar.row_count(), 1, "Should have 1 row remaining");
 
-    let price_col = columnar.get_column("PRICE").expect("Column should exist");
+    let price_col = columnar.get_column("price").expect("Column should exist");
     match price_col.get(0) {
         SqlValue::Integer(500) => {} // Expected
         other => panic!("Expected price 500, got {:?}", other),
@@ -202,15 +203,15 @@ fn test_delete_all_rows_invalidates_cache() {
     insert_product(&mut db, 2, "Gadget", 200);
 
     // Warm cache
-    let initial = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let initial = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(initial.row_count(), 2);
 
     // Delete all rows (no WHERE clause - triggers truncate optimization)
-    let deleted = delete_sql(&mut db, "DELETE FROM PRODUCTS");
+    let deleted = delete_sql(&mut db, "DELETE FROM products");
     assert_eq!(deleted, 2, "Should delete all 2 rows");
 
     // Verify cache reflects the empty table
-    let columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(columnar.row_count(), 0, "Table should be empty after DELETE");
 }
 
@@ -225,20 +226,20 @@ fn test_delete_then_insert_cache_consistency() {
     insert_product(&mut db, 2, "Keeper", 200);
 
     // Warm cache
-    let _ = db.get_columnar("PRODUCTS").unwrap();
+    let _ = db.get_columnar("products").unwrap();
 
     // Delete one row
-    let deleted = delete_sql(&mut db, "DELETE FROM PRODUCTS WHERE ID = 1");
+    let deleted = delete_sql(&mut db, "DELETE FROM products WHERE id = 1");
     assert_eq!(deleted, 1);
 
     // Insert a new row
     insert_product(&mut db, 3, "Newcomer", 300);
 
     // Verify cache shows correct state
-    let columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(columnar.row_count(), 2, "Should have 2 rows (1 deleted, 1 kept, 1 added)");
 
-    let price_col = columnar.get_column("PRICE").expect("Column should exist");
+    let price_col = columnar.get_column("price").expect("Column should exist");
     let prices: Vec<i64> = (0..2)
         .filter_map(|i| match price_col.get(i) {
             SqlValue::Integer(v) => Some(v),
@@ -264,21 +265,21 @@ fn test_delete_complex_where_invalidates_cache() {
     insert_product(&mut db, 4, "Gadget B", 350);
 
     // Warm cache
-    let initial = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let initial = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(initial.row_count(), 4);
 
-    // Delete rows matching complex condition: PRICE = 150 AND NAME LIKE 'Widget%'
+    // Delete rows matching complex condition: price = 150 AND name LIKE 'Widget%'
     let deleted =
-        delete_sql(&mut db, "DELETE FROM PRODUCTS WHERE PRICE = 150 AND NAME LIKE 'Widget%'");
+        delete_sql(&mut db, "DELETE FROM products WHERE price = 150 AND name LIKE 'Widget%'");
     assert_eq!(deleted, 1, "Should delete 1 row (Widget A)");
 
     // Verify cache reflects the deletion
-    let columnar = db.get_columnar("PRODUCTS").unwrap().expect("Table should exist");
+    let columnar = db.get_columnar("products").unwrap().expect("Table should exist");
     assert_eq!(columnar.row_count(), 3, "Should have 3 rows remaining");
 
     // Gadget A with price 150 should still exist
-    let price_col = columnar.get_column("PRICE").expect("Column should exist");
-    let name_col = columnar.get_column("NAME").expect("Column should exist");
+    let price_col = columnar.get_column("price").expect("Column should exist");
+    let name_col = columnar.get_column("name").expect("Column should exist");
 
     // Check that we still have a row with price 150 (Gadget A)
     let has_gadget_a = (0..3).any(|i| {

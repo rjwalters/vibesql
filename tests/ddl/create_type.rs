@@ -32,56 +32,56 @@ fn execute_and_expect_error(db: &mut Database, sql: &str) -> String {
 fn test_create_distinct_type_integer() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE age AS DISTINCT INTEGER");
-    assert_eq!(result, "Type 'AGE' created");
-    assert!(db.catalog.type_exists("AGE"));
+    assert_eq!(result, "Type 'age' created");
+    assert!(db.catalog.type_exists("age"));
 }
 
 #[test]
 fn test_create_distinct_type_varchar() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE email AS DISTINCT VARCHAR");
-    assert_eq!(result, "Type 'EMAIL' created");
-    assert!(db.catalog.type_exists("EMAIL"));
+    assert_eq!(result, "Type 'email' created");
+    assert!(db.catalog.type_exists("email"));
 }
 
 #[test]
 fn test_create_distinct_type_decimal() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE money AS DISTINCT DECIMAL");
-    assert_eq!(result, "Type 'MONEY' created");
-    assert!(db.catalog.type_exists("MONEY"));
+    assert_eq!(result, "Type 'money' created");
+    assert!(db.catalog.type_exists("money"));
 }
 
 #[test]
 fn test_create_distinct_type_boolean() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE flag AS DISTINCT BOOLEAN");
-    assert_eq!(result, "Type 'FLAG' created");
-    assert!(db.catalog.type_exists("FLAG"));
+    assert_eq!(result, "Type 'flag' created");
+    assert!(db.catalog.type_exists("flag"));
 }
 
 #[test]
 fn test_create_distinct_type_date() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE birthdate AS DISTINCT DATE");
-    assert_eq!(result, "Type 'BIRTHDATE' created");
-    assert!(db.catalog.type_exists("BIRTHDATE"));
+    assert_eq!(result, "Type 'birthdate' created");
+    assert!(db.catalog.type_exists("birthdate"));
 }
 
 #[test]
 fn test_create_structured_type_single_attr() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE point AS (x INTEGER)");
-    assert_eq!(result, "Type 'POINT' created");
-    assert!(db.catalog.type_exists("POINT"));
+    assert_eq!(result, "Type 'point' created");
+    assert!(db.catalog.type_exists("point"));
 }
 
 #[test]
 fn test_create_structured_type_two_attrs() {
     let mut db = Database::new();
     let result = execute_and_expect_success(&mut db, "CREATE TYPE coord AS (x INTEGER, y INTEGER)");
-    assert_eq!(result, "Type 'COORD' created");
-    assert!(db.catalog.type_exists("COORD"));
+    assert_eq!(result, "Type 'coord' created");
+    assert!(db.catalog.type_exists("coord"));
 }
 
 #[test]
@@ -89,8 +89,8 @@ fn test_create_structured_type_multi_attrs() {
     let mut db = Database::new();
     let sql = "CREATE TYPE address AS (street VARCHAR, city VARCHAR, zip VARCHAR)";
     let result = execute_and_expect_success(&mut db, sql);
-    assert_eq!(result, "Type 'ADDRESS' created");
-    assert!(db.catalog.type_exists("ADDRESS"));
+    assert_eq!(result, "Type 'address' created");
+    assert!(db.catalog.type_exists("address"));
 }
 
 #[test]
@@ -98,8 +98,8 @@ fn test_create_structured_type_complex() {
     let mut db = Database::new();
     let sql = "CREATE TYPE person AS (name VARCHAR, age INTEGER, active BOOLEAN, created DATE)";
     let result = execute_and_expect_success(&mut db, sql);
-    assert_eq!(result, "Type 'PERSON' created");
-    assert!(db.catalog.type_exists("PERSON"));
+    assert_eq!(result, "Type 'person' created");
+    assert!(db.catalog.type_exists("person"));
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn test_create_type_duplicate_error() {
 
     // Try to create the same type again - should fail
     let error = execute_and_expect_error(&mut db, "CREATE TYPE mytype AS DISTINCT INTEGER");
-    assert!(error.contains("already exists") || error.contains("MYTYPE"));
+    assert!(error.contains("already exists") || error.contains("mytype"));
 }
 
 #[test]
@@ -118,8 +118,8 @@ fn test_drop_type_distinct() {
     execute_and_expect_success(&mut db, "CREATE TYPE temperature AS DISTINCT FLOAT");
 
     let result = execute_and_expect_success(&mut db, "DROP TYPE temperature");
-    assert_eq!(result, "Type 'TEMPERATURE' dropped");
-    assert!(!db.catalog.type_exists("TEMPERATURE"));
+    assert_eq!(result, "Type 'temperature' dropped");
+    assert!(!db.catalog.type_exists("temperature"));
 }
 
 #[test]
@@ -128,8 +128,8 @@ fn test_drop_type_structured() {
     execute_and_expect_success(&mut db, "CREATE TYPE point AS (x INTEGER, y INTEGER)");
 
     let result = execute_and_expect_success(&mut db, "DROP TYPE point");
-    assert_eq!(result, "Type 'POINT' dropped");
-    assert!(!db.catalog.type_exists("POINT"));
+    assert_eq!(result, "Type 'point' dropped");
+    assert!(!db.catalog.type_exists("point"));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn test_drop_type_restrict() {
     execute_and_expect_success(&mut db, "CREATE TYPE percentage AS DISTINCT DECIMAL");
 
     let result = execute_and_expect_success(&mut db, "DROP TYPE percentage RESTRICT");
-    assert_eq!(result, "Type 'PERCENTAGE' dropped");
+    assert_eq!(result, "Type 'percentage' dropped");
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn test_drop_type_cascade() {
     execute_and_expect_success(&mut db, "CREATE TYPE score AS DISTINCT INTEGER");
 
     let result = execute_and_expect_success(&mut db, "DROP TYPE score CASCADE");
-    assert_eq!(result, "Type 'SCORE' dropped");
+    assert_eq!(result, "Type 'score' dropped");
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn test_drop_type_not_found() {
     let mut db = Database::new();
 
     let error = execute_and_expect_error(&mut db, "DROP TYPE nonexistent");
-    assert!(error.contains("not found") || error.contains("NONEXISTENT"));
+    assert!(error.contains("not found") || error.contains("nonexistent"));
 }
 
 #[test]
@@ -164,15 +164,15 @@ fn test_create_drop_recreate() {
 
     // Create
     execute_and_expect_success(&mut db, "CREATE TYPE mytype AS DISTINCT INTEGER");
-    assert!(db.catalog.type_exists("MYTYPE"));
+    assert!(db.catalog.type_exists("mytype"));
 
     // Drop
     execute_and_expect_success(&mut db, "DROP TYPE mytype");
-    assert!(!db.catalog.type_exists("MYTYPE"));
+    assert!(!db.catalog.type_exists("mytype"));
 
     // Recreate with different definition
     execute_and_expect_success(&mut db, "CREATE TYPE mytype AS DISTINCT VARCHAR");
-    assert!(db.catalog.type_exists("MYTYPE"));
+    assert!(db.catalog.type_exists("mytype"));
 }
 
 #[test]
@@ -185,9 +185,9 @@ fn test_multiple_types() {
     execute_and_expect_success(&mut db, "CREATE TYPE type3 AS (x INTEGER, y INTEGER)");
 
     // Verify all exist
-    assert!(db.catalog.type_exists("TYPE1"));
-    assert!(db.catalog.type_exists("TYPE2"));
-    assert!(db.catalog.type_exists("TYPE3"));
+    assert!(db.catalog.type_exists("type1"));
+    assert!(db.catalog.type_exists("type2"));
+    assert!(db.catalog.type_exists("type3"));
 
     // Drop them
     execute_and_expect_success(&mut db, "DROP TYPE type1");
@@ -195,9 +195,9 @@ fn test_multiple_types() {
     execute_and_expect_success(&mut db, "DROP TYPE type3");
 
     // Verify all dropped
-    assert!(!db.catalog.type_exists("TYPE1"));
-    assert!(!db.catalog.type_exists("TYPE2"));
-    assert!(!db.catalog.type_exists("TYPE3"));
+    assert!(!db.catalog.type_exists("type1"));
+    assert!(!db.catalog.type_exists("type2"));
+    assert!(!db.catalog.type_exists("type3"));
 }
 
 #[test]
@@ -206,6 +206,6 @@ fn test_create_type_forward_declaration() {
 
     // Create a forward declaration (without AS clause)
     let result = execute_and_expect_success(&mut db, "CREATE TYPE forward_type");
-    assert_eq!(result, "Type 'FORWARD_TYPE' created");
-    assert!(db.catalog.type_exists("FORWARD_TYPE"));
+    assert_eq!(result, "Type 'forward_type' created");
+    assert!(db.catalog.type_exists("forward_type"));
 }

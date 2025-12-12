@@ -2,9 +2,9 @@
 //!
 //! This module provides TPC-C (Transaction Processing Performance Council - C)
 //! benchmark utilities for testing OLTP workload performance including:
-//! - Data generation (`data` module)
-//! - Transaction definitions (`transactions` module)
-//! - Schema creation and data loading (`schema` module)
+//! - Data generation (from `vibesql-bench-common`)
+//! - Transaction definitions (from `vibesql-bench-common`)
+//! - Schema creation and data loading (`schema` module - engine-specific)
 //!
 //! TPC-C simulates a complete computing environment where users execute
 //! transactions against a database. It measures throughput in transactions
@@ -34,17 +34,44 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-pub mod data;
+// Engine-specific schema loading code (stays here due to vibesql dependencies)
 pub mod schema;
+
+// Engine-specific transaction execution code (uses vibesql internals)
 pub mod transactions;
 
-// Re-export commonly used items for convenience
-pub use data::TPCCData;
+// Re-export data generators from shared crate
+pub use vibesql_bench_common::tpcc::{
+    // Data generation
+    TPCCData, TPCCRng,
+    // Entity types
+    Customer, District, History, Item, NewOrder, Order, OrderLine, Stock, Warehouse,
+    // Transaction input types
+    DeliveryInput, NewOrderInput, NewOrderItemInput, OrderStatusInput, PaymentInput,
+    StockLevelInput, TransactionResult,
+    // Input generators
+    generate_delivery_input, generate_new_order_input, generate_order_status_input,
+    generate_payment_input, generate_stock_level_input,
+    // Workload generator
+    TPCCWorkload, TPCCBenchmarkResults,
+};
+
+// Re-export schema loaders
 #[cfg(feature = "duckdb")]
 pub use schema::load_duckdb;
 #[cfg(feature = "mysql")]
-pub use schema::load_mysql;
+pub use schema::{get_mysql_pool, load_mysql};
 #[cfg(feature = "sqlite")]
 pub use schema::load_sqlite;
 pub use schema::load_vibesql;
-pub use transactions::*;
+
+// Re-export transaction executors (engine-specific implementations)
+pub use transactions::{
+    print_profile_summary, reset_profile_counters, TPCCExecutor, VibesqlTransactionExecutor,
+};
+#[cfg(feature = "duckdb")]
+pub use transactions::DuckdbTransactionExecutor;
+#[cfg(feature = "mysql")]
+pub use transactions::MysqlTransactionExecutor;
+#[cfg(feature = "sqlite")]
+pub use transactions::SqliteTransactionExecutor;

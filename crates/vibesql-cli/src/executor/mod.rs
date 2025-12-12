@@ -573,7 +573,7 @@ impl SqlExecutor {
 
     /// Execute SHOW INDEX statement
     fn execute_show_index(&self, stmt: &vibesql_ast::ShowIndexStmt) -> anyhow::Result<QueryResult> {
-        let normalized_name = stmt.table_name.to_uppercase();
+        let normalized_name = stmt.table_name.to_lowercase();
 
         // Verify table exists
         let _ = self
@@ -637,7 +637,7 @@ impl SqlExecutor {
         &self,
         stmt: &vibesql_ast::ShowCreateTableStmt,
     ) -> anyhow::Result<QueryResult> {
-        let normalized_name = stmt.table_name.to_uppercase();
+        let normalized_name = stmt.table_name.to_lowercase();
         let table = self
             .db
             .get_table(&normalized_name)

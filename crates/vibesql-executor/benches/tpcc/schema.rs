@@ -13,7 +13,8 @@ use mysql::{Pool, PooledConn};
 use rusqlite::Connection as SqliteConn;
 use vibesql_storage::Database as VibeDB;
 
-use super::data::TPCCData;
+// Use data generators from shared crate
+use vibesql_bench_common::tpcc::TPCCData;
 
 // =============================================================================
 // Database Loaders

@@ -195,7 +195,7 @@ fn test_show_columns_with_like() {
 
 #[test]
 fn test_show_without_target() {
-    let result = Parser::parse_sql("SHOW");
+    let result = Parser::parse_sql("show");
     assert!(result.is_err());
 }
 
@@ -219,7 +219,7 @@ fn test_show_create_invalid_object() {
 
 #[test]
 fn test_describe_without_table() {
-    let result = Parser::parse_sql("DESCRIBE");
+    let result = Parser::parse_sql("describe");
     assert!(result.is_err());
 }
 

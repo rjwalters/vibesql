@@ -1,7 +1,7 @@
 use super::{keywords, Lexer, LexerError};
 use crate::token::Token;
 
-/// Stack buffer size for uppercase conversion.
+/// Stack buffer size for case conversion.
 /// Most SQL keywords are short (SELECT=6, CURRENT_TIMESTAMP=17).
 /// 32 bytes covers all standard SQL keywords with room to spare.
 const STACK_BUF_SIZE: usize = 32;
@@ -10,24 +10,19 @@ impl<'a> Lexer<'a> {
     /// Tokenize an identifier or keyword.
     ///
     /// This function is optimized to avoid heap allocations when possible:
-    /// - For identifiers <= 32 bytes that need uppercase conversion, uses a stack buffer
+    /// - For identifiers <= 32 bytes that need case conversion, uses a stack buffer
     /// - Only allocates when the token is confirmed to be an identifier (not a keyword)
     ///
     /// **Case handling**: Keywords are matched case-insensitively (using uppercase),
     /// but identifiers preserve their original case from the SQL text. This matches
-    /// SQLite's behavior where `CREATE TABLE t(col)` stores "col" in the schema,
-    /// and `SELECT col FROM t` returns "col" as the column name (schema case).
+    /// SQLite's behavior where `SELECT col FROM t` returns "col" as the column name
+    /// (preserving the case from the query for display purposes).
     pub(super) fn tokenize_identifier_or_keyword(&mut self) -> Result<Token, LexerError> {
         let start = self.position();
-        let mut needs_uppercase = false;
 
         while !self.is_eof() {
             let ch = self.current_char();
             if ch.is_ascii_alphanumeric() || ch == '_' {
-                // Track if we have lowercase letters that need conversion for keyword matching
-                if ch.is_ascii_lowercase() {
-                    needs_uppercase = true;
-                }
                 self.advance();
             } else {
                 break;
@@ -37,40 +32,29 @@ impl<'a> Lexer<'a> {
         // Get the identifier text directly from the input slice
         let text = self.slice_from(start);
 
-        if needs_uppercase {
-            // Fast path: use stack buffer for short identifiers to avoid heap allocation
-            // when checking for keywords (which would discard the allocation anyway)
-            if text.len() <= STACK_BUF_SIZE {
-                let mut buf = [0u8; STACK_BUF_SIZE];
-                for (i, b) in text.bytes().enumerate() {
-                    buf[i] = b.to_ascii_uppercase();
-                }
-                // SAFETY: Converting ASCII lowercase to uppercase produces valid UTF-8.
-                // The input `text` is valid UTF-8 (from slice_from), and to_ascii_uppercase
-                // only modifies ASCII bytes (0x61-0x7A → 0x41-0x5A), preserving UTF-8 validity.
-                let upper = unsafe { std::str::from_utf8_unchecked(&buf[..text.len()]) };
-
-                // Try keyword lookup first - no allocation yet
-                if let Some(keyword) = keywords::map_keyword(upper) {
-                    return Ok(Token::Keyword(keyword));
-                }
-
-                // Not a keyword - store original case to match SQLite behavior
-                // (column names preserve case from schema, not from query)
-                Ok(Token::Identifier(text.to_string()))
-            } else {
-                // Long identifier - fall back to heap allocation for keyword check only
-                let upper_text = text.to_ascii_uppercase();
-                match keywords::map_keyword(&upper_text) {
-                    Some(keyword) => Ok(Token::Keyword(keyword)),
-                    // Not a keyword - store original case
-                    None => Ok(Token::Identifier(text.to_string())),
-                }
+        // Keywords are case-insensitive (checked with uppercase)
+        // Identifiers preserve their original case for display
+        if text.len() <= STACK_BUF_SIZE {
+            let mut upper_buf = [0u8; STACK_BUF_SIZE];
+            for (i, b) in text.bytes().enumerate() {
+                upper_buf[i] = b.to_ascii_uppercase();
             }
+            // SAFETY: Converting ASCII to uppercase produces valid UTF-8.
+            let upper = unsafe { std::str::from_utf8_unchecked(&upper_buf[..text.len()]) };
+
+            // Try keyword lookup first (case-insensitive)
+            if let Some(keyword) = keywords::map_keyword(upper) {
+                return Ok(Token::Keyword(keyword));
+            }
+
+            // Not a keyword - preserve original case from SQL text
+            Ok(Token::Identifier(text.to_string()))
         } else {
-            // Text is already uppercase - try keyword lookup on the slice directly
-            match keywords::map_keyword(text) {
+            // Long identifier - fall back to heap allocation
+            let upper_text = text.to_ascii_uppercase();
+            match keywords::map_keyword(&upper_text) {
                 Some(keyword) => Ok(Token::Keyword(keyword)),
+                // Not a keyword - preserve original case from SQL text
                 None => Ok(Token::Identifier(text.to_string())),
             }
         }

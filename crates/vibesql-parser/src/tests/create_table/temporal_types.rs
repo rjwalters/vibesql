@@ -234,11 +234,11 @@ fn test_temporal_keywords_as_column_names() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 4);
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "TIMESTAMP");
-            assert_eq!(create.columns[1].name, "DATE");
-            assert_eq!(create.columns[2].name, "TIME");
-            assert_eq!(create.columns[3].name, "INTERVAL");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "timestamp");
+            assert_eq!(create.columns[1].name, "date");
+            assert_eq!(create.columns[2].name, "time");
+            assert_eq!(create.columns[3].name, "interval");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -265,8 +265,8 @@ fn test_timestamp_column_with_constraints() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 3);
             assert_eq!(create.columns[0].name, "run_id");
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[1].name, "TIMESTAMP");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[1].name, "timestamp");
             assert_eq!(create.columns[2].name, "workers");
 
             // Verify timestamp column has NOT NULL
@@ -284,8 +284,8 @@ fn test_date_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "DATE");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "date");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -299,8 +299,8 @@ fn test_time_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "TIME");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "time");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -314,8 +314,8 @@ fn test_interval_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "INTERVAL");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "interval");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -394,7 +394,8 @@ fn test_parse_create_table_year() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             match &create.columns[0].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
+                // Type names are normalized to lowercase by the parser for consistency
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "year" => {} /* Success */
                 _ => panic!(
                     "Expected YEAR to map to UserDefined type, got {:?}",
                     create.columns[0].data_type
@@ -420,17 +421,19 @@ fn test_parse_create_table_year_with_constraints() {
             // Verify first column: c1 YEAR KEY
             assert_eq!(create.columns[0].name, "c1");
             match &create.columns[0].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
+                // Type names are normalized to lowercase by the parser for consistency
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "year" => {} /* Success */
                 _ => panic!(
                     "Expected c1 to be YEAR (UserDefined), got {:?}",
                     create.columns[0].data_type
                 ),
             }
 
-            // Verify second column: c2 YEAR NULL (uppercased because not in backticks)
+            // Verify second column: c2 YEAR NULL
             assert_eq!(create.columns[1].name, "c2");
             match &create.columns[1].data_type {
-                vibesql_types::DataType::UserDefined { type_name } if type_name == "YEAR" => {} /* Success */
+                // Type names are normalized to lowercase by the parser for consistency
+                vibesql_types::DataType::UserDefined { type_name } if type_name == "year" => {} /* Success */
                 _ => panic!(
                     "Expected c2 to be YEAR (UserDefined), got {:?}",
                     create.columns[1].data_type
@@ -454,8 +457,8 @@ fn test_type_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "TYPE");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "type");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -470,8 +473,8 @@ fn test_sql_as_column_name() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "SQL");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "sql");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -495,12 +498,12 @@ fn test_type_and_sql_as_column_names_together() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 5);
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[0].name, "TYPE");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[0].name, "type");
             assert_eq!(create.columns[1].name, "name");
             assert_eq!(create.columns[2].name, "tbl_name");
             assert_eq!(create.columns[3].name, "rootpage");
-            assert_eq!(create.columns[4].name, "SQL");
+            assert_eq!(create.columns[4].name, "sql");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }
@@ -520,8 +523,8 @@ fn test_type_column_with_constraints() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            // Keywords used as column names are stored in uppercase form
-            assert_eq!(create.columns[1].name, "TYPE");
+            // Column names preserve original case from SQL
+            assert_eq!(create.columns[1].name, "type");
             assert!(!create.columns[1].nullable, "type column should be NOT NULL");
         }
         _ => panic!("Expected CREATE TABLE statement"),

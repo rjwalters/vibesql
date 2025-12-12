@@ -61,7 +61,7 @@ fn test_mysql_null_in_empty_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -83,7 +83,7 @@ fn test_mysql_null_in_empty_subquery() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
+                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "empty".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -151,7 +151,7 @@ fn test_mysql_null_not_in_empty_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -173,7 +173,7 @@ fn test_mysql_null_not_in_empty_subquery() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
+                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "empty".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -250,7 +250,7 @@ fn test_mysql_null_in_non_empty_without_null() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "test".to_string(),
             alias: None,
             column_aliases: None,
@@ -272,7 +272,7 @@ fn test_mysql_null_in_non_empty_without_null() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
+                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "values".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -384,7 +384,7 @@ fn test_mysql_triple_nested_subquery() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -408,7 +408,7 @@ fn test_mysql_triple_nested_subquery() {
                     }],
                     into_table: None,
                     into_variables: None,
-                    from: Some(vibesql_ast::FromClause::Table {
+                    from: Some(vibesql_ast::FromClause::Table { quoted: false,
                         name: "t2".to_string(),
                         alias: None,
                         column_aliases: None,
@@ -438,7 +438,7 @@ fn test_mysql_triple_nested_subquery() {
                                 }],
                                 into_table: None,
                                 into_variables: None,
-                                from: Some(vibesql_ast::FromClause::Table {
+                                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                                     name: "t3".to_string(),
                                     alias: None,
                                     column_aliases: None,
@@ -545,7 +545,7 @@ fn test_mysql_exists_short_circuit() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "customers".to_string(),
             alias: None,
             column_aliases: None,
@@ -560,7 +560,7 @@ fn test_mysql_exists_short_circuit() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
+                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "orders".to_string(),
                     alias: None,
                     column_aliases: None,
@@ -670,7 +670,7 @@ fn test_mysql_scalar_within_exists() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
@@ -685,7 +685,7 @@ fn test_mysql_scalar_within_exists() {
                 }],
                 into_table: None,
                 into_variables: None,
-                from: Some(vibesql_ast::FromClause::Table {
+                from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "products".to_string(),
                     alias: Some("p".to_string()),
                     column_aliases: None,
@@ -709,7 +709,7 @@ fn test_mysql_scalar_within_exists() {
                             }],
                             into_table: None,
                             into_variables: None,
-                            from: Some(vibesql_ast::FromClause::Table {
+                            from: Some(vibesql_ast::FromClause::Table { quoted: false,
                                 name: "average_price".to_string(),
                                 alias: None,
                                 column_aliases: None,

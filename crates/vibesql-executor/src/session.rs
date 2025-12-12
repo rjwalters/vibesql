@@ -979,7 +979,7 @@ mod tests {
         // Both tables should be tracked
         let tables = stmt.tables();
         assert!(tables.contains("users"), "Expected USERS in {:?}", tables);
-        assert!(tables.contains("orders"), "Expected ORDERS in {:?}", tables);
+        assert!(tables.contains("orders"), "Expected orders in {:?}", tables);
     }
 
     #[test]
@@ -1005,7 +1005,7 @@ mod tests {
         // Verify it creates a PkDelete plan
         match stmt.cached_plan() {
             CachedPlan::PkDelete(plan) => {
-                // Parser preserves original case (SQLite-compatible)
+                // Table name should be uppercase
                 assert_eq!(plan.table_name, "users");
                 // Should have one PK column
                 assert_eq!(plan.pk_columns, vec!["id"]);

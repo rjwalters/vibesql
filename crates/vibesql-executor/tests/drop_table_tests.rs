@@ -14,6 +14,7 @@ fn test_drop_table_basic() {
         CreateTableExecutor::execute(&stmt, &mut db).unwrap();
     }
 
+    // SQL:1999 normalizes unquoted identifiers to lowercase
     assert!(db.catalog.table_exists("users"));
 
     // Drop the table
@@ -109,7 +110,7 @@ fn test_drop_table_with_data() {
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
 
-    // Verify data exists
+    // Verify data exists (lowercase per SQL:1999)
     assert_eq!(db.get_table("orders").unwrap().row_count(), 2);
 
     // Drop table
@@ -146,6 +147,7 @@ fn test_drop_and_recreate_table() {
         InsertExecutor::execute(&mut db, &stmt).unwrap();
     }
 
+    // SQL:1999 normalizes to lowercase
     assert_eq!(db.get_table("test_temp").unwrap().row_count(), 1);
 
     // Drop table
@@ -164,7 +166,7 @@ fn test_drop_and_recreate_table() {
         CreateTableExecutor::execute(&stmt, &mut db).unwrap();
     }
 
-    // New table should be empty
+    // New table should be empty (lowercase per SQL:1999)
     assert!(db.catalog.table_exists("test_temp"));
     assert_eq!(db.get_table("test_temp").unwrap().row_count(), 0);
     assert_eq!(db.get_table("test_temp").unwrap().schema.column_count(), 2);
@@ -255,6 +257,7 @@ fn test_drop_table_if_exists_parser() {
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(stmt.table_name, "mytable");
         assert!(stmt.if_exists);
     } else {
@@ -269,6 +272,7 @@ fn test_drop_table_without_if_exists_parser() {
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(stmt.table_name, "mytable");
         assert!(!stmt.if_exists);
     } else {
@@ -293,6 +297,7 @@ fn test_drop_table_with_underscores() {
     let drop_stmt = Parser::parse_sql(drop_sql).unwrap();
 
     if let vibesql_ast::Statement::DropTable(stmt) = drop_stmt {
+        // SQL:1999 normalizes unquoted identifiers to lowercase
         assert_eq!(stmt.table_name, "user_profiles");
         let result = DropTableExecutor::execute(&stmt, &mut db);
         assert!(result.is_ok());
@@ -324,7 +329,7 @@ fn test_drop_table_integration_workflow() {
         assert_eq!(rows, 3);
     }
 
-    // 3. Verify data
+    // 3. Verify data (lowercase per SQL:1999)
     assert_eq!(db.get_table("customers").unwrap().row_count(), 3);
 
     // 4. Drop table
