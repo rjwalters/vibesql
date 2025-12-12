@@ -305,6 +305,19 @@ impl super::Catalog {
             schema.table_exists_by_identifier(identifier)
         })
     }
+
+    /// Get the TableIdentifier for a table by its canonical name.
+    ///
+    /// Returns the identifier that was used when the table was created,
+    /// which includes the `quoted` flag for SQL:1999 case-sensitivity semantics.
+    ///
+    /// The canonical_name should be the canonical form of the table name
+    /// (as returned by `list_tables()`).
+    pub fn get_table_identifier(&self, canonical_name: &str) -> Option<&TableIdentifier> {
+        self.schemas
+            .get(&self.current_schema)
+            .and_then(|schema| schema.get_table_identifier(canonical_name))
+    }
 }
 
 #[cfg(test)]

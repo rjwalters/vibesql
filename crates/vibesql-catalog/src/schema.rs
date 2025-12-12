@@ -97,9 +97,9 @@ impl Schema {
         self.drop_table_by_identifier(&identifier)
     }
 
-    /// List all table names in this schema
+    /// List all table names in this schema (returns canonical names)
     pub fn list_tables(&self) -> Vec<String> {
-        self.tables.values().map(|t| t.name.clone()).collect()
+        self.tables.keys().cloned().collect()
     }
 
     /// Get the TableIdentifier for a table by its canonical name

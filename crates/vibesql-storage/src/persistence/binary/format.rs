@@ -16,7 +16,8 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 /// - v1: Initial binary format
 /// - v2: Added sequence persistence and column default_value expressions
 /// - v3: Added primary key and unique constraints persistence
-pub const VERSION: u8 = 3;
+/// - v4: Added quoted flag for TableIdentifier (SQL:1999 case-sensitivity)
+pub const VERSION: u8 = 4;
 
 /// Type tags for binary serialization
 #[repr(u8)]
