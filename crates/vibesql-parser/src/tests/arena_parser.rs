@@ -286,3 +286,43 @@ fn test_arena_parse_insert_with_placeholder() {
         _ => panic!("Expected Values source"),
     }
 }
+
+// ============================================================================
+// Source Text Preservation Tests
+// ============================================================================
+
+#[test]
+fn test_source_text_preserves_original_case() {
+    use crate::Lexer;
+
+    // Test that tokenize_with_spans captures the right byte ranges
+    let input = "SELECT f1+F2 FROM test1";
+    let mut lexer = Lexer::new(input);
+    let tokens_with_spans = lexer.tokenize_with_spans().unwrap();
+
+    // SELECT (0-6), f1 (7-9), + (9-10), F2 (10-12), FROM (13-17), test1 (18-23), EOF
+    // Check that f1 span extracts "f1" (original case)
+    let (_, f1_span) = &tokens_with_spans[1];
+    assert_eq!(f1_span.extract(input), "f1", "f1 span should preserve original case");
+
+    // Check that F2 span extracts "F2" (original case)
+    let (_, f2_span) = &tokens_with_spans[3];
+    assert_eq!(f2_span.extract(input), "F2", "F2 span should preserve original case");
+}
+
+#[test]
+fn test_arena_parser_source_text_in_select_item() {
+    let arena = Bump::new();
+    let sql = "SELECT f1+F2 FROM test1";
+    let result = ArenaParser::parse_select_with_interner(sql, &arena);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let (stmt, _interner) = result.unwrap();
+    // Check that the select item has source_text preserved
+    if let vibesql_ast::arena::SelectItem::Expression { source_text, .. } = &stmt.select_list[0] {
+        assert!(source_text.is_some(), "source_text should be set");
+        assert_eq!(source_text.unwrap(), "f1+F2", "source_text should preserve original case");
+    } else {
+        panic!("Expected Expression select item");
+    }
+}

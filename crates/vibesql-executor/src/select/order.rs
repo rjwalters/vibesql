@@ -132,7 +132,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
             });
         }
         let idx = (*pos as usize) - 1;
-        if let vibesql_ast::SelectItem::Expression { expr, alias } = &select_list[idx] {
+        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select_list[idx] {
             // Return a ColumnRef to the alias name (or derive from expression)
             let col_name = if let Some(alias_name) = alias {
                 alias_name.clone()
@@ -178,7 +178,7 @@ fn resolve_order_by_for_aggregates_inner(
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
         if *pos > 0 && (*pos as usize) <= select_list.len() {
             let idx = (*pos as usize) - 1;
-            if let vibesql_ast::SelectItem::Expression { expr, alias } = &select_list[idx] {
+            if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select_list[idx] {
                 // Return a ColumnRef to the alias name (or derive from expression)
                 let col_name = if let Some(alias_name) = alias {
                     alias_name.clone()
@@ -214,6 +214,7 @@ fn resolve_order_by_for_aggregates_inner(
             if let vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
                 alias: Some(alias_name),
+                ..
             } = item
             {
                 if select_col.eq_ignore_ascii_case(column) {
@@ -231,6 +232,7 @@ fn resolve_order_by_for_aggregates_inner(
             if let vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
                 alias: None,
+                ..
             } = item
             {
                 if select_col.eq_ignore_ascii_case(column) {
@@ -313,7 +315,7 @@ fn find_matching_select_expression(
     select_list: &[vibesql_ast::SelectItem],
 ) -> Option<String> {
     for (idx, item) in select_list.iter().enumerate() {
-        if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias } = item {
+        if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias , .. } = item {
             if expressions_equal(expr, select_expr) {
                 // Found matching expression
                 return Some(if let Some(alias_name) = alias {
@@ -415,7 +417,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
     if let vibesql_ast::Expression::ColumnRef { table: None, column } = order_expr {
         // First, search for matching alias in SELECT list (ORDER BY using alias name)
         for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) } = item {
+            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
                 if alias_name.eq_ignore_ascii_case(column) {
                     // Found matching alias, use the SELECT list expression
                     return Ok(Cow::Borrowed(expr));
@@ -431,6 +433,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
             if let vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
                 alias: Some(alias_name),
+                ..
             } = item
             {
                 if select_col.eq_ignore_ascii_case(column) {

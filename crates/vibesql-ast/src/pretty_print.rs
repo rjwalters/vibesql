@@ -850,7 +850,7 @@ impl ToSql for SelectItem {
                     None => base,
                 }
             }
-            SelectItem::Expression { expr, alias } => {
+            SelectItem::Expression { expr, alias, .. } => {
                 let expr_sql = expr.to_sql();
                 match alias {
                     Some(a) => format!("{} AS {}", expr_sql, format_identifier(a)),
@@ -1109,6 +1109,7 @@ mod tests {
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                 alias: None,
+                source_text: None,
             }],
             into_table: None,
             into_variables: None,
@@ -1138,10 +1139,12 @@ mod tests {
                 SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "id".to_string() },
                     alias: None,
+                    source_text: None,
                 },
                 SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                     alias: None,
+                    source_text: None,
                 },
             ],
             into_table: None,
@@ -1175,6 +1178,7 @@ mod tests {
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                 alias: None,
+                source_text: None,
             }],
             into_table: None,
             into_variables: None,

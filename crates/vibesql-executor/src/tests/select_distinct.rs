@@ -73,8 +73,7 @@ fn test_distinct_removes_duplicate_rows() {
                 table: None,
                 column: "category".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "products".to_string(),
             alias: None,
@@ -186,15 +185,13 @@ fn test_distinct_with_multiple_columns() {
                     table: None,
                     column: "customer_id".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
                     table: None,
                     column: "status".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "orders".to_string(),
@@ -284,8 +281,7 @@ fn test_distinct_with_null_values() {
                 table: None,
                 column: "description".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "items".to_string(),
             alias: None,
@@ -435,8 +431,7 @@ fn test_distinct_with_where_clause() {
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "role".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "users".to_string(),
             alias: None,
@@ -533,8 +528,7 @@ fn test_distinct_with_order_by() {
                 table: None,
                 column: "category".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "products".to_string(),
             alias: None,

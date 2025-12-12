@@ -16,7 +16,7 @@ fn simple_select(table: &str, column: &str) -> SelectStmt {
     SelectStmt {
         with_clause: None,
         distinct: false,
-        select_list: vec![SelectItem::Expression { expr: column_ref(column), alias: None }],
+        select_list: vec![SelectItem::Expression { expr: column_ref(column), alias: None , source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from(table)),
@@ -594,8 +594,7 @@ fn test_conjunction_exists_to_semi_join() {
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from("lineitem")),
@@ -683,8 +682,7 @@ fn test_conjunction_not_exists_to_anti_join() {
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(simple_table_from("lineitem")),

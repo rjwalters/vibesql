@@ -62,22 +62,19 @@ fn test_select_rowid() {
                     table: None,
                     column: "rowid".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
                     table: None,
                     column: "a".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
                     table: None,
                     column: "b".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "t1".to_string(),
@@ -141,8 +138,7 @@ fn test_select_underscore_rowid() {
                 table: None,
                 column: "_rowid_".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "t1".to_string(),
             alias: None,
@@ -196,8 +192,7 @@ fn test_select_oid() {
                 table: None,
                 column: "oid".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "t1".to_string(),
             alias: None,
@@ -251,8 +246,7 @@ fn test_rowid_case_insensitive() {
                 table: None,
                 column: "ROWID".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "t1".to_string(),
             alias: None,
@@ -319,8 +313,7 @@ fn test_real_rowid_column_takes_precedence() {
                 table: None,
                 column: "rowid".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "t1".to_string(),
             alias: None,
@@ -380,8 +373,7 @@ fn test_rowid_with_table_alias() {
                 table: Some("t".to_string()),
                 column: "rowid".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "t1".to_string(),
             alias: Some("t".to_string()),

@@ -33,8 +33,7 @@ pub(super) fn rewrite_in_to_exists(
     // Change SELECT list to SELECT 1 (EXISTS doesn't care about actual values)
     exists_subquery.select_list = vec![SelectItem::Expression {
         expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-        alias: None,
-    }];
+        alias: None, source_text: None }];
 
     // Add LIMIT 1 for early termination after first match
     // EXISTS only cares if ANY row matches, not all rows
@@ -115,7 +114,7 @@ pub(super) fn rewrite_exists_to_in(
 
     // SELECT the inner correlation column
     decorrelated.select_list =
-        vec![SelectItem::Expression { expr: correlation.inner_expr.clone(), alias: None }];
+        vec![SelectItem::Expression { expr: correlation.inner_expr.clone(), alias: None , source_text: None }];
 
     // Remove correlation predicate from WHERE, keep only remaining predicates
     decorrelated.where_clause = remaining_predicates;

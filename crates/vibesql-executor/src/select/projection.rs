@@ -66,7 +66,7 @@ pub(crate) fn project_row_combined(
                 // If table not found, skip silently (this should be caught during column name
                 // derivation)
             }
-            vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+            vibesql_ast::SelectItem::Expression { expr, alias: _ , .. } => {
                 // Check if this is a window function expression
                 let value = if let Some(mapping) = window_mapping {
                     evaluate_expression_with_windows(expr, row, evaluator, mapping)?

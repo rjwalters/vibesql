@@ -17,6 +17,27 @@ mod numbers;
 mod operators;
 mod strings;
 
+/// Byte range span in the source text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    /// Start byte offset (inclusive)
+    pub start: usize,
+    /// End byte offset (exclusive)
+    pub end: usize,
+}
+
+impl Span {
+    /// Create a new span.
+    pub fn new(start: usize, end: usize) -> Self {
+        Span { start, end }
+    }
+
+    /// Extract the text covered by this span from the source.
+    pub fn extract<'a>(&self, source: &'a str) -> &'a str {
+        &source[self.start..self.end]
+    }
+}
+
 /// Lexer error returned when tokenization fails.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexerError {
@@ -46,6 +67,11 @@ impl<'a> Lexer<'a> {
         Lexer { input, byte_pos: 0 }
     }
 
+    /// Returns the original source input.
+    pub fn input(&self) -> &'a str {
+        self.input
+    }
+
     /// Tokenize the entire input.
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexerError> {
         // Pre-allocate based on estimated token count (~1 token per 6 bytes)
@@ -62,6 +88,32 @@ impl<'a> Lexer<'a> {
 
             let token = self.next_token()?;
             tokens.push(token);
+        }
+
+        Ok(tokens)
+    }
+
+    /// Tokenize the entire input, returning tokens with their byte spans.
+    ///
+    /// This is useful when you need to extract the original source text
+    /// for a token (e.g., for preserving original identifier case).
+    pub fn tokenize_with_spans(&mut self) -> Result<Vec<(Token, Span)>, LexerError> {
+        let estimated_tokens = (self.input.len() / 6).max(4);
+        let mut tokens = Vec::with_capacity(estimated_tokens);
+
+        loop {
+            self.skip_whitespace_and_comments();
+
+            let start = self.byte_pos;
+
+            if self.is_eof() {
+                tokens.push((Token::Eof, Span::new(start, start)));
+                break;
+            }
+
+            let token = self.next_token()?;
+            let end = self.byte_pos;
+            tokens.push((token, Span::new(start, end)));
         }
 
         Ok(tokens)

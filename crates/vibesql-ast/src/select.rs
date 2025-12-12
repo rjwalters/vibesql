@@ -234,7 +234,10 @@ pub enum SelectItem {
     /// SQL:1999 Feature E051-08: Correlation names in FROM clause with derived column lists
     QualifiedWildcard { qualifier: String, alias: Option<Vec<String>> },
     /// SELECT expr [AS alias]
-    Expression { expr: Expression, alias: Option<String> },
+    /// The `source_text` field stores the original SQL text of the expression for column naming.
+    /// SQLite uses the original expression text (not AST-reconstructed) as the column name
+    /// when no alias is provided.
+    Expression { expr: Expression, alias: Option<String>, source_text: Option<String> },
 }
 
 /// FROM clause

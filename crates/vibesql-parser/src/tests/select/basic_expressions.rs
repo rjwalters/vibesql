@@ -12,7 +12,7 @@ fn test_parse_select_42() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42)) => {} /* Success */
@@ -175,7 +175,7 @@ fn test_parse_select_current_date() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::CurrentDate => {}
@@ -200,7 +200,7 @@ fn test_parse_select_current_time() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::CurrentTime { precision } => {
@@ -227,7 +227,7 @@ fn test_parse_select_current_timestamp() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::CurrentTimestamp { precision } => {

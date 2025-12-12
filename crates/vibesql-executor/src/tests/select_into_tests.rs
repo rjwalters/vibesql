@@ -50,15 +50,13 @@ fn test_select_into_single_row() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
                     table: None,
                     column: "name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         into_table: Some("target".to_string()),
         into_variables: None,
@@ -140,8 +138,7 @@ fn test_select_into_no_rows_error() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -208,8 +205,7 @@ fn test_select_into_multiple_rows_error() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -280,8 +276,7 @@ fn test_select_into_with_expressions() {
                     vibesql_types::SqlValue::Integer(5),
                 )),
             },
-            alias: Some("y".to_string()),
-        }],
+            alias: Some("y".to_string()), source_text: None }],
         into_table: Some("target".to_string()),
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {

@@ -62,8 +62,7 @@ fn test_count_star_no_group_by() {
                 args: vec![vibesql_ast::Expression::Wildcard],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "users".to_string(),
             alias: None,
@@ -143,8 +142,7 @@ fn test_sum_no_group_by() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -222,8 +220,7 @@ fn test_count_with_nulls() {
                 args: vec![vibesql_ast::Expression::Wildcard],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "data".to_string(),
             alias: None,
@@ -303,8 +300,7 @@ fn test_sum_with_nulls() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "amounts".to_string(),
             alias: None,
@@ -385,8 +381,7 @@ fn test_avg_function() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "scores".to_string(),
             alias: None,
@@ -467,8 +462,7 @@ fn test_avg_with_nulls() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "ratings".to_string(),
             alias: None,
@@ -552,8 +546,7 @@ fn test_count_column_all_nulls() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "null_data".to_string(),
             alias: None,
@@ -585,8 +578,7 @@ fn test_count_column_all_nulls() {
                 args: vec![vibesql_ast::Expression::Wildcard],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "null_data".to_string(),
             alias: None,
@@ -656,8 +648,7 @@ fn test_count_star_in_simple_case_expression() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("other")),
                 ))),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "data".to_string(),
             alias: None,
@@ -730,8 +721,7 @@ fn test_count_star_in_searched_case_expression() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("few")),
                 ))),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "items".to_string(),
             alias: None,
@@ -794,8 +784,7 @@ fn test_count_star_in_arithmetic_expression() {
                     vibesql_types::SqlValue::Integer(10),
                 )),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "records".to_string(),
             alias: None,
@@ -863,8 +852,7 @@ fn test_count_star_in_case_then_clause() {
                     vibesql_types::SqlValue::Integer(0),
                 ))),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test".to_string(),
             alias: None,
@@ -943,8 +931,7 @@ fn test_count_star_in_nested_case_expression() {
                     vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("other")),
                 ))),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "nested".to_string(),
             alias: None,

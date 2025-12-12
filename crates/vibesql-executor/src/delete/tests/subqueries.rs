@@ -191,8 +191,7 @@ mod in_subquery {
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "inactive_depts".to_string(),
                 alias: None,
@@ -252,8 +251,7 @@ mod in_subquery {
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "active_depts".to_string(),
                 alias: None,
@@ -324,8 +322,7 @@ mod scalar_subquery {
                     args: vec![Expression::ColumnRef { table: None, column: "salary".to_string() }],
                     character_unit: None,
                 },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "employees".to_string(),
                 alias: None,
@@ -395,8 +392,7 @@ mod scalar_subquery {
                     args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
                     character_unit: None,
                 },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "items".to_string(),
                 alias: None,
@@ -456,8 +452,7 @@ mod scalar_subquery {
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "threshold".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "config".to_string(),
                 alias: None,
@@ -517,8 +512,7 @@ mod empty_subquery {
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "dept_id".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "old_depts".to_string(),
                 alias: None,
@@ -587,8 +581,7 @@ mod complex_subquery {
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Expression {
                 expr: Expression::ColumnRef { table: None, column: "customer_id".to_string() },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             from: Some(vibesql_ast::FromClause::Table {
                 name: "inactive_customers".to_string(),
                 alias: None,

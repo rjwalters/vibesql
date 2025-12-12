@@ -11,7 +11,7 @@ fn test_parse_concat_basic() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias: _ } => {
+                vibesql_ast::SelectItem::Expression { expr, alias: _, .. } => {
                     // Should be: (first_name || ' ') || last_name
                     match expr {
                         vibesql_ast::Expression::BinaryOp { op, .. } => {

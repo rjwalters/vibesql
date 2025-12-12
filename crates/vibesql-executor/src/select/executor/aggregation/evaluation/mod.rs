@@ -158,7 +158,7 @@ impl SelectExecutor<'_> {
         let mut result_columns = Vec::new();
         for (idx, item) in expanded_select_list.iter().enumerate() {
             match item {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     let column_name = if let Some(alias) = alias {
                         alias.clone()
                     } else {

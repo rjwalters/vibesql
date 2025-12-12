@@ -231,8 +231,7 @@ fn try_convert_complex_exists_to_join(
                     table: col.table.clone(),
                     column: col.column.clone(),
                 },
-                alias: Some(col.column.clone()),
-            })
+                alias: Some(col.column.clone()), source_text: None })
             .collect(),
         into_table: None,
         into_variables: None,

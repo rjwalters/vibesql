@@ -80,7 +80,9 @@ pub struct SetOperation<'arena> {
 pub enum SelectItem<'arena> {
     Wildcard { alias: Option<BumpVec<'arena, Symbol>> },
     QualifiedWildcard { qualifier: Symbol, alias: Option<BumpVec<'arena, Symbol>> },
-    Expression { expr: Expression<'arena>, alias: Option<Symbol> },
+    /// SELECT expr [AS alias]
+    /// The `source_text` field stores the original SQL text of the expression for column naming.
+    Expression { expr: Expression<'arena>, alias: Option<Symbol>, source_text: Option<&'arena str> },
 }
 
 /// FROM clause

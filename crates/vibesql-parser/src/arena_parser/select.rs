@@ -207,8 +207,19 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(SelectItem::Wildcard { alias: None });
         }
 
+        // Record start position before parsing expression
+        let start_pos = self.position;
+
         // Parse expression
         let expr = self.parse_expression()?;
+
+        // Record end position after parsing expression
+        let end_pos = self.position;
+
+        // Reconstruct source text from tokens consumed during expression parsing.
+        // This preserves the original identifier case and operator style (e.g., `f1+F2`
+        // instead of `(F1 + F2)`) for use as column names when no alias is provided.
+        let source_text = self.reconstruct_source_text(start_pos, end_pos);
 
         // Check for qualified wildcard (table.*)
         // Note: We compare the symbol directly now, which means we need to intern "*" for
@@ -241,7 +252,7 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        Ok(SelectItem::Expression { expr, alias })
+        Ok(SelectItem::Expression { expr, alias, source_text })
     }
 
     /// Parse INTO clause.

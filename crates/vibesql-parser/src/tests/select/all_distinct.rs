@@ -16,7 +16,7 @@ fn test_parse_select_all_literal() {
             assert!(!select.distinct);
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(42)) => {} /* Success */

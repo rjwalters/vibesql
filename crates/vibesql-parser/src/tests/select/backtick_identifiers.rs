@@ -14,7 +14,7 @@ fn test_parse_select_with_backtick_column_names() {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.select_list.len(), 2);
             match &select.select_list[0] {
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
                         vibesql_ast::Expression::ColumnRef { column, .. } => {

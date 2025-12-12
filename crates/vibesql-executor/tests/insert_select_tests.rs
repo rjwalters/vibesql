@@ -319,16 +319,14 @@ fn test_insert_from_select_with_aggregates() {
                     }],
                     character_unit: None,
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "COUNT".to_string(),
                     args: vec![vibesql_ast::Expression::Wildcard],
                     character_unit: None,
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         into_table: None,
         into_variables: None,

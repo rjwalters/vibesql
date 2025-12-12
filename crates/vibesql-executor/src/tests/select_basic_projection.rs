@@ -123,12 +123,10 @@ fn test_select_specific_columns() {
                     table: None,
                     column: "name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "users".to_string(),

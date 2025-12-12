@@ -476,8 +476,7 @@ impl SelectExecutor<'_> {
 
                             expanded.push(vibesql_ast::SelectItem::Expression {
                                 expr: column_expr,
-                                alias: None,
-                            });
+                                alias: None, source_text: None });
                         }
                     }
                 }
@@ -495,8 +494,7 @@ impl SelectExecutor<'_> {
 
                             expanded.push(vibesql_ast::SelectItem::Expression {
                                 expr: column_expr,
-                                alias: None,
-                            });
+                                alias: None, source_text: None });
                         }
                     } else {
                         return Err(ExecutorError::TableNotFound(format!(

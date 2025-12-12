@@ -180,15 +180,15 @@ fn test_select_column_names_and_values_issue_3810() {
 
 #[test]
 fn test_select_column_names_from_table() {
-    // Verify column names are derived correctly from table columns
+    // Verify column names are derived correctly preserving original case (SQLite compatibility)
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50))").unwrap();
     executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
 
     let result = executor.execute("SELECT id, name FROM users").unwrap();
 
-    // Column names should match the table schema
-    assert_eq!(result.columns, vec!["ID", "NAME"]);
+    // Column names should preserve original case from SQL (SQLite compatibility)
+    assert_eq!(result.columns, vec!["id", "name"]);
 
     // Values should be display format
     assert_eq!(result.rows[0][0], Some("1".to_string()));

@@ -101,8 +101,7 @@ fn test_count_distinct_basic() {
                     column: "amount".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -145,8 +144,7 @@ fn test_count_distinct_vs_count_all() {
                         column: "amount".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "COUNT".to_string(),
@@ -156,8 +154,7 @@ fn test_count_distinct_vs_count_all() {
                         column: "amount".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
@@ -202,8 +199,7 @@ fn test_sum_distinct() {
                     column: "amount".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -246,8 +242,7 @@ fn test_sum_distinct_vs_sum_all() {
                         column: "amount".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "SUM".to_string(),
@@ -257,8 +252,7 @@ fn test_sum_distinct_vs_sum_all() {
                         column: "amount".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
@@ -303,8 +297,7 @@ fn test_avg_distinct() {
                     column: "amount".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -346,8 +339,7 @@ fn test_min_distinct() {
                     column: "amount".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -389,8 +381,7 @@ fn test_max_distinct() {
                     column: "amount".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -452,8 +443,7 @@ fn test_count_distinct_with_nulls() {
                     column: "val".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test".to_string(),
             alias: None,
@@ -514,8 +504,7 @@ fn test_distinct_all_same_value() {
                         column: "val".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "SUM".to_string(),
@@ -525,8 +514,7 @@ fn test_distinct_all_same_value() {
                         column: "val".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test".to_string(),
@@ -582,8 +570,7 @@ fn test_distinct_empty_table() {
                         column: "val".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "SUM".to_string(),
@@ -593,8 +580,7 @@ fn test_distinct_empty_table() {
                         column: "val".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "empty_test".to_string(),

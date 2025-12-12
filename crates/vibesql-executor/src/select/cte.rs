@@ -135,7 +135,7 @@ pub(super) fn derive_cte_schema(
                 let col_name = match item {
                     vibesql_ast::SelectItem::Wildcard { .. }
                     | vibesql_ast::SelectItem::QualifiedWildcard { .. } => format!("col{}", i),
-                    vibesql_ast::SelectItem::Expression { expr, alias } => {
+                    vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                         if let Some(a) = alias {
                             a.clone()
                         } else {

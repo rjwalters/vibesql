@@ -187,7 +187,7 @@ fn test_parse_aggregate_with_alias() {
 
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias } => {
+            vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                 match expr {
                     vibesql_ast::Expression::AggregateFunction { name, .. } => {
                         assert_eq!(name, "COUNT");
@@ -210,7 +210,7 @@ fn test_parse_aggregate_with_alias_without_as() {
 
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
-            vibesql_ast::SelectItem::Expression { expr, alias } => {
+            vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                 match expr {
                     vibesql_ast::Expression::AggregateFunction { name, .. } => {
                         assert_eq!(name, "COUNT");

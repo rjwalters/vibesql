@@ -79,8 +79,7 @@ fn test_mysql_null_in_empty_subquery() {
                         table: None,
                         column: "id".to_string(),
                     },
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: None,
                 from: Some(vibesql_ast::FromClause::Table {
@@ -169,8 +168,7 @@ fn test_mysql_null_not_in_empty_subquery() {
                         table: None,
                         column: "id".to_string(),
                     },
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: None,
                 from: Some(vibesql_ast::FromClause::Table {
@@ -268,8 +266,7 @@ fn test_mysql_null_in_non_empty_without_null() {
                         table: None,
                         column: "id".to_string(),
                     },
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: None,
                 from: Some(vibesql_ast::FromClause::Table {
@@ -404,8 +401,7 @@ fn test_mysql_triple_nested_subquery() {
                             table: None,
                             column: "max_val".to_string(),
                         },
-                        alias: None,
-                    }],
+                        alias: None, source_text: None }],
                     into_table: None,
                     into_variables: None,
                     from: Some(vibesql_ast::FromClause::Table {
@@ -434,8 +430,7 @@ fn test_mysql_triple_nested_subquery() {
                                             vibesql_types::SqlValue::Integer(25),
                                         )),
                                     },
-                                    alias: None,
-                                }],
+                                    alias: None, source_text: None }],
                                 into_table: None,
                                 into_variables: None,
                                 from: Some(vibesql_ast::FromClause::Table {
@@ -556,8 +551,7 @@ fn test_mysql_exists_short_circuit() {
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
                     expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: None,
                 from: Some(vibesql_ast::FromClause::Table {
@@ -681,8 +675,7 @@ fn test_mysql_scalar_within_exists() {
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
                     expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: None,
                 from: Some(vibesql_ast::FromClause::Table {
@@ -705,8 +698,7 @@ fn test_mysql_scalar_within_exists() {
                                     table: None,
                                     column: "avg".to_string(),
                                 },
-                                alias: None,
-                            }],
+                                alias: None, source_text: None }],
                             into_table: None,
                             into_variables: None,
                             from: Some(vibesql_ast::FromClause::Table {

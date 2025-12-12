@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use vibesql_parser::Parser;
+use vibesql_parser::parse_with_arena_fallback;
 use vibesql_storage::Database;
 
 // Submodules
@@ -67,8 +67,8 @@ impl SqlExecutor {
     pub fn execute(&mut self, sql: &str) -> anyhow::Result<QueryResult> {
         let start = Instant::now();
 
-        // Parse SQL
-        let statement = Parser::parse_sql(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Parse SQL using arena fallback for SELECT statements (preserves original case in source_text)
+        let statement = parse_with_arena_fallback(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Execute statement through appropriate executor
         let mut result = QueryResult {

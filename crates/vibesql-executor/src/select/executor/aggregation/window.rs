@@ -220,7 +220,7 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
 fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> Expression {
     // Try to find this expression in the SELECT list
     for (idx, item) in select_list.iter().enumerate() {
-        if let SelectItem::Expression { expr: select_expr, alias } = item {
+        if let SelectItem::Expression { expr: select_expr, alias , .. } = item {
             // Check if expressions match
             if expressions_match(expr, select_expr) {
                 let col_name = alias.clone().unwrap_or_else(|| format!("col{}", idx));

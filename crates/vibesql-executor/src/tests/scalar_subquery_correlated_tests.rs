@@ -92,8 +92,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
                     column: "I_CURRENT_PRICE".to_string(), // UPPERCASE column - this was failing
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "ITEM".to_string(),     // UPPERCASE table
             alias: Some("J".to_string()), // UPPERCASE alias
@@ -131,8 +130,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
                 table: Some("I".to_string()),
                 column: "I_ITEM_SK".to_string(),
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "ITEM".to_string(),
             alias: Some("I".to_string()),
@@ -270,8 +268,7 @@ fn test_correlated_subquery_basic() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "employees".to_string(),
             alias: None,
@@ -309,15 +306,13 @@ fn test_correlated_subquery_basic() {
                     table: None,
                     column: "name".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
                     table: None,
                     column: "salary".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "employees".to_string(),

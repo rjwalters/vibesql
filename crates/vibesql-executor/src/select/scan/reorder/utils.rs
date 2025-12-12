@@ -19,7 +19,7 @@ fn extract_column_names_from_select_list(select_list: &[SelectItem]) -> Vec<Stri
                 // Return empty to fall back to CTE-fallback path
                 return Vec::new();
             }
-            SelectItem::Expression { expr, alias } => {
+            SelectItem::Expression { expr, alias, .. } => {
                 let col_name = if let Some(a) = alias {
                     a.to_lowercase()
                 } else {

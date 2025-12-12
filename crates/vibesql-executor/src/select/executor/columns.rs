@@ -83,10 +83,13 @@ impl SelectExecutor<'_> {
                         ));
                     }
                 }
-                vibesql_ast::SelectItem::Expression { expr, alias } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, source_text , .. } => {
                     // If there's an alias, use it
                     if let Some(alias_name) = alias {
                         column_names.push(alias_name.clone());
+                    } else if let Some(src) = source_text {
+                        // Use original source text for column name (SQLite compatibility)
+                        column_names.push(src.clone());
                     } else {
                         // Derive name from the expression
                         column_names.push(self.derive_expression_name(expr));

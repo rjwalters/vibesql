@@ -32,7 +32,7 @@ mod tests;
 mod token;
 
 pub use keywords::Keyword;
-pub use lexer::{Lexer, LexerError};
+pub use lexer::{Lexer, LexerError, Span};
 pub use parser::{ParseError, Parser};
 pub use token::Token;
 use vibesql_ast::Statement;

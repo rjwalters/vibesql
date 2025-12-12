@@ -684,8 +684,7 @@ mod tests {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "id".to_string() },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_ok());
@@ -696,8 +695,7 @@ mod tests {
         let schema = make_test_schema();
         let select_list = vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "invalid_column".to_string() },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
@@ -719,8 +717,7 @@ mod tests {
                 table: Some("products".to_string()),
                 column: "id".to_string(),
             },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_ok());
@@ -734,8 +731,7 @@ mod tests {
                 table: Some("products".to_string()),
                 column: "invalid_column".to_string(),
             },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
@@ -759,8 +755,7 @@ mod tests {
                 }),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             },
-            alias: None,
-        }];
+            alias: None, source_text: None }];
 
         let result = validate_select_columns(&select_list, None, &schema);
         assert!(result.is_err());
@@ -832,6 +827,7 @@ mod tests {
                 args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
             },
             alias: None,
+            source_text: None,
         }];
         let result = super::validate_aggregate_arguments(&select_list);
         assert!(result.is_err());

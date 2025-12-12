@@ -68,6 +68,7 @@ fn test_scalar_subquery() {
                 character_unit: None,
             },
             alias: None,
+            source_text: None,
         }],
         into_table: None,
         into_variables: None,
@@ -101,6 +102,7 @@ fn test_in_expression() {
         select_list: vec![SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: "department_id".to_string() },
             alias: None,
+            source_text: None,
         }],
         into_table: None,
         into_variables: None,

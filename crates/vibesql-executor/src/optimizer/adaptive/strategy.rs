@@ -374,8 +374,7 @@ mod tests {
                         }),
                     }],
                 },
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: Some(FromClause::Table {
@@ -401,8 +400,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::Literal(SqlValue::Integer(42)),
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: None,

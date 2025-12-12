@@ -57,8 +57,7 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::ColumnRef { table: None, column: column_name.to_string() },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {
@@ -91,8 +90,7 @@ fn create_aggregate_subquery(
                 args: vec![Expression::ColumnRef { table: None, column: column_name.to_string() }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
         from: Some(vibesql_ast::FromClause::Table {

@@ -90,7 +90,7 @@ fn test_repeated_count_star_cached() {
         set_operation: None,
             values: None,
         distinct: false,
-        select_list: vec![vibesql_ast::SelectItem::Expression { expr: final_expr, alias: None }],
+        select_list: vec![vibesql_ast::SelectItem::Expression { expr: final_expr, alias: None , source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test".to_string(),
             alias: None,
@@ -164,7 +164,7 @@ fn test_repeated_sum_cached() {
         set_operation: None,
             values: None,
         distinct: false,
-        select_list: vec![vibesql_ast::SelectItem::Expression { expr, alias: None }],
+        select_list: vec![vibesql_ast::SelectItem::Expression { expr, alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "sales".to_string(),
             alias: None,
@@ -279,9 +279,8 @@ fn test_cache_cleared_between_groups() {
                     table: None,
                     column: "category".to_string(),
                 },
-                alias: None,
-            },
-            vibesql_ast::SelectItem::Expression { expr: doubled_count, alias: None },
+                alias: None, source_text: None },
+            vibesql_ast::SelectItem::Expression { expr: doubled_count, alias: None , source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "items".to_string(),
@@ -367,12 +366,10 @@ fn test_distinct_aggregates_not_confused() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: count_val,
-                alias: Some("count_all".to_string()),
-            },
+                alias: Some("count_all".to_string()), source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: count_distinct_val,
-                alias: Some("count_distinct".to_string()),
-            },
+                alias: Some("count_distinct".to_string()), source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "values".to_string(),

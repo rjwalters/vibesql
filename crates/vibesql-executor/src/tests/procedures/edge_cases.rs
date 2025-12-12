@@ -369,8 +369,7 @@ fn test_procedural_select_into_single_column() {
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "name".to_string() },
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
                 from: Some(FromClause::Table {
@@ -447,12 +446,10 @@ fn test_procedural_select_into_multiple_columns() {
                 select_list: vec![
                     SelectItem::Expression {
                         expr: Expression::ColumnRef { table: None, column: "id".to_string() },
-                        alias: None,
-                    },
+                        alias: None, source_text: None },
                     SelectItem::Expression {
                         expr: Expression::ColumnRef { table: None, column: "name".to_string() },
-                        alias: None,
-                    },
+                        alias: None, source_text: None },
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_id_out".to_string(), "user_name".to_string()]),
@@ -521,8 +518,7 @@ fn test_procedural_select_into_error_no_rows() {
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "name".to_string() },
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
                 from: Some(FromClause::Table {
@@ -603,8 +599,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: "name".to_string() },
-                    alias: None,
-                }],
+                    alias: None, source_text: None }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
                 from: Some(FromClause::Table {
@@ -668,12 +663,10 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 select_list: vec![
                     SelectItem::Expression {
                         expr: Expression::ColumnRef { table: None, column: "id".to_string() },
-                        alias: None,
-                    },
+                        alias: None, source_text: None },
                     SelectItem::Expression {
                         expr: Expression::ColumnRef { table: None, column: "name".to_string() },
-                        alias: None,
-                    },
+                        alias: None, source_text: None },
                 ],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),

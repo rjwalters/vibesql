@@ -96,8 +96,19 @@ impl Parser {
             return Ok(vibesql_ast::SelectItem::Wildcard { alias });
         }
 
+        // Record start position before parsing expression
+        let start_pos = self.position;
+
         // Parse expression
         let expr = self.parse_expression()?;
+
+        // Record end position after parsing expression
+        let end_pos = self.position;
+
+        // Reconstruct source text from tokens consumed during expression parsing.
+        // This preserves the original identifier case and operator style (e.g., `f1+F2`
+        // instead of `(F1 + F2)`) for use as column names when no alias is provided.
+        let source_text = self.reconstruct_source_text(start_pos, end_pos);
 
         // Check for optional AS alias (MySQL allows aliases without AS keyword)
         // Keywords are allowed as aliases after AS (e.g., d_year AS year)
@@ -118,6 +129,6 @@ impl Parser {
             None
         };
 
-        Ok(vibesql_ast::SelectItem::Expression { expr, alias })
+        Ok(vibesql_ast::SelectItem::Expression { expr, alias, source_text })
     }
 }

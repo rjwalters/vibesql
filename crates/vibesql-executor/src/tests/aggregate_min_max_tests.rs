@@ -65,8 +65,7 @@ fn test_min_function() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "temps".to_string(),
             alias: None,
@@ -146,8 +145,7 @@ fn test_max_function() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "temps".to_string(),
             alias: None,
@@ -230,8 +228,7 @@ fn test_min_max_on_strings() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "names".to_string(),
             alias: None,
@@ -269,8 +266,7 @@ fn test_min_max_on_strings() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "names".to_string(),
             alias: None,

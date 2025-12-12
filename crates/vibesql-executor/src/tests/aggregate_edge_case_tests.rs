@@ -66,8 +66,7 @@ fn test_avg_precision_decimal() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "prices".to_string(),
             alias: None,
@@ -154,8 +153,7 @@ fn test_sum_mixed_numeric_types() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "mixed_amounts".to_string(),
             alias: None,
@@ -264,8 +262,7 @@ fn test_aggregate_with_case_expression() {
                 }],
                 character_unit: None,
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "transactions".to_string(),
             alias: None,
@@ -325,8 +322,7 @@ fn test_max_with_unary_plus() {
                     }),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab0".to_string(),
             alias: None,
@@ -385,8 +381,7 @@ fn test_max_with_unary_minus() {
                     }),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab0".to_string(),
             alias: None,
@@ -446,8 +441,7 @@ fn test_count_with_not() {
                     }),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "tab0".to_string(),
             alias: None,

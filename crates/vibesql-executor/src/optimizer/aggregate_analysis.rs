@@ -505,8 +505,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: make_column_ref("users", "name"),
-                alias: None,
-            }],
+                alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
             from: None,
@@ -535,12 +534,10 @@ mod tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: make_column_ref("orders", "customer_id"),
-                    alias: None,
-                },
+                    alias: None, source_text: None },
                 SelectItem::Expression {
                     expr: make_aggregate("COUNT", Expression::Wildcard),
-                    alias: Some("order_count".to_string()),
-                },
+                    alias: Some("order_count".to_string()), source_text: None },
             ],
             into_table: None,
             into_variables: None,
@@ -571,12 +568,10 @@ mod tests {
             select_list: vec![
                 SelectItem::Expression {
                     expr: make_column_ref("lineitem", "l_orderkey"),
-                    alias: None,
-                },
+                    alias: None, source_text: None },
                 SelectItem::Expression {
                     expr: make_aggregate("SUM", make_column_ref("lineitem", "l_quantity")),
-                    alias: Some("total_qty".to_string()),
-                },
+                    alias: Some("total_qty".to_string()), source_text: None },
             ],
             into_table: None,
             into_variables: None,

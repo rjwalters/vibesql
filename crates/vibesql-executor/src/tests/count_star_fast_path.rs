@@ -53,8 +53,7 @@ fn test_count_star_fast_path_simple() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
             alias: None,
@@ -101,8 +100,7 @@ fn test_count_star_fast_path_empty_table() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "empty_table".to_string(),
             alias: None,
@@ -167,8 +165,7 @@ fn test_count_star_with_where_no_fast_path() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
             alias: None,
@@ -272,16 +269,14 @@ fn test_count_star_with_group_by_no_fast_path() {
                     table: None,
                     column: "category".to_string(),
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
@@ -339,8 +334,7 @@ fn test_count_star_distinct_no_fast_path() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
             alias: None,
@@ -398,8 +392,7 @@ fn test_count_column_no_fast_path() {
                     column: "id".to_string(),
                 }],
             },
-            alias: None,
-        }],
+            alias: None, source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
             alias: None,
@@ -454,8 +447,7 @@ fn test_count_star_with_alias() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
             },
-            alias: Some("total".to_string()), // Has alias
-        }],
+            alias: Some("total".to_string()), source_text: None }],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
             alias: None,
@@ -521,8 +513,7 @@ fn test_count_star_multiple_select_items_no_fast_path() {
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
                     name: "SUM".to_string(),
@@ -532,8 +523,7 @@ fn test_count_star_multiple_select_items_no_fast_path() {
                         column: "value".to_string(),
                     }],
                 },
-                alias: None,
-            },
+                alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table {
             name: "test_table".to_string(),
