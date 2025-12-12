@@ -22,8 +22,8 @@ impl Parser {
             false
         };
 
-        // Parse table name (supports schema.table)
-        let table_name = self.parse_qualified_identifier()?;
+        // Parse table name with quoted flag (supports schema.table)
+        let table = self.parse_table_ref()?;
 
         // Parse column definitions and table constraints
         self.expect_token(Token::LParen)?;
@@ -148,10 +148,11 @@ impl Parser {
 
         Ok(vibesql_ast::CreateTableStmt {
             if_not_exists,
-            table_name,
+            table_name: table.name,
             columns,
             table_constraints,
             table_options,
+            quoted: table.quoted,
         })
     }
 

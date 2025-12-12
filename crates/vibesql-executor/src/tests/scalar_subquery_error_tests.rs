@@ -46,7 +46,7 @@ fn test_scalar_subquery_error_multiple_rows() {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -71,7 +71,7 @@ fn test_scalar_subquery_error_multiple_rows() {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -152,7 +152,7 @@ fn test_scalar_subquery_error_multiple_columns() {
                 alias: None,
             },
         ],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,
@@ -177,7 +177,7 @@ fn test_scalar_subquery_error_multiple_columns() {
             expr: vibesql_ast::Expression::ScalarSubquery(subquery),
             alias: None,
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "employees".to_string(),
             alias: None,
             column_aliases: None,

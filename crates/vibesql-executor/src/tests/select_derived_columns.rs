@@ -49,7 +49,7 @@ fn test_select_star_with_derived_columns() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
             alias: Some(vec!["C".to_string(), "D".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -114,7 +114,7 @@ fn test_select_qualified_star_with_derived_columns() {
             qualifier: "t1".to_string(),
             alias: Some(vec!["C".to_string(), "D".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -180,7 +180,7 @@ fn test_derived_columns_count_mismatch() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
             alias: Some(vec!["C".to_string(), "D".to_string(), "E".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -251,7 +251,7 @@ fn test_select_distinct_star_with_derived_columns() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard {
             alias: Some(vec!["C".to_string(), "D".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: None,
             column_aliases: None,
@@ -316,7 +316,7 @@ fn test_select_star_alias_with_table_alias() {
             qualifier: "alias_name".to_string(),
             alias: Some(vec!["X".to_string(), "Y".to_string()]),
         }],
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
             alias: Some("alias_name".to_string()),
             column_aliases: None,

@@ -53,7 +53,7 @@ fn test_trigger_failure_causes_rollback() {
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         into_table: None,
         into_variables: None,
-        from: Some(vibesql_ast::FromClause::Table {
+        from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "USERS".to_string(),
             alias: None,
             column_aliases: None,

@@ -39,6 +39,7 @@ pub(super) fn rebuild_from_clause(tables: &[TableInfo]) -> Option<FromClause> {
         name: first.name.clone(),
         alias: first.alias.clone(),
         column_aliases: None,
+        quoted: false, // Synthesized, treat as unquoted
     };
 
     for table in iter {
@@ -48,6 +49,7 @@ pub(super) fn rebuild_from_clause(tables: &[TableInfo]) -> Option<FromClause> {
                 name: table.name.clone(),
                 alias: table.alias.clone(),
                 column_aliases: None,
+                quoted: false, // Synthesized, treat as unquoted
             }),
             join_type: JoinType::Cross,
             condition: None,
@@ -77,6 +79,7 @@ pub(super) fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Express
                     name: table.name.clone(),
                     alias: table.alias.clone(),
                     column_aliases: None,
+                    quoted: false, // Synthesized, treat as unquoted
                 }),
                 where_clause: table.filter.clone(),
                 group_by: None,

@@ -56,6 +56,7 @@ impl CreateTableExecutor {
     ///     ],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
+    ///     quoted: false,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);

@@ -864,8 +864,13 @@ impl ToSql for SelectItem {
 impl ToSql for FromClause {
     fn to_sql(&self) -> String {
         match self {
-            FromClause::Table { name, alias, column_aliases } => {
-                let mut result = format_identifier(name);
+            FromClause::Table { name, alias, column_aliases, quoted } => {
+                // Format name with quotes if it was originally quoted
+                let mut result = if *quoted {
+                    format!("\"{}\"", name.replace('"', "\"\""))
+                } else {
+                    format_identifier(name)
+                };
                 if let Some(a) = alias {
                     result.push_str(&format!(" AS {}", format_identifier(a)));
                     if let Some(cols) = column_aliases {
