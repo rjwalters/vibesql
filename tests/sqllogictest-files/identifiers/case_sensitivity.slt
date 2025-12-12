@@ -1,0 +1,301 @@
+# SQL:1999 Case Sensitivity Tests
+#
+# Per SQL:1999 standard:
+# - Unquoted identifiers are case-insensitive (folded to lowercase canonical form)
+# - Quoted (delimited) identifiers are case-sensitive (exact case preserved)
+#
+# Related: #4396 (TableIdentifier), #4405 (DML quoted support)
+
+# =============================================================================
+# SECTION 1: Unquoted Identifiers (Case-Insensitive)
+# =============================================================================
+
+# Test that unquoted table names are case-insensitive
+statement ok
+CREATE TABLE users (id INTEGER, name VARCHAR(50))
+
+# INSERT with different cases should all work
+statement ok
+INSERT INTO Users VALUES (1, 'Alice')
+
+statement ok
+INSERT INTO USERS VALUES (2, 'Bob')
+
+statement ok
+INSERT INTO users VALUES (3, 'Charlie')
+
+statement ok
+INSERT INTO UsErS VALUES (4, 'Diana')
+
+# SELECT with any case should find the table
+query IT rowsort
+SELECT * FROM users
+----
+1 Alice
+2 Bob
+3 Charlie
+4 Diana
+
+query IT rowsort
+SELECT * FROM USERS
+----
+1 Alice
+2 Bob
+3 Charlie
+4 Diana
+
+query IT rowsort
+SELECT * FROM Users
+----
+1 Alice
+2 Bob
+3 Charlie
+4 Diana
+
+# Count should be consistent
+query I
+SELECT COUNT(*) FROM users
+----
+4
+
+query I
+SELECT COUNT(*) FROM USERS
+----
+4
+
+statement ok
+DROP TABLE users
+
+# =============================================================================
+# SECTION 2: Creating Multiple Tables with Same Unquoted Name (Should Fail)
+# =============================================================================
+
+statement ok
+CREATE TABLE test_dup (id INTEGER)
+
+# These should all fail because unquoted names are case-insensitive
+# so TEST_DUP, Test_Dup, etc. all resolve to the same table
+statement error
+CREATE TABLE TEST_DUP (id INTEGER)
+
+statement error
+CREATE TABLE Test_Dup (id INTEGER)
+
+statement error
+CREATE TABLE TEST_dup (id INTEGER)
+
+statement ok
+DROP TABLE test_dup
+
+# =============================================================================
+# SECTION 3: Column Name Case Insensitivity
+# =============================================================================
+
+statement ok
+CREATE TABLE col_test (MyColumn INTEGER, AnotherCol VARCHAR(20))
+
+statement ok
+INSERT INTO col_test (mycolumn, anothercol) VALUES (1, 'test')
+
+statement ok
+INSERT INTO col_test (MYCOLUMN, ANOTHERCOL) VALUES (2, 'test2')
+
+query IT rowsort
+SELECT mycolumn, anothercol FROM col_test
+----
+1 test
+2 test2
+
+query IT rowsort
+SELECT MYCOLUMN, ANOTHERCOL FROM col_test
+----
+1 test
+2 test2
+
+query IT rowsort
+SELECT MyColumn, AnotherCol FROM col_test
+----
+1 test
+2 test2
+
+statement ok
+DROP TABLE col_test
+
+# =============================================================================
+# SECTION 4: WHERE Clause with Case-Insensitive Column Names
+# =============================================================================
+
+statement ok
+CREATE TABLE filter_test (Value INTEGER, Category VARCHAR(20))
+
+statement ok
+INSERT INTO filter_test VALUES (10, 'A'), (20, 'B'), (30, 'A')
+
+query I rowsort
+SELECT value FROM filter_test WHERE category = 'A'
+----
+10
+30
+
+query I rowsort
+SELECT VALUE FROM filter_test WHERE CATEGORY = 'A'
+----
+10
+30
+
+statement ok
+DROP TABLE filter_test
+
+# =============================================================================
+# SECTION 5: JOIN with Case-Insensitive Table/Column Names
+# =============================================================================
+
+statement ok
+CREATE TABLE orders (order_id INTEGER, customer_id INTEGER)
+
+statement ok
+CREATE TABLE customers (customer_id INTEGER, name VARCHAR(50))
+
+statement ok
+INSERT INTO orders VALUES (1, 100), (2, 101), (3, 100)
+
+statement ok
+INSERT INTO customers VALUES (100, 'Alice'), (101, 'Bob')
+
+# Various case combinations in JOIN
+query ITI rowsort
+SELECT O.order_id, C.name, C.customer_id FROM Orders O JOIN Customers C ON O.customer_id = C.customer_id
+----
+1 Alice 100
+2 Bob 101
+3 Alice 100
+
+query ITI rowsort
+SELECT o.ORDER_ID, c.NAME, c.CUSTOMER_ID FROM ORDERS o JOIN CUSTOMERS c ON o.CUSTOMER_ID = c.CUSTOMER_ID
+----
+1 Alice 100
+2 Bob 101
+3 Alice 100
+
+statement ok
+DROP TABLE orders
+
+statement ok
+DROP TABLE customers
+
+# =============================================================================
+# SECTION 6: Aggregate Functions with Case-Insensitive Names
+# =============================================================================
+
+statement ok
+CREATE TABLE sales (product VARCHAR(20), amount INTEGER)
+
+statement ok
+INSERT INTO sales VALUES ('Widget', 100), ('Gadget', 200), ('Widget', 150)
+
+query TI rowsort
+SELECT PRODUCT, SUM(amount) FROM sales GROUP BY product
+----
+Gadget 200
+Widget 250
+
+query TI rowsort
+SELECT product, SUM(AMOUNT) FROM SALES GROUP BY PRODUCT
+----
+Gadget 200
+Widget 250
+
+statement ok
+DROP TABLE sales
+
+# =============================================================================
+# SECTION 7: ORDER BY with Case-Insensitive Column Names
+# =============================================================================
+
+statement ok
+CREATE TABLE sorted_data (id INTEGER, value INTEGER)
+
+statement ok
+INSERT INTO sorted_data VALUES (3, 30), (1, 10), (2, 20)
+
+query II
+SELECT ID, VALUE FROM sorted_data ORDER BY id
+----
+1 10
+2 20
+3 30
+
+query II
+SELECT id, value FROM SORTED_DATA ORDER BY ID
+----
+1 10
+2 20
+3 30
+
+statement ok
+DROP TABLE sorted_data
+
+# =============================================================================
+# SECTION 8: Quoted Identifiers (Case-Sensitive) - CREATE TABLE
+# =============================================================================
+# NOTE: DML (INSERT/SELECT/UPDATE/DELETE) with quoted identifiers
+# requires #4405. These tests verify CREATE TABLE works now,
+# and will be expanded when #4405 is complete.
+
+# Create tables with quoted identifiers - these should be case-sensitive
+# and create three DIFFERENT tables
+statement ok
+CREATE TABLE "CaseSensitive" (id INTEGER)
+
+statement ok
+CREATE TABLE "casesensitive" (id INTEGER)
+
+statement ok
+CREATE TABLE "CASESENSITIVE" (id INTEGER)
+
+# Cleanup - unquoted drop resolves to lowercase canonical form
+# which matches "casesensitive" (the one stored with lowercase)
+statement ok
+DROP TABLE casesensitive
+
+# TODO: When #4405 is complete, add these tests:
+# statement ok
+# DROP TABLE "CaseSensitive"
+#
+# statement ok
+# DROP TABLE "CASESENSITIVE"
+#
+# And add tests for:
+# - INSERT INTO "QuotedTable" VALUES (...)
+# - SELECT * FROM "QuotedTable"
+# - UPDATE "QuotedTable" SET ...
+# - DELETE FROM "QuotedTable" WHERE ...
+
+# =============================================================================
+# SECTION 9: Mixed Quoted and Unquoted - Unquoted Operations Only
+# =============================================================================
+
+# Create unquoted table (will be stored as lowercase canonical)
+statement ok
+CREATE TABLE mixedtest (id INTEGER)
+
+# Insert into unquoted (case-insensitive) - all these work
+statement ok
+INSERT INTO mixedtest VALUES (1)
+
+statement ok
+INSERT INTO MIXEDTEST VALUES (2)
+
+statement ok
+INSERT INTO MixedTest VALUES (3)
+
+# Verify unquoted table has all 3 rows
+query I rowsort
+SELECT * FROM mixedtest
+----
+1
+2
+3
+
+statement ok
+DROP TABLE mixedtest
