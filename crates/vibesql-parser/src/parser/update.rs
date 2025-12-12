@@ -5,12 +5,17 @@ impl Parser {
     pub(super) fn parse_update_statement(&mut self) -> Result<vibesql_ast::UpdateStmt, ParseError> {
         self.expect_keyword(Keyword::Update)?;
 
-        // Parse table name (support both regular and delimited identifiers)
-        let table_name = match self.peek() {
-            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
                 let table = name.clone();
                 self.advance();
-                table
+                (table, false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let table = name.clone();
+                self.advance();
+                (table, true)
             }
             _ => {
                 return Err(ParseError { message: "Expected table name after UPDATE".to_string() })
@@ -72,6 +77,6 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::UpdateStmt { table_name, assignments, where_clause })
+        Ok(vibesql_ast::UpdateStmt { table_name, quoted, assignments, where_clause })
     }
 }

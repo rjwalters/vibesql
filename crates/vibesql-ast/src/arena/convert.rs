@@ -553,6 +553,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     pub fn convert_insert(&self, stmt: &arena_dml::InsertStmt<'arena>) -> InsertStmt {
         InsertStmt {
             table_name: self.resolve(stmt.table_name),
+            quoted: stmt.quoted,
             columns: stmt.columns.iter().map(|s| self.resolve(*s)).collect(),
             source: self.convert_insert_source(&stmt.source),
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
@@ -583,6 +584,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     pub fn convert_update(&self, stmt: &arena_dml::UpdateStmt<'arena>) -> UpdateStmt {
         UpdateStmt {
             table_name: self.resolve(stmt.table_name),
+            quoted: stmt.quoted,
             assignments: stmt.assignments.iter().map(|a| self.convert_assignment(a)).collect(),
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
         }
@@ -604,6 +606,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
         DeleteStmt {
             only: stmt.only,
             table_name: self.resolve(stmt.table_name),
+            quoted: stmt.quoted,
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
         }
     }

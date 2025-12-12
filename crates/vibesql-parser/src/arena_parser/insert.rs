@@ -30,15 +30,23 @@ impl<'arena> ArenaParser<'arena> {
 
         self.consume_keyword(Keyword::Into)?;
 
-        // Parse table name
-        let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            self.advance();
-            self.intern(&name)
-        } else {
-            return Err(ParseError {
-                message: "Expected table name after INSERT INTO".to_string(),
-            });
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), true)
+            }
+            _ => {
+                return Err(ParseError {
+                    message: "Expected table name after INSERT INTO".to_string(),
+                });
+            }
         };
 
         // Parse column list (optional)
@@ -79,7 +87,7 @@ impl<'arena> ArenaParser<'arena> {
         self.try_consume(&Token::Semicolon);
 
         let stmt =
-            InsertStmt { table_name, columns, source, conflict_clause, on_duplicate_key_update };
+            InsertStmt { table_name, quoted, columns, source, conflict_clause, on_duplicate_key_update };
 
         Ok(self.arena.alloc(stmt))
     }
@@ -91,15 +99,23 @@ impl<'arena> ArenaParser<'arena> {
         self.consume_keyword(Keyword::Replace)?;
         self.consume_keyword(Keyword::Into)?;
 
-        // Parse table name
-        let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            self.advance();
-            self.intern(&name)
-        } else {
-            return Err(ParseError {
-                message: "Expected table name after REPLACE INTO".to_string(),
-            });
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), true)
+            }
+            _ => {
+                return Err(ParseError {
+                    message: "Expected table name after REPLACE INTO".to_string(),
+                });
+            }
         };
 
         // Parse column list (optional)
@@ -139,6 +155,7 @@ impl<'arena> ArenaParser<'arena> {
 
         let stmt = InsertStmt {
             table_name,
+            quoted,
             columns,
             source,
             conflict_clause: Some(ConflictClause::Replace),

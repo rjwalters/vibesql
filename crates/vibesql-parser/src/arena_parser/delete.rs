@@ -19,15 +19,23 @@ impl<'arena> ArenaParser<'arena> {
         // Check for optional left parenthesis
         let has_paren = self.try_consume(&Token::LParen);
 
-        // Parse table name
-        let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            self.advance();
-            self.intern(&name)
-        } else {
-            return Err(ParseError {
-                message: "Expected table name after DELETE FROM".to_string(),
-            });
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), true)
+            }
+            _ => {
+                return Err(ParseError {
+                    message: "Expected table name after DELETE FROM".to_string(),
+                });
+            }
         };
 
         // If we had opening paren, expect closing paren
@@ -61,7 +69,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = DeleteStmt { only, table_name, where_clause };
+        let stmt = DeleteStmt { only, table_name, quoted, where_clause };
 
         Ok(self.arena.alloc(stmt))
     }

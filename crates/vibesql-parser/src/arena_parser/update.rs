@@ -13,13 +13,21 @@ impl<'arena> ArenaParser<'arena> {
     ) -> Result<&'arena UpdateStmt<'arena>, ParseError> {
         self.consume_keyword(Keyword::Update)?;
 
-        // Parse table name
-        let table_name = if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            self.advance();
-            self.intern(&name)
-        } else {
-            return Err(ParseError { message: "Expected table name after UPDATE".to_string() });
+        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
+        let (table_name, quoted) = match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), false)
+            }
+            Token::DelimitedIdentifier(name) => {
+                let name = name.clone();
+                self.advance();
+                (self.intern(&name), true)
+            }
+            _ => {
+                return Err(ParseError { message: "Expected table name after UPDATE".to_string() });
+            }
         };
 
         // Parse SET keyword
@@ -54,7 +62,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = UpdateStmt { table_name, assignments, where_clause };
+        let stmt = UpdateStmt { table_name, quoted, assignments, where_clause };
 
         Ok(self.arena.alloc(stmt))
     }
