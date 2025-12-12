@@ -137,8 +137,7 @@ fn test_unknown_type_still_fails() {
         assert!(
             e.to_string().to_lowercase().contains("unknown data type")
                 && e.to_string().to_lowercase().contains("unknowntype"),
-            "Error should mention unknown type, got: {}",
-            e.to_string()
+            "Error should mention unknown type, got: {e}",
         );
     }
 }

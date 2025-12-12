@@ -301,9 +301,9 @@ impl super::Catalog {
     /// - Quoted identifiers are case-sensitive (match exact canonical form)
     /// - Unquoted identifiers are case-insensitive (lowercase canonical form)
     pub fn table_exists_by_identifier(&self, identifier: &TableIdentifier) -> bool {
-        self.schemas.get(&self.current_schema).map_or(false, |schema| {
-            schema.table_exists_by_identifier(identifier)
-        })
+        self.schemas
+            .get(&self.current_schema)
+            .is_some_and(|schema| schema.table_exists_by_identifier(identifier))
     }
 
     /// Get the TableIdentifier for a table by its canonical name.

@@ -102,10 +102,6 @@ impl SelectExecutor<'_> {
         Ok(column_names)
     }
 
-    /// Derive a column name from an expression
-    pub(super) fn derive_expression_name(&self, expr: &vibesql_ast::Expression) -> String {
-        derive_expression_name_impl(expr, None)
-    }
 }
 
 /// Helper function to derive a column name from an expression
@@ -113,9 +109,9 @@ impl SelectExecutor<'_> {
 /// # Arguments
 /// * `expr` - The expression to derive a name from
 /// * `schema` - Optional schema to use for resolving original column names.
-///              When provided, ColumnRef expressions will use the schema's column name
-///              (preserving original case) instead of the parsed identifier (which is
-///              uppercased for unquoted identifiers).
+///   When provided, ColumnRef expressions will use the schema's column name
+///   (preserving original case) instead of the parsed identifier (which is
+///   uppercased for unquoted identifiers).
 fn derive_expression_name_impl(
     expr: &vibesql_ast::Expression,
     schema: Option<&CombinedSchema>,

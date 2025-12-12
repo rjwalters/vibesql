@@ -12,4 +12,5 @@
 //!   SUPPRESS_COMPARISON_SUMMARY - Set to "1" or "true" to suppress comparison summary output
 
 // Re-export everything from the shared crate
+#[allow(unused_imports)]
 pub use vibesql_bench_common::harness::*;
