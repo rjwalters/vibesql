@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -114,6 +114,11 @@ help:
 	@echo "  make benchmark-vibesql   - All embedded benchmarks for VibeSQL only"
 	@echo "  make benchmark-sqlite    - All embedded benchmarks for SQLite only"
 	@echo "  make benchmark-duckdb    - All embedded benchmarks for DuckDB only"
+	@echo ""
+	@echo "CLI benchmarks (apples-to-apples via CLI tools):"
+	@echo "  make benchmark-cli       - Run CLI-based TPC-H benchmark (vibesql vs sqlite3)"
+	@echo "  make benchmark-cli-quick - Quick CLI benchmark (Q1, Q6 only)"
+	@echo "  make benchmark-cli-prep  - Prepare databases for CLI benchmarks"
 	@echo ""
 	@echo "Profiling targets (uses samply, no sudo required):"
 	@echo "  make profile-tpch       - Profile TPC-H queries (opens Firefox Profiler)"
@@ -373,6 +378,28 @@ benchmark-tpcds:
 benchmark-sysbench:
 	@echo "Running Sysbench benchmarks (embedded engines)..."
 	@./scripts/bench --test=sysbench --engine=vibesql,sqlite,duckdb
+
+#
+# CLI Benchmarks (apples-to-apples comparison via CLI tools)
+#
+
+# Prepare TPC-H databases for CLI benchmarks
+# Creates pre-built database files in /tmp/tpch_bench for fast CLI testing
+benchmark-cli-prep:
+	@echo "Preparing TPC-H databases for CLI benchmarks..."
+	@cargo build --release -p vibesql-executor --bench prep_tpch_databases --features sqlite --quiet 2>/dev/null || cargo build --release -p vibesql-executor --bench prep_tpch_databases --features sqlite
+	@find ./target/release/deps -name 'prep_tpch_databases-*' -type f -perm +111 -exec {} --sqlite \;
+
+# Run CLI-based TPC-H benchmark (apples-to-apples via CLI tools)
+# Uses vibesql and sqlite3 CLI tools for fair comparison
+benchmark-cli: benchmark-cli-prep
+	@echo "Running CLI benchmarks (vibesql vs sqlite3)..."
+	@./scripts/bench-cli --db-dir /tmp/tpch_bench
+
+# Run CLI benchmark with specific queries
+benchmark-cli-quick: benchmark-cli-prep
+	@echo "Running quick CLI benchmark (Q1, Q6)..."
+	@./scripts/bench-cli --db-dir /tmp/tpch_bench --queries Q1,Q6 --iterations 3
 
 #
 # Server Benchmarks (client-server databases: VibeSQL-server, MySQL)
