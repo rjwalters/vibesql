@@ -25,9 +25,9 @@ impl Parser {
 
         self.expect_keyword(Keyword::Into)?;
 
-        // Parse table name
+        // Parse table name (support both regular and delimited identifiers)
         let table_name = match self.peek() {
-            Token::Identifier(name) => {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                 let table = name.clone();
                 self.advance();
                 table

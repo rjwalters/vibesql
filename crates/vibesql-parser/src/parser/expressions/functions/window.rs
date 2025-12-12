@@ -15,21 +15,24 @@ impl Parser {
         name: &str,
         args: Vec<vibesql_ast::Expression>,
     ) -> vibesql_ast::WindowFunctionSpec {
+        // Use uppercase for matching, but store the original name (which is already
+        // normalized to lowercase by the lexer for unquoted identifiers)
         let name_upper = name.to_uppercase();
+        let name_owned = name.to_string();
 
         match name_upper.as_str() {
             // Ranking functions
             "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" => {
-                vibesql_ast::WindowFunctionSpec::Ranking { name: name_upper, args }
+                vibesql_ast::WindowFunctionSpec::Ranking { name: name_owned, args }
             }
 
             // Value functions
             "LAG" | "LEAD" | "FIRST_VALUE" | "LAST_VALUE" => {
-                vibesql_ast::WindowFunctionSpec::Value { name: name_upper, args }
+                vibesql_ast::WindowFunctionSpec::Value { name: name_owned, args }
             }
 
             // Aggregate functions (SUM, AVG, COUNT, MIN, MAX, etc.)
-            _ => vibesql_ast::WindowFunctionSpec::Aggregate { name: name_upper, args },
+            _ => vibesql_ast::WindowFunctionSpec::Aggregate { name: name_owned, args },
         }
     }
 
