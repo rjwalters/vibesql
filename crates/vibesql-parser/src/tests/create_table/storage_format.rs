@@ -80,7 +80,7 @@ fn test_parse_create_table_with_invalid_storage_format() {
 
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("ROW") || err.message.contains("COLUMNAR"),
+        err.message.contains("ROW") || err.message.contains("columnar"),
         "Error message should mention valid formats: {}",
         err.message
     );

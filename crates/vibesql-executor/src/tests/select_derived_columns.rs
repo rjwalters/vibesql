@@ -382,8 +382,8 @@ fn test_select_wildcard_with_derived_column_list() {
     let executor = SelectExecutor::new(&db);
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
-    // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    // Check column names are renamed (parser preserves original case)
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -429,8 +429,8 @@ fn test_select_all_wildcard_with_derived_column_list() {
     let executor = SelectExecutor::new(&db);
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
-    // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    // Check column names are renamed (parser preserves original case)
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -484,8 +484,8 @@ fn test_select_distinct_wildcard_with_derived_column_list() {
     let executor = SelectExecutor::new(&db);
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
-    // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    // Check column names are renamed (parser preserves original case)
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check DISTINCT works - should have only 1 row
     assert_eq!(result.rows.len(), 1);
@@ -531,8 +531,8 @@ fn test_select_qualified_wildcard_with_derived_column_list() {
     let executor = SelectExecutor::new(&db);
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
-    // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    // Check column names are renamed (parser preserves original case)
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);
@@ -580,8 +580,8 @@ fn test_select_alias_wildcard_with_derived_column_list() {
     let executor = SelectExecutor::new(&db);
     let result = executor.execute_with_columns(&select_stmt).unwrap();
 
-    // Check column names are renamed
-    assert_eq!(result.columns, vec!["C", "D"]);
+    // Check column names are renamed (parser preserves original case)
+    assert_eq!(result.columns, vec!["c", "d"]);
 
     // Check values are correct
     assert_eq!(result.rows.len(), 1);

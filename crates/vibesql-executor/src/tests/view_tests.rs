@@ -174,12 +174,14 @@ mod tests {
             advanced_objects::execute_create_view(&view_stmt, &mut db)
                 .expect("Failed to create view");
 
+            // View name lookup is case-insensitive
             let view = db.catalog.get_view("USER_SUMMARY").expect("View not found");
             assert!(view.columns.is_some());
             let cols = view.columns.as_ref().unwrap();
             assert_eq!(cols.len(), 2);
-            assert_eq!(cols[0], "USER_ID");
-            assert_eq!(cols[1], "FULL_NAME");
+            // Column names preserve original case from SQL (SQLite-compatible)
+            assert_eq!(cols[0], "user_id");
+            assert_eq!(cols[1], "full_name");
         }
     }
 

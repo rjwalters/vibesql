@@ -932,7 +932,7 @@ mod tests {
         assert_eq!(stmt.param_count(), 1);
 
         // Verify tables were extracted (arena parser uses uppercase)
-        assert!(stmt.tables().contains("USERS"));
+        assert!(stmt.tables().contains("users"));
 
         // Test caching - second call should hit cache
         let stmt2 = session.prepare_arena("SELECT * FROM users WHERE id = ?").unwrap();
@@ -978,8 +978,8 @@ mod tests {
 
         // Both tables should be tracked
         let tables = stmt.tables();
-        assert!(tables.contains("USERS"), "Expected USERS in {:?}", tables);
-        assert!(tables.contains("ORDERS"), "Expected ORDERS in {:?}", tables);
+        assert!(tables.contains("users"), "Expected USERS in {:?}", tables);
+        assert!(tables.contains("orders"), "Expected ORDERS in {:?}", tables);
     }
 
     #[test]
@@ -1005,10 +1005,10 @@ mod tests {
         // Verify it creates a PkDelete plan
         match stmt.cached_plan() {
             CachedPlan::PkDelete(plan) => {
-                // Table name should be uppercase
-                assert_eq!(plan.table_name, "USERS");
+                // Parser preserves original case (SQLite-compatible)
+                assert_eq!(plan.table_name, "users");
                 // Should have one PK column
-                assert_eq!(plan.pk_columns, vec!["ID"]);
+                assert_eq!(plan.pk_columns, vec!["id"]);
                 // Param 0 maps to PK column 0
                 assert_eq!(plan.param_to_pk_col, vec![(0, 0)]);
                 // Fast path should not be validated yet

@@ -1,7 +1,7 @@
 //! Column name derivation for SELECT results
 
 use super::builder::SelectExecutor;
-use crate::{errors::ExecutorError, select::join::FromResult};
+use crate::{errors::ExecutorError, schema::CombinedSchema, select::join::FromResult};
 
 impl SelectExecutor<'_> {
     /// Derive column names from SELECT list
@@ -11,6 +11,7 @@ impl SelectExecutor<'_> {
         from_result: Option<&FromResult>,
     ) -> Result<Vec<String>, ExecutorError> {
         let mut column_names = Vec::new();
+        let schema = from_result.map(|fr| &fr.schema);
 
         for item in select_list {
             match item {
@@ -88,8 +89,8 @@ impl SelectExecutor<'_> {
                     if let Some(alias_name) = alias {
                         column_names.push(alias_name.clone());
                     } else {
-                        // Derive name from the expression
-                        column_names.push(self.derive_expression_name(expr));
+                        // Derive name from the expression, using schema to preserve original case
+                        column_names.push(derive_expression_name_impl(expr, schema));
                     }
                 }
             }
@@ -100,20 +101,41 @@ impl SelectExecutor<'_> {
 
     /// Derive a column name from an expression
     pub(super) fn derive_expression_name(&self, expr: &vibesql_ast::Expression) -> String {
-        derive_expression_name_impl(expr)
+        derive_expression_name_impl(expr, None)
     }
 }
 
 /// Helper function to derive a column name from an expression
-fn derive_expression_name_impl(expr: &vibesql_ast::Expression) -> String {
+///
+/// # Arguments
+/// * `expr` - The expression to derive a name from
+/// * `schema` - Optional schema to use for resolving original column names.
+///              When provided, ColumnRef expressions will use the schema's column name
+///              (preserving original case) instead of the parsed identifier (which is
+///              uppercased for unquoted identifiers).
+fn derive_expression_name_impl(
+    expr: &vibesql_ast::Expression,
+    schema: Option<&CombinedSchema>,
+) -> String {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table: _, column } => column.clone(),
+        vibesql_ast::Expression::ColumnRef { table, column } => {
+            // Use schema to get the original column name (preserves case from CREATE TABLE)
+            // SQLite returns schema column names, not query identifier case
+            if let Some(s) = schema {
+                s.get_original_column_name(table.as_deref(), column)
+            } else {
+                column.clone()
+            }
+        }
         vibesql_ast::Expression::Function { name, args, character_unit: _ } => {
             // For functions, use name(args) format
             let args_str = if args.is_empty() {
                 "*".to_string()
             } else {
-                args.iter().map(derive_expression_name_impl).collect::<Vec<_>>().join(", ")
+                args.iter()
+                    .map(|e| derive_expression_name_impl(e, schema))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             format!("{}({})", name, args_str)
         }
@@ -123,7 +145,10 @@ fn derive_expression_name_impl(expr: &vibesql_ast::Expression) -> String {
             let args_str = if args.is_empty() {
                 "*".to_string()
             } else {
-                args.iter().map(derive_expression_name_impl).collect::<Vec<_>>().join(", ")
+                args.iter()
+                    .map(|e| derive_expression_name_impl(e, schema))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             format!("{}({}{})", name, distinct_str, args_str)
         }
@@ -131,7 +156,7 @@ fn derive_expression_name_impl(expr: &vibesql_ast::Expression) -> String {
             // For binary operations, create descriptive name
             format!(
                 "({} {} {})",
-                derive_expression_name_impl(left),
+                derive_expression_name_impl(left, schema),
                 match op {
                     vibesql_ast::BinaryOperator::Plus => "+",
                     vibesql_ast::BinaryOperator::Minus => "-",
@@ -148,7 +173,7 @@ fn derive_expression_name_impl(expr: &vibesql_ast::Expression) -> String {
                     vibesql_ast::BinaryOperator::Concat => "||",
                     _ => "?",
                 },
-                derive_expression_name_impl(right)
+                derive_expression_name_impl(right, schema)
             )
         }
         vibesql_ast::Expression::Literal(val) => {

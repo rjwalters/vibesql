@@ -6,29 +6,29 @@ use super::super::*;
 fn test_tokenize_simple_identifier() {
     let mut lexer = Lexer::new("users");
     let tokens = lexer.tokenize().unwrap();
-    // Regular identifiers are normalized to uppercase
-    assert_eq!(tokens[0], Token::Identifier("USERS".to_string()));
+    // Regular identifiers preserve original case
+    assert_eq!(tokens[0], Token::Identifier("users".to_string()));
 }
 
 #[test]
 fn test_tokenize_identifier_with_underscore() {
     let mut lexer = Lexer::new("user_id");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("USER_ID".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("user_id".to_string()));
 }
 
 #[test]
 fn test_tokenize_identifier_with_numbers() {
     let mut lexer = Lexer::new("table123");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("TABLE123".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("table123".to_string()));
 }
 
 #[test]
 fn test_tokenize_identifier_starting_with_underscore() {
     let mut lexer = Lexer::new("_internal");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Identifier("_INTERNAL".to_string()));
+    assert_eq!(tokens[0], Token::Identifier("_internal".to_string()));
 }
 
 // ============================================================================
@@ -103,7 +103,8 @@ fn test_tokenize_mixed_identifiers() {
     assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
     assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
     assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::Identifier("REGULARCOLUMN".to_string()));
+    // Regular identifiers preserve original case
+    assert_eq!(tokens[3], Token::Identifier("regularColumn".to_string()));
     assert_eq!(tokens[4], Token::Keyword(Keyword::From));
     assert_eq!(tokens[5], Token::Keyword(Keyword::Table)); // "table" is a reserved keyword
 }
@@ -187,7 +188,8 @@ fn test_tokenize_mixed_backtick_and_regular_identifiers() {
     assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
     assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
     assert_eq!(tokens[2], Token::Comma);
-    assert_eq!(tokens[3], Token::Identifier("REGULARCOLUMN".to_string()));
+    // Regular identifiers preserve original case
+    assert_eq!(tokens[3], Token::Identifier("regularColumn".to_string()));
     assert_eq!(tokens[4], Token::Keyword(Keyword::From));
     assert_eq!(tokens[5], Token::DelimitedIdentifier("table_name".to_string()));
 }

@@ -241,7 +241,7 @@ fn test_default_before_comment_mysql_standard() {
             assert_eq!(create.columns.len(), 1);
 
             let col = &create.columns[0];
-            assert_eq!(col.name, "COL");
+            assert_eq!(col.name, "col");
 
             // Verify DEFAULT value is parsed
             assert!(col.default_value.is_some(), "Should have default value");
@@ -299,7 +299,7 @@ fn test_polygon_with_null_constraint() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "C1");
+            assert_eq!(create.columns[0].name, "c1");
             assert!(create.columns[0].nullable, "Column should be nullable");
         }
         _ => panic!("Expected CREATE TABLE statement"),

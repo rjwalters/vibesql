@@ -17,8 +17,8 @@ fn test_parse_grant_usage_on_schema() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Usage);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "PUBLIC");
-            assert_eq!(grant_stmt.grantees, vec!["USER_ROLE"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "public");
+            assert_eq!(grant_stmt.grantees, vec!["user_role"]);
             assert!(!grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -36,8 +36,8 @@ fn test_parse_grant_create_on_schema() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Create);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "PUBLIC");
-            assert_eq!(grant_stmt.grantees, vec!["ADMIN_ROLE"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "public");
+            assert_eq!(grant_stmt.grantees, vec!["admin_role"]);
             assert!(!grant_stmt.with_grant_option);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
@@ -56,8 +56,8 @@ fn test_parse_grant_usage_and_create_on_schema() {
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::Usage);
             assert_eq!(grant_stmt.privileges[1], PrivilegeType::Create);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "MYSCHEMA");
-            assert_eq!(grant_stmt.grantees, vec!["DEVELOPER"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "myschema");
+            assert_eq!(grant_stmt.grantees, vec!["developer"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }
@@ -74,8 +74,8 @@ fn test_parse_grant_all_on_schema() {
             assert_eq!(grant_stmt.privileges.len(), 1);
             assert_eq!(grant_stmt.privileges[0], PrivilegeType::AllPrivileges);
             assert_eq!(grant_stmt.object_type, ObjectType::Schema);
-            assert_eq!(grant_stmt.object_name.to_string(), "PUBLIC");
-            assert_eq!(grant_stmt.grantees, vec!["ADMIN_ROLE"]);
+            assert_eq!(grant_stmt.object_name.to_string(), "public");
+            assert_eq!(grant_stmt.grantees, vec!["admin_role"]);
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }

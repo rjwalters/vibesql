@@ -19,8 +19,8 @@ fn test_parse_match_against_natural_language() {
             &select.where_clause.unwrap()
         {
             assert_eq!(columns.len(), 2);
-            assert_eq!(columns[0], "TITLE");
-            assert_eq!(columns[1], "BODY");
+            assert_eq!(columns[0], "title");
+            assert_eq!(columns[1], "body");
             assert_eq!(*mode, vibesql_ast::FulltextMode::NaturalLanguage);
         } else {
             panic!("Expected MatchAgainst expression in WHERE clause");
@@ -65,7 +65,7 @@ fn test_parse_match_against_query_expansion() {
             &select.where_clause.unwrap()
         {
             assert_eq!(columns.len(), 1);
-            assert_eq!(columns[0], "TITLE");
+            assert_eq!(columns[0], "title");
             assert_eq!(*mode, vibesql_ast::FulltextMode::QueryExpansion);
         } else {
             panic!("Expected MatchAgainst expression");
@@ -85,7 +85,7 @@ fn test_parse_match_against_single_column() {
         if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap()
         {
             assert_eq!(columns.len(), 1);
-            assert_eq!(columns[0], "TITLE");
+            assert_eq!(columns[0], "title");
         } else {
             panic!("Expected MatchAgainst expression");
         }
@@ -109,7 +109,7 @@ fn test_parse_match_against_in_select_list() {
         if let vibesql_ast::SelectItem::Expression { expr, alias } = &select.select_list[2] {
             if let vibesql_ast::Expression::MatchAgainst { columns, .. } = expr {
                 assert_eq!(columns.len(), 2);
-                assert_eq!(*alias, Some("RELEVANCE".to_string()));
+                assert_eq!(*alias, Some("relevance".to_string()));
             } else {
                 panic!("Expected MatchAgainst expression");
             }
@@ -131,8 +131,8 @@ fn test_parse_match_against_mixed_case() {
     if let vibesql_ast::Statement::Select(select) = stmt {
         if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap()
         {
-            assert_eq!(columns[0], "TITLE");
-            assert_eq!(columns[1], "BODY");
+            assert_eq!(columns[0], "title");
+            assert_eq!(columns[1], "body");
         } else {
             panic!("Expected MatchAgainst expression");
         }
@@ -148,10 +148,10 @@ fn test_parse_create_fulltext_index() {
 
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::CreateIndex(idx_stmt) = stmt {
-        assert_eq!(idx_stmt.index_name, "FT_TITLE");
-        assert_eq!(idx_stmt.table_name, "ARTICLES");
+        assert_eq!(idx_stmt.index_name, "ft_title");
+        assert_eq!(idx_stmt.table_name, "articles");
         assert_eq!(idx_stmt.columns.len(), 1);
-        assert_eq!(idx_stmt.columns[0].column_name, "TITLE");
+        assert_eq!(idx_stmt.columns[0].column_name, "title");
 
         match &idx_stmt.index_type {
             vibesql_ast::IndexType::Fulltext => {
@@ -171,11 +171,11 @@ fn test_parse_create_fulltext_index_multi_column() {
 
     let stmt = result.unwrap();
     if let vibesql_ast::Statement::CreateIndex(idx_stmt) = stmt {
-        assert_eq!(idx_stmt.index_name, "FT_SEARCH");
-        assert_eq!(idx_stmt.table_name, "ARTICLES");
+        assert_eq!(idx_stmt.index_name, "ft_search");
+        assert_eq!(idx_stmt.table_name, "articles");
         assert_eq!(idx_stmt.columns.len(), 2);
-        assert_eq!(idx_stmt.columns[0].column_name, "TITLE");
-        assert_eq!(idx_stmt.columns[1].column_name, "BODY");
+        assert_eq!(idx_stmt.columns[0].column_name, "title");
+        assert_eq!(idx_stmt.columns[1].column_name, "body");
 
         match &idx_stmt.index_type {
             vibesql_ast::IndexType::Fulltext => {

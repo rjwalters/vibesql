@@ -85,7 +85,7 @@ impl CachedPlan {
 /// This reduces per-query overhead from ~5-15µs to ~1-2µs for repeated executions.
 #[derive(Debug, Clone)]
 pub struct SimpleFastPathPlan {
-    /// Table name (normalized to uppercase for case-insensitive matching)
+    /// Table name (preserves original case from parser; catalog handles case-insensitive lookup)
     pub table_name: String,
 
     /// Lazily-cached column names derived from the SELECT list
@@ -125,7 +125,7 @@ impl SimpleFastPathPlan {
 /// Cached plan for primary key point lookup queries
 #[derive(Debug, Clone)]
 pub struct PkPointLookupPlan {
-    /// Table name (normalized to uppercase for case-insensitive matching)
+    /// Table name (preserves original case from parser; catalog handles case-insensitive lookup)
     pub table_name: String,
 
     /// Primary key column names in order
@@ -216,7 +216,7 @@ pub struct ColumnProjection {
 /// At execution time, we extract PK values directly from params and call delete_by_pk_fast.
 #[derive(Debug, Clone)]
 pub struct PkDeletePlan {
-    /// Table name (normalized to uppercase for case-insensitive matching)
+    /// Table name (preserves original case from parser; catalog handles case-insensitive lookup)
     pub table_name: String,
 
     /// Primary key column names in order (for validation)
@@ -287,7 +287,9 @@ fn analyze_select(stmt: &SelectStmt) -> CachedPlan {
     // This caches the result of is_simple_point_query() to avoid recomputing it every execution
     if crate::select::is_simple_point_query(stmt) {
         if let Some(table_name) = extract_single_table_name(stmt) {
-            return CachedPlan::SimpleFastPath(SimpleFastPathPlan::new(table_name.to_uppercase()));
+            // Preserve original case from parser (SQLite-compatible)
+            // Catalog handles case-insensitive lookups
+            return CachedPlan::SimpleFastPath(SimpleFastPathPlan::new(table_name));
         }
     }
 
@@ -316,8 +318,10 @@ fn analyze_delete(stmt: &DeleteStmt) -> CachedPlan {
         .map(|(pk_idx, (param_idx, _))| (*param_idx, pk_idx))
         .collect();
 
+    // Preserve original case from parser (SQLite-compatible)
+    // Catalog handles case-insensitive lookups
     CachedPlan::PkDelete(PkDeletePlan::new(
-        stmt.table_name.to_uppercase(),
+        stmt.table_name.clone(),
         pk_columns,
         param_to_pk_col,
     ))
@@ -368,8 +372,10 @@ fn try_analyze_pk_lookup(stmt: &SelectStmt) -> Option<PkPointLookupPlan> {
         .map(|(pk_idx, (param_idx, _))| (*param_idx, pk_idx))
         .collect();
 
+    // Preserve original case from parser (SQLite-compatible)
+    // Catalog handles case-insensitive lookups
     Some(PkPointLookupPlan {
-        table_name: table_name.to_uppercase(),
+        table_name,
         pk_columns,
         param_to_pk_col,
         projection,
@@ -510,9 +516,9 @@ mod tests {
         let plan = parse_to_plan("SELECT * FROM users WHERE id = ?");
         match plan {
             CachedPlan::PkPointLookup(p) => {
-                assert_eq!(p.table_name, "USERS");
-                // Parser normalizes identifiers to uppercase
-                assert_eq!(p.pk_columns, vec!["ID"]);
+                assert_eq!(p.table_name, "users");
+                // Parser preserves original case (SQLite-compatible)
+                assert_eq!(p.pk_columns, vec!["id"]);
                 assert_eq!(p.param_to_pk_col, vec![(0, 0)]);
                 assert!(matches!(p.projection, ProjectionPlan::Wildcard));
             }
@@ -525,9 +531,9 @@ mod tests {
         let plan = parse_to_plan("SELECT * FROM orders WHERE customer_id = ? AND order_id = ?");
         match plan {
             CachedPlan::PkPointLookup(p) => {
-                assert_eq!(p.table_name, "ORDERS");
-                // Parser normalizes identifiers to uppercase
-                assert_eq!(p.pk_columns, vec!["CUSTOMER_ID", "ORDER_ID"]);
+                assert_eq!(p.table_name, "orders");
+                // Parser preserves original case (SQLite-compatible)
+                assert_eq!(p.pk_columns, vec!["customer_id", "order_id"]);
                 assert_eq!(p.param_to_pk_col.len(), 2);
             }
             _ => panic!("Expected PkPointLookup"),
@@ -542,9 +548,9 @@ mod tests {
                 match p.projection {
                     ProjectionPlan::Columns(cols) => {
                         assert_eq!(cols.len(), 2);
-                        // Parser normalizes identifiers to uppercase
-                        assert_eq!(cols[0].column_name, "NAME");
-                        assert_eq!(cols[1].column_name, "EMAIL");
+                        // Parser preserves original case (SQLite-compatible)
+                        assert_eq!(cols[0].column_name, "name");
+                        assert_eq!(cols[1].column_name, "email");
                     }
                     _ => panic!("Expected Columns projection"),
                 }
@@ -591,8 +597,9 @@ mod tests {
         let plan = parse_to_plan("DELETE FROM sbtest1 WHERE id = ?");
         match plan {
             CachedPlan::PkDelete(p) => {
-                assert_eq!(p.table_name, "SBTEST1");
-                assert_eq!(p.pk_columns, vec!["ID"]);
+                // Parser preserves original case (SQLite-compatible)
+                assert_eq!(p.table_name, "sbtest1");
+                assert_eq!(p.pk_columns, vec!["id"]);
                 assert_eq!(p.param_to_pk_col, vec![(0, 0)]);
             }
             other => panic!("Expected PkDelete, got {:?}", other),

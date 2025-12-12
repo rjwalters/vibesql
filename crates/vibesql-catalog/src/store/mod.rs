@@ -92,11 +92,11 @@ impl Catalog {
             current_charset: "UTF8".to_string(),
             current_collation: None,
             current_timezone: "UTC".to_string(),
-            // Default to case-sensitive identifiers (SQL:1999 compliant)
-            // The parser already normalizes unquoted identifiers to uppercase
-            // and preserves case for delimited identifiers, so we must use
-            // case-sensitive lookups to respect the parser's normalization
-            case_sensitive_identifiers: true,
+            // Default to case-insensitive identifiers (SQLite-compatible)
+            // The parser preserves original case from the SQL text for identifiers,
+            // matching SQLite behavior. Lookups use case-insensitive matching so
+            // 'SELECT * FROM users' works regardless of how the table was created.
+            case_sensitive_identifiers: false,
         };
 
         // Create the default "public" schema

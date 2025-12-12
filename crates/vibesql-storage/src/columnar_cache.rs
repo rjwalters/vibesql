@@ -31,6 +31,13 @@ use parking_lot::RwLock;
 
 use crate::ColumnarTable;
 
+/// Normalize table name for cache key (case-insensitive matching)
+/// Uses uppercase to match SQLite/SQL standard behavior
+#[inline]
+fn normalize_cache_key(table_name: &str) -> String {
+    table_name.to_uppercase()
+}
+
 /// Statistics for monitoring cache effectiveness
 #[derive(Debug, Clone, Default)]
 pub struct CacheStats {
@@ -134,13 +141,15 @@ impl ColumnarCache {
     ///
     /// Returns `Some(Arc<ColumnarTable>)` if the table is cached, `None` otherwise.
     /// Accessing a cached entry marks it as recently used.
+    /// Table names are normalized for case-insensitive matching.
     pub fn get(&self, table_name: &str) -> Option<Arc<ColumnarTable>> {
+        let key = normalize_cache_key(table_name);
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut cache = self.cache.write();
             let mut stats = self.stats.write();
 
-            if let Some(entry) = cache.get(table_name) {
+            if let Some(entry) = cache.get(&key) {
                 stats.hits += 1;
                 Some(Arc::clone(&entry.data))
             } else {
@@ -154,7 +163,7 @@ impl ColumnarCache {
             let mut cache = self.cache.write().unwrap();
             let mut stats = self.stats.write().unwrap();
 
-            if let Some(entry) = cache.get(table_name) {
+            if let Some(entry) = cache.get(&key) {
                 stats.hits += 1;
                 Some(Arc::clone(&entry.data))
             } else {
@@ -169,6 +178,7 @@ impl ColumnarCache {
     /// If the table is already cached, the existing entry is updated.
     /// If inserting would exceed the memory budget, least recently used
     /// entries are evicted until there's sufficient space.
+    /// Table names are normalized for case-insensitive matching.
     ///
     /// # Arguments
     /// * `table_name` - Name of the table
@@ -177,6 +187,7 @@ impl ColumnarCache {
     /// # Returns
     /// The Arc-wrapped columnar table (for immediate use)
     pub fn insert(&self, table_name: &str, columnar: ColumnarTable) -> Arc<ColumnarTable> {
+        let key = normalize_cache_key(table_name);
         let size_bytes = columnar.size_in_bytes();
         let data = Arc::new(columnar);
 
@@ -187,7 +198,7 @@ impl ColumnarCache {
             let mut stats = self.stats.write();
 
             // Remove existing entry if present
-            if let Some(old_entry) = cache.pop(table_name) {
+            if let Some(old_entry) = cache.pop(&key) {
                 *current_memory = current_memory.saturating_sub(old_entry.size_bytes);
             }
 
@@ -204,7 +215,7 @@ impl ColumnarCache {
 
             // Insert new entry
             let entry = CacheEntry { data: Arc::clone(&data), size_bytes };
-            cache.put(table_name.to_string(), entry);
+            cache.put(key, entry);
             *current_memory += size_bytes;
             stats.conversions += 1;
         }
@@ -216,7 +227,7 @@ impl ColumnarCache {
             let mut stats = self.stats.write().unwrap();
 
             // Remove existing entry if present
-            if let Some(old_entry) = cache.pop(table_name) {
+            if let Some(old_entry) = cache.pop(&key) {
                 *current_memory = current_memory.saturating_sub(old_entry.size_bytes);
             }
 
@@ -233,7 +244,7 @@ impl ColumnarCache {
 
             // Insert new entry
             let entry = CacheEntry { data: Arc::clone(&data), size_bytes };
-            cache.put(table_name.to_string(), entry);
+            cache.put(key, entry);
             *current_memory += size_bytes;
             stats.conversions += 1;
         }
@@ -245,14 +256,16 @@ impl ColumnarCache {
     ///
     /// Called when a table is modified (INSERT/UPDATE/DELETE) to ensure
     /// the cache doesn't serve stale data.
+    /// Table names are normalized for case-insensitive matching.
     pub fn invalidate(&self, table_name: &str) {
+        let key = normalize_cache_key(table_name);
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut cache = self.cache.write();
             let mut current_memory = self.current_memory.write();
             let mut stats = self.stats.write();
 
-            if let Some(entry) = cache.pop(table_name) {
+            if let Some(entry) = cache.pop(&key) {
                 *current_memory = current_memory.saturating_sub(entry.size_bytes);
                 stats.invalidations += 1;
             }
@@ -264,7 +277,7 @@ impl ColumnarCache {
             let mut current_memory = self.current_memory.write().unwrap();
             let mut stats = self.stats.write().unwrap();
 
-            if let Some(entry) = cache.pop(table_name) {
+            if let Some(entry) = cache.pop(&key) {
                 *current_memory = current_memory.saturating_sub(entry.size_bytes);
                 stats.invalidations += 1;
             }

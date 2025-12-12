@@ -12,9 +12,9 @@ fn test_parse_char_with_characters_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 10 } => {} // Success
                 _ => panic!("Expected CHAR(10) data type"),
@@ -32,9 +32,9 @@ fn test_parse_char_with_octets_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 10 } => {} // Success
                 _ => panic!("Expected CHAR(10) data type"),
@@ -52,9 +52,9 @@ fn test_parse_char_without_modifier_still_works() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 10 } => {} // Success
                 _ => panic!("Expected CHAR(10) data type"),
@@ -72,7 +72,7 @@ fn test_parse_char_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
             assert_eq!(create.columns[0].name, "A");
             match create.columns[0].data_type {
@@ -92,7 +92,7 @@ fn test_parse_character_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
             assert_eq!(create.columns[0].name, "A");
             match create.columns[0].data_type {
@@ -116,9 +116,9 @@ fn test_parse_nchar_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 20 } => {} // Success
                 _ => panic!("Expected CHAR(20) data type"),
@@ -136,9 +136,9 @@ fn test_parse_nchar_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 1 } => {} // Success - default is 1
                 _ => panic!("Expected CHAR(1) data type (default)"),
@@ -156,7 +156,7 @@ fn test_parse_nchar_with_characters_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 10 } => {} // Success
                 _ => panic!("Expected CHAR(10) data type"),
@@ -178,9 +178,9 @@ fn test_parse_national_character_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 15 } => {} // Success
                 _ => panic!("Expected CHAR(15) data type"),
@@ -198,9 +198,9 @@ fn test_parse_national_character_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 1 } => {} // Success - default is 1
                 _ => panic!("Expected CHAR(1) data type (default)"),
@@ -218,9 +218,9 @@ fn test_parse_national_char_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 10 } => {} // Success
                 _ => panic!("Expected CHAR(10) data type"),
@@ -262,7 +262,7 @@ fn test_parse_national_character_with_octets_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Character { length: 12 } => {} // Success
                 _ => panic!("Expected CHAR(12) data type"),

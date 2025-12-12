@@ -3,15 +3,15 @@
 //! Tests the case_sensitive_identifiers setting in the catalog which controls
 //! whether table and view lookups are case-sensitive or case-insensitive.
 //!
-//! Default behavior (case_sensitive_identifiers = true, SQL:1999 compliant):
+//! Default behavior (case_sensitive_identifiers = false, SQLite compatible):
+//! - Lookups are case-insensitive (SQLite behavior)
+//! - The parser preserves original case from the SQL text
+//! - "users", "USERS", "Users" all refer to the same table
+//!
+//! When case_sensitive_identifiers = true (SQL:1999 compliant mode):
 //! - Lookups are case-sensitive (SQL standard)
-//! - The parser normalizes unquoted identifiers to uppercase
 //! - Delimited identifiers preserve their exact case
 //! - "users" and "USERS" are different tables
-//!
-//! When case_sensitive_identifiers = false (MySQL compatible mode):
-//! - Lookups are case-insensitive
-//! - "users", "USERS", "Users" all refer to the same table
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Database;
@@ -22,11 +22,7 @@ use vibesql_types::DataType;
 fn test_table_lookup_case_insensitive_when_enabled() {
     let mut db = Database::new();
 
-    // Default is case-sensitive (SQL:1999 compliant)
-    assert!(db.catalog.is_case_sensitive_identifiers());
-
-    // Enable case-insensitive mode for this test
-    db.catalog.set_case_sensitive_identifiers(false);
+    // Default is case-insensitive (SQLite compatible)
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
     // Create table with lowercase name
@@ -183,11 +179,7 @@ fn test_case_sensitive_mode() {
 fn test_toggle_case_sensitivity() {
     let mut db = Database::new();
 
-    // Default is case-sensitive (SQL:1999 compliant)
-    assert!(db.catalog.is_case_sensitive_identifiers());
-
-    // Start in case-insensitive mode for this test
-    db.catalog.set_case_sensitive_identifiers(false);
+    // Default is case-insensitive (SQLite compatible)
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
     // Create table in case-insensitive mode with uppercase name

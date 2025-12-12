@@ -44,7 +44,7 @@ fn test_parse_count_column() {
                     assert!(!(*distinct));
                     assert_eq!(args.len(), 1);
                     match &args[0] {
-                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "ID" => {}
+                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "id" => {}
                         _ => panic!("Expected column reference"),
                     }
                 }
@@ -149,7 +149,7 @@ fn test_parse_scalar_min_max_functions() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "MIN");
+                        assert_eq!(name.to_uppercase(), "min");
                         assert_eq!(args.len(), 2, "min(11, 22) should have 2 arguments");
                     }
                     vibesql_ast::Expression::AggregateFunction { .. } => {
@@ -164,7 +164,7 @@ fn test_parse_scalar_min_max_functions() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "MAX");
+                        assert_eq!(name.to_uppercase(), "max");
                         assert_eq!(args.len(), 3, "max(1, 2, 3) should have 3 arguments");
                     }
                     vibesql_ast::Expression::AggregateFunction { .. } => {
@@ -194,7 +194,7 @@ fn test_parse_aggregate_with_alias() {
                     }
                     _ => panic!("Expected aggregate function"),
                 }
-                assert_eq!(alias.as_ref().unwrap(), "TOTAL");
+                assert_eq!(alias.as_ref().unwrap(), "total");
             }
             _ => panic!("Expected expression with alias"),
         },
@@ -217,7 +217,7 @@ fn test_parse_aggregate_with_alias_without_as() {
                     }
                     _ => panic!("Expected aggregate function"),
                 }
-                assert_eq!(alias.as_ref().unwrap(), "TOTAL");
+                assert_eq!(alias.as_ref().unwrap(), "total");
             }
             _ => panic!("Expected expression with alias"),
         },

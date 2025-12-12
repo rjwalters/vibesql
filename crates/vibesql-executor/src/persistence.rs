@@ -182,8 +182,8 @@ CREATE TABLE test_schema.products (id INTEGER, price REAL);
 
         let db = load_sql_dump(temp_file).unwrap();
 
-        // Verify table exists in schema (note: identifiers are uppercased)
-        assert!(db.get_table("TEST_SCHEMA.PRODUCTS").is_some());
+        // Verify table exists in schema (case-insensitive lookup)
+        assert!(db.get_table("test_schema.products").is_some());
 
         fs::remove_file(temp_file).unwrap();
     }

@@ -12,9 +12,9 @@ fn test_parse_character_varying_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(50) } => {} // Success
                 _ => panic!("Expected VARCHAR(50) data type"),
@@ -32,9 +32,9 @@ fn test_parse_character_varying_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: None } => {} // Success
                 _ => panic!("Expected VARCHAR data type without length"),
@@ -52,9 +52,9 @@ fn test_parse_varchar_with_characters_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(20) } => {} // Success
                 _ => panic!("Expected VARCHAR(20) data type"),
@@ -72,9 +72,9 @@ fn test_parse_varchar_with_octets_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(20) } => {} // Success
                 _ => panic!("Expected VARCHAR(20) data type"),
@@ -92,9 +92,9 @@ fn test_parse_character_varying_with_characters_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(30) } => {} // Success
                 _ => panic!("Expected VARCHAR(30) data type"),
@@ -112,9 +112,9 @@ fn test_parse_character_varying_with_octets_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(30) } => {} // Success
                 _ => panic!("Expected VARCHAR(30) data type"),
@@ -137,9 +137,9 @@ fn test_parse_char_varing_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: None } => {} // Success
                 _ => panic!("Expected VARCHAR data type without length"),
@@ -158,9 +158,9 @@ fn test_parse_char_varing_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(50) } => {} // Success
                 _ => panic!("Expected VARCHAR(50) data type"),
@@ -206,9 +206,9 @@ fn test_parse_nchar_varying_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(50) } => {} // Success
                 _ => panic!("Expected VARCHAR(50) data type"),
@@ -226,9 +226,9 @@ fn test_parse_nchar_varying_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: None } => {} // Success
                 _ => panic!("Expected VARCHAR data type without length"),
@@ -262,7 +262,7 @@ fn test_parse_nchar_varying_with_constraint() {
             // Note: COMMENT is parsed but not currently stored in the AST
 
             // Check second column (unquoted, normalized to uppercase)
-            assert_eq!(create.columns[1].name, "C2");
+            assert_eq!(create.columns[1].name, "c2");
             match create.columns[1].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(42) } => {} // Success
                 _ => panic!("Expected VARCHAR(42) for c2"),
@@ -285,7 +285,7 @@ fn test_parse_nchar_varying_with_octets_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(25) } => {} // Success
                 _ => panic!("Expected VARCHAR(25) data type"),
@@ -307,9 +307,9 @@ fn test_parse_nvarchar_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(13) } => {} // Success
                 _ => panic!("Expected VARCHAR(13) data type"),
@@ -328,9 +328,9 @@ fn test_parse_nvarchar_with_space_before_paren() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(13) } => {} // Success
                 _ => panic!("Expected VARCHAR(13) data type"),
@@ -348,9 +348,9 @@ fn test_parse_nvarchar_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: None } => {} // Success
                 _ => panic!("Expected VARCHAR data type without length"),
@@ -438,7 +438,7 @@ fn test_parse_nvarchar_with_characters_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(25) } => {} // Success
                 _ => panic!("Expected VARCHAR(25) data type"),
@@ -456,7 +456,7 @@ fn test_parse_nvarchar_with_octets_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(30) } => {} // Success
                 _ => panic!("Expected VARCHAR(30) data type"),
@@ -478,9 +478,9 @@ fn test_parse_national_varchar_with_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(20) } => {} // Success
                 _ => panic!("Expected VARCHAR(20) data type"),
@@ -499,9 +499,9 @@ fn test_parse_national_varchar_with_space_before_paren() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(4) } => {} // Success
                 _ => panic!("Expected VARCHAR(4) data type"),
@@ -519,9 +519,9 @@ fn test_parse_national_varchar_without_length() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: None } => {} // Success
                 _ => panic!("Expected VARCHAR data type without length"),
@@ -563,7 +563,7 @@ fn test_parse_national_varchar_with_constraint() {
                 .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::Unique)));
 
             // Check second column (unquoted, normalized to uppercase)
-            assert_eq!(create.columns[1].name, "C2");
+            assert_eq!(create.columns[1].name, "c2");
             match create.columns[1].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(19) } => {} // Success
                 _ => panic!("Expected VARCHAR(19) for c2"),
@@ -610,7 +610,7 @@ fn test_parse_national_varchar_with_characters_modifier() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match create.columns[0].data_type {
                 vibesql_types::DataType::Varchar { max_length: Some(25) } => {} // Success
                 _ => panic!("Expected VARCHAR(25) data type"),

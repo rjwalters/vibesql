@@ -12,14 +12,14 @@ fn test_create_index_simple() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "IDX");
-            assert_eq!(stmt.table_name, "USERS");
+            assert_eq!(stmt.index_name, "idx");
+            assert_eq!(stmt.table_name, "users");
             match &stmt.index_type {
                 vibesql_ast::IndexType::BTree { unique } => assert!(!unique),
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "EMAIL");
+            assert_eq!(stmt.columns[0].column_name, "email");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -40,10 +40,10 @@ fn test_create_unique_index() {
                 }
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
-            assert_eq!(stmt.index_name, "IDX");
-            assert_eq!(stmt.table_name, "USERS");
+            assert_eq!(stmt.index_name, "idx");
+            assert_eq!(stmt.table_name, "users");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "EMAIL");
+            assert_eq!(stmt.columns[0].column_name, "email");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -58,18 +58,18 @@ fn test_create_index_multi_column() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "IDX");
-            assert_eq!(stmt.table_name, "USERS");
+            assert_eq!(stmt.index_name, "idx");
+            assert_eq!(stmt.table_name, "users");
             match &stmt.index_type {
                 vibesql_ast::IndexType::BTree { unique } => assert!(!unique),
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.columns.len(), 3);
-            assert_eq!(stmt.columns[0].column_name, "FIRST_NAME");
+            assert_eq!(stmt.columns[0].column_name, "first_name");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
-            assert_eq!(stmt.columns[1].column_name, "LAST_NAME");
+            assert_eq!(stmt.columns[1].column_name, "last_name");
             assert_eq!(stmt.columns[1].direction, vibesql_ast::OrderDirection::Asc);
-            assert_eq!(stmt.columns[2].column_name, "EMAIL");
+            assert_eq!(stmt.columns[2].column_name, "email");
             assert_eq!(stmt.columns[2].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -88,12 +88,12 @@ fn test_create_unique_index_multi_column() {
                 vibesql_ast::IndexType::BTree { unique } => assert!(*unique),
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
-            assert_eq!(stmt.index_name, "IDX");
-            assert_eq!(stmt.table_name, "ORDERS");
+            assert_eq!(stmt.index_name, "idx");
+            assert_eq!(stmt.table_name, "orders");
             assert_eq!(stmt.columns.len(), 2);
-            assert_eq!(stmt.columns[0].column_name, "CUSTOMER_ID");
+            assert_eq!(stmt.columns[0].column_name, "customer_id");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
-            assert_eq!(stmt.columns[1].column_name, "ORDER_DATE");
+            assert_eq!(stmt.columns[1].column_name, "order_date");
             assert_eq!(stmt.columns[1].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -108,10 +108,10 @@ fn test_create_index_mixed_case_identifiers() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "MYINDEX");
-            assert_eq!(stmt.table_name, "MYTABLE");
+            assert_eq!(stmt.index_name, "myindex");
+            assert_eq!(stmt.table_name, "mytable");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "MYCOLUMN");
+            assert_eq!(stmt.columns[0].column_name, "mycolumn");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -126,10 +126,10 @@ fn test_create_index_single_column() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "PK");
-            assert_eq!(stmt.table_name, "USERS");
+            assert_eq!(stmt.index_name, "pk");
+            assert_eq!(stmt.table_name, "users");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "ID");
+            assert_eq!(stmt.columns[0].column_name, "id");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -144,16 +144,16 @@ fn test_create_index_with_desc() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "IDX");
-            assert_eq!(stmt.table_name, "USERS");
+            assert_eq!(stmt.index_name, "idx");
+            assert_eq!(stmt.table_name, "users");
             match &stmt.index_type {
                 vibesql_ast::IndexType::BTree { unique } => assert!(!unique),
                 other => panic!("Expected BTree index, got: {:?}", other),
             }
             assert_eq!(stmt.columns.len(), 2);
-            assert_eq!(stmt.columns[0].column_name, "EMAIL");
+            assert_eq!(stmt.columns[0].column_name, "email");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Desc);
-            assert_eq!(stmt.columns[1].column_name, "CREATED_AT");
+            assert_eq!(stmt.columns[1].column_name, "created_at");
             assert_eq!(stmt.columns[1].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -168,7 +168,7 @@ fn test_drop_index_simple() {
 
     match result.unwrap() {
         Statement::DropIndex(stmt) => {
-            assert_eq!(stmt.index_name, "IDX");
+            assert_eq!(stmt.index_name, "idx");
         }
         other => panic!("Expected DropIndex, got: {:?}", other),
     }
@@ -182,7 +182,7 @@ fn test_drop_index_mixed_case() {
 
     match result.unwrap() {
         Statement::DropIndex(stmt) => {
-            assert_eq!(stmt.index_name, "MYINDEX");
+            assert_eq!(stmt.index_name, "myindex");
         }
         other => panic!("Expected DropIndex, got: {:?}", other),
     }
@@ -222,15 +222,15 @@ fn test_create_spatial_index() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "IDX_LOCATION");
-            assert_eq!(stmt.table_name, "PLACES");
+            assert_eq!(stmt.index_name, "idx_location");
+            assert_eq!(stmt.table_name, "places");
             assert!(
                 matches!(stmt.index_type, vibesql_ast::IndexType::Spatial),
                 "Expected Spatial index, got: {:?}",
                 stmt.index_type
             );
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "GEOM");
+            assert_eq!(stmt.columns[0].column_name, "geom");
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
@@ -245,11 +245,11 @@ fn test_create_spatial_index_if_not_exists() {
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
             assert!(stmt.if_not_exists);
-            assert_eq!(stmt.index_name, "IDX_BOUNDARY");
-            assert_eq!(stmt.table_name, "PARCELS");
+            assert_eq!(stmt.index_name, "idx_boundary");
+            assert_eq!(stmt.table_name, "parcels");
             assert!(matches!(stmt.index_type, vibesql_ast::IndexType::Spatial));
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "BOUNDARY");
+            assert_eq!(stmt.columns[0].column_name, "boundary");
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }

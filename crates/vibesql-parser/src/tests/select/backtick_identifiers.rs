@@ -121,7 +121,7 @@ fn test_parse_select_mixed_backtick_and_regular() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "ID");
+                        assert_eq!(column, "id");
                     }
                     _ => panic!("Expected ColumnRef"),
                 },

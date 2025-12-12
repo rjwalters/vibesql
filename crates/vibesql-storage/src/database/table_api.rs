@@ -77,6 +77,18 @@ impl Database {
             }
         }
 
+        // For qualified names (schema.table), try normalizing each part separately
+        // This handles the case where storage normalized table name but not schema
+        if let Some((schema_part, table_part)) = name.split_once('.') {
+            // Try schema lowercase, table uppercase (current storage behavior)
+            let mixed_case = format!("{}.{}", schema_part.to_lowercase(), table_part.to_uppercase());
+            if mixed_case != name && mixed_case != uppercase_name && mixed_case != lowercase_name {
+                if let Some(table) = self.tables.get(&mixed_case) {
+                    return Some(table);
+                }
+            }
+        }
+
         // Try with schema qualification
         if !name.contains('.') {
             let current_schema = &self.catalog.get_current_schema();

@@ -54,7 +54,9 @@ impl super::super::Catalog {
         event: Option<vibesql_ast::TriggerEvent>,
     ) -> impl Iterator<Item = &'a TriggerDefinition> + 'a {
         self.triggers.values().filter(move |trigger| {
-            trigger.table_name == table_name && event.as_ref().is_none_or(|e| trigger.event == *e)
+            // Case-insensitive table name matching (SQLite-compatible)
+            trigger.table_name.eq_ignore_ascii_case(table_name)
+                && event.as_ref().is_none_or(|e| trigger.event == *e)
         })
     }
 

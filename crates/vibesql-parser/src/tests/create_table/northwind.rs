@@ -18,9 +18,9 @@ fn test_parse_northwind_categories_table() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "CATEGORIES");
+            assert_eq!(create.table_name, "Categories");
             assert_eq!(create.columns.len(), 3);
-            assert_eq!(create.columns[0].name, "CATEGORYID");
+            assert_eq!(create.columns[0].name, "CategoryID");
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
@@ -50,11 +50,11 @@ fn test_parse_northwind_products_table() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "PRODUCTS");
+            assert_eq!(create.table_name, "products");
             assert_eq!(create.columns.len(), 4);
 
             // product_id has PRIMARY KEY
-            assert_eq!(create.columns[0].name, "PRODUCT_ID");
+            assert_eq!(create.columns[0].name, "product_id");
             assert_eq!(create.columns[0].constraints.len(), 1);
             assert!(matches!(
                 create.columns[0].constraints[0],
@@ -65,7 +65,7 @@ fn test_parse_northwind_products_table() {
             ));
 
             // product_name has NOT NULL (nullable = false)
-            assert_eq!(create.columns[1].name, "PRODUCT_NAME");
+            assert_eq!(create.columns[1].name, "product_name");
             assert!(!create.columns[1].nullable, "product_name should be NOT NULL");
 
             // Table has FOREIGN KEY constraint
@@ -83,10 +83,10 @@ fn test_parse_northwind_products_table() {
                     ..
                 } => {
                     assert_eq!(columns.len(), 1);
-                    assert_eq!(columns[0], "CATEGORY_ID");
-                    assert_eq!(references_table, "CATEGORIES");
+                    assert_eq!(columns[0], "category_id");
+                    assert_eq!(references_table, "Categories");
                     assert_eq!(references_columns.len(), 1);
-                    assert_eq!(references_columns[0], "CATEGORY_ID");
+                    assert_eq!(references_columns[0], "category_id");
                     assert!(on_delete.is_none());
                     assert!(on_update.is_none());
                 }

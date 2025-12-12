@@ -13,9 +13,9 @@ fn test_parse_varbinary_with_size() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "VARBINARY");
@@ -36,9 +36,9 @@ fn test_parse_varbinary_with_size_and_space() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "VARBINARY");
@@ -59,9 +59,9 @@ fn test_parse_varbinary_without_size() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "VARBINARY");
@@ -82,9 +82,9 @@ fn test_parse_binary_with_size() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "BINARY");
@@ -105,9 +105,9 @@ fn test_parse_binary_with_size_and_space() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "BINARY");
@@ -128,9 +128,9 @@ fn test_parse_binary_without_size() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "BINARY");
@@ -151,9 +151,9 @@ fn test_parse_varbinary_with_key_constraint() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T");
+            assert_eq!(create.table_name, "t");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "C1");
+            assert_eq!(create.columns[0].name, "c1");
             match &create.columns[0].data_type {
                 vibesql_types::DataType::UserDefined { type_name } => {
                     assert_eq!(type_name, "VARBINARY");

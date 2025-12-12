@@ -102,7 +102,7 @@ fn test_parse_position_with_column() {
                             **string,
                             vibesql_ast::Expression::ColumnRef {
                                 table: None,
-                                column: "NAME".to_string()
+                                column: "name".to_string()
                             }
                         );
                     }
@@ -133,14 +133,14 @@ fn test_parse_position_both_columns() {
                             **substring,
                             vibesql_ast::Expression::ColumnRef {
                                 table: None,
-                                column: "NEEDLE".to_string()
+                                column: "needle".to_string()
                             }
                         );
                         assert_eq!(
                             **string,
                             vibesql_ast::Expression::ColumnRef {
                                 table: None,
-                                column: "HAYSTACK".to_string()
+                                column: "haystack".to_string()
                             }
                         );
                     }
@@ -176,7 +176,7 @@ fn test_parse_position_with_function() {
                         // Check that string is a Function expression
                         match &**string {
                             vibesql_ast::Expression::Function { name, args, character_unit: _ } => {
-                                assert_eq!(name, "LOWER");
+                                assert_eq!(name, "lower");
                                 assert_eq!(args.len(), 1);
                             }
                             _ => panic!("Expected Function expression in string"),

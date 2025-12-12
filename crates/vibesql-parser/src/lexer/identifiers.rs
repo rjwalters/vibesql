@@ -12,6 +12,11 @@ impl<'a> Lexer<'a> {
     /// This function is optimized to avoid heap allocations when possible:
     /// - For identifiers <= 32 bytes that need uppercase conversion, uses a stack buffer
     /// - Only allocates when the token is confirmed to be an identifier (not a keyword)
+    ///
+    /// **Case handling**: Keywords are matched case-insensitively (using uppercase),
+    /// but identifiers preserve their original case from the SQL text. This matches
+    /// SQLite's behavior where `CREATE TABLE t(col)` stores "col" in the schema,
+    /// and `SELECT col FROM t` returns "col" as the column name (schema case).
     pub(super) fn tokenize_identifier_or_keyword(&mut self) -> Result<Token, LexerError> {
         let start = self.position();
         let mut needs_uppercase = false;
@@ -19,7 +24,7 @@ impl<'a> Lexer<'a> {
         while !self.is_eof() {
             let ch = self.current_char();
             if ch.is_ascii_alphanumeric() || ch == '_' {
-                // Track if we have lowercase letters that need conversion
+                // Track if we have lowercase letters that need conversion for keyword matching
                 if ch.is_ascii_lowercase() {
                     needs_uppercase = true;
                 }
@@ -50,15 +55,16 @@ impl<'a> Lexer<'a> {
                     return Ok(Token::Keyword(keyword));
                 }
 
-                // Not a keyword - now allocate for the identifier
-                // We need to allocate anyway since identifiers are stored as String
-                Ok(Token::Identifier(upper.to_string()))
+                // Not a keyword - store original case to match SQLite behavior
+                // (column names preserve case from schema, not from query)
+                Ok(Token::Identifier(text.to_string()))
             } else {
-                // Long identifier - fall back to heap allocation
+                // Long identifier - fall back to heap allocation for keyword check only
                 let upper_text = text.to_ascii_uppercase();
                 match keywords::map_keyword(&upper_text) {
                     Some(keyword) => Ok(Token::Keyword(keyword)),
-                    None => Ok(Token::Identifier(upper_text)),
+                    // Not a keyword - store original case
+                    None => Ok(Token::Identifier(text.to_string())),
                 }
             }
         } else {
