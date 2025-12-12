@@ -18,8 +18,8 @@ fn test_parse_select_wildcard_with_derived_column_list() {
                     assert!(alias.is_some());
                     let derived_cols = alias.as_ref().unwrap();
                     assert_eq!(derived_cols.len(), 2);
-                    assert_eq!(derived_cols[0], "C");
-                    assert_eq!(derived_cols[1], "D");
+                    assert_eq!(derived_cols[0], "c");
+                    assert_eq!(derived_cols[1], "d");
                 }
                 _ => panic!("Expected Wildcard select item"),
             }
@@ -42,8 +42,8 @@ fn test_parse_select_all_wildcard_with_derived_column_list() {
                     assert!(alias.is_some());
                     let derived_cols = alias.as_ref().unwrap();
                     assert_eq!(derived_cols.len(), 2);
-                    assert_eq!(derived_cols[0], "C");
-                    assert_eq!(derived_cols[1], "D");
+                    assert_eq!(derived_cols[0], "c");
+                    assert_eq!(derived_cols[1], "d");
                 }
                 _ => panic!("Expected Wildcard select item"),
             }
@@ -67,8 +67,8 @@ fn test_parse_select_distinct_wildcard_with_derived_column_list() {
                     assert!(alias.is_some());
                     let derived_cols = alias.as_ref().unwrap();
                     assert_eq!(derived_cols.len(), 2);
-                    assert_eq!(derived_cols[0], "C");
-                    assert_eq!(derived_cols[1], "D");
+                    assert_eq!(derived_cols[0], "c");
+                    assert_eq!(derived_cols[1], "d");
                 }
                 _ => panic!("Expected Wildcard select item"),
             }
@@ -88,12 +88,12 @@ fn test_parse_select_qualified_wildcard_with_derived_column_list() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
-                    assert_eq!(qualifier, "TABLE_NAME");
+                    assert_eq!(qualifier, "table_name");
                     assert!(alias.is_some());
                     let derived_cols = alias.as_ref().unwrap();
                     assert_eq!(derived_cols.len(), 2);
-                    assert_eq!(derived_cols[0], "C");
-                    assert_eq!(derived_cols[1], "D");
+                    assert_eq!(derived_cols[0], "c");
+                    assert_eq!(derived_cols[1], "d");
                 }
                 _ => panic!("Expected QualifiedWildcard select item"),
             }
@@ -113,12 +113,12 @@ fn test_parse_select_alias_wildcard_with_derived_column_list() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
-                    assert_eq!(qualifier, "T");
+                    assert_eq!(qualifier, "t");
                     assert!(alias.is_some());
                     let derived_cols = alias.as_ref().unwrap();
                     assert_eq!(derived_cols.len(), 2);
-                    assert_eq!(derived_cols[0], "C");
-                    assert_eq!(derived_cols[1], "D");
+                    assert_eq!(derived_cols[0], "c");
+                    assert_eq!(derived_cols[1], "d");
                 }
                 _ => panic!("Expected QualifiedWildcard select item"),
             }
@@ -141,11 +141,11 @@ fn test_parse_select_wildcard_with_multiple_columns_in_derived_list() {
                     assert!(alias.is_some());
                     let derived_cols = alias.as_ref().unwrap();
                     assert_eq!(derived_cols.len(), 5);
-                    assert_eq!(derived_cols[0], "A");
-                    assert_eq!(derived_cols[1], "B");
-                    assert_eq!(derived_cols[2], "C");
-                    assert_eq!(derived_cols[3], "D");
-                    assert_eq!(derived_cols[4], "E");
+                    assert_eq!(derived_cols[0], "a");
+                    assert_eq!(derived_cols[1], "b");
+                    assert_eq!(derived_cols[2], "c");
+                    assert_eq!(derived_cols[3], "d");
+                    assert_eq!(derived_cols[4], "e");
                 }
                 _ => panic!("Expected Wildcard select item"),
             }

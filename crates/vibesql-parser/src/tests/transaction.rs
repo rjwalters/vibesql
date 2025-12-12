@@ -4,7 +4,7 @@ use crate::Parser;
 
 #[test]
 fn test_parse_begin() {
-    let result = Parser::parse_sql("BEGIN");
+    let result = Parser::parse_sql("begin");
     assert!(result.is_ok());
     match result.unwrap() {
         vibesql_ast::Statement::BeginTransaction(_) => (),
@@ -34,7 +34,7 @@ fn test_parse_start_transaction() {
 
 #[test]
 fn test_parse_commit() {
-    let result = Parser::parse_sql("COMMIT");
+    let result = Parser::parse_sql("commit");
     assert!(result.is_ok());
     match result.unwrap() {
         vibesql_ast::Statement::Commit(_) => (),
@@ -44,7 +44,7 @@ fn test_parse_commit() {
 
 #[test]
 fn test_parse_rollback() {
-    let result = Parser::parse_sql("ROLLBACK");
+    let result = Parser::parse_sql("rollback");
     assert!(result.is_ok());
     match result.unwrap() {
         vibesql_ast::Statement::Rollback(_) => (),
@@ -58,7 +58,7 @@ fn test_transaction_keywords_case_insensitive() {
     let result1 = Parser::parse_sql("begin");
     assert!(result1.is_ok());
 
-    let result2 = Parser::parse_sql("COMMIT");
+    let result2 = Parser::parse_sql("commit");
     assert!(result2.is_ok());
 
     let result3 = Parser::parse_sql("rollback");
@@ -170,7 +170,7 @@ fn test_parse_begin_durability_case_insensitive() {
 #[test]
 fn test_parse_begin_without_durability_defaults() {
     // Test that BEGIN without durability hint defaults to Default
-    let result = Parser::parse_sql("BEGIN");
+    let result = Parser::parse_sql("begin");
     assert!(result.is_ok());
     match result.unwrap() {
         vibesql_ast::Statement::BeginTransaction(stmt) => {

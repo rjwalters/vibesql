@@ -79,7 +79,7 @@ fn test_parse_create_table_all_phase2_types() {
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 14, "Should have 14 columns");
-            assert_eq!(create.table_name, "COMPREHENSIVE");
+            assert_eq!(create.table_name, "comprehensive");
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

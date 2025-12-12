@@ -11,7 +11,7 @@ fn test_create_translation_minimal() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
-            assert_eq!(create_stmt.translation_name, "MY_TRANS");
+            assert_eq!(create_stmt.translation_name, "my_trans");
             assert_eq!(create_stmt.source_charset, None);
             assert_eq!(create_stmt.target_charset, None);
             assert_eq!(create_stmt.translation_source, None);
@@ -29,9 +29,9 @@ fn test_create_translation_with_for_to() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
-            assert_eq!(create_stmt.translation_name, "MY_TRANS");
-            assert_eq!(create_stmt.source_charset, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.target_charset, Some("LATIN1".to_string()));
+            assert_eq!(create_stmt.translation_name, "my_trans");
+            assert_eq!(create_stmt.source_charset, Some("utf8".to_string()));
+            assert_eq!(create_stmt.target_charset, Some("latin1".to_string()));
             assert_eq!(create_stmt.translation_source, None);
         }
         _ => panic!("Expected CreateTranslation statement, got: {:?}", stmt),
@@ -47,10 +47,10 @@ fn test_create_translation_with_from() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
-            assert_eq!(create_stmt.translation_name, "MY_TRANS");
+            assert_eq!(create_stmt.translation_name, "my_trans");
             assert_eq!(create_stmt.source_charset, None);
             assert_eq!(create_stmt.target_charset, None);
-            assert_eq!(create_stmt.translation_source, Some("CONVERTER".to_string()));
+            assert_eq!(create_stmt.translation_source, Some("converter".to_string()));
         }
         _ => panic!("Expected CreateTranslation statement, got: {:?}", stmt),
     }
@@ -65,10 +65,10 @@ fn test_create_translation_full_syntax() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
-            assert_eq!(create_stmt.translation_name, "MY_TRANS");
-            assert_eq!(create_stmt.source_charset, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.target_charset, Some("LATIN1".to_string()));
-            assert_eq!(create_stmt.translation_source, Some("CONVERTER".to_string()));
+            assert_eq!(create_stmt.translation_name, "my_trans");
+            assert_eq!(create_stmt.source_charset, Some("utf8".to_string()));
+            assert_eq!(create_stmt.target_charset, Some("latin1".to_string()));
+            assert_eq!(create_stmt.translation_source, Some("converter".to_string()));
         }
         _ => panic!("Expected CreateTranslation statement, got: {:?}", stmt),
     }
@@ -84,8 +84,8 @@ fn test_create_translation_for_without_to() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
-            assert_eq!(create_stmt.translation_name, "MY_TRANS");
-            assert_eq!(create_stmt.source_charset, Some("UTF8".to_string()));
+            assert_eq!(create_stmt.translation_name, "my_trans");
+            assert_eq!(create_stmt.source_charset, Some("utf8".to_string()));
             assert_eq!(create_stmt.target_charset, None);
             assert_eq!(create_stmt.translation_source, None);
         }
@@ -102,7 +102,7 @@ fn test_drop_translation() {
     let stmt = result.unwrap();
     match stmt {
         vibesql_ast::Statement::DropTranslation(drop_stmt) => {
-            assert_eq!(drop_stmt.translation_name, "MY_TRANS");
+            assert_eq!(drop_stmt.translation_name, "my_trans");
         }
         _ => panic!("Expected DropTranslation statement, got: {:?}", stmt),
     }

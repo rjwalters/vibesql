@@ -20,8 +20,8 @@ fn test_parse_grant_select_on_table() {
         &grant,
         &[PrivilegeType::Select(None)],
         ObjectType::Table,
-        "USERS",
-        &["MANAGER"],
+        "users",
+        &["manager"],
         false,
     );
 }
@@ -33,8 +33,8 @@ fn test_parse_grant_multiple_privileges() {
         &grant,
         &[PrivilegeType::Select(None), PrivilegeType::Insert(None), PrivilegeType::Update(None)],
     );
-    assert_object(&grant, ObjectType::Table, "USERS");
-    assert_grantees(&grant, &["MANAGER"]);
+    assert_object(&grant, ObjectType::Table, "users");
+    assert_grantees(&grant, &["manager"]);
 }
 
 #[test]
@@ -58,8 +58,8 @@ fn test_parse_grant_all_privileges_with_keyword() {
         &grant,
         &[PrivilegeType::AllPrivileges],
         ObjectType::Table,
-        "USERS",
-        &["MANAGER"],
+        "users",
+        &["manager"],
         false,
     );
 }
@@ -71,8 +71,8 @@ fn test_parse_grant_references_on_table() {
         &grant,
         &[PrivilegeType::References(None)],
         ObjectType::Table,
-        "USERS",
-        &["MANAGER"],
+        "users",
+        &["manager"],
         false,
     );
 }
@@ -81,8 +81,8 @@ fn test_parse_grant_references_on_table() {
 fn test_parse_grant_references_combined_with_select() {
     let grant = parse_grant("GRANT REFERENCES, SELECT ON TABLE products TO buyer");
     assert_privileges(&grant, &[PrivilegeType::References(None), PrivilegeType::Select(None)]);
-    assert_object(&grant, ObjectType::Table, "PRODUCTS");
-    assert_grantees(&grant, &["BUYER"]);
+    assert_object(&grant, ObjectType::Table, "products");
+    assert_grantees(&grant, &["buyer"]);
 }
 
 #[test]
@@ -92,8 +92,8 @@ fn test_parse_grant_all_without_privileges_keyword() {
         &grant,
         &[PrivilegeType::AllPrivileges],
         ObjectType::Table,
-        "USERS",
-        &["MANAGER"],
+        "users",
+        &["manager"],
         false,
     );
 }
@@ -102,16 +102,16 @@ fn test_parse_grant_all_without_privileges_keyword() {
 fn test_parse_grant_all_case_insensitive() {
     let grant = parse_grant("grant all on table employees to clerk");
     assert_privileges(&grant, &[PrivilegeType::AllPrivileges]);
-    assert_object(&grant, ObjectType::Table, "EMPLOYEES");
-    assert_grantees(&grant, &["CLERK"]);
+    assert_object(&grant, ObjectType::Table, "employees");
+    assert_grantees(&grant, &["clerk"]);
 }
 
 #[test]
 fn test_parse_grant_references_case_insensitive() {
     let grant = parse_grant("grant references on table employees to clerk");
     assert_privileges(&grant, &[PrivilegeType::References(None)]);
-    assert_object(&grant, ObjectType::Table, "EMPLOYEES");
-    assert_grantees(&grant, &["CLERK"]);
+    assert_object(&grant, ObjectType::Table, "employees");
+    assert_grantees(&grant, &["clerk"]);
 }
 
 #[test]
@@ -121,8 +121,8 @@ fn test_parse_grant_references_with_grant_option_table_level() {
         &grant,
         &[PrivilegeType::References(None)],
         ObjectType::Table,
-        "ORDERS",
-        &["MANAGER"],
+        "orders",
+        &["manager"],
         true,
     );
 }

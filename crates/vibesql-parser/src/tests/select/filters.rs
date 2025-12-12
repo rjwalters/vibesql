@@ -13,7 +13,7 @@ fn test_parse_select_with_where() {
                 vibesql_ast::Expression::BinaryOp { op, left, right } => {
                     assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
                     match **left {
-                        vibesql_ast::Expression::ColumnRef { ref column, .. } if column == "ID" => {
+                        vibesql_ast::Expression::ColumnRef { ref column, .. } if column == "id" => {
                         }
                         _ => panic!("Expected id column in WHERE"),
                     }
@@ -40,7 +40,7 @@ fn test_parse_select_with_alias() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { alias, .. } => {
-                    assert_eq!(alias.as_ref().unwrap(), "USER_ID");
+                    assert_eq!(alias.as_ref().unwrap(), "user_id");
                 }
                 _ => panic!("Expected Expression select item"),
             }
@@ -60,7 +60,7 @@ fn test_parse_select_with_alias_without_as() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { alias, .. } => {
-                    assert_eq!(alias.as_ref().unwrap(), "USER_ID");
+                    assert_eq!(alias.as_ref().unwrap(), "user_id");
                 }
                 _ => panic!("Expected Expression select item"),
             }
@@ -82,7 +82,7 @@ fn test_parse_select_mixed_aliases() {
             // First column: id AS user_id
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { alias, .. } => {
-                    assert_eq!(alias.as_ref().unwrap(), "USER_ID");
+                    assert_eq!(alias.as_ref().unwrap(), "user_id");
                 }
                 _ => panic!("Expected Expression select item"),
             }
@@ -90,7 +90,7 @@ fn test_parse_select_mixed_aliases() {
             // Second column: name username (without AS)
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { alias, .. } => {
-                    assert_eq!(alias.as_ref().unwrap(), "USERNAME");
+                    assert_eq!(alias.as_ref().unwrap(), "username");
                 }
                 _ => panic!("Expected Expression select item"),
             }
@@ -275,7 +275,7 @@ fn test_select_type_column_unquoted() {
                     assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
                     match **left {
                         vibesql_ast::Expression::ColumnRef { ref column, .. } => {
-                            assert_eq!(column, "TYPE");
+                            assert_eq!(column, "type");
                         }
                         _ => panic!("Expected type column in WHERE, got {:?}", left),
                     }
@@ -300,7 +300,7 @@ fn test_select_sql_column_unquoted() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "SQL");
+                        assert_eq!(column, "sql");
                     }
                     _ => panic!("Expected ColumnRef for sql"),
                 },
@@ -327,7 +327,7 @@ fn test_select_type_and_sql_columns_together() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "TYPE");
+                        assert_eq!(column, "type");
                     }
                     _ => panic!("Expected ColumnRef for type"),
                 },
@@ -338,7 +338,7 @@ fn test_select_type_and_sql_columns_together() {
             match &select.select_list[2] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "SQL");
+                        assert_eq!(column, "sql");
                     }
                     _ => panic!("Expected ColumnRef for sql"),
                 },
@@ -360,8 +360,8 @@ fn test_select_qualified_type_column() {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::ColumnRef { table, column, .. } => {
-                    assert_eq!(table.as_deref(), Some("SQLITE_MASTER"));
-                    assert_eq!(column, "TYPE");
+                    assert_eq!(table.as_deref(), Some("sqlite_master"));
+                    assert_eq!(column, "type");
                 }
                 _ => panic!("Expected ColumnRef"),
             },

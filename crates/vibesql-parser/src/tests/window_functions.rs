@@ -17,7 +17,7 @@ fn test_empty_over_clause() {
                     vibesql_ast::Expression::WindowFunction { function, over } => {
                         match function {
                             vibesql_ast::WindowFunctionSpec::Ranking { name, .. } => {
-                                assert_eq!(name, "ROW_NUMBER");
+                                assert_eq!(name, "row_number");
                             }
                             _ => panic!("Expected Ranking window function"),
                         }
@@ -241,7 +241,7 @@ fn test_aggregate_as_window_function() {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                 vibesql_ast::Expression::WindowFunction { function, .. } => match function {
                     vibesql_ast::WindowFunctionSpec::Aggregate { name, args } => {
-                        assert_eq!(name, "SUM");
+                        assert_eq!(name, "sum");
                         assert_eq!(args.len(), 1);
                     }
                     _ => panic!("Expected Aggregate window function"),

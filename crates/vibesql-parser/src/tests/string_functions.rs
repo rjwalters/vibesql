@@ -15,7 +15,7 @@ fn test_substring_comma_syntax() {
 
         if let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] {
             if let vibesql_ast::Expression::Function { name, args, character_unit: _ } = expr {
-                assert_eq!(name.to_uppercase(), "SUBSTRING");
+                assert_eq!(name.to_uppercase(), "substring");
                 assert_eq!(args.len(), 3); // string, start, length
 
                 // Check string argument
@@ -64,7 +64,7 @@ fn test_substring_comma_syntax_no_length() {
     if let vibesql_ast::Statement::Select(select) = stmt {
         if let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] {
             if let vibesql_ast::Expression::Function { name, args, character_unit: _ } = expr {
-                assert_eq!(name.to_uppercase(), "SUBSTRING");
+                assert_eq!(name.to_uppercase(), "substring");
                 assert_eq!(args.len(), 2); // string, start (no length)
             } else {
                 panic!("Expected Function expression");
@@ -84,7 +84,7 @@ fn test_substring_from_syntax() {
 
         if let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] {
             if let vibesql_ast::Expression::Function { name, args, character_unit: _ } = expr {
-                assert_eq!(name.to_uppercase(), "SUBSTRING");
+                assert_eq!(name.to_uppercase(), "substring");
                 assert_eq!(args.len(), 2); // string, start
 
                 // Check string argument
@@ -126,7 +126,7 @@ fn test_substring_from_for_syntax() {
 
         if let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] {
             if let vibesql_ast::Expression::Function { name, args, character_unit: _ } = expr {
-                assert_eq!(name.to_uppercase(), "SUBSTRING");
+                assert_eq!(name.to_uppercase(), "substring");
                 assert_eq!(args.len(), 3); // string, start, length
 
                 // Check string argument

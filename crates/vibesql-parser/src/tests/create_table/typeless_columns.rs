@@ -18,9 +18,9 @@ fn test_parse_create_table_single_typeless_column() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T1");
+            assert_eq!(create.table_name, "t1");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             // Typeless columns default to BLOB affinity
             assert_eq!(create.columns[0].data_type, vibesql_types::DataType::BinaryLargeObject);
         }
@@ -37,11 +37,11 @@ fn test_parse_create_table_multiple_typeless_columns() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T1");
+            assert_eq!(create.table_name, "t1");
             assert_eq!(create.columns.len(), 3);
-            assert_eq!(create.columns[0].name, "A");
-            assert_eq!(create.columns[1].name, "B");
-            assert_eq!(create.columns[2].name, "C");
+            assert_eq!(create.columns[0].name, "a");
+            assert_eq!(create.columns[1].name, "b");
+            assert_eq!(create.columns[2].name, "c");
             // All columns default to BLOB affinity
             for col in &create.columns {
                 assert_eq!(col.data_type, vibesql_types::DataType::BinaryLargeObject);
@@ -60,9 +60,9 @@ fn test_parse_create_table_typeless_with_primary_key() {
 
     match stmt {
         vibesql_ast::Statement::CreateTable(create) => {
-            assert_eq!(create.table_name, "T1");
+            assert_eq!(create.table_name, "t1");
             assert_eq!(create.columns.len(), 1);
-            assert_eq!(create.columns[0].name, "X");
+            assert_eq!(create.columns[0].name, "x");
             assert_eq!(create.columns[0].data_type, vibesql_types::DataType::BinaryLargeObject);
             // Should have PRIMARY KEY constraint
             assert!(create.columns[0]
@@ -136,13 +136,13 @@ fn test_parse_create_table_mixed_typed_and_typeless() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert_eq!(create.columns.len(), 3);
             // First column has INTEGER type
-            assert_eq!(create.columns[0].name, "A");
+            assert_eq!(create.columns[0].name, "a");
             assert_eq!(create.columns[0].data_type, vibesql_types::DataType::Integer);
             // Second column is typeless -> BLOB
-            assert_eq!(create.columns[1].name, "B");
+            assert_eq!(create.columns[1].name, "b");
             assert_eq!(create.columns[1].data_type, vibesql_types::DataType::BinaryLargeObject);
             // Third column has TEXT type (maps to VARCHAR)
-            assert_eq!(create.columns[2].name, "C");
+            assert_eq!(create.columns[2].name, "c");
             assert_eq!(
                 create.columns[2].data_type,
                 vibesql_types::DataType::Varchar { max_length: None }
@@ -210,7 +210,7 @@ fn test_parse_create_table_typeless_with_references() {
             assert!(create.columns[0].constraints.iter().any(|c| matches!(
                 &c.kind,
                 vibesql_ast::ColumnConstraintKind::References { table, column, .. }
-                    if table == "OTHER" && column == "ID"
+                    if table == "other" && column == "id"
             )));
         }
         _ => panic!("Expected CREATE TABLE statement"),
