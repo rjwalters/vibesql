@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{errors::CatalogError, table::TableSchema};
+use crate::{errors::CatalogError, identifier::TableIdentifier, table::TableSchema};
 
 impl super::Catalog {
     /// Check for circular foreign key dependencies that would be created by adding this table.
@@ -118,7 +118,29 @@ impl super::Catalog {
         false
     }
 
+    /// Create a table schema in the current schema with SQL:1999 identifier semantics.
+    ///
+    /// The `identifier` parameter determines case-sensitivity:
+    /// - Quoted identifiers: stored with exact case
+    /// - Unquoted identifiers: stored with lowercase canonical form
+    pub fn create_table_with_identifier(
+        &mut self,
+        schema: TableSchema,
+        identifier: TableIdentifier,
+    ) -> Result<(), CatalogError> {
+        // Check for circular foreign key dependencies
+        self.check_circular_foreign_keys(&schema)?;
+
+        let current_schema = self
+            .schemas
+            .get_mut(&self.current_schema)
+            .ok_or_else(|| CatalogError::SchemaNotFound(self.current_schema.clone()))?;
+
+        current_schema.create_table_with_identifier(schema, identifier)
+    }
+
     /// Create a table schema in the current schema.
+    /// Legacy method - uses global case_sensitive_identifiers setting
     pub fn create_table(&mut self, schema: TableSchema) -> Result<(), CatalogError> {
         // Check for circular foreign key dependencies
         self.check_circular_foreign_keys(&schema)?;
@@ -150,7 +172,18 @@ impl super::Catalog {
         target_schema.create_table_with_case_mode(schema, case_sensitive)
     }
 
+    /// Get a table schema using SQL:1999 identifier semantics.
+    ///
+    /// The `identifier` parameter determines case-sensitivity based on whether
+    /// the identifier was quoted in the original SQL.
+    pub fn get_table_by_identifier(&self, identifier: &TableIdentifier) -> Option<&TableSchema> {
+        self.schemas.get(&self.current_schema).and_then(|schema| {
+            schema.get_table_by_identifier(identifier)
+        })
+    }
+
     /// Get a table schema by name (supports qualified names like "schema.table").
+    /// Legacy method - uses global case_sensitive_identifiers setting
     pub fn get_table(&self, name: &str) -> Option<&TableSchema> {
         // Parse qualified name: schema.table or just table
         if let Some((schema_name, table_name)) = name.split_once('.') {
