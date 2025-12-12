@@ -940,6 +940,7 @@ fn test_json_view_preservation() {
             name: "users".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef { table: None, column: "active".to_string() }),
@@ -1023,6 +1024,7 @@ fn test_json_view_preservation_without_sql_definition() {
             name: "products".to_string(),
             alias: None,
             column_aliases: None,
+        quoted: false,
         }),
         where_clause: None,
         group_by: None,
