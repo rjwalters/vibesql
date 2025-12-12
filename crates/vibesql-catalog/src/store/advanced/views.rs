@@ -43,9 +43,9 @@ impl super::super::Catalog {
         self.views.get(&key)
     }
 
-    /// List all VIEW names
+    /// List all VIEW names (returns original names, not normalized keys)
     pub fn list_views(&self) -> Vec<String> {
-        self.views.keys().cloned().collect()
+        self.views.values().map(|v| v.name.clone()).collect()
     }
 
     /// Drop a VIEW with specified behavior
