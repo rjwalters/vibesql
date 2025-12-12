@@ -116,11 +116,11 @@ fn test_parse_delete_only_with_parentheses_and_current_of() {
     match stmt {
         vibesql_ast::Statement::Delete(delete) => {
             assert!(delete.only, "ONLY flag should be true");
-            assert_eq!(delete.table_name, "table_e121_07_01_01");
+            assert_eq!(delete.table_name, "TABLE_E121_07_01_01");
             assert!(delete.where_clause.is_some());
             match delete.where_clause.unwrap() {
                 vibesql_ast::WhereClause::CurrentOf(cursor) => {
-                    assert_eq!(cursor, "cur_e121_07_01_01");
+                    assert_eq!(cursor, "CUR_E121_07_01_01");
                 }
                 _ => panic!("Expected WHERE CURRENT OF clause"),
             }

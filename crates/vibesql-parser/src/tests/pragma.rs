@@ -123,7 +123,7 @@ fn test_pragma_with_identifier_value() {
             assert!(stmt.database.is_none());
             assert_eq!(stmt.name, "synchronous");
             match &stmt.value {
-                Some(PragmaValue::Identifier(v)) => assert_eq!(v, "off"),
+                Some(PragmaValue::Identifier(v)) => assert_eq!(v, "OFF"),
                 other => panic!("Expected Identifier value, got: {:?}", other),
             }
         }

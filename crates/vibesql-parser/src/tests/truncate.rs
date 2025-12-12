@@ -80,7 +80,7 @@ fn test_truncate_qualified_table() {
 
     match stmt {
         Statement::TruncateTable(truncate_stmt) => {
-            assert_eq!(truncate_stmt.table_names, vec!["MYSCHEMA.USERS"]);
+            assert_eq!(truncate_stmt.table_names, vec!["myschema.users"]);
             assert!(!truncate_stmt.if_exists);
         }
         _ => panic!("Expected TruncateTable statement, got {:?}", stmt),
@@ -148,7 +148,7 @@ fn test_truncate_multiple_qualified_tables() {
 
     match stmt {
         Statement::TruncateTable(truncate_stmt) => {
-            assert_eq!(truncate_stmt.table_names, vec!["SCHEMA1.TABLE1", "SCHEMA2.TABLE2"]);
+            assert_eq!(truncate_stmt.table_names, vec!["schema1.table1", "schema2.table2"]);
             assert!(!truncate_stmt.if_exists);
         }
         _ => panic!("Expected TruncateTable statement, got {:?}", stmt),

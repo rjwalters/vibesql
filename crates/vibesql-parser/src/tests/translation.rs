@@ -30,8 +30,9 @@ fn test_create_translation_with_for_to() {
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
             assert_eq!(create_stmt.translation_name, "my_trans");
-            assert_eq!(create_stmt.source_charset, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.target_charset, Some("LATIN1".to_string()));
+            // Unquoted identifiers preserve their original case
+            assert_eq!(create_stmt.source_charset, Some("utf8".to_string()));
+            assert_eq!(create_stmt.target_charset, Some("latin1".to_string()));
             assert_eq!(create_stmt.translation_source, None);
         }
         _ => panic!("Expected CreateTranslation statement, got: {:?}", stmt),
@@ -66,8 +67,9 @@ fn test_create_translation_full_syntax() {
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
             assert_eq!(create_stmt.translation_name, "my_trans");
-            assert_eq!(create_stmt.source_charset, Some("UTF8".to_string()));
-            assert_eq!(create_stmt.target_charset, Some("LATIN1".to_string()));
+            // Unquoted identifiers preserve their original case
+            assert_eq!(create_stmt.source_charset, Some("utf8".to_string()));
+            assert_eq!(create_stmt.target_charset, Some("latin1".to_string()));
             assert_eq!(create_stmt.translation_source, Some("converter".to_string()));
         }
         _ => panic!("Expected CreateTranslation statement, got: {:?}", stmt),
@@ -85,7 +87,8 @@ fn test_create_translation_for_without_to() {
     match stmt {
         vibesql_ast::Statement::CreateTranslation(create_stmt) => {
             assert_eq!(create_stmt.translation_name, "my_trans");
-            assert_eq!(create_stmt.source_charset, Some("UTF8".to_string()));
+            // Unquoted identifiers preserve their original case
+            assert_eq!(create_stmt.source_charset, Some("utf8".to_string()));
             assert_eq!(create_stmt.target_charset, None);
             assert_eq!(create_stmt.translation_source, None);
         }

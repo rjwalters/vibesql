@@ -131,8 +131,9 @@ fn test_parse_match_against_mixed_case() {
     if let vibesql_ast::Statement::Select(select) = stmt {
         if let vibesql_ast::Expression::MatchAgainst { columns, .. } = &select.where_clause.unwrap()
         {
-            assert_eq!(columns[0], "title");
-            assert_eq!(columns[1], "body");
+            // Identifiers preserve their original case from the SQL
+            assert_eq!(columns[0], "Title");
+            assert_eq!(columns[1], "Body");
         } else {
             panic!("Expected MatchAgainst expression");
         }

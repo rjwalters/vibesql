@@ -149,7 +149,7 @@ fn test_parse_scalar_min_max_functions() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "min");
+                        assert_eq!(name, "min");
                         assert_eq!(args.len(), 2, "min(11, 22) should have 2 arguments");
                     }
                     vibesql_ast::Expression::AggregateFunction { .. } => {
@@ -164,7 +164,7 @@ fn test_parse_scalar_min_max_functions() {
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::Function { name, args, .. } => {
-                        assert_eq!(name.to_uppercase(), "max");
+                        assert_eq!(name, "max");
                         assert_eq!(args.len(), 3, "max(1, 2, 3) should have 3 arguments");
                     }
                     vibesql_ast::Expression::AggregateFunction { .. } => {

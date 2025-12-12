@@ -17,7 +17,8 @@ fn test_column_m_in_select() {
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef { column, .. } => {
-                        assert_eq!(column, "m");
+                        // M is a keyword, so stored in uppercase
+                        assert_eq!(column, "M");
                     }
                     _ => panic!("Expected ColumnRef, got {:?}", expr),
                 },

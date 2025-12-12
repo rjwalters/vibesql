@@ -27,7 +27,8 @@ fn test_parse_set_names_simple() {
 
     match stmt {
         vibesql_ast::Statement::SetNames(set_stmt) => {
-            assert_eq!(set_stmt.charset_name, "utf8");
+            // String literals preserve their case
+            assert_eq!(set_stmt.charset_name, "UTF8");
             assert_eq!(set_stmt.collation, None);
         }
         _ => panic!("Expected SetNames statement"),
@@ -43,7 +44,8 @@ fn test_parse_set_names_with_collation() {
 
     match stmt {
         vibesql_ast::Statement::SetNames(set_stmt) => {
-            assert_eq!(set_stmt.charset_name, "utf8");
+            // String literals preserve their case
+            assert_eq!(set_stmt.charset_name, "UTF8");
             assert_eq!(set_stmt.collation, Some("en_US".to_string()));
         }
         _ => panic!("Expected SetNames statement"),

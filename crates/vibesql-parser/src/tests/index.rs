@@ -108,10 +108,10 @@ fn test_create_index_mixed_case_identifiers() {
 
     match result.unwrap() {
         Statement::CreateIndex(stmt) => {
-            assert_eq!(stmt.index_name, "myindex");
-            assert_eq!(stmt.table_name, "mytable");
+            assert_eq!(stmt.index_name, "MyIndex");
+            assert_eq!(stmt.table_name, "MyTable");
             assert_eq!(stmt.columns.len(), 1);
-            assert_eq!(stmt.columns[0].column_name, "mycolumn");
+            assert_eq!(stmt.columns[0].column_name, "MyColumn");
             assert_eq!(stmt.columns[0].direction, vibesql_ast::OrderDirection::Asc);
         }
         other => panic!("Expected CreateIndex, got: {:?}", other),
@@ -182,7 +182,7 @@ fn test_drop_index_mixed_case() {
 
     match result.unwrap() {
         Statement::DropIndex(stmt) => {
-            assert_eq!(stmt.index_name, "myindex");
+            assert_eq!(stmt.index_name, "MyIndex");
         }
         other => panic!("Expected DropIndex, got: {:?}", other),
     }

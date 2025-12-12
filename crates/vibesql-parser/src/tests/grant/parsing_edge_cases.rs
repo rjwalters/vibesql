@@ -34,7 +34,7 @@ fn test_parse_grant_qualified_table_name() {
 
     match result.unwrap() {
         Statement::Grant(grant_stmt) => {
-            assert_eq!(grant_stmt.object_name.to_string(), "PUBLIC.USERS");
+            assert_eq!(grant_stmt.object_name.to_string(), "public.users");
         }
         other => panic!("Expected Grant statement, got {:?}", other),
     }

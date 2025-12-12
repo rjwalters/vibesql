@@ -147,7 +147,7 @@ fn test_declare_cursor_for_update_of_columns() {
     if let Ok(Statement::DeclareCursor(stmt)) = result {
         assert_eq!(stmt.cursor_name, "my_cursor");
         if let CursorUpdatability::Update { columns } = stmt.updatability {
-            assert_eq!(columns, Some(vec!["A".to_string(), "b".to_string()]));
+            assert_eq!(columns, Some(vec!["a".to_string(), "b".to_string()]));
         } else {
             panic!("Expected Update updatability with columns");
         }

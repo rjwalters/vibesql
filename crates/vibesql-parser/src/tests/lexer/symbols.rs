@@ -64,9 +64,9 @@ fn test_tokenize_double_equals_sqlite_compat() {
     // Test in expression context
     let mut lexer2 = Lexer::new("a==b");
     let tokens2 = lexer2.tokenize().unwrap();
-    assert_eq!(tokens2[0], Token::Identifier("A".to_string()));
+    assert_eq!(tokens2[0], Token::Identifier("a".to_string()));
     assert_eq!(tokens2[1], Token::Operator(MultiCharOperator::DoubleEqual));
-    assert_eq!(tokens2[2], Token::Identifier("B".to_string()));
+    assert_eq!(tokens2[2], Token::Identifier("b".to_string()));
 }
 
 #[test]

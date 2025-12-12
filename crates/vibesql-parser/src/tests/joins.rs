@@ -212,7 +212,7 @@ fn test_parse_join_using_single_column() {
                 assert!(using_columns.is_some());
                 let cols = using_columns.as_ref().unwrap();
                 assert_eq!(cols.len(), 1);
-                assert_eq!(cols[0].to_uppercase(), "id");
+                assert_eq!(cols[0], "id");
             }
             _ => panic!("Expected JOIN"),
         },

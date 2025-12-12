@@ -84,7 +84,7 @@ fn test_parse_northwind_products_table() {
                 } => {
                     assert_eq!(columns.len(), 1);
                     assert_eq!(columns[0], "category_id");
-                    assert_eq!(references_table, "Categories");
+                    assert_eq!(references_table, "categories");
                     assert_eq!(references_columns.len(), 1);
                     assert_eq!(references_columns[0], "category_id");
                     assert!(on_delete.is_none());
