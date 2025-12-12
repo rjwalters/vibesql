@@ -18,7 +18,10 @@ pub struct SqlExecutor {
 
 #[derive(Debug, Clone)]
 pub struct QueryResult {
-    pub rows: Vec<Vec<String>>,
+    /// Cell values: None represents SQL NULL, Some(s) represents actual data.
+    /// This distinction is important for output formatting - NULL values should
+    /// be displayed differently than the literal string "NULL".
+    pub rows: Vec<Vec<Option<String>>>,
     pub columns: Vec<String>,
     pub row_count: usize,
     pub execution_time_ms: Option<f64>,
@@ -86,9 +89,19 @@ impl SqlExecutor {
                         // Use column names from the executor result
                         result.columns = select_result.columns;
                         // Convert rows to string representation using Display trait
+                        // NULL values are represented as None to distinguish from the literal string "NULL"
                         for row in select_result.rows {
-                            let row_strs: Vec<String> =
-                                row.values.iter().map(|v| format!("{}", v)).collect();
+                            let row_strs: Vec<Option<String>> = row
+                                .values
+                                .iter()
+                                .map(|v| {
+                                    if v.is_null() {
+                                        None
+                                    } else {
+                                        Some(format!("{}", v))
+                                    }
+                                })
+                                .collect();
                             result.rows.push(row_strs);
                         }
                     }
@@ -234,7 +247,7 @@ impl SqlExecutor {
                         result.columns = vec!["QUERY PLAN".to_string()];
                         // Split output into rows for better display
                         for line in output.lines() {
-                            result.rows.push(vec![line.to_string()]);
+                            result.rows.push(vec![Some(line.to_string())]);
                         }
                         result.row_count = result.rows.len();
                     }
@@ -419,7 +432,8 @@ impl SqlExecutor {
         // Note: WHERE clause filtering would require expression evaluation
         // For now, we support LIKE pattern only
 
-        let rows: Vec<Vec<String>> = filtered_tables.iter().map(|t| vec![t.clone()]).collect();
+        let rows: Vec<Vec<Option<String>>> =
+            filtered_tables.iter().map(|t| vec![Some(t.clone())]).collect();
         let row_count = rows.len();
 
         Ok(QueryResult {
@@ -448,7 +462,8 @@ impl SqlExecutor {
             schemas
         };
 
-        let rows: Vec<Vec<String>> = filtered_schemas.iter().map(|s| vec![s.clone()]).collect();
+        let rows: Vec<Vec<Option<String>>> =
+            filtered_schemas.iter().map(|s| vec![Some(s.clone())]).collect();
         let row_count = rows.len();
 
         Ok(QueryResult {
@@ -471,7 +486,7 @@ impl SqlExecutor {
             .get_table(&normalized_name)
             .ok_or_else(|| anyhow::anyhow!("Table '{}' does not exist", stmt.table_name))?;
 
-        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut rows: Vec<Vec<Option<String>>> = Vec::new();
 
         for column in &table.schema.columns {
             // Check LIKE pattern if specified
@@ -504,24 +519,24 @@ impl SqlExecutor {
             let row = if stmt.full {
                 // SHOW FULL COLUMNS returns additional fields
                 vec![
-                    column.name.clone(),
-                    display::format_data_type(&column.data_type),
-                    String::new(), // Collation - not yet supported
-                    nullable.to_string(),
-                    key.to_string(),
-                    default_val,
-                    String::new(), // Extra
-                    String::new(), // Privileges
-                    String::new(), // Comment
+                    Some(column.name.clone()),
+                    Some(display::format_data_type(&column.data_type)),
+                    Some(String::new()), // Collation - not yet supported
+                    Some(nullable.to_string()),
+                    Some(key.to_string()),
+                    Some(default_val),
+                    Some(String::new()), // Extra
+                    Some(String::new()), // Privileges
+                    Some(String::new()), // Comment
                 ]
             } else {
                 vec![
-                    column.name.clone(),
-                    display::format_data_type(&column.data_type),
-                    nullable.to_string(),
-                    key.to_string(),
-                    default_val,
-                    String::new(), // Extra
+                    Some(column.name.clone()),
+                    Some(display::format_data_type(&column.data_type)),
+                    Some(nullable.to_string()),
+                    Some(key.to_string()),
+                    Some(default_val),
+                    Some(String::new()), // Extra
                 ]
             };
 
@@ -567,7 +582,7 @@ impl SqlExecutor {
             .ok_or_else(|| anyhow::anyhow!("Table '{}' does not exist", stmt.table_name))?;
 
         let index_names = self.db.list_indexes();
-        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut rows: Vec<Vec<Option<String>>> = Vec::new();
 
         for index_name in index_names {
             if let Some(index_meta) = self.db.get_index(&index_name) {
@@ -575,18 +590,18 @@ impl SqlExecutor {
                     // Add one row per column in the index
                     for (seq, col) in index_meta.columns.iter().enumerate() {
                         rows.push(vec![
-                            normalized_name.clone(),                               // Table
-                            if index_meta.unique { "0" } else { "1" }.to_string(), // Non_unique
-                            index_meta.index_name.clone(),                         // Key_name
-                            (seq + 1).to_string(),                                 // Seq_in_index
-                            col.column_name.clone(),                               // Column_name
-                            "A".to_string(), // Collation (always Ascending for now)
-                            String::new(),   // Cardinality
-                            String::new(),   // Sub_part
-                            String::new(),   // Packed
-                            String::new(),   // Null
-                            "BTREE".to_string(), // Index_type
-                            String::new(),   // Comment
+                            Some(normalized_name.clone()),                               // Table
+                            Some(if index_meta.unique { "0" } else { "1" }.to_string()), // Non_unique
+                            Some(index_meta.index_name.clone()),                         // Key_name
+                            Some((seq + 1).to_string()), // Seq_in_index
+                            Some(col.column_name.clone()), // Column_name
+                            Some("A".to_string()), // Collation (always Ascending for now)
+                            Some(String::new()),   // Cardinality
+                            Some(String::new()),   // Sub_part
+                            Some(String::new()),   // Packed
+                            Some(String::new()),   // Null
+                            Some("BTREE".to_string()), // Index_type
+                            Some(String::new()),   // Comment
                         ]);
                     }
                 }
@@ -670,7 +685,7 @@ impl SqlExecutor {
 
         Ok(QueryResult {
             columns: vec!["Table".to_string(), "Create Table".to_string()],
-            rows: vec![vec![normalized_name, create_sql]],
+            rows: vec![vec![Some(normalized_name), Some(create_sql)]],
             row_count: 1,
             execution_time_ms: None,
             message: None,
