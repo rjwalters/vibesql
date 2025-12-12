@@ -47,6 +47,7 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
@@ -138,6 +139,7 @@ fn test_in_subquery_explicit_multi_column_rejected() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
@@ -242,6 +244,7 @@ fn test_in_subquery_single_column_accepted() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
@@ -261,6 +264,7 @@ fn test_in_subquery_single_column_accepted() {
                         column: "x".to_string(),
                     },
                     alias: None,
+                    source_text: None,
                 }],
                 from: Some(vibesql_ast::FromClause::Table { quoted: false,
                     name: "t1".to_string(),
@@ -354,6 +358,7 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
                 into_variables: None,
             })),
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),

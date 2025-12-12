@@ -190,6 +190,7 @@ fn test_not_between() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "products".to_string(),
@@ -363,6 +364,7 @@ fn test_between_with_column_references() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() },
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "ranges".to_string(),

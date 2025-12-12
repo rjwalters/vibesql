@@ -672,6 +672,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
             alias: None,
+            source_text: None,
         }],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
             name: "t1".to_string(),
