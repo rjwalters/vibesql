@@ -14,10 +14,10 @@ use vibesql_types::SqlValue;
 use super::{hnsw::HnswIndex, ivfflat::IVFFlatIndex};
 use crate::{btree::BTreeIndex, page::PageManager, StorageError};
 
-/// Normalize an index name to uppercase for case-insensitive comparison
+/// Normalize an index name to lowercase for case-insensitive comparison
 /// This follows SQL standard identifier rules
 pub(super) fn normalize_index_name(name: &str) -> String {
-    name.to_uppercase()
+    name.to_lowercase()
 }
 
 /// Threshold for choosing disk-backed indexes (number of table rows)

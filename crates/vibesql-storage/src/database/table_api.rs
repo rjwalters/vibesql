@@ -65,7 +65,7 @@ impl Database {
         let normalized_table_name = if self.catalog.is_case_sensitive_identifiers() {
             table_name.clone()
         } else {
-            table_name.to_uppercase()
+            table_name.to_lowercase()
         };
 
         let current_schema = &self.catalog.get_current_schema();
@@ -106,19 +106,18 @@ impl Database {
             return Some(table);
         }
 
-        // Try uppercase normalization (for unquoted identifiers from the parser)
-        let uppercase_name = name.to_uppercase();
-        if uppercase_name != name {
-            if let Some(table) = self.tables.get(&uppercase_name) {
+        // Try lowercase normalization (standard for unquoted identifiers)
+        let lowercase_name = name.to_lowercase();
+        if lowercase_name != name {
+            if let Some(table) = self.tables.get(&lowercase_name) {
                 return Some(table);
             }
         }
 
-        // Try lowercase normalization (for case-insensitive matching when table
-        // was created with lowercase but query uses uppercase identifiers)
-        let lowercase_name = name.to_lowercase();
-        if lowercase_name != name && lowercase_name != uppercase_name {
-            if let Some(table) = self.tables.get(&lowercase_name) {
+        // Try uppercase normalization (for backward compatibility with old data)
+        let uppercase_name = name.to_uppercase();
+        if uppercase_name != name && uppercase_name != lowercase_name {
+            if let Some(table) = self.tables.get(&uppercase_name) {
                 return Some(table);
             }
         }
@@ -160,20 +159,19 @@ impl Database {
             return self.tables.get_mut(name);
         }
 
-        // Try uppercase normalization (for unquoted identifiers from the parser)
-        let uppercase_name = name.to_uppercase();
-        if uppercase_name != name && self.tables.contains_key(&uppercase_name) {
-            return self.tables.get_mut(&uppercase_name);
+        // Try lowercase normalization (standard for unquoted identifiers)
+        let lowercase_name = name.to_lowercase();
+        if lowercase_name != name && self.tables.contains_key(&lowercase_name) {
+            return self.tables.get_mut(&lowercase_name);
         }
 
-        // Try lowercase normalization (for case-insensitive matching when table
-        // was created with lowercase but query uses uppercase identifiers)
-        let lowercase_name = name.to_lowercase();
-        if lowercase_name != name
-            && lowercase_name != uppercase_name
-            && self.tables.contains_key(&lowercase_name)
+        // Try uppercase normalization (for backward compatibility with old data)
+        let uppercase_name = name.to_uppercase();
+        if uppercase_name != name
+            && uppercase_name != lowercase_name
+            && self.tables.contains_key(&uppercase_name)
         {
-            return self.tables.get_mut(&lowercase_name);
+            return self.tables.get_mut(&uppercase_name);
         }
 
         // Try with schema qualification
@@ -186,21 +184,21 @@ impl Database {
                 return self.tables.get_mut(&qualified_name_original);
             }
 
-            // Try uppercase with schema prefix
-            let qualified_name_uppercase = format!("{}.{}", current_schema, uppercase_name);
-            if qualified_name_uppercase != qualified_name_original
-                && self.tables.contains_key(&qualified_name_uppercase)
-            {
-                return self.tables.get_mut(&qualified_name_uppercase);
-            }
-
-            // Try lowercase with schema prefix
+            // Try lowercase with schema prefix (standard)
             let qualified_name_lowercase = format!("{}.{}", current_schema, lowercase_name);
             if qualified_name_lowercase != qualified_name_original
-                && qualified_name_lowercase != qualified_name_uppercase
                 && self.tables.contains_key(&qualified_name_lowercase)
             {
                 return self.tables.get_mut(&qualified_name_lowercase);
+            }
+
+            // Try uppercase with schema prefix (backward compatibility)
+            let qualified_name_uppercase = format!("{}.{}", current_schema, uppercase_name);
+            if qualified_name_uppercase != qualified_name_original
+                && qualified_name_uppercase != qualified_name_lowercase
+                && self.tables.contains_key(&qualified_name_uppercase)
+            {
+                return self.tables.get_mut(&qualified_name_uppercase);
             }
         }
 
