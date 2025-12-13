@@ -124,7 +124,7 @@ help:
 	@echo "  make benchmark           - Run all benchmarks, VibeSQL only (~2.5 hours)"
 	@echo "  make benchmark-quick     - Quick CI run with reduced iterations (~25 min)"
 	@echo "  make benchmark-smoke     - Smoke test for pipeline validation (~30s)"
-	@echo "  make benchmark-all       - FULL matrix: tests + benchmarks (runs in BACKGROUND)"
+	@echo "  make benchmark-all       - FULL matrix: embedded + server benchmarks (runs in BACKGROUND)"
 	@echo "  make benchmark-all-fg    - Run 'make benchmark-all' in foreground (blocking)"
 	@echo "  make benchmark-logs      - Tail the background benchmark output"
 	@echo "  make benchmark-status    - Check if background benchmark is running"
@@ -367,8 +367,9 @@ benchmark-quick:
 benchmark-smoke:
 	@./scripts/bench --smoke --all
 
-# Full benchmark matrix: tests + embedded + server benchmarks
-# Runs unit tests, sqllogictest, then all benchmarks with timing report
+# Full benchmark matrix: embedded + server benchmarks
+# Runs all benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench) with timing report
+# Note: Tests are NOT included - run 'make test' separately
 # Runs in BACKGROUND by default - use 'make benchmark-all-fg' for foreground
 benchmark-all:
 	@echo "══════════════════════════════════════════════════════════════════"

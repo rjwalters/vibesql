@@ -3,10 +3,11 @@
 # benchmark-all orchestrator
 #
 # Runs the full benchmark matrix with timing breakdown:
-# 1. Unit tests
-# 2. SQLLogicTest suite
-# 3. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)
-# 4. Server benchmarks (TPC-H, TPC-C, Sysbench over PostgreSQL wire protocol)
+# 1. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)
+# 2. Server benchmarks (TPC-H, TPC-C, Sysbench over PostgreSQL wire protocol)
+#
+# Note: Tests (unit tests, SQLLogicTest) are NOT included.
+# Run 'make test' separately if you need test validation.
 #
 # Usage:
 #   ./scripts/bench-all
@@ -30,12 +31,8 @@ NC='\033[0m'
 # Timing data (bash 3 compatible - use separate variables)
 PHASE1_TIME=0
 PHASE2_TIME=0
-PHASE3_TIME=0
-PHASE4_TIME=0
 PHASE1_STATUS=""
 PHASE2_STATUS=""
-PHASE3_STATUS=""
-PHASE4_STATUS=""
 TOTAL_START=$(date +%s)
 
 # Format seconds into human-readable duration
@@ -69,73 +66,36 @@ print_summary() {
     echo "─────────────────────────────────────────────────────"
 
     # Print each phase
-    local test_time=0
     local bench_time=0
 
     if [ -n "$PHASE1_STATUS" ]; then
         local icon="✓"
         [ "$PHASE1_STATUS" != "success" ] && icon="✗"
-        printf "%-25s %10s %10s\n" "Unit Tests" "$(format_duration $PHASE1_TIME)" "$icon"
-        test_time=$((test_time + PHASE1_TIME))
+        printf "%-25s %10s %10s\n" "Embedded Benchmarks" "$(format_duration $PHASE1_TIME)" "$icon"
+        bench_time=$((bench_time + PHASE1_TIME))
     fi
 
     if [ -n "$PHASE2_STATUS" ]; then
         local icon="✓"
         [ "$PHASE2_STATUS" != "success" ] && icon="✗"
-        printf "%-25s %10s %10s\n" "SQLLogicTest" "$(format_duration $PHASE2_TIME)" "$icon"
-        test_time=$((test_time + PHASE2_TIME))
+        printf "%-25s %10s %10s\n" "Server Benchmarks" "$(format_duration $PHASE2_TIME)" "$icon"
+        bench_time=$((bench_time + PHASE2_TIME))
     fi
 
-    if [ -n "$PHASE3_STATUS" ]; then
-        local icon="✓"
-        [ "$PHASE3_STATUS" != "success" ] && icon="✗"
-        printf "%-25s %10s %10s\n" "Embedded Benchmarks" "$(format_duration $PHASE3_TIME)" "$icon"
-        bench_time=$((bench_time + PHASE3_TIME))
-    fi
-
-    if [ -n "$PHASE4_STATUS" ]; then
-        local icon="✓"
-        [ "$PHASE4_STATUS" != "success" ] && icon="✗"
-        printf "%-25s %10s %10s\n" "Server Benchmarks" "$(format_duration $PHASE4_TIME)" "$icon"
-        bench_time=$((bench_time + PHASE4_TIME))
-    fi
-
-    echo "─────────────────────────────────────────────────────"
-    printf "%-25s %10s\n" "Tests subtotal:" "$(format_duration $test_time)"
-    printf "%-25s %10s\n" "Benchmarks subtotal:" "$(format_duration $bench_time)"
     echo "═════════════════════════════════════════════════════"
     printf "${BOLD}%-25s %10s${NC}\n" "TOTAL:" "$(format_duration $total_duration)"
     echo ""
-
-    # Time allocation analysis
-    if (( total_duration > 0 )); then
-        local test_pct=$((test_time * 100 / total_duration))
-        local bench_pct=$((bench_time * 100 / total_duration))
-
-        echo "Time allocation:"
-        echo "  Tests:      $test_pct% ($(format_duration $test_time))"
-        echo "  Benchmarks: $bench_pct% ($(format_duration $bench_time))"
-        echo ""
-    fi
 
     # Priority recommendations based on what takes the longest
     echo -e "${BOLD}Optimization priorities:${NC}"
 
     # Find longest phase
-    local longest_name="Unit Tests"
+    local longest_name="Embedded Benchmarks"
     local longest_time=$PHASE1_TIME
 
     if (( PHASE2_TIME > longest_time )); then
-        longest_name="SQLLogicTest"
-        longest_time=$PHASE2_TIME
-    fi
-    if (( PHASE3_TIME > longest_time )); then
-        longest_name="Embedded Benchmarks"
-        longest_time=$PHASE3_TIME
-    fi
-    if (( PHASE4_TIME > longest_time )); then
         longest_name="Server Benchmarks"
-        longest_time=$PHASE4_TIME
+        longest_time=$PHASE2_TIME
     fi
 
     if (( longest_time > 0 )); then
@@ -143,11 +103,7 @@ print_summary() {
     fi
 
     # Specific recommendations
-    if (( PHASE2_TIME > 600 )); then
-        echo "  Tip: SQLLogicTest already uses parallel mode"
-    fi
-
-    if (( PHASE3_TIME > 3600 )); then
+    if (( PHASE1_TIME > 3600 )); then
         echo "  Tip: Use 'make benchmark-quick' for faster iteration (~25 min)"
     fi
 
@@ -164,72 +120,34 @@ main() {
     echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo "Running full benchmark matrix:"
-    echo "  1. Unit tests"
-    echo "  2. SQLLogicTest suite (~5.9M tests)"
-    echo "  3. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
-    echo "  4. Server benchmarks (PostgreSQL wire protocol)"
+    echo "  1. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
+    echo "  2. Server benchmarks (PostgreSQL wire protocol)"
+    echo ""
+    echo "Note: Tests not included. Run 'make test' separately."
     echo ""
     echo "Started at: $(date)"
 
     # Track if any phase failed
     local failed=0
 
-    # Phase 1: Unit tests
+    # Phase 1: Embedded benchmarks
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}[Unit Tests]${NC} Starting..."
+    echo -e "${BOLD}[Embedded Benchmarks]${NC} Starting..."
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     local phase_start=$(date +%s)
 
-    if make test-unit; then
+    if make benchmark-embedded-all; then
         PHASE1_STATUS="success"
-        echo -e "${GREEN}✓ [Unit Tests] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
+        echo -e "${GREEN}✓ [Embedded Benchmarks] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
     else
         PHASE1_STATUS="failed"
         failed=1
-        echo -e "${RED}✗ [Unit Tests] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
+        echo -e "${RED}✗ [Embedded Benchmarks] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
     fi
     PHASE1_TIME=$(($(date +%s) - phase_start))
 
-    # Phase 2: SQLLogicTest (only if unit tests passed)
-    if [ $failed -eq 0 ]; then
-        echo ""
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${BOLD}[SQLLogicTest]${NC} Starting..."
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        phase_start=$(date +%s)
-
-        if make test-sqllogictest; then
-            PHASE2_STATUS="success"
-            echo -e "${GREEN}✓ [SQLLogicTest] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
-        else
-            PHASE2_STATUS="failed"
-            failed=1
-            echo -e "${RED}✗ [SQLLogicTest] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
-        fi
-        PHASE2_TIME=$(($(date +%s) - phase_start))
-    fi
-
-    # Phase 3: Embedded benchmarks (only if tests passed)
-    if [ $failed -eq 0 ]; then
-        echo ""
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${BOLD}[Embedded Benchmarks]${NC} Starting..."
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        phase_start=$(date +%s)
-
-        if make benchmark-embedded-all; then
-            PHASE3_STATUS="success"
-            echo -e "${GREEN}✓ [Embedded Benchmarks] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
-        else
-            PHASE3_STATUS="failed"
-            failed=1
-            echo -e "${RED}✗ [Embedded Benchmarks] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
-        fi
-        PHASE3_TIME=$(($(date +%s) - phase_start))
-    fi
-
-    # Phase 4: Server benchmarks (only if embedded passed)
+    # Phase 2: Server benchmarks (only if embedded passed)
     if [ $failed -eq 0 ]; then
         echo ""
         echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -238,14 +156,14 @@ main() {
         phase_start=$(date +%s)
 
         if make benchmark-server-all; then
-            PHASE4_STATUS="success"
+            PHASE2_STATUS="success"
             echo -e "${GREEN}✓ [Server Benchmarks] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
         else
-            PHASE4_STATUS="failed"
+            PHASE2_STATUS="failed"
             failed=1
             echo -e "${RED}✗ [Server Benchmarks] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
         fi
-        PHASE4_TIME=$(($(date +%s) - phase_start))
+        PHASE2_TIME=$(($(date +%s) - phase_start))
     fi
 
     # Print summary
