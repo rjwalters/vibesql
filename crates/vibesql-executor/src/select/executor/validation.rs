@@ -851,7 +851,7 @@ fn expression_contains_aggregate(expr: &Expression) -> bool {
         Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().is_some_and(|e| expression_contains_aggregate(e))
                 || when_clauses.iter().any(|w| {
-                    w.conditions.iter().any(|c| expression_contains_aggregate(c))
+                    w.conditions.iter().any(expression_contains_aggregate)
                         || expression_contains_aggregate(&w.result)
                 })
                 || else_result.as_ref().is_some_and(|e| expression_contains_aggregate(e))

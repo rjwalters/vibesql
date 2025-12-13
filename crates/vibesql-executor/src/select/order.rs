@@ -704,14 +704,12 @@ fn resolve_aliases_in_expression(
         // Handle UnaryOp (e.g., -x, +x, NOT x)
         vibesql_ast::Expression::UnaryOp { op, expr: inner } => {
             // Try to resolve the inner expression
-            if let Some(resolved_inner) = resolve_alias_or_clone(inner, select_list) {
-                Some(vibesql_ast::Expression::UnaryOp {
+            resolve_alias_or_clone(inner, select_list).map(|resolved_inner| {
+                vibesql_ast::Expression::UnaryOp {
                     op: *op,
                     expr: Box::new(resolved_inner),
-                })
-            } else {
-                None
-            }
+                }
+            })
         }
 
         // Handle BinaryOp (e.g., 10-x, x+y)

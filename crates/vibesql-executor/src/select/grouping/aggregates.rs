@@ -1010,7 +1010,7 @@ mod tests {
         // SQLite's SUM() always returns REAL (float) for numeric values
         let result = acc.finalize();
         match result {
-            SqlValue::Numeric(v) if v == 0.0 => {} // OK - SUM returns REAL
+            SqlValue::Numeric(0.0) => {} // OK - SUM returns REAL
             _ => panic!("SUM of values that sum to 0 should return 0.0, got {:?}", result),
         }
     }

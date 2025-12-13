@@ -32,12 +32,8 @@ pub fn evaluate_predicate_string_batch(
                 | SqlValue::Real(_)
                 | SqlValue::Numeric(_)
                 | SqlValue::Smallint(_) => {
-                    // Return all false - no matches, respecting NULL handling
-                    return Ok(if let Some(null_mask) = nulls {
-                        null_mask.iter().map(|&is_null| !is_null && false).collect()
-                    } else {
-                        vec![false; values.len()]
-                    });
+                    // Return all false - type mismatch never matches
+                    return Ok(vec![false; values.len()]);
                 }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
@@ -60,11 +56,7 @@ pub fn evaluate_predicate_string_batch(
                 | SqlValue::Real(_)
                 | SqlValue::Numeric(_)
                 | SqlValue::Smallint(_) => {
-                    return Ok(if let Some(null_mask) = nulls {
-                        null_mask.iter().map(|&is_null| !is_null && false).collect()
-                    } else {
-                        vec![false; values.len()]
-                    });
+                    return Ok(vec![false; values.len()]);
                 }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
@@ -114,11 +106,7 @@ pub fn evaluate_predicate_string_batch(
                 | SqlValue::Real(_)
                 | SqlValue::Numeric(_)
                 | SqlValue::Smallint(_) => {
-                    return Ok(if let Some(null_mask) = nulls {
-                        null_mask.iter().map(|&is_null| !is_null && false).collect()
-                    } else {
-                        vec![false; values.len()]
-                    });
+                    return Ok(vec![false; values.len()]);
                 }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
@@ -224,11 +212,7 @@ pub fn evaluate_predicate_string_batch(
             //   - string <= high_num is false (text > numbers)
             //   - Result: true AND false = false
             if is_numeric(low) && is_numeric(high) {
-                return Ok(if let Some(null_mask) = nulls {
-                    null_mask.iter().map(|&is_null| !is_null && false).collect()
-                } else {
-                    vec![false; values.len()]
-                });
+                return Ok(vec![false; values.len()]);
             }
 
             // String BETWEEN - compare lexicographically
