@@ -5,6 +5,8 @@
 
 #![allow(clippy::collapsible_else_if)]
 
+use std::sync::Arc;
+
 use vibesql_types::SqlValue;
 
 use super::{
@@ -350,9 +352,42 @@ pub(super) fn compute_batch_sum(
     }
 }
 
-/// Compute COUNT aggregate directly on a ColumnarBatch
-pub(super) fn compute_batch_count(batch: &ColumnarBatch) -> Result<SqlValue, ExecutorError> {
-    Ok(SqlValue::Integer(batch.row_count() as i64))
+/// Compute COUNT aggregate directly on a ColumnarBatch column
+///
+/// Counts non-NULL values in the specified column. This is different from COUNT(*)
+/// which counts all rows regardless of NULL values.
+pub(super) fn compute_batch_count(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+) -> Result<SqlValue, ExecutorError> {
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
+
+    // Helper to count non-null values given array length and optional null mask
+    fn count_non_null(len: usize, nulls: Option<&Arc<Vec<bool>>>) -> usize {
+        if let Some(null_mask) = nulls {
+            len - null_mask.iter().filter(|&&is_null| is_null).count()
+        } else {
+            len
+        }
+    }
+
+    let count = match column {
+        ColumnArray::Int64(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Int32(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Float64(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Float32(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::String(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::FixedString(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Boolean(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Date(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Timestamp(values, nulls) => count_non_null(values.len(), nulls.as_ref()),
+        ColumnArray::Mixed(values) => values.iter().filter(|v| !v.is_null()).count(),
+    };
+
+    Ok(SqlValue::Integer(count as i64))
 }
 
 /// Compute AVG aggregate directly on a ColumnarBatch column
@@ -544,7 +579,7 @@ pub(super) fn compute_batch_aggregate(
 ) -> Result<SqlValue, ExecutorError> {
     match op {
         AggregateOp::Sum => compute_batch_sum(batch, column_idx),
-        AggregateOp::Count => compute_batch_count(batch),
+        AggregateOp::Count => compute_batch_count(batch, column_idx),
         AggregateOp::Avg => compute_batch_avg(batch, column_idx),
         AggregateOp::Min => compute_batch_min(batch, column_idx),
         AggregateOp::Max => compute_batch_max(batch, column_idx),

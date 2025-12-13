@@ -133,6 +133,9 @@ impl ColumnarBatch {
     }
 
     /// Extract a single column from rows into a typed array
+    ///
+    /// SQLite allows mixed types in a single column (manifest typing), so this
+    /// function handles type mismatches gracefully by falling back to Mixed type.
     pub(crate) fn extract_column(
         rows: &[Row],
         col_idx: usize,
@@ -155,12 +158,9 @@ impl ColumnarBatch {
                             nulls.push(true);
                             has_nulls = true;
                         }
-                        Some(other) => {
-                            return Err(ExecutorError::ColumnarTypeMismatch {
-                                operation: "extract_column".to_string(),
-                                left_type: "Integer".to_string(),
-                                right_type: Some(format!("{:?}", other)),
-                            });
+                        Some(_other) => {
+                            // Type mismatch - fall back to Mixed type for SQLite compatibility
+                            return Self::extract_column(rows, col_idx, &ColumnType::Mixed);
                         }
                         None => {
                             values.push(0);
@@ -192,12 +192,9 @@ impl ColumnarBatch {
                             nulls.push(true);
                             has_nulls = true;
                         }
-                        Some(other) => {
-                            return Err(ExecutorError::ColumnarTypeMismatch {
-                                operation: "extract_column".to_string(),
-                                left_type: "Double".to_string(),
-                                right_type: Some(format!("{:?}", other)),
-                            });
+                        Some(_other) => {
+                            // Type mismatch - fall back to Mixed type for SQLite compatibility
+                            return Self::extract_column(rows, col_idx, &ColumnType::Mixed);
                         }
                         None => {
                             values.push(0.0);
@@ -229,12 +226,9 @@ impl ColumnarBatch {
                             nulls.push(true);
                             has_nulls = true;
                         }
-                        Some(other) => {
-                            return Err(ExecutorError::ColumnarTypeMismatch {
-                                operation: "extract_column".to_string(),
-                                left_type: "Varchar".to_string(),
-                                right_type: Some(format!("{:?}", other)),
-                            });
+                        Some(_other) => {
+                            // Type mismatch - fall back to Mixed type for SQLite compatibility
+                            return Self::extract_column(rows, col_idx, &ColumnType::Mixed);
                         }
                         None => {
                             values.push(Arc::from(""));
@@ -278,12 +272,9 @@ impl ColumnarBatch {
                             nulls.push(true);
                             has_nulls = true;
                         }
-                        Some(other) => {
-                            return Err(ExecutorError::ColumnarTypeMismatch {
-                                operation: "extract_column".to_string(),
-                                left_type: "Boolean".to_string(),
-                                right_type: Some(format!("{:?}", other)),
-                            });
+                        Some(_other) => {
+                            // Type mismatch - fall back to Mixed type for SQLite compatibility
+                            return Self::extract_column(rows, col_idx, &ColumnType::Mixed);
                         }
                         None => {
                             values.push(0);
@@ -411,6 +402,74 @@ mod tests {
             assert_eq!(nulls.as_slice(), &[false, false, true]);
         } else {
             panic!("Expected Float64 column with nulls");
+        }
+    }
+
+    #[test]
+    fn test_columnar_batch_mixed_types() {
+        // SQLite allows mixed types in a single column (manifest typing)
+        // First row has VARCHAR, subsequent rows have INTEGER
+        let rows = vec![
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+                SqlValue::Null,
+            ]),
+            Row::new(vec![SqlValue::Null, SqlValue::Varchar(arcstr::ArcStr::from("xyz"))]),
+            Row::new(vec![SqlValue::Integer(11), SqlValue::Integer(22)]),
+            Row::new(vec![SqlValue::Integer(33), SqlValue::Integer(44)]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        assert_eq!(batch.row_count(), 4);
+        assert_eq!(batch.column_count(), 2);
+
+        // Column 0 should be Mixed due to type mismatch (VARCHAR then INTEGER)
+        let col0 = batch.column(0).unwrap();
+        if let ColumnArray::Mixed(values) = col0 {
+            assert_eq!(values.len(), 4);
+            assert_eq!(values[0], SqlValue::Varchar(arcstr::ArcStr::from("abc")));
+            assert_eq!(values[1], SqlValue::Null);
+            assert_eq!(values[2], SqlValue::Integer(11));
+            assert_eq!(values[3], SqlValue::Integer(33));
+        } else {
+            panic!("Expected Mixed column, got {:?}", col0);
+        }
+
+        // Column 1 should also be Mixed (NULL first, then VARCHAR, then INTEGERs)
+        let col1 = batch.column(1).unwrap();
+        if let ColumnArray::Mixed(values) = col1 {
+            assert_eq!(values.len(), 4);
+            assert_eq!(values[0], SqlValue::Null);
+            assert_eq!(values[1], SqlValue::Varchar(arcstr::ArcStr::from("xyz")));
+            assert_eq!(values[2], SqlValue::Integer(22));
+            assert_eq!(values[3], SqlValue::Integer(44));
+        } else {
+            panic!("Expected Mixed column, got {:?}", col1);
+        }
+    }
+
+    #[test]
+    fn test_columnar_batch_mixed_types_int_first() {
+        // Test case where INTEGER comes first, then VARCHAR
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(11), SqlValue::Integer(22)]),
+            Row::new(vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+                SqlValue::Null,
+            ]),
+        ];
+
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        // Column 0: First row is Integer, second is Varchar -> Mixed
+        let col0 = batch.column(0).unwrap();
+        if let ColumnArray::Mixed(values) = col0 {
+            assert_eq!(values.len(), 2);
+            assert_eq!(values[0], SqlValue::Integer(11));
+            assert_eq!(values[1], SqlValue::Varchar(arcstr::ArcStr::from("abc")));
+        } else {
+            panic!("Expected Mixed column for mixed integer/varchar, got {:?}", col0);
         }
     }
 }
