@@ -60,17 +60,27 @@ const DEFAULT_VIBESQL_PORT: u16 = 15433;
 /// All available TPC-H queries for server benchmark
 const ALL_QUERIES: &[(&str, &str)] = &[
     ("Q1", TPCH_Q1),
+    ("Q2", TPCH_Q2),
     ("Q3", TPCH_Q3),
     ("Q4", TPCH_Q4),
     ("Q5", TPCH_Q5),
     ("Q6", TPCH_Q6),
     ("Q7", TPCH_Q7),
+    ("Q8", TPCH_Q8),
     ("Q9", TPCH_Q9),
     ("Q10", TPCH_Q10),
     ("Q11", TPCH_Q11),
     ("Q12", TPCH_Q12),
+    ("Q13", TPCH_Q13),
     ("Q14", TPCH_Q14),
+    ("Q15", TPCH_Q15),
+    ("Q16", TPCH_Q16),
+    ("Q17", TPCH_Q17),
+    ("Q18", TPCH_Q18),
     ("Q19", TPCH_Q19),
+    ("Q20", TPCH_Q20),
+    ("Q21", TPCH_Q21),
+    ("Q22", TPCH_Q22),
 ];
 
 /// Query result for a single query
