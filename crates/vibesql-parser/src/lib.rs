@@ -155,4 +155,24 @@ mod arena_fallback_tests {
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), Statement::CreateTable(_)));
     }
+
+    #[test]
+    fn test_arena_fallback_qualified_wildcard() {
+        let result = parse_with_arena_fallback("SELECT t1.* FROM t1");
+        assert!(result.is_ok());
+        if let Statement::Select(select) = result.unwrap() {
+            assert_eq!(select.select_list.len(), 1);
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias: _ } => {
+                    assert_eq!(qualifier, "t1");
+                }
+                other => panic!(
+                    "Expected QualifiedWildcard, got {:?}",
+                    other
+                ),
+            }
+        } else {
+            panic!("Expected SELECT statement");
+        }
+    }
 }
