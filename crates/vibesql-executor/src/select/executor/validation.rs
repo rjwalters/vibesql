@@ -192,7 +192,7 @@ fn is_aggregate_function(name: &str) -> bool {
 /// Returns Some((function_name, arg_count)) if there's an error, None otherwise
 fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::AggregateFunction { name, args, .. } => {
+        Expression::AggregateFunction { name, args, distinct } => {
             let upper = name.to_uppercase();
             let arg_count = args.len();
 
@@ -208,9 +208,13 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
 
             match upper.as_str() {
                 "COUNT" => {
-                    // Multi-arg count without DISTINCT is an error
-                    // But this is checked elsewhere, so skip here
-                    None
+                    // Multi-arg COUNT without DISTINCT is an error
+                    // SQLite: "wrong number of arguments to function count()"
+                    if arg_count > 1 && !*distinct {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
                 }
                 "MIN" | "MAX" => {
                     if has_wildcard || arg_count == 0 {
@@ -438,6 +442,100 @@ fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
     }
 }
 
+/// Find nested aggregate function in an expression
+///
+/// A nested aggregate is when one aggregate's arguments contain another aggregate,
+/// e.g., `SUM(MIN(x))`. This is invalid in SQL.
+///
+/// Returns Some(inner_aggregate_name) if found, None otherwise.
+fn find_nested_aggregate(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::AggregateFunction { args, .. } => {
+            // Check if any argument contains an aggregate function
+            for arg in args {
+                if let Some(inner_name) = find_aggregate_in_expression(arg) {
+                    return Some(inner_name);
+                }
+            }
+            None
+        }
+        Expression::Function { name, args, .. } => {
+            // Check if this function is a built-in aggregate with nested aggregate args
+            if is_aggregate_function(name) {
+                let upper = name.to_uppercase();
+                // Multi-arg MIN/MAX are scalar functions, not aggregates
+                let is_scalar_minmax = matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
+                if !is_scalar_minmax {
+                    // This is an aggregate - check for nested aggregates in args
+                    for arg in args {
+                        if let Some(inner_name) = find_aggregate_in_expression(arg) {
+                            return Some(inner_name);
+                        }
+                    }
+                }
+            }
+            // Check arguments recursively (for non-aggregate functions)
+            for arg in args {
+                if let Some(found) = find_nested_aggregate(arg) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            find_nested_aggregate(left).or_else(|| find_nested_aggregate(right))
+        }
+        Expression::UnaryOp { expr, .. } => find_nested_aggregate(expr),
+        Expression::Cast { expr, .. } => find_nested_aggregate(expr),
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                if let Some(found) = find_nested_aggregate(op) {
+                    return Some(found);
+                }
+            }
+            for case_when in when_clauses {
+                for cond in &case_when.conditions {
+                    if let Some(found) = find_nested_aggregate(cond) {
+                        return Some(found);
+                    }
+                }
+                if let Some(found) = find_nested_aggregate(&case_when.result) {
+                    return Some(found);
+                }
+            }
+            if let Some(else_expr) = else_result {
+                find_nested_aggregate(else_expr)
+            } else {
+                None
+            }
+        }
+        Expression::IsNull { expr, .. } => find_nested_aggregate(expr),
+        Expression::Between { expr, low, high, .. } => find_nested_aggregate(expr)
+            .or_else(|| find_nested_aggregate(low))
+            .or_else(|| find_nested_aggregate(high)),
+        Expression::InList { expr, values, .. } => {
+            if let Some(found) = find_nested_aggregate(expr) {
+                return Some(found);
+            }
+            for val in values {
+                if let Some(found) = find_nested_aggregate(val) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for child in children {
+                if let Some(found) = find_nested_aggregate(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Validate a single column reference against the schema (and optionally outer schema)
 fn validate_column_ref(
     col_ref: &ColumnReference,
@@ -635,6 +733,24 @@ pub fn validate_aggregate_arguments(select_list: &[SelectItem]) -> Result<(), Ex
         if let SelectItem::Expression { expr, .. } = item {
             if let Some(agg_name) = check_aggregate_arg_count(expr) {
                 return Err(ExecutorError::WrongNumberOfArguments { function_name: agg_name });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate that there are no nested aggregate functions in the SELECT list
+///
+/// Nested aggregates like `SUM(MIN(x))` are invalid in SQL.
+/// Returns an error with SQLite-compatible message if nested aggregates are found.
+///
+/// Note: This uses the "misuse of aggregate function X()" format (with "function")
+/// as SQLite detects this during name resolution, not during execution.
+pub fn validate_no_nested_aggregates(select_list: &[SelectItem]) -> Result<(), ExecutorError> {
+    for item in select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            if let Some(inner_agg_name) = find_nested_aggregate(expr) {
+                return Err(ExecutorError::MisuseOfAggregate { function_name: inner_agg_name });
             }
         }
     }

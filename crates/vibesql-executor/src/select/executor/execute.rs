@@ -49,6 +49,11 @@ impl SelectExecutor<'_> {
         // Must happen before any fast paths or strategy selection
         super::validation::validate_aggregate_arguments(&stmt.select_list)?;
 
+        // Validate no nested aggregates (issue #4439)
+        // This catches errors like SUM(MIN(x)) before any execution
+        // Uses "misuse of aggregate function X()" format to match SQLite's resolve.c
+        super::validation::validate_no_nested_aggregates(&stmt.select_list)?;
+
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 

@@ -363,9 +363,11 @@ impl CombinedExpressionEvaluator<'_> {
 
             // Aggregate functions - should be evaluated in aggregation context
             vibesql_ast::Expression::AggregateFunction { name, .. } => {
-                // SQLite-compatible error message for aggregate misuse
-                // Preserve original case to match SQLite behavior
-                Err(ExecutorError::MisuseOfAggregate { function_name: name.clone() })
+                // SQLite-compatible error message for aggregate misuse in execution context
+                // This error occurs when an aggregate is evaluated outside of aggregation,
+                // such as in ORDER BY clauses of non-aggregate queries.
+                // Uses "misuse of aggregate: X()" format (with colon) to match SQLite's expr.c
+                Err(ExecutorError::MisuseOfAggregateContext { function_name: name.clone() })
             }
 
             // Full-text search
