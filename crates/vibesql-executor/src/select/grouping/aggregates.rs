@@ -314,7 +314,33 @@ impl AggregateAccumulator {
                 if *count == 0 {
                     vibesql_types::SqlValue::Null
                 } else {
-                    sum.clone()
+                    // SQLite's SUM() always returns REAL (float) for numeric values
+                    // This differs from TOTAL() which also returns 0.0 for empty sets
+                    match sum {
+                        vibesql_types::SqlValue::Integer(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        vibesql_types::SqlValue::Bigint(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        vibesql_types::SqlValue::Smallint(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        // Already float types - return as-is but normalize to Numeric
+                        vibesql_types::SqlValue::Float(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        vibesql_types::SqlValue::Double(v) => {
+                            vibesql_types::SqlValue::Numeric(*v)
+                        }
+                        vibesql_types::SqlValue::Real(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        // Already Numeric
+                        vibesql_types::SqlValue::Numeric(_) => sum.clone(),
+                        // Fallback for unexpected types
+                        _ => sum.clone(),
+                    }
                 }
             }
             AggregateAccumulator::Avg { sum, count, .. } => {
@@ -980,11 +1006,12 @@ mod tests {
         acc.accumulate(&SqlValue::Integer(5));
         acc.accumulate(&SqlValue::Integer(-5));
 
-        // Finalize should return 0, not NULL
+        // Finalize should return 0.0 (as Numeric/REAL), not NULL
+        // SQLite's SUM() always returns REAL (float) for numeric values
         let result = acc.finalize();
         match result {
-            SqlValue::Integer(0) => {} // OK
-            _ => panic!("SUM of values that sum to 0 should return 0, got {:?}", result),
+            SqlValue::Numeric(v) if v == 0.0 => {} // OK - SUM returns REAL
+            _ => panic!("SUM of values that sum to 0 should return 0.0, got {:?}", result),
         }
     }
 

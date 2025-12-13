@@ -120,7 +120,10 @@ pub fn compute_i64_aggregate(
             values.len()
         );
         return match op {
-            AggregateOp::Sum => Ok(SqlValue::Integer(simd_sum_i64(values))),
+            AggregateOp::Sum => {
+                // SQLite's SUM() always returns REAL (float)
+                Ok(SqlValue::Numeric(simd_sum_i64(values) as f64))
+            }
             AggregateOp::Count => Ok(SqlValue::Integer(values.len() as i64)),
             AggregateOp::Avg => {
                 let sum = simd_sum_i64(values);
@@ -146,13 +149,14 @@ pub fn compute_i64_aggregate(
 
     match op {
         AggregateOp::Sum => {
+            // SQLite's SUM() always returns REAL (float)
             let mut sum: i64 = 0;
             for (i, &v) in values.iter().enumerate() {
                 if !null_mask[i] {
                     sum += v;
                 }
             }
-            Ok(SqlValue::Integer(sum))
+            Ok(SqlValue::Numeric(sum as f64))
         }
         AggregateOp::Count => {
             let count = null_mask.iter().filter(|&&is_null| !is_null).count();

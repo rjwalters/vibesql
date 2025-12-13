@@ -220,7 +220,8 @@ fn test_sum_distinct() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // Should sum unique values: 100 + 200 + 300 = 600
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(600));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(600.0));
 }
 
 #[test]
@@ -274,9 +275,11 @@ fn test_sum_distinct_vs_sum_all() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM: 100+100+200+100+300+200 = 1000
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1000));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(1000.0));
     // SUM(DISTINCT): 100+200+300 = 600
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(600));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Numeric(600.0));
 }
 
 #[test]
@@ -546,7 +549,8 @@ fn test_distinct_all_same_value() {
     // COUNT(DISTINCT): 1 unique value
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
     // SUM(DISTINCT): 42 (only counted once)
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(42));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Numeric(42.0));
 }
 
 #[test]

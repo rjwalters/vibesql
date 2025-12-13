@@ -61,8 +61,11 @@ fn get_i64(val: &SqlValue) -> i64 {
         SqlValue::Integer(i) => *i,
         SqlValue::Bigint(i) => *i,
         SqlValue::Smallint(i) => *i as i64,
+        // SQLite's SUM() returns REAL (Numeric), handle it here
+        SqlValue::Numeric(n) => *n as i64,
+        SqlValue::Double(d) => *d as i64,
         SqlValue::Null => -999999, // Sentinel for NULL
-        _ => panic!("Expected integer, got {:?}", val),
+        _ => panic!("Expected integer or numeric, got {:?}", val),
     }
 }
 

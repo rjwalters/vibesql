@@ -249,6 +249,7 @@ fn test_sum_avg_without_from() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].get(0), Some(&vibesql_types::SqlValue::Integer(100)));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].get(0), Some(&vibesql_types::SqlValue::Numeric(100.0)));
     assert_eq!(result[0].get(1), Some(&vibesql_types::SqlValue::Numeric(50.0)));
 }

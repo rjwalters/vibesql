@@ -92,29 +92,30 @@ fn test_tpch_q1_columnar_group_by() {
     });
 
     // Verify group (A, F): 3 rows, sum_qty=37, sum_price=3700
+    // SQLite's SUM() always returns REAL (Numeric)
     assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("A"))));
     assert_eq!(sorted[0].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("F"))));
-    assert!(matches!(sorted[0].get(2), Some(&SqlValue::Double(qty)) if (qty - 37.0).abs() < 0.001));
+    assert!(matches!(sorted[0].get(2), Some(&SqlValue::Numeric(qty)) if (qty - 37.0).abs() < 0.001));
     assert!(
-        matches!(sorted[0].get(3), Some(&SqlValue::Double(price)) if (price - 3700.0).abs() < 0.001)
+        matches!(sorted[0].get(3), Some(&SqlValue::Numeric(price)) if (price - 3700.0).abs() < 0.001)
     );
     assert_eq!(sorted[0].get(4), Some(&SqlValue::Integer(3)));
 
     // Verify group (N, O): 2 rows, sum_qty=50, sum_price=5000
     assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("N"))));
     assert_eq!(sorted[1].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("O"))));
-    assert!(matches!(sorted[1].get(2), Some(&SqlValue::Double(qty)) if (qty - 50.0).abs() < 0.001));
+    assert!(matches!(sorted[1].get(2), Some(&SqlValue::Numeric(qty)) if (qty - 50.0).abs() < 0.001));
     assert!(
-        matches!(sorted[1].get(3), Some(&SqlValue::Double(price)) if (price - 5000.0).abs() < 0.001)
+        matches!(sorted[1].get(3), Some(&SqlValue::Numeric(price)) if (price - 5000.0).abs() < 0.001)
     );
     assert_eq!(sorted[1].get(4), Some(&SqlValue::Integer(2)));
 
     // Verify group (R, F): 1 row, sum_qty=25, sum_price=2500
     assert_eq!(sorted[2].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("R"))));
     assert_eq!(sorted[2].get(1), Some(&SqlValue::Varchar(arcstr::ArcStr::from("F"))));
-    assert!(matches!(sorted[2].get(2), Some(&SqlValue::Double(qty)) if (qty - 25.0).abs() < 0.001));
+    assert!(matches!(sorted[2].get(2), Some(&SqlValue::Numeric(qty)) if (qty - 25.0).abs() < 0.001));
     assert!(
-        matches!(sorted[2].get(3), Some(&SqlValue::Double(price)) if (price - 2500.0).abs() < 0.001)
+        matches!(sorted[2].get(3), Some(&SqlValue::Numeric(price)) if (price - 2500.0).abs() < 0.001)
     );
     assert_eq!(sorted[2].get(4), Some(&SqlValue::Integer(1)));
 }
@@ -180,8 +181,9 @@ fn test_tpch_q1_with_multiple_aggregates() {
 
     // Verify aggregates for group A
     // SUM(qty) = 40, SUM(price) = 4000, AVG(qty) = 20, AVG(price) = 2000, COUNT = 2
-    assert!(matches!(a_group.get(1), Some(&SqlValue::Double(sum)) if (sum - 40.0).abs() < 0.001));
-    assert!(matches!(a_group.get(2), Some(&SqlValue::Double(sum)) if (sum - 4000.0).abs() < 0.001));
+    // SQLite's SUM() always returns REAL (Numeric)
+    assert!(matches!(a_group.get(1), Some(&SqlValue::Numeric(sum)) if (sum - 40.0).abs() < 0.001));
+    assert!(matches!(a_group.get(2), Some(&SqlValue::Numeric(sum)) if (sum - 4000.0).abs() < 0.001));
     assert!(matches!(a_group.get(3), Some(&SqlValue::Double(avg)) if (avg - 20.0).abs() < 0.001));
     assert!(matches!(a_group.get(4), Some(&SqlValue::Double(avg)) if (avg - 2000.0).abs() < 0.001));
     assert_eq!(a_group.get(5), Some(&SqlValue::Integer(2)));

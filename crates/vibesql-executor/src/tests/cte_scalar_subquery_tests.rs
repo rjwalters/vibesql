@@ -203,9 +203,9 @@ fn test_cte_in_select_list_scalar_subquery() {
 
     assert_eq!(result.len(), 3);
     // Grand total = 100 + 200 + 150 = 450
-    assert_eq!(result[0].values[2], vibesql_types::SqlValue::Integer(450));
-    assert_eq!(result[1].values[2], vibesql_types::SqlValue::Integer(450));
-    assert_eq!(result[2].values[2], vibesql_types::SqlValue::Integer(450));
+    assert_eq!(result[0].values[2], vibesql_types::SqlValue::Numeric(450.0));
+    assert_eq!(result[1].values[2], vibesql_types::SqlValue::Numeric(450.0));
+    assert_eq!(result[2].values[2], vibesql_types::SqlValue::Numeric(450.0));
 }
 
 /// Test CTE referenced in IN subquery (issue #3044)

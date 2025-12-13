@@ -181,7 +181,8 @@ fn test_repeated_sum_cached() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM(amount) = 60, so 60 + 60*2 = 60 + 120 = 180
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(180));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(180.0));
 }
 
 #[test]

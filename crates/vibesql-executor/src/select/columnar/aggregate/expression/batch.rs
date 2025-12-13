@@ -445,8 +445,9 @@ fn aggregate_i64_array(
 
     match op {
         AggregateOp::Sum => {
+            // SQLite's SUM() always returns REAL (float)
             let sum: i64 = non_null_values.iter().sum();
-            Ok(SqlValue::Integer(sum))
+            Ok(SqlValue::Numeric(sum as f64))
         }
         AggregateOp::Count => Ok(SqlValue::Integer(non_null_values.len() as i64)),
         AggregateOp::Avg => {

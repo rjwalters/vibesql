@@ -672,7 +672,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0][0], SqlValue::Integer(1)); // key
-        assert_eq!(results[0][1], SqlValue::Integer(60)); // SUM
+        assert_eq!(results[0][1], SqlValue::Numeric(60.0)); // SUM
         assert_eq!(results[0][2], SqlValue::Numeric(20.0)); // AVG
     }
 
@@ -770,7 +770,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0][1], SqlValue::Integer(2)); // COUNT = 2 (NULLs not counted)
-        assert_eq!(results[0][2], SqlValue::Integer(30)); // SUM = 30 (NULLs ignored)
+        assert_eq!(results[0][2], SqlValue::Numeric(30.0)); // SUM = 30 (NULLs ignored)
     }
 
     #[test]
