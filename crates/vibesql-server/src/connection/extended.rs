@@ -179,6 +179,7 @@ pub async fn handle_parse(
 }
 
 /// Handle Bind message - bind parameters to a prepared statement
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_bind(
     _session: &mut Option<Session>,
     extended_state: &mut ExtendedQueryState,
@@ -405,9 +406,8 @@ pub async fn handle_execute(
                     // not by Execute. Execute only sends DataRow messages and CommandComplete.
 
                     // Send data rows
-                    let mut row_count = 0;
-                    for row in &rows {
-                        if max_rows > 0 && row_count >= max_rows {
+                    for (row_count, row) in rows.iter().enumerate() {
+                        if max_rows > 0 && row_count >= max_rows as usize {
                             // More rows exist but we've hit the limit
                             send_message(write_half, write_buf, &BackendMessage::PortalSuspended)
                                 .await?;
@@ -421,7 +421,6 @@ pub async fn handle_execute(
                             .collect();
                         send_message(write_half, write_buf, &BackendMessage::DataRow { values })
                             .await?;
-                        row_count += 1;
                     }
 
                     // Send command complete
