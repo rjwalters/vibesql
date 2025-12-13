@@ -187,3 +187,114 @@ fn test_having_clause() {
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
     assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(300));
 }
+
+/// Test for issue #4432: Detect misuse of aliased aggregates in HAVING clause
+///
+/// SQLite reports "misuse of aliased aggregate" when an aggregate alias
+/// (e.g., `m` from `min(f1) AS m`) is used inside another aggregate function
+/// in the HAVING clause (e.g., `HAVING max(m) < 10`).
+#[test]
+fn test_having_misuse_of_aliased_aggregate() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test table
+    let create_sql = "CREATE TABLE test1 (f1 INTEGER, f2 INTEGER)";
+    let stmt = Parser::parse_sql(create_sql).unwrap();
+    match stmt {
+        Statement::CreateTable(create_stmt) => {
+            CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
+        }
+        _ => panic!("Expected CREATE TABLE"),
+    }
+
+    // Insert some data
+    let insert_sql = "INSERT INTO test1 VALUES (11, 22)";
+    let stmt = Parser::parse_sql(insert_sql).unwrap();
+    match stmt {
+        Statement::Insert(insert_stmt) => {
+            InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+        }
+        _ => panic!("Expected INSERT"),
+    }
+
+    let insert_sql = "INSERT INTO test1 VALUES (33, 44)";
+    let stmt = Parser::parse_sql(insert_sql).unwrap();
+    match stmt {
+        Statement::Insert(insert_stmt) => {
+            InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+        }
+        _ => panic!("Expected INSERT"),
+    }
+
+    // Test case: SELECT min(f1) AS m FROM test1 GROUP BY f1 HAVING max(m+5)<10
+    // This should fail with "misuse of aliased aggregate m"
+    let query = "SELECT min(f1) AS m FROM test1 GROUP BY f1 HAVING max(m+5)<10";
+    let stmt = Parser::parse_sql(query).unwrap();
+    match stmt {
+        Statement::Select(select_stmt) => {
+            let executor = SelectExecutor::new(&db);
+            let result = executor.execute(&select_stmt);
+            assert!(result.is_err(), "Should error for aliased aggregate misuse");
+            let err = result.unwrap_err();
+            let err_str = format!("{}", err);
+            assert!(
+                err_str.contains("misuse of aliased aggregate m"),
+                "Expected 'misuse of aliased aggregate m', got: {}",
+                err_str
+            );
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+/// Test that valid uses of aggregate aliases still work
+#[test]
+fn test_having_valid_aggregate_alias_in_order_by() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test table
+    let create_sql = "CREATE TABLE test1 (f1 INTEGER, f2 INTEGER)";
+    let stmt = Parser::parse_sql(create_sql).unwrap();
+    match stmt {
+        Statement::CreateTable(create_stmt) => {
+            CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
+        }
+        _ => panic!("Expected CREATE TABLE"),
+    }
+
+    // Insert some data
+    let insert_sql = "INSERT INTO test1 VALUES (11, 22)";
+    let stmt = Parser::parse_sql(insert_sql).unwrap();
+    match stmt {
+        Statement::Insert(insert_stmt) => {
+            InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+        }
+        _ => panic!("Expected INSERT"),
+    }
+
+    let insert_sql = "INSERT INTO test1 VALUES (33, 44)";
+    let stmt = Parser::parse_sql(insert_sql).unwrap();
+    match stmt {
+        Statement::Insert(insert_stmt) => {
+            InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+        }
+        _ => panic!("Expected INSERT"),
+    }
+
+    // Valid use: aggregate alias in ORDER BY (not inside another aggregate)
+    let query = "SELECT min(f1) AS m FROM test1 GROUP BY f1 ORDER BY m";
+    let stmt = Parser::parse_sql(query).unwrap();
+    match stmt {
+        Statement::Select(select_stmt) => {
+            let executor = SelectExecutor::new(&db);
+            let result = executor.execute(&select_stmt);
+            assert!(result.is_ok(), "Should succeed for valid aggregate alias use in ORDER BY");
+            let rows = result.unwrap();
+            assert_eq!(rows.len(), 2);
+            // First row should have m=11, second should have m=33 (ascending order)
+            assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(11));
+            assert_eq!(rows[1].values[0], vibesql_types::SqlValue::Integer(33));
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}

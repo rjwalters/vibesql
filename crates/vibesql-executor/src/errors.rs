@@ -56,6 +56,11 @@ pub enum ExecutorError {
     MisuseOfAggregate {
         function_name: String,
     },
+    /// Misuse of aliased aggregate (SQLite-compatible error)
+    /// e.g., HAVING max(alias) where alias refers to an aggregate like min(x)
+    MisuseOfAliasedAggregate {
+        alias_name: String,
+    },
     UnsupportedExpression(String),
     UnsupportedFeature(String),
     StorageError(String),
@@ -485,6 +490,10 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::MisuseOfAggregate { function_name } => {
                 // SQLite-compatible error message format
                 write!(f, "misuse of aggregate function {}()", function_name)
+            }
+            ExecutorError::MisuseOfAliasedAggregate { alias_name } => {
+                // SQLite-compatible error message format
+                write!(f, "misuse of aliased aggregate {}", alias_name)
             }
             ExecutorError::UnsupportedExpression(msg) => {
                 write!(

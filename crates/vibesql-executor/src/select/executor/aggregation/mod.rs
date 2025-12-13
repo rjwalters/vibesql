@@ -93,6 +93,14 @@ impl SelectExecutor<'_> {
             )?;
         }
 
+        // Validate HAVING clause for misuse of aliased aggregates (#4432)
+        // e.g., SELECT min(f1) AS m FROM t GROUP BY f1 HAVING max(m) < 10
+        // The alias 'm' refers to an aggregate, and using it inside max() is an error.
+        crate::select::executor::validation::validate_having_aliased_aggregates(
+            stmt.having.as_ref(),
+            &stmt.select_list,
+        )?;
+
         // Extract schema for evaluator before moving from_result
         let original_schema = from_result.schema.clone();
 
