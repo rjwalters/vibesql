@@ -207,6 +207,28 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(SelectItem::Wildcard { alias: None });
         }
 
+        // Check for qualified wildcard (table.* or alias.*)
+        // Must check BEFORE parsing as expression to avoid losing the qualifier.
+        // The expression parser would parse "table.*" as Expression::Wildcard, losing the table name.
+        let saved_position = self.position;
+        if let Token::Identifier(qualifier) | Token::DelimitedIdentifier(qualifier) = self.peek() {
+            let qualifier = qualifier.clone();
+            self.advance();
+
+            if matches!(self.peek(), Token::Symbol('.')) {
+                self.advance(); // consume dot
+
+                if matches!(self.peek(), Token::Symbol('*')) {
+                    self.advance(); // consume asterisk
+                    let qualifier_sym = self.intern(&qualifier);
+                    return Ok(SelectItem::QualifiedWildcard { qualifier: qualifier_sym, alias: None });
+                }
+            }
+
+            // Not a qualified wildcard, backtrack
+            self.position = saved_position;
+        }
+
         // Record start position before parsing expression
         let start_pos = self.position;
 
