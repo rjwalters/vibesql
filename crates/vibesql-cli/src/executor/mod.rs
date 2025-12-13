@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use vibesql_parser::parse_with_arena_fallback;
 use vibesql_storage::Database;
+use vibesql_types::SqlValue;
 
 // Submodules
 mod copy_handler;
@@ -31,6 +32,16 @@ pub struct QueryResult {
 }
 
 use crate::util::is_memory_database;
+
+/// Format SqlValue for output in SQLite-compatible format
+/// - Booleans are displayed as 0/1 instead of FALSE/TRUE
+/// - Other values use their standard Display format
+fn format_sql_value(v: &SqlValue) -> String {
+    match v {
+        SqlValue::Boolean(b) => if *b { "1".to_string() } else { "0".to_string() },
+        _ => format!("{}", v),
+    }
+}
 
 impl SqlExecutor {
     pub fn new(database: Option<String>) -> anyhow::Result<Self> {
@@ -88,7 +99,7 @@ impl SqlExecutor {
                         result.row_count = select_result.rows.len();
                         // Use column names from the executor result
                         result.columns = select_result.columns;
-                        // Convert rows to string representation using Display trait
+                        // Convert rows to string representation using SQLite-compatible format
                         // NULL values are represented as None to distinguish from the literal string "NULL"
                         for row in select_result.rows {
                             let row_strs: Vec<Option<String>> = row
@@ -98,7 +109,7 @@ impl SqlExecutor {
                                     if v.is_null() {
                                         None
                                     } else {
-                                        Some(format!("{}", v))
+                                        Some(format_sql_value(v))
                                     }
                                 })
                                 .collect();

@@ -252,17 +252,99 @@ pub(super) fn compute_max(
 }
 
 /// Compare two values for MIN/MAX (returns true if a < b)
+///
+/// Implements SQLite type affinity ordering: NULL < integers/reals < text < blob
 pub(super) fn compare_for_min_max(a: &SqlValue, b: &SqlValue) -> bool {
     use std::cmp::Ordering;
 
+    // Helper to determine type class for affinity ordering
+    // 0 = numeric (integers/reals), 1 = text, 2 = other
+    fn type_class(v: &SqlValue) -> u8 {
+        match v {
+            SqlValue::Integer(_)
+            | SqlValue::Bigint(_)
+            | SqlValue::Smallint(_)
+            | SqlValue::Unsigned(_)
+            | SqlValue::Float(_)
+            | SqlValue::Double(_)
+            | SqlValue::Numeric(_)
+            | SqlValue::Real(_) => 0,
+            SqlValue::Character(_) | SqlValue::Varchar(_) => 1,
+            _ => 2,
+        }
+    }
+
     let ordering = match (a, b) {
+        // Same type comparisons
         (SqlValue::Integer(a), SqlValue::Integer(b)) => a.cmp(b),
         (SqlValue::Bigint(a), SqlValue::Bigint(b)) => a.cmp(b),
         (SqlValue::Smallint(a), SqlValue::Smallint(b)) => a.cmp(b),
+        (SqlValue::Unsigned(a), SqlValue::Unsigned(b)) => a.cmp(b),
         (SqlValue::Float(a), SqlValue::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (SqlValue::Double(a), SqlValue::Double(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (SqlValue::Numeric(a), SqlValue::Numeric(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        _ => Ordering::Equal,
+        (SqlValue::Real(a), SqlValue::Real(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (SqlValue::Varchar(a), SqlValue::Varchar(b)) => a.cmp(b),
+        (SqlValue::Character(a), SqlValue::Character(b)) => a.cmp(b),
+
+        // Cross-type numeric comparisons (all numeric types compare as f64)
+        (SqlValue::Integer(a), SqlValue::Bigint(b)) => (*a).cmp(b),
+        (SqlValue::Bigint(a), SqlValue::Integer(b)) => a.cmp(b),
+        (SqlValue::Integer(a), SqlValue::Smallint(b)) => a.cmp(&(*b as i64)),
+        (SqlValue::Smallint(a), SqlValue::Integer(b)) => (*a as i64).cmp(b),
+        (SqlValue::Integer(a), SqlValue::Float(b)) => {
+            (*a as f64).partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Float(a), SqlValue::Integer(b)) => {
+            (*a as f64).partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Integer(a), SqlValue::Double(b)) => {
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Double(a), SqlValue::Integer(b)) => {
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Integer(a), SqlValue::Numeric(b)) => {
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Numeric(a), SqlValue::Integer(b)) => {
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Integer(a), SqlValue::Real(b)) => {
+            (*a as f64).partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Real(a), SqlValue::Integer(b)) => {
+            (*a as f64).partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Float(a), SqlValue::Double(b)) => {
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Double(a), SqlValue::Float(b)) => {
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Bigint(a), SqlValue::Double(b)) => {
+            (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+        }
+        (SqlValue::Double(a), SqlValue::Bigint(b)) => {
+            a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+        }
+
+        // String type cross-comparisons
+        (SqlValue::Varchar(a), SqlValue::Character(b)) => a.as_str().cmp(b.as_str()),
+        (SqlValue::Character(a), SqlValue::Varchar(b)) => a.as_str().cmp(b.as_str()),
+
+        // For different type classes, use SQLite affinity ordering
+        // Numbers < text < other types
+        _ => {
+            let class_a = type_class(a);
+            let class_b = type_class(b);
+            if class_a != class_b {
+                class_a.cmp(&class_b)
+            } else {
+                // Same class but different specific types - compare as strings
+                format!("{:?}", a).cmp(&format!("{:?}", b))
+            }
+        }
     };
 
     ordering == Ordering::Less

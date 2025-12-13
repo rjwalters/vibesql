@@ -730,10 +730,13 @@ fn divide_sql_value(value: &vibesql_types::SqlValue, count: i64) -> vibesql_type
 
 /// Compare two SqlValues for ordering purposes (SQL ORDER BY semantics)
 ///
-/// Uses the PartialOrd trait implementation with SQL-specific NULL handling:
+/// Implements SQLite type affinity ordering for MIN/MAX aggregates:
 /// - NULL values sort last (NULLS LAST - SQL:1999 default for ASC)
-/// - Incomparable values (type mismatches, NaN) default to Equal for sort stability
+/// - Numbers (all integer and float types) < text < other types
+/// - Within the same type class, uses natural ordering
 pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlValue) -> Ordering {
+    use vibesql_types::SqlValue;
+
     match (a.is_null(), b.is_null()) {
         // Both NULL - equal
         (true, true) => Ordering::Equal,
@@ -741,11 +744,37 @@ pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlVal
         (true, false) => Ordering::Greater,
         // Second is NULL - first sorts first (less)
         (false, true) => Ordering::Less,
-        // Neither NULL - use PartialOrd trait
+        // Neither NULL - compare by type affinity then value
         (false, false) => {
-            // partial_cmp returns None for incomparable values (type mismatch, NaN)
-            // Default to Equal to maintain sort stability
-            PartialOrd::partial_cmp(a, b).unwrap_or(Ordering::Equal)
+            // Helper to determine type class for SQLite affinity ordering
+            // 0 = numeric (integers/reals), 1 = text, 2 = other
+            fn type_class(v: &SqlValue) -> u8 {
+                match v {
+                    SqlValue::Integer(_)
+                    | SqlValue::Bigint(_)
+                    | SqlValue::Smallint(_)
+                    | SqlValue::Unsigned(_)
+                    | SqlValue::Float(_)
+                    | SqlValue::Double(_)
+                    | SqlValue::Numeric(_)
+                    | SqlValue::Real(_) => 0,
+                    SqlValue::Character(_) | SqlValue::Varchar(_) => 1,
+                    _ => 2,
+                }
+            }
+
+            let class_a = type_class(a);
+            let class_b = type_class(b);
+
+            if class_a != class_b {
+                // Different type classes - use SQLite affinity ordering
+                class_a.cmp(&class_b)
+            } else {
+                // Same type class - use natural ordering
+                // partial_cmp returns None for incomparable values (NaN)
+                // Default to Equal to maintain sort stability
+                PartialOrd::partial_cmp(a, b).unwrap_or(Ordering::Equal)
+            }
         }
     }
 }

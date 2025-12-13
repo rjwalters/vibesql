@@ -68,7 +68,11 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        // Parse ORDER BY
+        // Parse set operations (UNION, INTERSECT, EXCEPT) BEFORE ORDER BY/LIMIT
+        // This ensures ORDER BY/LIMIT apply to the entire set operation result
+        let set_operation = self.parse_set_operation_internal()?;
+
+        // Parse ORDER BY (only after set operations, so it applies to combined result)
         let order_by = if self.try_consume_keyword(Keyword::Order) {
             self.consume_keyword(Keyword::By)?;
             Some(self.parse_order_by_clause()?)
@@ -111,9 +115,6 @@ impl<'arena> ArenaParser<'arena> {
         if (limit.is_some() || offset.is_some()) && self.peek_keyword(Keyword::Order) {
             return Err(ParseError { message: self.peek().syntax_error() });
         }
-
-        // Parse set operations (UNION, INTERSECT, EXCEPT)
-        let set_operation = self.parse_set_operation()?;
 
         // Issue #4448: Validate no unexpected tokens before semicolon/EOF
         // This catches incomplete input like: SELECT f1 FROM test1 AS 'hi', test2 AS
@@ -641,8 +642,10 @@ impl<'arena> ArenaParser<'arena> {
         Ok(items)
     }
 
-    /// Parse set operation (UNION, INTERSECT, EXCEPT).
-    fn parse_set_operation(&mut self) -> Result<Option<SetOperation<'arena>>, ParseError> {
+    /// Parse set operation (UNION/INTERSECT/EXCEPT) - internal implementation.
+    /// The right-hand side is parsed without ORDER BY/LIMIT since those apply to
+    /// the combined result, not individual SELECT statements.
+    fn parse_set_operation_internal(&mut self) -> Result<Option<SetOperation<'arena>>, ParseError> {
         let op = if self.try_consume_keyword(Keyword::Union) {
             SetOperator::Union
         } else if self.try_consume_keyword(Keyword::Intersect) {
@@ -656,8 +659,93 @@ impl<'arena> ArenaParser<'arena> {
         let all = self.try_consume_keyword(Keyword::All);
         self.try_consume_keyword(Keyword::Distinct);
 
-        let right = self.parse_select_statement()?;
+        // Parse the right side without ORDER BY/LIMIT - those apply to the combined result
+        let right = self.parse_select_for_set_operation()?;
 
         Ok(Some(SetOperation { op, all, right }))
+    }
+
+    /// Parse a SELECT statement for the right side of a set operation.
+    /// This does NOT parse ORDER BY/LIMIT since those should apply to the combined result.
+    fn parse_select_for_set_operation(
+        &mut self,
+    ) -> Result<&'arena SelectStmt<'arena>, ParseError> {
+        // Handle parenthesized subqueries
+        if self.try_consume(&Token::LParen) {
+            let stmt = self.parse_select_statement()?;
+            if !self.try_consume(&Token::RParen) {
+                return Err(ParseError {
+                    message: "Expected ')' after parenthesized SELECT in set operation".to_string(),
+                });
+            }
+            return Ok(stmt);
+        }
+
+        self.consume_keyword(Keyword::Select)?;
+
+        // Parse DISTINCT
+        let distinct = self.try_consume_keyword(Keyword::Distinct);
+        self.try_consume_keyword(Keyword::All);
+
+        // Parse select list
+        let select_list = self.parse_select_list()?;
+
+        // Parse optional INTO
+        let (into_table, into_variables) = self.parse_into_clause()?;
+
+        // Parse FROM
+        let from = if self.try_consume_keyword(Keyword::From) {
+            Some(self.parse_from_clause()?)
+        } else {
+            None
+        };
+
+        // Parse WHERE
+        let where_clause = if self.try_consume_keyword(Keyword::Where) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Parse GROUP BY
+        let group_by = if self.try_consume_keyword(Keyword::Group) {
+            self.consume_keyword(Keyword::By)?;
+            Some(self.parse_group_by_clause()?)
+        } else {
+            None
+        };
+
+        // Parse HAVING
+        let having = if self.try_consume_keyword(Keyword::Having) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Parse nested set operations (for chains like A UNION B UNION C)
+        // But NOT ORDER BY/LIMIT - those are parsed by the outer parse_select_statement
+        let set_operation = self.parse_set_operation_internal()?;
+
+        // Note: ORDER BY, LIMIT, OFFSET are NOT parsed here
+        // They apply to the combined result and are handled by the outer statement
+
+        let stmt = SelectStmt {
+            with_clause: None, // CTEs are on the outer statement
+            distinct,
+            select_list,
+            into_table,
+            into_variables,
+            from,
+            where_clause,
+            group_by,
+            having,
+            order_by: None,    // ORDER BY applies to combined result
+            limit: None,       // LIMIT applies to combined result
+            offset: None,      // OFFSET applies to combined result
+            set_operation,
+            values: None,
+        };
+
+        Ok(self.arena.alloc(stmt))
     }
 }

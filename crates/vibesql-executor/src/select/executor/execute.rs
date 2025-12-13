@@ -547,7 +547,13 @@ impl SelectExecutor<'_> {
         if let Some(set_op) = &stmt.set_operation {
             results = self.execute_set_operations(results, set_op, cte_results)?;
 
-            // Apply LIMIT/OFFSET to the final result (after all set operations)
+            // Apply ORDER BY after set operations (if specified)
+            // The UNION's default sort is overridden by explicit ORDER BY
+            if let Some(order_by) = &stmt.order_by {
+                results = self.sort_set_operation_results(results, order_by)?;
+            }
+
+            // Apply LIMIT/OFFSET to the final result (after all set operations and ORDER BY)
             // For queries WITHOUT set operations, LIMIT/OFFSET is already applied
             // in execute_without_aggregation() or execute_with_aggregation()
             results = apply_limit_offset(results, stmt.limit, stmt.offset);
@@ -955,6 +961,69 @@ impl SelectExecutor<'_> {
         }
 
         Ok(left_results)
+    }
+
+    /// Sort set operation results by ORDER BY clause
+    ///
+    /// ORDER BY on a UNION/INTERSECT/EXCEPT uses column positions (e.g., ORDER BY 1 DESC)
+    /// since the columns come from different source SELECTs.
+    fn sort_set_operation_results(
+        &self,
+        mut rows: Vec<vibesql_storage::Row>,
+        order_by: &[vibesql_ast::OrderByItem],
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        use crate::select::grouping::compare_sql_values;
+        use std::cmp::Ordering;
+
+        // Parse order_by items - they should be column numbers (e.g., ORDER BY 1, 2 DESC)
+        let mut sort_columns: Vec<(usize, bool)> = Vec::new(); // (column_index, is_desc)
+        for item in order_by {
+            match &item.expr {
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
+                    let col_idx = (*n as usize).saturating_sub(1); // 1-based to 0-based
+                    let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
+                    sort_columns.push((col_idx, is_desc));
+                }
+                vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    // Try to parse as numeric column reference or match by name
+                    if let Ok(n) = column.parse::<usize>() {
+                        let col_idx = n.saturating_sub(1);
+                        let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
+                        sort_columns.push((col_idx, is_desc));
+                    }
+                    // Otherwise fall through - column names don't work on UNION results
+                }
+                _ => {
+                    // Complex expressions in ORDER BY on UNION not supported
+                    // Just skip them
+                }
+            }
+        }
+
+        if sort_columns.is_empty() {
+            return Ok(rows);
+        }
+
+        rows.sort_by(|a, b| {
+            for (col_idx, is_desc) in &sort_columns {
+                let val_a = a.values.get(*col_idx);
+                let val_b = b.values.get(*col_idx);
+
+                let cmp = match (val_a, val_b) {
+                    (Some(a), Some(b)) => compare_sql_values(a, b),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                };
+
+                if cmp != Ordering::Equal {
+                    return if *is_desc { cmp.reverse() } else { cmp };
+                }
+            }
+            Ordering::Equal
+        });
+
+        Ok(rows)
     }
 
     /// Execute a FROM clause with WHERE, ORDER BY, and LIMIT for optimization

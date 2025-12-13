@@ -54,15 +54,39 @@ impl SelectExecutor<'_> {
         // Pass WHERE clause for predicate pushdown optimization
         // Note: ORDER BY and LIMIT are applied after aggregation, so we pass None here
         // Pass select_list for table elimination optimization (#3556)
+        //
+        // IMPORTANT: For aggregate queries with SELECT aliases that might shadow table columns,
+        // we need to resolve aliases before passing the WHERE clause for predicate pushdown.
+        // Otherwise, an alias like `COUNT(*) AS col1` would cause `col1` in WHERE to be
+        // incorrectly interpreted as the aggregate alias instead of the table column.
+        // See issue #4XXX for details.
         let from_result = match &stmt.from {
-            Some(from_clause) => self.execute_from_with_where(
-                from_clause,
-                cte_results,
-                stmt.where_clause.as_ref(),
-                None,
-                None,
-                Some(&stmt.select_list),
-            )?,
+            Some(from_clause) => {
+                // Pre-resolve SELECT aliases in WHERE clause before predicate pushdown
+                // This uses a lightweight schema built from the FROM clause
+                let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+                    // Build a minimal schema from the FROM clause to resolve aliases
+                    // For simple table references, get the schema from the catalog
+                    if let Some(schema) = build_early_schema(from_clause, self.database) {
+                        crate::select::order::resolve_where_aliases_with_schema(
+                            where_expr,
+                            &stmt.select_list,
+                            &schema,
+                        )
+                    } else {
+                        // Fallback: use legacy resolution without schema
+                        crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+                    }
+                });
+                self.execute_from_with_where(
+                    from_clause,
+                    cte_results,
+                    resolved_where.as_ref(),
+                    None,
+                    None,
+                    Some(&stmt.select_list),
+                )?
+            }
             None => {
                 // SELECT without FROM with aggregates - operate over ONE implicit row
                 // SQL standard behavior: SELECT without FROM operates over single implicit row
@@ -125,8 +149,9 @@ impl SelectExecutor<'_> {
 
             // Resolve SELECT aliases in WHERE clause (SQLite extension)
             // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+            // NOTE: Table column names take precedence over aliases (SQLite behavior)
             let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+                crate::select::order::resolve_where_aliases_with_schema(where_expr, &stmt.select_list, &original_schema)
             });
 
             // Optimize WHERE clause with constant folding and dead code elimination
@@ -527,5 +552,46 @@ impl SelectExecutor<'_> {
         }
 
         Ok(expanded)
+    }
+}
+
+/// Build an early schema from a FROM clause without fully executing it.
+///
+/// This is used to resolve SELECT aliases in WHERE clauses before predicate pushdown.
+/// The schema only needs column names, not actual data.
+///
+/// Returns None for complex FROM clauses (subqueries, CTEs, etc.) where we can't
+/// easily determine the schema without execution.
+fn build_early_schema(
+    from_clause: &vibesql_ast::FromClause,
+    database: &vibesql_storage::Database,
+) -> Option<crate::schema::CombinedSchema> {
+    match from_clause {
+        // Simple table reference - get schema from catalog
+        vibesql_ast::FromClause::Table { name, alias, .. } => {
+            let table_schema = database.catalog.get_table(name)?;
+            let effective_name = alias.as_ref().unwrap_or(name).clone();
+            Some(crate::schema::CombinedSchema::from_table(effective_name, table_schema.clone()))
+        }
+
+        // JOIN - recursively build schemas and combine
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            let left_schema = build_early_schema(left, database)?;
+            let right_schema = build_early_schema(right, database)?;
+
+            // Combine schemas
+            let mut combined = left_schema;
+            for (key, (_, schema)) in right_schema.table_schemas {
+                combined.table_schemas.insert(
+                    key,
+                    (combined.total_columns, schema.clone()),
+                );
+                combined.total_columns += schema.columns.len();
+            }
+            Some(combined)
+        }
+
+        // Subqueries, VALUES, etc. - can't easily determine schema without execution
+        vibesql_ast::FromClause::Subquery { .. } | vibesql_ast::FromClause::Values { .. } => None,
     }
 }
