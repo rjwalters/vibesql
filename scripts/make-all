@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+#
+# make-all orchestrator
+#
+# Runs the full build + test suite with timing breakdown:
+# 1. Build all (Rust crates + Python bindings)
+# 2. Test suite (unit tests + SQLLogicTest + analysis)
+#
+# Usage:
+#   ./scripts/make-all
+#   make all-fg
+#
+# For background execution, use:
+#   make all
+#
+
+set -euo pipefail
+
+# Get repository root
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Timing data (bash 3 compatible - use separate variables)
+PHASE1_TIME=0
+PHASE2_TIME=0
+PHASE1_STATUS=""
+PHASE2_STATUS=""
+TOTAL_START=$(date +%s)
+
+# Format seconds into human-readable duration
+format_duration() {
+    local secs=$1
+    if (( secs < 60 )); then
+        echo "${secs}s"
+    elif (( secs < 3600 )); then
+        local mins=$((secs / 60))
+        local remaining=$((secs % 60))
+        echo "${mins}m ${remaining}s"
+    else
+        local hours=$((secs / 3600))
+        local mins=$(((secs % 3600) / 60))
+        echo "${hours}h ${mins}m"
+    fi
+}
+
+# Print final summary with timing breakdown
+print_summary() {
+    local total_end=$(date +%s)
+    local total_duration=$((total_end - TOTAL_START))
+
+    echo ""
+    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}                      MAKE ALL SUMMARY                             ${NC}"
+    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    printf "%-25s %10s %10s\n" "Phase" "Duration" "Status"
+    echo "─────────────────────────────────────────────────────"
+
+    if [ -n "$PHASE1_STATUS" ]; then
+        local icon="✓"
+        [ "$PHASE1_STATUS" != "success" ] && icon="✗"
+        printf "%-25s %10s %10s\n" "Build All" "$(format_duration $PHASE1_TIME)" "$icon"
+    fi
+
+    if [ -n "$PHASE2_STATUS" ]; then
+        local icon="✓"
+        [ "$PHASE2_STATUS" != "success" ] && icon="✗"
+        printf "%-25s %10s %10s\n" "Test Suite" "$(format_duration $PHASE2_TIME)" "$icon"
+    fi
+
+    echo "═════════════════════════════════════════════════════"
+    printf "${BOLD}%-25s %10s${NC}\n" "TOTAL:" "$(format_duration $total_duration)"
+    echo ""
+
+    # Show what to do next
+    echo -e "${BOLD}Next steps:${NC}"
+    if [ "$PHASE1_STATUS" = "success" ] && [ "$PHASE2_STATUS" = "success" ]; then
+        echo "  Run 'make benchmark' for performance benchmarks"
+        echo "  Run 'make analyze' to see test results analysis"
+    else
+        echo "  Check errors above and fix failing tests/builds"
+    fi
+
+    echo ""
+    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
+}
+
+# Main execution
+main() {
+    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}                       VIBESQL MAKE ALL                            ${NC}"
+    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "Running full build and test suite:"
+    echo "  1. Build all (Rust crates + Python bindings)"
+    echo "  2. Test suite (unit + integration + SQLLogicTest)"
+    echo ""
+    echo "Started at: $(date)"
+
+    # Track if any phase failed
+    local failed=0
+
+    # Phase 1: Build all
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}[Build All]${NC} Starting..."
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    local phase_start=$(date +%s)
+
+    if make build-all; then
+        PHASE1_STATUS="success"
+        echo -e "${GREEN}✓ [Build All] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
+    else
+        PHASE1_STATUS="failed"
+        failed=1
+        echo -e "${RED}✗ [Build All] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
+    fi
+    PHASE1_TIME=$(($(date +%s) - phase_start))
+
+    # Phase 2: Test suite (only if build passed)
+    if [ $failed -eq 0 ]; then
+        echo ""
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BOLD}[Test Suite]${NC} Starting..."
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        phase_start=$(date +%s)
+
+        if make test; then
+            PHASE2_STATUS="success"
+            echo -e "${GREEN}✓ [Test Suite] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
+        else
+            PHASE2_STATUS="failed"
+            failed=1
+            echo -e "${RED}✗ [Test Suite] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
+        fi
+        PHASE2_TIME=$(($(date +%s) - phase_start))
+    fi
+
+    # Print summary
+    print_summary
+
+    if [ $failed -ne 0 ]; then
+        echo -e "${RED}Some phases failed. Check output above for details.${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}All phases completed successfully!${NC}"
+}
+
+main "$@"

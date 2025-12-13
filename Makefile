@@ -33,7 +33,8 @@ all:
 
 # Run all targets in foreground (build, test)
 # This is what 'make all' runs in the background
-all-fg: build-all test
+all-fg:
+	@./scripts/make-all
 
 # Tail the background make output
 logs:
