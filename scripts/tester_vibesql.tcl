@@ -251,10 +251,18 @@ proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
 
-    # Skip SQLite-specific statements we don't support
+    # Handle SQLite-specific statements
     set sql_upper [string toupper [string trim $sql]]
+
+    # Allow PRAGMA full_column_names and short_column_names through
     if {[string match "PRAGMA*" $sql_upper]} {
-        return {}  ;# Skip PRAGMA statements
+        # Parse PRAGMA name from the statement
+        # Patterns: PRAGMA name, PRAGMA name=value, PRAGMA name(value)
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names)} $sql]} {
+            # Pass through to VibeSQL - these are supported
+        } else {
+            return {}  ;# Skip unsupported PRAGMA statements
+        }
     }
     if {[string match "ANALYZE*" $sql_upper]} {
         return {}  ;# Skip ANALYZE statements
@@ -455,10 +463,15 @@ proc execsql2 {sql {db ""}} {
     # {colname1 value1 colname2 value2 ...} for each row, all in a flat list
     # This is used by SQLite tests to verify column name handling
 
-    # Skip SQLite-specific statements we don't support
+    # Handle SQLite-specific statements
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
-        return {}
+        # Allow PRAGMA full_column_names and short_column_names through
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names)} $sql]} {
+            # Pass through to VibeSQL - these are supported
+        } else {
+            return {}  ;# Skip unsupported PRAGMA statements
+        }
     }
 
     if {$::db_file eq ""} {
