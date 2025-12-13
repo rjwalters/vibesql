@@ -405,6 +405,7 @@ pub struct TestClient {
 
 impl TestClient {
     /// Connect to a test server
+    #[allow(dead_code)]
     pub async fn connect(addr: SocketAddr) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
         Ok(Self {
@@ -415,6 +416,7 @@ impl TestClient {
     }
 
     /// Send startup message
+    #[allow(dead_code)]
     pub async fn send_startup(&mut self, user: &str, database: &str) -> std::io::Result<()> {
         self.write_buf.clear();
 
@@ -474,6 +476,7 @@ impl TestClient {
     }
 
     /// Send a query message
+    #[allow(dead_code)]
     pub async fn send_query(&mut self, query: &str) -> std::io::Result<()> {
         self.write_buf.clear();
 
@@ -518,11 +521,13 @@ impl TestClient {
     }
 
     /// Read until we get a specific message type (with 5 second timeout)
+    #[allow(dead_code)]
     pub async fn read_until_message_type(&mut self, msg_type: u8) -> std::io::Result<Vec<u8>> {
         self.read_until_message_type_timeout(msg_type, std::time::Duration::from_secs(5)).await
     }
 
     /// Read until we get a specific message type with custom timeout
+    #[allow(dead_code)]
     pub async fn read_until_message_type_timeout(
         &mut self,
         msg_type: u8,
@@ -610,12 +615,14 @@ impl TestClient {
 }
 
 /// Helper to put a null-terminated C string
+#[allow(dead_code)]
 fn put_cstring(buf: &mut BytesMut, s: &str) {
     buf.extend_from_slice(s.as_bytes());
     buf.put_u8(0);
 }
 
 /// Check if data contains a message of a specific type
+#[allow(dead_code)]
 fn contains_message_type(data: &[u8], msg_type: u8) -> bool {
     let mut pos = 0;
     while pos < data.len() {

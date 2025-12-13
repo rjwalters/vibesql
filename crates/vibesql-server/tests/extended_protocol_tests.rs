@@ -7,7 +7,7 @@ mod common;
 
 use tokio_postgres::NoTls;
 
-use common::{start_test_server, test_config};
+use common::start_test_server;
 
 /// Test basic extended query protocol flow: Parse -> Bind -> Execute -> Sync
 #[tokio::test]
