@@ -55,6 +55,6 @@ For current documentation, see:
 
 ---
 
-**Last Cleanup**: 2025-12-06
+**Last Cleanup**: 2025-12-12
 **Files**: 67 historical documents
 **Storage**: ~730K

@@ -45,16 +45,16 @@
 - [Publishing Checklist](PUBLISHING_CHECKLIST.md) - Release process
 
 ### Performance
-- [Optimization](performance/OPTIMIZATION.md) - Performance optimization strategies
-- [Optimization Roadmap](performance/OPTIMIZATION_ROADMAP.md) - Performance improvement plans
-- [Profiling Guide](performance/PROFILING_GUIDE.md) - How to profile queries
+- [Performance Overview](performance/) - Performance documentation hub
+- [CPU Profiling](performance/CPU_PROFILING.md) - Profiling tool selection decision tree
+- [Optimization Guide](performance/OPTIMIZATION.md) - Performance optimization strategies
 - [TPC-H Benchmarking](performance/TPC-H_BENCHMARKING.md) - TPC-H benchmark guide
-- [TPC-DS Results](performance/TPCDS_RESULTS.md) - TPC-DS benchmark results
 
 ### Testing
+- [Testing Overview](testing/) - Testing documentation hub
 - [Testing Strategy](testing/TESTING_STRATEGY.md) - Overall testing approach
-- [SQL:1999 Conformance](testing/SQL1999_CONFORMANCE.md) - Standards compliance
-- [SQLLogicTest Guide](testing/sqllogictest/) - SQLLogicTest suite documentation
+- [SQL:1999 Conformance](testing/SQL1999_CONFORMANCE.md) - Standards compliance (100% Core)
+- [SQLLogicTest](testing/sqllogictest/QUICKSTART.md) - SQLLogicTest suite usage
 
 ### Architecture
 - [Columnar Architecture](architecture/COLUMNAR_ARCHITECTURE.md) - Columnar execution engine design

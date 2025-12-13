@@ -2,37 +2,39 @@
 
 ## Overview
 
-This document describes the SQL:1999 conformance testing strategy, including current implementation status, test suite organization, and future enhancement plans.
+This document describes VibeSQL's comprehensive testing strategy, including SQL:1999 conformance, SQLLogicTest integration, and SQLite TCL test suite coverage.
 
-## Current Implementation Status
+## Current Status
 
-### Test Suite Architecture
+| Test Suite | Status | Pass Rate |
+|------------|--------|-----------|
+| SQL:1999 Conformance | ✅ Complete | 100% (739/739) |
+| SQLLogicTest | ✅ Integrated | See [SQL1999_CONFORMANCE.md](SQL1999_CONFORMANCE.md) |
+| SQLite TCL Tests | ✅ Integrated | 1,174 test files |
 
-**Primary Test Suite**: SQL:1999 tests extracted from [sqltest by Elliot Chance](https://github.com/elliotchance/sqltest)
+## Test Suites
+
+### SQL:1999 Conformance Tests
+
+**Source**: [sqltest by Elliot Chance](https://github.com/elliotchance/sqltest)
 
 - **Location**: `tests/sql1999/manifest.json`
 - **Test Count**: 739 tests covering Core SQL:1999 features
-- **Source**: Tests extracted from sqltest's SQL:2016 Core and Foundation features
 - **Organization**: Feature-based by SQL standard codes (E011, E021, F031, etc.)
-- **Format**: JSON manifest with SQL statements and expected outcomes
+- **Pass Rate**: **100%** (739/739 tests passing)
 
 **Test Runner**: `tests/sqltest_conformance.rs`
-- Loads test manifest from JSON
-- Parses SQL statements using our parser
-- Executes against database engine
-- Compares results and generates metrics
-- Outputs results to `target/sqltest_results.json`
 
-**Test Coverage** (as of current baseline):
-- **E011-01**: Numeric data types (INTEGER, SMALLINT, BIGINT, FLOAT, DOUBLE)
-- **E011-04**: Arithmetic operators (+, -, *, /)
-- **E011-05**: Comparison predicates (<, <=, =, <>, >=, >)
-- **E011-06**: Implicit casting between numeric types
+**Coverage includes**:
+- **E011**: Numeric data types and arithmetic
 - **E021**: Character string types (CHAR, VARCHAR)
+- **E051**: Basic query specification
+- **E061**: Predicates and search conditions
+- **E091**: Set functions (aggregates)
+- **E141**: Integrity constraints
+- **E151**: Transaction support
+- **F031**: Basic schema manipulation
 - **F051**: Date/Time types and operations
-- **E141**: Default values and constraints
-- **F031**: Basic schema operations
-- **Pass Rate**: **85.7%** (633/739 tests passing, strong foundation)
 
 See `tests/sql1999/README.md` for details.
 
@@ -145,29 +147,29 @@ test:
       run: ./run_tests.sh --protocol=${{ matrix.protocol }}
 ```
 
-### Phase 2: SQLLogicTest Integration (Planned)
+### SQLLogicTest Suite
 
-**Status**: Not yet implemented
+**Status**: ✅ Integrated
 
-**Rationale**: Industry-standard test framework used by SQLite, DuckDB, and other databases provides massive baseline coverage.
+Industry-standard test framework used by SQLite, DuckDB, and other production databases.
 
 **Details**:
-- **Scale**: 7+ million tests
-- **Coverage**: Core SQL operations (portable subset)
+- **Scale**: 600+ test files with comprehensive SQL coverage
+- **Coverage**: Core SQL operations (SELECT, INSERT, UPDATE, DELETE, JOINs, aggregates, etc.)
 - **Source**: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
-- **Implementation**: sqllogictest-rs (Rust): https://github.com/risinglightdb/sqllogictest-rs
 
-**Approach**:
-1. Integrate sqllogictest-rs framework
-2. Run comprehensive test suite for baseline validation
-3. Complement existing SQL:1999 tests with broader coverage
+**Running Tests**:
+```bash
+# Full suite with parallel workers
+./scripts/sqllogictest run --parallel
 
-**Benefits**:
-- Massive test coverage (7M+ tests)
-- Actively maintained
-- Used by production databases (SQLite, DuckDB, etc.)
-- Available in Rust
-- Validates core SQL functionality beyond standard-specific features
+# Query results
+./scripts/sqllogictest query --preset by-category
+```
+
+**Results Storage**: VibeSQL stores its own test results in a VibeSQL database (dogfooding!)
+
+See [sqllogictest/QUICKSTART.md](sqllogictest/QUICKSTART.md) for detailed usage.
 
 ### Phase 3: Expanded SQL:1999 Feature Coverage (Planned)
 
@@ -220,10 +222,8 @@ tests/sql1999/
 - Metrics: total tests, passed, failed, errors, pass rate percentage
 
 **Current Metrics** (739 tests):
-- **85.4% pass rate** (631 passing, 108 errors)
-- Strong conformance across Core SQL:1999 features
-- Recent regression: PR #685 broke 3 previously passing tests
-- Remaining gaps: Need to analyze 108 test failures for patterns and prioritization
+- **100% pass rate** (739/739 passing)
+- Full conformance across Core SQL:1999 features achieved November 2025
 
 ### Future Compliance Matrix (Planned)
 
@@ -277,36 +277,28 @@ Coverage commands are defined as Cargo aliases in `.cargo/config.toml`, so the i
 
 ## Test Development Priorities
 
-### ✅ Completed: Foundation (Phase 1)
-- [x] Basic test harness created (`tests/sqltest_conformance.rs`)
+### ✅ Completed: SQL:1999 Core Compliance
 - [x] 739 SQL:1999 tests extracted from sqltest
-- [x] JSON manifest format established
+- [x] **100% pass rate achieved** (739/739 tests)
 - [x] GitHub Actions integration with badge generation
 - [x] Compliance report automation
+- [x] Full parser and executor support for Core SQL:1999
 
-### ✅ Completed: Strong Foundation Achievement (Phase 2)
-- [x] Achieved **85.7% pass rate** (633/739 tests)
-- [x] Fixed parser gaps (constraints, TRIM, CAST, comparison operators)
-- [x] Fixed executor gaps (type coercion, constraint enforcement, transactions)
-- [x] Strong Core SQL:1999 compliance demonstrated
+### ✅ Completed: SQLLogicTest Integration
+- [x] SQLLogicTest suite integrated
+- [x] Parallel test execution
+- [x] Results stored in VibeSQL database (dogfooding)
+- [x] Query interface for analyzing results
 
-### 🚧 Current: Analyzing Failures for 90%+ (Phase 3)
-1. Analyze 106 remaining test failures
-2. Identify common failure patterns
-3. Prioritize high-impact fixes
-4. Target: 90%+ pass rate on 739-test suite
+### ✅ Completed: SQLite TCL Test Suite
+- [x] 1,174 test files from SQLite's canonical test suite
+- [x] TCL shim for VibeSQL compatibility
+- [x] Priority-based test organization
 
-### Planned: Test Coverage Expansion (Phase 3)
-1. Extract 200-500 more tests from sqltest
-2. Build tests for all ~169 Core SQL:1999 features
-3. Organize expanded test coverage by feature codes
-4. Add Optional feature tests (triggers, procedures, recursive queries)
-
-### Future: Protocol & Advanced Testing (Phase 4)
-1. Implement ODBC driver and test execution
-2. Implement JDBC driver and test execution
-3. Integrate SQLLogicTest (7M+ tests)
-4. Edge cases, performance, concurrency tests
+### Future: Protocol Testing
+- [ ] ODBC driver implementation and testing
+- [ ] JDBC driver implementation and testing
+- [ ] Protocol-level conformance validation
 
 ## Alternative Test Resources
 
@@ -344,24 +336,20 @@ Coverage commands are defined as Cargo aliases in `.cargo/config.toml`, so the i
 
 ## Success Criteria
 
-### Current Phase Goals (Direct API Testing)
+### ✅ Achieved Goals
 
 1. ✅ Basic test infrastructure established
 2. ✅ Tests run automatically in GitHub Actions on every commit
 3. ✅ Automated badge generation and compliance reporting
-4. ✅ 80%+ pass rate achieved - now at **85.7%** (633/739 tests)
-5. ✅ 739 tests covering Core SQL:1999 features
-6. ✅ Clear gap identification for parser and executor improvements
-7. 🚧 Target 90%+ pass rate (analyzing 106 remaining failures)
+4. ✅ **100% pass rate achieved** (739/739 SQL:1999 tests)
+5. ✅ SQLLogicTest suite integrated
+6. ✅ SQLite TCL test suite integrated (1,174 tests)
 
-### Future Phase Goals (Full Compliance)
+### Future Goals
 
-7. ⬜ ODBC and JDBC drivers implemented
-8. ⬜ All tests executable via both ODBC and JDBC protocols
-9. ⬜ Both protocols produce identical results for all tests
-10. ⬜ Comprehensive test coverage of all SQL:1999 Core features (~169)
-11. ⬜ Complete test coverage of SQL:1999 optional features (FULL compliance)
-12. ⬜ 100% of tests passing (FULL SQL:1999 compliance achieved)
+- [ ] ODBC and JDBC drivers implemented
+- [ ] Protocol-level test execution
+- [ ] Expanded optional feature coverage
 
 ## Risks and Mitigations
 
@@ -385,58 +373,68 @@ Coverage commands are defined as Cargo aliases in `.cargo/config.toml`, so the i
 - **Mitigation**: Use existing ODBC/JDBC drivers as reference
 - **Mitigation**: Test incrementally as protocols are implemented
 
-## Next Steps
+## Running Tests
 
-### Immediate Priorities
+### SQL:1999 Conformance
 
-1. ✅ **Fixed parser gaps** - Achieved 85.7% pass rate
-   - ✅ Added constraint naming support
-   - ✅ Enhanced TRIM syntax (BOTH/LEADING/TRAILING 'x' FROM s)
-   - ✅ CAST to VARCHAR without explicit length
-   - ✅ Comparison operators for all types
+```bash
+cargo test --test sqltest_conformance --release
+```
 
-2. ✅ **Fixed executor gaps**
-   - ✅ Type coercion working
-   - ✅ All constraints enforced (NOT NULL, PRIMARY KEY, UNIQUE, CHECK, FOREIGN KEY)
-   - ✅ Transaction support complete (BEGIN, COMMIT, ROLLBACK, SAVEPOINT)
+### SQLLogicTest Suite
 
-3. 🚧 **Analyze and fix failures for 90%+ conformance** (current: 85.7%)
-   - Analyze 106 remaining test failures
-   - Group by failure patterns
-   - Prioritize high-impact fixes
-   - Systematically address gaps
+```bash
+# Full suite
+./scripts/sqllogictest run --parallel
 
-### Medium-Term Goals
+# Individual file
+./scripts/sqllogictest test random/select/slt_good_19.test
 
-4. ✅ **Achieved 80%+ pass rate** - now at 85.7%
-5. 🚧 **Target 90%+ pass rate** (analyzing 106 failures)
-6. ⬜ **Build ODBC driver** (deferred - not required for Core compliance)
-7. ⬜ **Build JDBC driver** (deferred - not required for Core compliance)
+# Query results
+./scripts/sqllogictest query --preset by-category
+```
 
-### Long-Term Vision
+### SQLite TCL Tests
 
-7. **Integrate SQLLogicTest** for baseline validation
-8. **Cover all Core and Optional features** for FULL SQL:1999 compliance
-9. **Achieve 100% test pass rate** across all protocols
+```bash
+# Priority 1 tests (core SQL)
+make test-tcl
+
+# All tests
+make test-tcl-all
+
+# Specific test
+make test-tcl-file FILE=select1.test
+```
+
+### Code Coverage
+
+```bash
+cargo coverage        # HTML report
+cargo coverage-lcov   # lcov.info for CI
+```
 
 ## References
 
-### Current Implementation Files
+### Internal Files
 
-1. **Test Suite**: `tests/sql1999/manifest.json` - 100 SQL:1999 tests
-2. **Test Runner**: `tests/sqltest_conformance.rs` - Main conformance test harness
-3. **Test Documentation**: `tests/sql1999/README.md` - Test organization and usage
-4. **Badge Generation**: `.github/workflows/deploy-demo.yml` (lines 76-111)
-5. **Compliance Reporting**: `scripts/generate_compliance_report.sh`
-6. **Compliance Report**: `docs/SQL1999_CONFORMANCE.md` (auto-generated)
-7. **Badge Endpoint**: https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json
-8. **Test Results**: `target/sqltest_results.json` (generated after test runs)
+| File | Purpose |
+|------|---------|
+| `tests/sql1999/manifest.json` | SQL:1999 test definitions |
+| `tests/sqltest_conformance.rs` | SQL:1999 test runner |
+| `scripts/sqllogictest` | SQLLogicTest CLI tool |
+| `scripts/tcltest` | TCL test suite runner |
+| `scripts/generate_compliance_report.sh` | Generate conformance report |
 
 ### External Resources
 
-9. **sqltest by Elliot Chance**: https://github.com/elliotchance/sqltest
-10. **SQLLogicTest**: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
-11. **sqllogictest-rs**: https://github.com/risinglightdb/sqllogictest-rs
-12. **PostgreSQL Regression Tests**: https://github.com/postgres/postgres/tree/master/src/test/regress
-13. **SQL:1999 Standard**: ISO/IEC 9075:1999 (purchase required)
-14. **NIST SQL Test Suite**: https://www.itl.nist.gov/div897/ctg/sql_form.htm (historical, obsolete)
+- [sqltest by Elliot Chance](https://github.com/elliotchance/sqltest) - SQL:1999 test source
+- [SQLLogicTest](https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki) - Test framework
+- [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) - Rust implementation
+
+### Related Documentation
+
+- [SQL1999_CONFORMANCE.md](SQL1999_CONFORMANCE.md) - Current conformance status
+- [sqllogictest/QUICKSTART.md](sqllogictest/QUICKSTART.md) - SQLLogicTest usage guide
+- [Benchmarking Guide](../development/BENCHMARKING.md) - Performance testing
+- [Feature Status](../reference/FEATURE_STATUS.md) - SQL feature implementation

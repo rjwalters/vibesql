@@ -1,6 +1,9 @@
 # VibeSQL Performance Optimization
 
-## Current Status
+> **Note**: This is an archived document from a specific point in the optimization journey.
+> For current optimization documentation, see [../performance/OPTIMIZATION.md](../performance/OPTIMIZATION.md).
+
+## Status (at time of archiving)
 
 **TPC-H Q6 Performance (SF 0.01, ~60K rows)**:
 - **VibeSQL**: 35.2ms
