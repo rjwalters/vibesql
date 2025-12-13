@@ -52,3 +52,4 @@ mod update;
 mod values_statement;
 mod view;
 mod window_functions;
+mod dml_schema_qualified;

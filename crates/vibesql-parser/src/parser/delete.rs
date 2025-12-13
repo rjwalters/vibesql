@@ -9,30 +9,17 @@ impl Parser {
         // Check for optional ONLY keyword
         let only = self.try_consume_keyword(Keyword::Only);
 
-        // Check for optional left parenthesis
+        // Check for optional left parenthesis (for DELETE FROM ONLY (table_name) syntax)
         let has_paren = matches!(self.peek(), Token::LParen);
         if has_paren {
             self.advance(); // consume '('
         }
 
-        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
-        let (table_name, quoted) = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, false)
-            }
-            Token::DelimitedIdentifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, true)
-            }
-            _ => {
-                return Err(ParseError {
-                    message: "Expected table name after DELETE FROM".to_string(),
-                })
-            }
-        };
+        // Parse table name with optional schema qualifier and quoted flag
+        // Supports: tablename, "TableName", schema.table, "schema"."table"
+        let table_ref = self.parse_table_ref()?;
+        let table_name = table_ref.name;
+        let quoted = table_ref.quoted;
 
         // If we had opening paren, expect closing paren
         if has_paren {
