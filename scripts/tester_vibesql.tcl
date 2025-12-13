@@ -209,9 +209,13 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "CHECK constraint failed"
     }
 
-    # Syntax/parse errors - try to preserve some context
+    # Syntax/parse errors - parser now produces SQLite-compatible format directly
+    # Format: "Parse error: near "X": syntax error" -> "near "X": syntax error"
+    if {[regexp -nocase {^Parse error: (near .+: syntax error)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
-        # Return simplified parse error
         return "near \"$parse_msg\": syntax error"
     }
 

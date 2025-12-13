@@ -399,9 +399,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => {
-                Err(ParseError { message: format!("Expected table name, found {:?}", self.peek()) })
-            }
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -413,9 +411,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => Err(ParseError {
-                message: format!("Expected column name, found {:?}", self.peek()),
-            }),
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -783,11 +779,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.expect_token(Token::RParen)?;
                 TableConstraintKind::Check { expr: self.arena.alloc(expr) }
             }
-            _ => {
-                return Err(ParseError {
-                    message: format!("Expected constraint type, found {:?}", self.peek()),
-                })
-            }
+            _ => return Err(ParseError { message: self.peek().syntax_error() })
         };
 
         Ok(TableConstraint { name, kind })
@@ -1057,9 +1049,7 @@ impl<'arena> ArenaParser<'arena> {
                     }),
                 }
             }
-            _ => Err(ParseError {
-                message: format!("Expected PRAGMA value, found {:?}", self.peek()),
-            }),
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 }
