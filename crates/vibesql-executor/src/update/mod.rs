@@ -82,6 +82,7 @@ impl UpdateExecutor {
     /// // Update salary
     /// let stmt = UpdateStmt {
     ///     table_name: "employees".to_string(),
+    ///     quoted: false,
     ///     assignments: vec![Assignment {
     ///         column: "salary".to_string(),
     ///         value: Expression::Literal(SqlValue::Integer(60000)),

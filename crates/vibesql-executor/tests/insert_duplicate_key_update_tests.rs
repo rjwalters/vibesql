@@ -35,6 +35,7 @@ fn test_on_duplicate_key_update_basic() {
     // Initial INSERT: INSERT INTO products VALUES (1, 'Widget', 10)
     let initial_stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -54,6 +55,7 @@ fn test_on_duplicate_key_update_basic() {
     // VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -91,6 +93,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
     // Initial INSERT
     let initial_stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -108,6 +111,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
     // Upsert with arithmetic: stock = stock + VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -151,6 +155,7 @@ fn test_on_duplicate_key_update_no_conflict() {
     // INSERT with ON DUPLICATE KEY UPDATE - no conflict, should insert normally
     let upsert_stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

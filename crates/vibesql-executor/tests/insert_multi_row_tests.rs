@@ -12,6 +12,7 @@ fn test_multi_row_insert_atomic_success() {
     // All should succeed
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -53,6 +54,7 @@ fn test_multi_row_insert_atomic_failure() {
     // Second row violates NOT NULL constraint on id, should fail atomically
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -95,6 +97,7 @@ fn test_multi_row_insert_with_column_list() {
     // INSERT INTO users (name, id) VALUES ('Alice', 1), ('Bob', 2)
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["name".to_string(), "id".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -130,6 +133,7 @@ fn test_multi_row_insert_type_mismatch() {
     // Second row has type mismatch, should fail atomically
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -197,6 +201,7 @@ fn test_multi_row_insert_various_data_types() {
     //   (3, NULL, NULL, NULL)
     let stmt = vibesql_ast::InsertStmt {
         table_name: "test_types".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -260,6 +265,7 @@ fn test_multi_row_insert_primary_key_violation() {
     // Second row violates PRIMARY KEY, should fail atomically
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -296,6 +302,7 @@ fn test_single_row_insert_no_transaction() {
     // Single row INSERT should work without implicit transaction
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

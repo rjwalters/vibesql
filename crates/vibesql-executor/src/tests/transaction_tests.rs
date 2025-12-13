@@ -120,6 +120,7 @@ fn test_transaction_insert_commit() {
     // Insert a row
     let insert_stmt = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -155,6 +156,7 @@ fn test_transaction_insert_rollback() {
     // Insert a row
     let insert_stmt = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -186,6 +188,7 @@ fn test_transaction_multiple_operations_commit() {
     // Insert initial data outside transaction
     let insert_stmt1 = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -203,6 +206,7 @@ fn test_transaction_multiple_operations_commit() {
     // Insert another row
     let insert_stmt2 = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
@@ -233,6 +237,7 @@ fn test_transaction_multiple_operations_rollback() {
     // Insert initial data outside transaction
     let insert_stmt1 = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -250,6 +255,7 @@ fn test_transaction_multiple_operations_rollback() {
     // Insert another row
     let insert_stmt2 = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
@@ -288,6 +294,7 @@ fn test_transaction_isolation() {
         .unwrap();
     let insert_stmt = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -326,6 +333,7 @@ fn test_transaction_nested_operations() {
     for i in 1..=5 {
         let insert_stmt = InsertStmt {
             table_name: "users".to_string(),
+            quoted: false,
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(i)),
@@ -360,6 +368,7 @@ fn test_transaction_empty_rollback() {
     // Insert data outside transaction
     let insert_stmt = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -392,6 +401,7 @@ fn test_multiple_transactions() {
         .unwrap();
     let insert_stmt1 = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -408,6 +418,7 @@ fn test_multiple_transactions() {
         .unwrap();
     let insert_stmt2 = InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),

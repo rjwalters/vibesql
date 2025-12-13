@@ -74,6 +74,7 @@ fn test_update_where_in_subquery() {
     // UPDATE employees SET salary = 80000 WHERE dept_id IN (SELECT dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(80000)),
@@ -158,6 +159,7 @@ fn test_update_where_not_in_subquery() {
     // UPDATE employees SET active = FALSE WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "active".to_string(),
             value: Expression::Literal(SqlValue::Boolean(false)),
@@ -235,6 +237,7 @@ fn test_update_where_subquery_empty_result() {
     // UPDATE employees SET active = FALSE WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
     let stmt = vibesql_ast::UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "active".to_string(),
             value: Expression::Literal(SqlValue::Boolean(false)),
@@ -327,6 +330,7 @@ fn test_update_where_complex_subquery_condition() {
     // budget > 80000)
     let stmt = vibesql_ast::UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(70000)),
@@ -415,6 +419,7 @@ fn test_update_where_multiple_rows_in_subquery() {
     // UPDATE employees SET active = FALSE WHERE dept_id IN (SELECT dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "active".to_string(),
             value: Expression::Literal(SqlValue::Boolean(false)),

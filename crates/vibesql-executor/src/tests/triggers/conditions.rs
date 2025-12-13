@@ -69,6 +69,7 @@ fn test_when_clause_filters_firing() {
     // Insert row with amount=50 (should NOT fire)
     let insert1 = vibesql_ast::InsertStmt {
         table_name: "TRANSACTIONS".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "amount".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -85,6 +86,7 @@ fn test_when_clause_filters_firing() {
     // Insert row with amount=150 (should fire)
     let insert2 = vibesql_ast::InsertStmt {
         table_name: "TRANSACTIONS".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "amount".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2)),

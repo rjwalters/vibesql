@@ -119,6 +119,7 @@ fn create_update_stmt(
 ) -> UpdateStmt {
     UpdateStmt {
         table_name: table_name.to_string(),
+        quoted: false,
         assignments: vec![Assignment { column: column.to_string(), value }],
         where_clause,
     }
@@ -130,6 +131,7 @@ fn create_multi_column_update_stmt(
 ) -> UpdateStmt {
     UpdateStmt {
         table_name: table_name.to_string(),
+        quoted: false,
         assignments: assignments
             .into_iter()
             .map(|(col, val)| Assignment { column: col.to_string(), value: val })
