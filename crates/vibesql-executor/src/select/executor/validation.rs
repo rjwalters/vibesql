@@ -649,7 +649,25 @@ pub fn validate_select_columns_with_context(
         })
         .unwrap_or_default();
 
+    // Collect SELECT aliases (SQLite extension: allow aliases in WHERE clause)
+    let select_aliases: std::collections::HashSet<String> = select_list
+        .iter()
+        .filter_map(|item| {
+            if let SelectItem::Expression { alias: Some(alias), .. } = item {
+                Some(vec![alias.clone(), alias.to_lowercase()])
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+
+    // Combine procedure variables and SELECT aliases for WHERE clause validation
+    let allowed_in_where: std::collections::HashSet<String> =
+        proc_vars.union(&select_aliases).cloned().collect();
+
     let mut column_refs = Vec::new();
+    let mut where_column_refs = Vec::new();
 
     // Extract column references from SELECT list
     for item in select_list {
@@ -684,9 +702,9 @@ pub fn validate_select_columns_with_context(
         }
     }
 
-    // Extract column references from WHERE clause
+    // Extract column references from WHERE clause (tracked separately for alias resolution)
     if let Some(where_expr) = where_clause {
-        extract_column_refs(where_expr, &mut column_refs);
+        extract_column_refs(where_expr, &mut where_column_refs);
 
         // Check for wrong argument count FIRST (takes priority over misuse)
         // SQLite reports arg count errors before context errors
@@ -704,7 +722,7 @@ pub fn validate_select_columns_with_context(
         }
     }
 
-    // Validate each column reference
+    // Validate SELECT list column references (only procedure variables allowed)
     for col_ref in &column_refs {
         // Skip validation for procedure variables (unqualified only)
         if col_ref.table.is_none() {
@@ -714,6 +732,22 @@ pub fn validate_select_columns_with_context(
                 continue;
             }
         }
+        validate_column_ref(col_ref, schema, outer_schema)?;
+    }
+
+    // Validate WHERE clause column references (aliases + procedure variables allowed)
+    log::debug!("Validating WHERE: allowed_in_where={:?}", allowed_in_where);
+    for col_ref in &where_column_refs {
+        // Skip validation for allowed names (procedure variables and SELECT aliases)
+        if col_ref.table.is_none() {
+            if allowed_in_where.contains(&col_ref.column)
+                || allowed_in_where.contains(&col_ref.column.to_lowercase())
+            {
+                log::debug!("WHERE validation: allowing alias '{}'", col_ref.column);
+                continue;
+            }
+        }
+        log::debug!("WHERE validation: checking column '{}' against schema", col_ref.column);
         validate_column_ref(col_ref, schema, outer_schema)?;
     }
 

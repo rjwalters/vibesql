@@ -85,10 +85,16 @@ impl SelectExecutor<'_> {
         }
         let evaluator = ctx.create_evaluator();
 
+        // Resolve SELECT aliases in WHERE clause (SQLite extension)
+        // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+        });
+
         // Validate WHERE clause subqueries upfront (before row iteration)
         // This ensures schema validation happens even for empty result sets
         // Issue #3562: Pass CTE context so CTEs can be resolved in IN subqueries
-        if let Some(where_expr) = &stmt.where_clause {
+        if let Some(ref where_expr) = resolved_where {
             validate_where_clause_subqueries(where_expr, self.database, cte_ctx)?;
         }
 
@@ -97,7 +103,7 @@ impl SelectExecutor<'_> {
             Box::new(TableScanIterator::new(schema.clone(), rows));
 
         // Stage 2: WHERE filter (if present)
-        if let Some(where_expr) = &stmt.where_clause {
+        if let Some(ref where_expr) = resolved_where {
             // Optimize WHERE clause
             let where_optimization = optimize_where_clause(Some(where_expr), &evaluator)?;
 
