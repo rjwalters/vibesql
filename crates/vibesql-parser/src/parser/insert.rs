@@ -25,24 +25,11 @@ impl Parser {
 
         self.expect_keyword(Keyword::Into)?;
 
-        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
-        let (table_name, quoted) = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, false)
-            }
-            Token::DelimitedIdentifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, true)
-            }
-            _ => {
-                return Err(ParseError {
-                    message: "Expected table name after INSERT INTO".to_string(),
-                })
-            }
-        };
+        // Parse table name with optional schema qualifier and quoted flag
+        // Supports: tablename, "TableName", schema.table, "schema"."table"
+        let table_ref = self.parse_table_ref()?;
+        let table_name = table_ref.name;
+        let quoted = table_ref.quoted;
 
         // Parse column list (optional in SQL, but we'll require it for now)
         let columns = if matches!(self.peek(), Token::LParen) {
@@ -152,24 +139,11 @@ impl Parser {
         self.expect_keyword(Keyword::Replace)?;
         self.expect_keyword(Keyword::Into)?;
 
-        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
-        let (table_name, quoted) = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, false)
-            }
-            Token::DelimitedIdentifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, true)
-            }
-            _ => {
-                return Err(ParseError {
-                    message: "Expected table name after REPLACE INTO".to_string(),
-                })
-            }
-        };
+        // Parse table name with optional schema qualifier and quoted flag
+        // Supports: tablename, "TableName", schema.table, "schema"."table"
+        let table_ref = self.parse_table_ref()?;
+        let table_name = table_ref.name;
+        let quoted = table_ref.quoted;
 
         // Parse column list (optional)
         let columns = if matches!(self.peek(), Token::LParen) {

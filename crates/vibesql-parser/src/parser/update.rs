@@ -5,22 +5,11 @@ impl Parser {
     pub(super) fn parse_update_statement(&mut self) -> Result<vibesql_ast::UpdateStmt, ParseError> {
         self.expect_keyword(Keyword::Update)?;
 
-        // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
-        let (table_name, quoted) = match self.peek() {
-            Token::Identifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, false)
-            }
-            Token::DelimitedIdentifier(name) => {
-                let table = name.clone();
-                self.advance();
-                (table, true)
-            }
-            _ => {
-                return Err(ParseError { message: "Expected table name after UPDATE".to_string() })
-            }
-        };
+        // Parse table name with optional schema qualifier and quoted flag
+        // Supports: tablename, "TableName", schema.table, "schema"."table"
+        let table_ref = self.parse_table_ref()?;
+        let table_name = table_ref.name;
+        let quoted = table_ref.quoted;
 
         // Parse SET keyword
         self.expect_keyword(Keyword::Set)?;
