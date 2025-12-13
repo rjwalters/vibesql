@@ -78,7 +78,7 @@ fn test_savepoint() {
 
     match stmt {
         Statement::Savepoint(savepoint_stmt) => {
-            assert_eq!(savepoint_stmt.name, "MY_SAVEPOINT");
+            assert_eq!(savepoint_stmt.name, "my_savepoint");
         }
         _ => panic!("Expected Savepoint statement, got {:?}", stmt),
     }
@@ -104,7 +104,7 @@ fn test_rollback_to_savepoint() {
 
     match stmt {
         Statement::RollbackToSavepoint(rollback_stmt) => {
-            assert_eq!(rollback_stmt.name, "MY_SAVEPOINT");
+            assert_eq!(rollback_stmt.name, "my_savepoint");
         }
         _ => panic!("Expected RollbackToSavepoint statement, got {:?}", stmt),
     }
@@ -117,7 +117,7 @@ fn test_release_savepoint() {
 
     match stmt {
         Statement::ReleaseSavepoint(release_stmt) => {
-            assert_eq!(release_stmt.name, "MY_SAVEPOINT");
+            assert_eq!(release_stmt.name, "my_savepoint");
         }
         _ => panic!("Expected ReleaseSavepoint statement, got {:?}", stmt),
     }
@@ -177,9 +177,9 @@ fn test_transaction_statement_case_insensitive() {
 #[test]
 fn test_savepoint_names_various() {
     let test_cases = vec![
-        ("SAVEPOINT abc", "ABC"), // unquoted identifiers are uppercased
-        ("SAVEPOINT ABC", "ABC"),
-        ("SAVEPOINT save_point_123", "SAVE_POINT_123"),
+        ("SAVEPOINT abc", "abc"), // unquoted identifiers are lowercased
+        ("SAVEPOINT ABC", "abc"),
+        ("SAVEPOINT save_point_123", "save_point_123"),
         ("SAVEPOINT \"quoted name\"", "quoted name"), // quoted identifiers preserve case
     ];
 

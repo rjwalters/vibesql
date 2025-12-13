@@ -2,6 +2,35 @@
 
 use crate::{keywords::Keyword, parser::ParseError, token::Token};
 
+/// Parse a savepoint name, normalizing unquoted identifiers to lowercase.
+///
+/// SQL:1999 behavior (as implemented in this codebase):
+/// - Unquoted identifiers are case-insensitive (normalized to lowercase)
+/// - Quoted identifiers preserve their original case
+fn parse_savepoint_name(parser: &mut super::Parser) -> Result<String, ParseError> {
+    match parser.peek() {
+        Token::Identifier(name) => {
+            let normalized = name.to_lowercase();
+            parser.advance();
+            Ok(normalized)
+        }
+        Token::DelimitedIdentifier(name) => {
+            let preserved = name.clone();
+            parser.advance();
+            Ok(preserved)
+        }
+        Token::Keyword(kw) => Err(ParseError {
+            message: format!(
+                "Expected savepoint name, found reserved keyword '{}'. Use delimited identifiers (e.g., \"{}\") to use keywords as names.",
+                kw, kw
+            ),
+        }),
+        _ => Err(ParseError {
+            message: parser.peek().syntax_error(),
+        }),
+    }
+}
+
 /// Parse BEGIN [TRANSACTION] [WITH DURABILITY = <mode>] or START TRANSACTION [WITH DURABILITY =
 /// <mode>] statement
 ///
@@ -88,8 +117,8 @@ pub(super) fn parse_savepoint_statement(
     // Consume SAVEPOINT
     parser.consume_keyword(Keyword::Savepoint)?;
 
-    // Parse savepoint name (identifier)
-    let name = parser.parse_identifier()?;
+    // Parse savepoint name (identifier, normalized to uppercase if unquoted)
+    let name = parse_savepoint_name(parser)?;
 
     Ok(vibesql_ast::SavepointStmt { name })
 }
@@ -107,8 +136,8 @@ pub(super) fn parse_rollback_to_savepoint_statement(
     // Consume SAVEPOINT
     parser.consume_keyword(Keyword::Savepoint)?;
 
-    // Parse savepoint name (identifier)
-    let name = parser.parse_identifier()?;
+    // Parse savepoint name (identifier, normalized to uppercase if unquoted)
+    let name = parse_savepoint_name(parser)?;
 
     Ok(vibesql_ast::RollbackToSavepointStmt { name })
 }
@@ -123,8 +152,8 @@ pub(super) fn parse_release_savepoint_statement(
     // Consume SAVEPOINT
     parser.consume_keyword(Keyword::Savepoint)?;
 
-    // Parse savepoint name (identifier)
-    let name = parser.parse_identifier()?;
+    // Parse savepoint name (identifier, normalized to uppercase if unquoted)
+    let name = parse_savepoint_name(parser)?;
 
     Ok(vibesql_ast::ReleaseSavepointStmt { name })
 }
