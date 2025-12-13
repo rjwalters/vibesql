@@ -25,6 +25,20 @@ pub fn evaluate_predicate_string_batch(
             // Extract target string
             let target = match value {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+                // SQLite affinity: TEXT vs INTEGER/REAL equality is always false
+                // Different types never match in equality comparison
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Real(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Smallint(_) => {
+                    // Return all false - no matches, respecting NULL handling
+                    return Ok(if let Some(null_mask) = nulls {
+                        null_mask.iter().map(|&is_null| !is_null && false).collect()
+                    } else {
+                        vec![false; values.len()]
+                    });
+                }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string equality".to_string(),
@@ -39,6 +53,19 @@ pub fn evaluate_predicate_string_batch(
         ColumnPredicate::LessThan { value, .. } => {
             let target = match value {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+                // SQLite affinity: TEXT is always GREATER than INTEGER/REAL
+                // So "string < number" is always false
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Real(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Smallint(_) => {
+                    return Ok(if let Some(null_mask) = nulls {
+                        null_mask.iter().map(|&is_null| !is_null && false).collect()
+                    } else {
+                        vec![false; values.len()]
+                    });
+                }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -53,6 +80,19 @@ pub fn evaluate_predicate_string_batch(
         ColumnPredicate::GreaterThan { value, .. } => {
             let target = match value {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+                // SQLite affinity: TEXT is always GREATER than INTEGER/REAL
+                // So "string > number" is always true (for non-null values)
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Real(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Smallint(_) => {
+                    return Ok(if let Some(null_mask) = nulls {
+                        null_mask.iter().map(|&is_null| !is_null).collect()
+                    } else {
+                        vec![true; values.len()]
+                    });
+                }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -67,6 +107,19 @@ pub fn evaluate_predicate_string_batch(
         ColumnPredicate::LessThanOrEqual { value, .. } => {
             let target = match value {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+                // SQLite affinity: TEXT is always GREATER than INTEGER/REAL
+                // So "string <= number" is always false
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Real(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Smallint(_) => {
+                    return Ok(if let Some(null_mask) = nulls {
+                        null_mask.iter().map(|&is_null| !is_null && false).collect()
+                    } else {
+                        vec![false; values.len()]
+                    });
+                }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -81,6 +134,19 @@ pub fn evaluate_predicate_string_batch(
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
             let target = match value {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+                // SQLite affinity: TEXT is always GREATER than INTEGER/REAL
+                // So "string >= number" is always true (for non-null values)
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Real(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Smallint(_) => {
+                    return Ok(if let Some(null_mask) = nulls {
+                        null_mask.iter().map(|&is_null| !is_null).collect()
+                    } else {
+                        vec![true; values.len()]
+                    });
+                }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -95,6 +161,19 @@ pub fn evaluate_predicate_string_batch(
         ColumnPredicate::NotEqual { value, .. } => {
             let target = match value {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,
+                // SQLite affinity: TEXT vs INTEGER/REAL are always not equal
+                // So "string <> number" is always true (for non-null values)
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Real(_)
+                | SqlValue::Numeric(_)
+                | SqlValue::Smallint(_) => {
+                    return Ok(if let Some(null_mask) = nulls {
+                        null_mask.iter().map(|&is_null| !is_null).collect()
+                    } else {
+                        vec![true; values.len()]
+                    });
+                }
                 _ => {
                     return Err(ExecutorError::ColumnarTypeMismatch {
                         operation: "string comparison".to_string(),
@@ -127,6 +206,31 @@ pub fn evaluate_predicate_string_batch(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
+            // Helper to check if a value is numeric
+            let is_numeric = |v: &SqlValue| {
+                matches!(
+                    v,
+                    SqlValue::Integer(_)
+                        | SqlValue::Bigint(_)
+                        | SqlValue::Real(_)
+                        | SqlValue::Numeric(_)
+                        | SqlValue::Smallint(_)
+                )
+            };
+
+            // SQLite affinity: TEXT is always GREATER than INTEGER/REAL
+            // For "string BETWEEN low_num AND high_num":
+            //   - string >= low_num is true (text > numbers)
+            //   - string <= high_num is false (text > numbers)
+            //   - Result: true AND false = false
+            if is_numeric(low) && is_numeric(high) {
+                return Ok(if let Some(null_mask) = nulls {
+                    null_mask.iter().map(|&is_null| !is_null && false).collect()
+                } else {
+                    vec![false; values.len()]
+                });
+            }
+
             // String BETWEEN - compare lexicographically
             let low_str = match low {
                 SqlValue::Character(s) | SqlValue::Varchar(s) => &**s,

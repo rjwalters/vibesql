@@ -10,9 +10,18 @@ use super::{
         filter::ColumnPredicate,
         simd_ops::{self, PackedMask},
     },
-    conversion::{value_to_date_i32, value_to_f64, value_to_timestamp_i64},
+    conversion::{is_string_value, value_to_date_i32, value_to_f64, value_to_timestamp_i64},
 };
 use crate::errors::ExecutorError;
+
+/// Helper to apply null mask and return result with given constant value
+fn apply_null_mask_constant(nulls: Option<&[bool]>, len: usize, constant: bool) -> Vec<bool> {
+    if let Some(null_mask) = nulls {
+        null_mask.iter().map(|&is_null| !is_null && constant).collect()
+    } else {
+        vec![constant; len]
+    }
+}
 
 /// Evaluate predicate on i64 column using SIMD
 pub fn evaluate_predicate_i64_simd(
@@ -22,6 +31,10 @@ pub fn evaluate_predicate_i64_simd(
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
+            // SQLite affinity: INTEGER < TEXT is always true
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), true));
+            }
             if let SqlValue::Integer(threshold) = value {
                 simd_ops::lt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
@@ -41,6 +54,10 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
+            // SQLite affinity: INTEGER > TEXT is always false
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             if let SqlValue::Integer(threshold) = value {
                 simd_ops::gt_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
@@ -58,6 +75,10 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::Equal { value, .. } => {
+            // SQLite affinity: INTEGER = TEXT is always false
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             if let SqlValue::Integer(target) = value {
                 simd_ops::eq_i64(values, *target)
             } else if let SqlValue::Bigint(target) = value {
@@ -75,6 +96,12 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
+            // SQLite affinity: INTEGER BETWEEN TEXT AND TEXT is always false
+            // (since INTEGER < TEXT, so INTEGER >= TEXT is false)
+            if is_string_value(low) || is_string_value(high) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
+
             // Try integer bounds first for optimal i64 SIMD path
             let low_i64 = match low {
                 SqlValue::Integer(v) => Some(*v),
@@ -109,6 +136,10 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
+            // SQLite affinity: INTEGER >= TEXT is always false
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             if let SqlValue::Integer(threshold) = value {
                 simd_ops::ge_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
@@ -126,6 +157,10 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
+            // SQLite affinity: INTEGER <= TEXT is always true
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), true));
+            }
             if let SqlValue::Integer(threshold) = value {
                 simd_ops::le_i64(values, *threshold)
             } else if let SqlValue::Bigint(threshold) = value {
@@ -143,6 +178,10 @@ pub fn evaluate_predicate_i64_simd(
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
+            // SQLite affinity: INTEGER <> TEXT is always true
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), true));
+            }
             if let SqlValue::Integer(target) = value {
                 simd_ops::ne_i64(values, *target)
             } else if let SqlValue::Bigint(target) = value {
@@ -347,6 +386,10 @@ pub fn evaluate_predicate_f64_simd(
 ) -> Result<Vec<bool>, ExecutorError> {
     let mut result = match predicate {
         ColumnPredicate::LessThan { value, .. } => {
+            // SQLite affinity: REAL < TEXT is always true
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), true));
+            }
             let threshold =
                 value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
@@ -357,6 +400,10 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::GreaterThan { value, .. } => {
+            // SQLite affinity: REAL > TEXT is always false
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             let threshold =
                 value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
@@ -367,6 +414,10 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::GreaterThanOrEqual { value, .. } => {
+            // SQLite affinity: REAL >= TEXT is always false
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             let threshold =
                 value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
@@ -377,6 +428,10 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::LessThanOrEqual { value, .. } => {
+            // SQLite affinity: REAL <= TEXT is always true
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), true));
+            }
             let threshold =
                 value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
@@ -387,6 +442,10 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::Equal { value, .. } => {
+            // SQLite affinity: REAL = TEXT is always false
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             let target =
                 value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),
@@ -397,6 +456,10 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::Between { low, high, .. } => {
+            // SQLite affinity: REAL BETWEEN TEXT AND TEXT is always false
+            if is_string_value(low) || is_string_value(high) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), false));
+            }
             let low_f64 = value_to_f64(low).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                 operation: "BETWEEN".to_string(),
                 left_type: "Float64".to_string(),
@@ -412,6 +475,10 @@ pub fn evaluate_predicate_f64_simd(
         }
 
         ColumnPredicate::NotEqual { value, .. } => {
+            // SQLite affinity: REAL <> TEXT is always true
+            if is_string_value(value) {
+                return Ok(apply_null_mask_constant(nulls, values.len(), true));
+            }
             let target =
                 value_to_f64(value).ok_or_else(|| ExecutorError::ColumnarTypeMismatch {
                     operation: "comparison".to_string(),

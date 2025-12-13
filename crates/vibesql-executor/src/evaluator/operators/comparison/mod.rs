@@ -197,6 +197,37 @@ where
         _ => {} // Fall through to regular comparison logic
     }
 
+    // SQLite affinity rules: TEXT values are always greater than INTEGER/REAL
+    // NULL < INTEGER < REAL < TEXT < BLOB (type ordering)
+    // When comparing incompatible types, use type order rather than throwing errors
+    let is_string = |v: &SqlValue| matches!(v, Varchar(_) | Character(_));
+    let is_numeric = |v: &SqlValue| {
+        matches!(
+            v,
+            Integer(_) | Smallint(_) | Bigint(_) | Float(_) | Real(_) | Double(_) | Numeric(_)
+        )
+    };
+
+    // String compared to numeric: String is always greater
+    if is_string(left) && is_numeric(right) {
+        // "string" compared to number: string > number in type order
+        // For "string < number": false (string is greater)
+        // For "string > number": true
+        // For "string = number": false
+        // We use Greater ordering since TEXT > INTEGER/REAL
+        return Ok(Boolean(predicate(std::cmp::Ordering::Greater)));
+    }
+
+    // Numeric compared to string: Numeric is always less
+    if is_numeric(left) && is_string(right) {
+        // number compared to "string": number < string in type order
+        // For "number < string": true
+        // For "number > string": false
+        // For "number = string": false
+        // We use Less ordering since INTEGER/REAL < TEXT
+        return Ok(Boolean(predicate(std::cmp::Ordering::Less)));
+    }
+
     match (left, right) {
         // Integer comparisons
         (Integer(a), Integer(b)) => Ok(Boolean(predicate(a.cmp(b)))),

@@ -7,6 +7,11 @@ use vibesql_types::SqlValue;
 
 use super::super::filter::parse_date_string;
 
+/// Check if a SqlValue is a string type (TEXT in SQLite terms)
+pub fn is_string_value(value: &SqlValue) -> bool {
+    matches!(value, SqlValue::Character(_) | SqlValue::Varchar(_))
+}
+
 /// Convert SqlValue to f64 for numeric comparisons
 pub fn value_to_f64(value: &SqlValue) -> Option<f64> {
     match value {
