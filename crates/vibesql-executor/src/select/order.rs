@@ -10,6 +10,177 @@ use super::grouping::compare_sql_values;
 use super::parallel::ParallelConfig;
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator, schema::CombinedSchema};
 
+/// Result of extracting a column position from an ORDER BY expression
+#[derive(Debug, Clone, Copy)]
+enum ColumnPositionResult {
+    /// A valid positive column position (1-indexed)
+    Position(i64),
+    /// A negative column position (always invalid, but we track it for error reporting)
+    Negative(i64),
+    /// Not a column position expression
+    NotAPosition,
+}
+
+/// Extracts a numeric column position from an ORDER BY expression.
+///
+/// Handles:
+/// - `ORDER BY N` - Integer literal → Position(N)
+/// - `ORDER BY +N` - Unary plus with integer → Position(N) (#4418)
+/// - `ORDER BY -N` - Unary minus with integer → Negative(N)
+/// - Other expressions → NotAPosition
+fn extract_column_position(expr: &vibesql_ast::Expression) -> ColumnPositionResult {
+    match expr {
+        // Direct integer literal: ORDER BY 1, ORDER BY 2, etc.
+        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) => {
+            ColumnPositionResult::Position(*pos)
+        }
+        // Unary operator with integer
+        vibesql_ast::Expression::UnaryOp { op, expr } => {
+            if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
+                expr.as_ref()
+            {
+                match op {
+                    // ORDER BY +N: treat as ORDER BY N (#4418)
+                    vibesql_ast::UnaryOperator::Plus => ColumnPositionResult::Position(*pos),
+                    // ORDER BY -N: always invalid
+                    vibesql_ast::UnaryOperator::Minus => ColumnPositionResult::Negative(*pos),
+                    _ => ColumnPositionResult::NotAPosition,
+                }
+            } else {
+                ColumnPositionResult::NotAPosition
+            }
+        }
+        _ => ColumnPositionResult::NotAPosition,
+    }
+}
+
+/// Validates a column position and returns an error if out of range.
+fn validate_column_position(
+    pos: i64,
+    column_count: usize,
+    term_index: usize,
+) -> Result<usize, ExecutorError> {
+    if pos <= 0 || (pos as usize) > column_count {
+        return Err(ExecutorError::OrderByOutOfRange {
+            term_position: term_index + 1, // Convert to 1-indexed for error message
+            column_number: pos,
+            select_list_len: column_count,
+        });
+    }
+    Ok((pos as usize) - 1) // Convert to 0-indexed
+}
+
+/// Resolves a column position to a column name for aggregate queries.
+///
+/// For aggregate queries, we simply look up the alias/expression at the given position
+/// in the SELECT list without wildcard expansion (aggregates don't typically use wildcards).
+fn resolve_position_to_column_name(
+    idx: usize,
+    select_list: &[vibesql_ast::SelectItem],
+) -> Option<String> {
+    if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select_list[idx] {
+        Some(if let Some(alias_name) = alias {
+            alias_name.clone()
+        } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
+            column.clone()
+        } else {
+            format!("col{}", idx + 1)
+        })
+    } else {
+        None
+    }
+}
+
+/// Result of resolving a column position with wildcard expansion
+enum ResolvedPosition<'a> {
+    /// The expression at the position (for regular SELECT items)
+    Expression(&'a vibesql_ast::Expression),
+    /// A column name resolved from a wildcard expansion
+    ColumnName(String),
+    /// Position not found (shouldn't happen if validation passed)
+    NotFound,
+}
+
+/// Resolves a column position to an expression or column name, handling wildcard expansion.
+///
+/// This handles SELECT lists that may contain wildcards (`*`) or qualified wildcards (`table.*`)
+/// which expand to multiple columns. The position is 0-indexed.
+fn resolve_position_with_wildcards<'a>(
+    target_col: usize,
+    select_list: &'a [vibesql_ast::SelectItem],
+    schema: Option<&CombinedSchema>,
+) -> ResolvedPosition<'a> {
+    let mut current_col = 0;
+
+    for item in select_list {
+        match item {
+            vibesql_ast::SelectItem::Wildcard { .. } => {
+                // Count how many columns this wildcard expands to
+                let wildcard_cols = if let Some(s) = schema {
+                    s.table_schemas.values().map(|(_, ts)| ts.columns.len()).sum()
+                } else {
+                    1
+                };
+
+                if target_col < current_col + wildcard_cols {
+                    // The position is within this wildcard's expanded columns
+                    if let Some(s) = schema {
+                        let offset_in_wildcard = target_col - current_col;
+                        // Collect all columns from all tables in schema order
+                        let mut all_columns: Vec<(usize, String)> = Vec::new();
+                        for (start_idx, table_schema) in s.table_schemas.values() {
+                            for (i, col) in table_schema.columns.iter().enumerate() {
+                                all_columns.push((start_idx + i, col.name.clone()));
+                            }
+                        }
+                        all_columns.sort_by_key(|(idx, _)| *idx);
+
+                        if offset_in_wildcard < all_columns.len() {
+                            return ResolvedPosition::ColumnName(
+                                all_columns[offset_in_wildcard].1.clone(),
+                            );
+                        }
+                    }
+                    return ResolvedPosition::NotFound;
+                }
+                current_col += wildcard_cols;
+            }
+            vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
+                // Count how many columns this qualified wildcard expands to
+                let qualified_cols = if let Some(s) = schema {
+                    s.get_table(qualifier).map(|(_, ts)| ts.columns.len()).unwrap_or(1)
+                } else {
+                    1
+                };
+
+                if target_col < current_col + qualified_cols {
+                    // The position is within this qualified wildcard's columns
+                    if let Some(s) = schema {
+                        if let Some((_, table_schema)) = s.get_table(qualifier) {
+                            let offset = target_col - current_col;
+                            if offset < table_schema.columns.len() {
+                                return ResolvedPosition::ColumnName(
+                                    table_schema.columns[offset].name.clone(),
+                                );
+                            }
+                        }
+                    }
+                    return ResolvedPosition::NotFound;
+                }
+                current_col += qualified_cols;
+            }
+            vibesql_ast::SelectItem::Expression { expr, .. } => {
+                if target_col == current_col {
+                    return ResolvedPosition::Expression(expr);
+                }
+                current_col += 1;
+            }
+        }
+    }
+
+    ResolvedPosition::NotFound
+}
+
 /// Row with optional sort keys for ORDER BY
 pub(super) type RowWithSortKeys =
     (vibesql_storage::Row, Option<Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>>);
@@ -189,78 +360,24 @@ pub(crate) fn resolve_order_by_for_aggregates(
     // Validate numeric column positions at the TOP LEVEL ONLY
     // (nested integer literals like `WHERE x = 0` are not column positions)
 
-    // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
-    if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
-        // Validate the column position
-        if *pos <= 0 || (*pos as usize) > column_count {
-            return Err(ExecutorError::OrderByOutOfRange {
-                term_position: term_index + 1, // Convert to 1-indexed for error message
-                column_number: *pos,
-                select_list_len: column_count,
-            });
-        }
-        let idx = (*pos as usize) - 1;
-        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select_list[idx] {
-            // Return a ColumnRef to the alias name (or derive from expression)
-            let col_name = if let Some(alias_name) = alias {
-                alias_name.clone()
-            } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
-                column.clone()
-            } else {
-                format!("col{}", idx + 1)
-            };
-            return Ok(vibesql_ast::Expression::ColumnRef { table: None, column: col_name });
-        }
-    }
-
-    // Check for positive unary operator with numeric column position (ORDER BY +1 parsed as UnaryOp { Plus, Integer(1) })
-    // Treat +N the same as N (#4418)
-    if let vibesql_ast::Expression::UnaryOp {
-        op: vibesql_ast::UnaryOperator::Plus,
-        expr,
-    } = order_expr
-    {
-        if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
-            expr.as_ref()
-        {
-            // Validate the column position
-            if *pos <= 0 || (*pos as usize) > column_count {
-                return Err(ExecutorError::OrderByOutOfRange {
-                    term_position: term_index + 1, // Convert to 1-indexed for error message
-                    column_number: *pos,
-                    select_list_len: column_count,
-                });
-            }
-            let idx = (*pos as usize) - 1;
-            if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select_list[idx] {
-                // Return a ColumnRef to the alias name (or derive from expression)
-                let col_name = if let Some(alias_name) = alias {
-                    alias_name.clone()
-                } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
-                    column.clone()
-                } else {
-                    format!("col{}", idx + 1)
-                };
+    // Check for numeric column position (ORDER BY N, ORDER BY +N, ORDER BY -N)
+    match extract_column_position(order_expr) {
+        ColumnPositionResult::Position(pos) => {
+            let idx = validate_column_position(pos, column_count, term_index)?;
+            if let Some(col_name) = resolve_position_to_column_name(idx, select_list) {
                 return Ok(vibesql_ast::Expression::ColumnRef { table: None, column: col_name });
             }
         }
-    }
-
-    // Check for negative numeric column position (ORDER BY -1 parsed as UnaryOp { Minus, Integer(1) })
-    if let vibesql_ast::Expression::UnaryOp {
-        op: vibesql_ast::UnaryOperator::Minus,
-        expr,
-    } = order_expr
-    {
-        if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
-            expr.as_ref()
-        {
+        ColumnPositionResult::Negative(pos) => {
             // Negative column positions are always invalid
             return Err(ExecutorError::OrderByOutOfRange {
                 term_position: term_index + 1,
-                column_number: -*pos,
+                column_number: -pos,
                 select_list_len: column_count,
             });
+        }
+        ColumnPositionResult::NotAPosition => {
+            // Not a column position, continue to other resolution logic
         }
     }
 
@@ -489,214 +606,37 @@ pub(crate) fn resolve_order_by_alias<'a>(
     // Count actual columns after wildcard expansion (#4413)
     let column_count = count_select_columns(select_list, schema);
 
-    // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
-    if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
-        // Validate the column position against expanded column count
-        if *pos <= 0 || (*pos as usize) > column_count {
-            return Err(ExecutorError::OrderByOutOfRange {
-                term_position: term_index + 1, // Convert to 1-indexed for error message
-                column_number: *pos,
-                select_list_len: column_count,
-            });
-        }
+    // Check for numeric column position (ORDER BY N, ORDER BY +N, ORDER BY -N)
+    match extract_column_position(order_expr) {
+        ColumnPositionResult::Position(pos) => {
+            let idx = validate_column_position(pos, column_count, term_index)?;
 
-        // Map the 1-based position to the corresponding select_list item
-        // accounting for wildcard expansion
-        let target_col = (*pos as usize) - 1; // 0-indexed target column position
-        let mut current_col = 0;
-
-        for item in select_list {
-            match item {
-                vibesql_ast::SelectItem::Wildcard { .. } => {
-                    // Count how many columns this wildcard expands to
-                    let wildcard_cols = if let Some(s) = schema {
-                        s.table_schemas.values().map(|(_, ts)| ts.columns.len()).sum()
-                    } else {
-                        1
-                    };
-
-                    if target_col < current_col + wildcard_cols {
-                        // The position is within this wildcard's expanded columns
-                        // Return a ColumnRef to the N-th column from the schema
-                        if let Some(s) = schema {
-                            let offset_in_wildcard = target_col - current_col;
-                            // Collect all columns from all tables in schema order
-                            let mut all_columns: Vec<(usize, String)> = Vec::new();
-                            for (start_idx, table_schema) in s.table_schemas.values() {
-                                for (i, col) in table_schema.columns.iter().enumerate() {
-                                    all_columns.push((start_idx + i, col.name.clone()));
-                                }
-                            }
-                            all_columns.sort_by_key(|(idx, _)| *idx);
-
-                            if offset_in_wildcard < all_columns.len() {
-                                let col_name = all_columns[offset_in_wildcard].1.clone();
-                                return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                                    table: None,
-                                    column: col_name,
-                                }));
-                            }
-                        }
-                        // Fallback: shouldn't reach here if schema is available
-                        break;
-                    }
-                    current_col += wildcard_cols;
+            // Resolve the position, handling wildcard expansion
+            match resolve_position_with_wildcards(idx, select_list, schema) {
+                ResolvedPosition::Expression(expr) => {
+                    return Ok(Cow::Borrowed(expr));
                 }
-                vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
-                    // Count how many columns this qualified wildcard expands to
-                    let qualified_cols = if let Some(s) = schema {
-                        s.get_table(qualifier).map(|(_, ts)| ts.columns.len()).unwrap_or(1)
-                    } else {
-                        1
-                    };
-
-                    if target_col < current_col + qualified_cols {
-                        // The position is within this qualified wildcard's columns
-                        if let Some(s) = schema {
-                            if let Some((_, table_schema)) = s.get_table(qualifier) {
-                                let offset = target_col - current_col;
-                                if offset < table_schema.columns.len() {
-                                    let col_name = table_schema.columns[offset].name.clone();
-                                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                                        table: None,
-                                        column: col_name,
-                                    }));
-                                }
-                            }
-                        }
-                        break;
-                    }
-                    current_col += qualified_cols;
+                ResolvedPosition::ColumnName(col_name) => {
+                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                        table: None,
+                        column: col_name,
+                    }));
                 }
-                vibesql_ast::SelectItem::Expression { expr, .. } => {
-                    if target_col == current_col {
-                        // This is a regular expression, return it directly
-                        return Ok(Cow::Borrowed(expr));
-                    }
-                    current_col += 1;
+                ResolvedPosition::NotFound => {
+                    // Fallback: shouldn't reach here if validation passed
                 }
             }
         }
-
-        // Fallback: return original expression (shouldn't reach here normally)
-    }
-
-    // Check for positive unary operator with numeric column position (ORDER BY +1 parsed as UnaryOp { Plus, Integer(1) })
-    // Treat +N the same as N (#4418)
-    if let vibesql_ast::Expression::UnaryOp {
-        op: vibesql_ast::UnaryOperator::Plus,
-        expr,
-    } = order_expr
-    {
-        if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
-            expr.as_ref()
-        {
-            // Validate the column position against expanded column count
-            if *pos <= 0 || (*pos as usize) > column_count {
-                return Err(ExecutorError::OrderByOutOfRange {
-                    term_position: term_index + 1, // Convert to 1-indexed for error message
-                    column_number: *pos,
-                    select_list_len: column_count,
-                });
-            }
-
-            // Map the 1-based position to the corresponding select_list item
-            // accounting for wildcard expansion
-            let target_col = (*pos as usize) - 1; // 0-indexed target column position
-            let mut current_col = 0;
-
-            for item in select_list {
-                match item {
-                    vibesql_ast::SelectItem::Wildcard { .. } => {
-                        // Count how many columns this wildcard expands to
-                        let wildcard_cols = if let Some(s) = schema {
-                            s.table_schemas.values().map(|(_, ts)| ts.columns.len()).sum()
-                        } else {
-                            1
-                        };
-
-                        if target_col < current_col + wildcard_cols {
-                            // The position is within this wildcard's expanded columns
-                            // Return a ColumnRef to the N-th column from the schema
-                            if let Some(s) = schema {
-                                let offset_in_wildcard = target_col - current_col;
-                                // Collect all columns from all tables in schema order
-                                let mut all_columns: Vec<(usize, String)> = Vec::new();
-                                for (start_idx, table_schema) in s.table_schemas.values() {
-                                    for (i, col) in table_schema.columns.iter().enumerate() {
-                                        all_columns.push((start_idx + i, col.name.clone()));
-                                    }
-                                }
-                                all_columns.sort_by_key(|(idx, _)| *idx);
-
-                                if offset_in_wildcard < all_columns.len() {
-                                    let col_name = all_columns[offset_in_wildcard].1.clone();
-                                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                                        table: None,
-                                        column: col_name,
-                                    }));
-                                }
-                            }
-                            // Fallback: shouldn't reach here if schema is available
-                            break;
-                        }
-                        current_col += wildcard_cols;
-                    }
-                    vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
-                        // Count how many columns this qualified wildcard expands to
-                        let qualified_cols = if let Some(s) = schema {
-                            s.get_table(qualifier).map(|(_, ts)| ts.columns.len()).unwrap_or(1)
-                        } else {
-                            1
-                        };
-
-                        if target_col < current_col + qualified_cols {
-                            // The position is within this qualified wildcard's columns
-                            if let Some(s) = schema {
-                                if let Some((_, table_schema)) = s.get_table(qualifier) {
-                                    let offset = target_col - current_col;
-                                    if offset < table_schema.columns.len() {
-                                        let col_name = table_schema.columns[offset].name.clone();
-                                        return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                                            table: None,
-                                            column: col_name,
-                                        }));
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        current_col += qualified_cols;
-                    }
-                    vibesql_ast::SelectItem::Expression { expr, .. } => {
-                        if target_col == current_col {
-                            // This is a regular expression, return it directly
-                            return Ok(Cow::Borrowed(expr));
-                        }
-                        current_col += 1;
-                    }
-                }
-            }
-
-            // Fallback: return original expression (shouldn't reach here normally)
-        }
-    }
-
-    // Check for negative numeric column position (ORDER BY -1 parsed as UnaryOp { Minus, Integer(1) })
-    if let vibesql_ast::Expression::UnaryOp {
-        op: vibesql_ast::UnaryOperator::Minus,
-        expr,
-    } = order_expr
-    {
-        if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) =
-            expr.as_ref()
-        {
+        ColumnPositionResult::Negative(pos) => {
             // Negative column positions are always invalid
             return Err(ExecutorError::OrderByOutOfRange {
                 term_position: term_index + 1,
-                column_number: -*pos,
+                column_number: -pos,
                 select_list_len: column_count,
             });
+        }
+        ColumnPositionResult::NotAPosition => {
+            // Not a column position, continue to other resolution logic
         }
     }
 
