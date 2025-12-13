@@ -354,6 +354,7 @@ fn test_truncate_resets_auto_increment() {
     for val in ["a", "b", "c"] {
         let insert = InsertStmt {
             table_name: "auto_inc_test".to_string(),
+            quoted: false,
             columns: vec!["data".to_string()],
             source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
                 arcstr::ArcStr::from(val),
@@ -382,6 +383,7 @@ fn test_truncate_resets_auto_increment() {
     // Insert new row - should get id = 1, not 4
     let insert = InsertStmt {
         table_name: "auto_inc_test".to_string(),
+        quoted: false,
         columns: vec!["data".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
             arcstr::ArcStr::from("d"),
@@ -446,6 +448,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
     for i in 1..=10 {
         let insert = InsertStmt {
             table_name: "multi_test".to_string(),
+            quoted: false,
             columns: vec!["value".to_string()],
             source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Integer(
                 i * 100,
@@ -472,6 +475,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
     // Insert new row - should get id = 1, not 11
     let insert = InsertStmt {
         table_name: "multi_test".to_string(),
+        quoted: false,
         columns: vec!["value".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Integer(9999))]]),
         conflict_clause: None,

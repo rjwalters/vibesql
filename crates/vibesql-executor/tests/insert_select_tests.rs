@@ -11,6 +11,7 @@ fn test_insert_from_select_basic() {
     // First insert some data to select from
     let insert_stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -66,6 +67,7 @@ fn test_insert_from_select_basic() {
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
         table_name: "users_backup".to_string(),
+        quoted: false,
         columns: vec![], // No explicit columns, use all
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
@@ -87,6 +89,7 @@ fn test_insert_from_select_with_where() {
     // Insert multiple users
     let insert_stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -157,6 +160,7 @@ fn test_insert_from_select_with_where() {
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
         table_name: "active_users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
@@ -178,6 +182,7 @@ fn test_insert_from_select_column_mismatch() {
     // Insert some data
     let insert_stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -238,6 +243,7 @@ fn test_insert_from_select_column_mismatch() {
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
         table_name: "wrong_table".to_string(),
+        quoted: false,
         columns: vec![], // Should match all columns
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
@@ -274,6 +280,7 @@ fn test_insert_from_select_with_aggregates() {
     // Insert sales data
     let insert_stmt = vibesql_ast::InsertStmt {
         table_name: "sales".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -351,6 +358,7 @@ fn test_insert_from_select_with_aggregates() {
 
     let insert_select_stmt = vibesql_ast::InsertStmt {
         table_name: "summary".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,

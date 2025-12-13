@@ -11,6 +11,7 @@ fn test_basic_insert() {
     // INSERT INTO users VALUES (1, 'Alice')
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![], // No columns specified
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -38,6 +39,7 @@ fn test_multi_row_insert() {
     // INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -72,6 +74,7 @@ fn test_insert_with_column_list() {
     // INSERT INTO users (name, id) VALUES ('Alice', 1)
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["name".to_string(), "id".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -116,6 +119,7 @@ fn test_insert_null_value() {
     // INSERT INTO users VALUES (1, NULL)
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -137,6 +141,7 @@ fn test_insert_type_mismatch() {
     // INSERT INTO users VALUES ('not_a_number', 'Alice')
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -163,6 +168,7 @@ fn test_insert_column_count_mismatch() {
     // INSERT INTO users VALUES (1)  -- Missing name column
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             vibesql_types::SqlValue::Integer(1),
@@ -182,6 +188,7 @@ fn test_insert_table_not_found() {
     // INSERT INTO nonexistent VALUES (1, 'Alice')
     let stmt = vibesql_ast::InsertStmt {
         table_name: "nonexistent".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -206,6 +213,7 @@ fn test_insert_column_not_found() {
     // INSERT INTO users (id, invalid_col) VALUES (1, 'Alice')
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "invalid_col".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -231,6 +239,7 @@ fn test_insert_not_null_constraint_violation() {
     // id column is NOT NULL, so this should fail
     let stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),

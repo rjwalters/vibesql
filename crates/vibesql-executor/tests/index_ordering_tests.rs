@@ -39,6 +39,7 @@ fn test_index_ordering() {
     // Insert data
     let insert_stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![

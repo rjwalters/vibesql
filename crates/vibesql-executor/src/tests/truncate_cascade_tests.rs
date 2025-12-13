@@ -112,6 +112,7 @@ fn create_table_with_fk(
 fn insert_row(db: &mut Database, table_name: &str, values: Vec<SqlValue>) {
     let stmt = InsertStmt {
         table_name: table_name.to_string(),
+        quoted: false,
         columns: vec![],
         source: InsertSource::Values(vec![values.into_iter().map(Expression::Literal).collect()]),
         conflict_clause: None,

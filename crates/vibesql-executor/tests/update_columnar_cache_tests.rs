@@ -53,6 +53,7 @@ fn test_update_invalidates_columnar_cache() {
     // Execute UPDATE - give Alice a raise
     let stmt = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(55000)),
@@ -117,6 +118,7 @@ fn test_update_invalidates_prewarmed_cache() {
     // UPDATE to change Bob's salary
     let stmt = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(75000)),
@@ -155,6 +157,7 @@ fn test_update_all_rows_invalidates_cache() {
     // UPDATE all rows - give everyone the same salary
     let stmt = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(60000)),
@@ -187,6 +190,7 @@ fn test_update_no_match_does_not_invalidate_cache() {
     // UPDATE with WHERE clause that matches no rows
     let stmt = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(999999)),
@@ -224,6 +228,7 @@ fn test_multiple_updates_invalidate_cache() {
     // First UPDATE
     let stmt1 = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(50000)),
@@ -247,6 +252,7 @@ fn test_multiple_updates_invalidate_cache() {
     // Second UPDATE
     let stmt2 = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(55000)),
@@ -286,6 +292,7 @@ fn test_update_multiple_columns_invalidates_cache() {
     // UPDATE multiple columns at once
     let stmt = UpdateStmt {
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![
             Assignment {
                 column: "salary".to_string(),

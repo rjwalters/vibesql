@@ -13,7 +13,7 @@ fn test_delete_table_not_found() {
     let mut db = Database::new();
 
     let stmt =
-        DeleteStmt { only: false, table_name: "nonexistent".to_string(), where_clause: None };
+        DeleteStmt { only: false, table_name: "nonexistent".to_string(), quoted: false, where_clause: None };
 
     let result = DeleteExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
@@ -29,6 +29,7 @@ fn test_delete_no_matching_rows() {
     let stmt = DeleteStmt {
         only: false,
         table_name: "users".to_string(),
+        quoted: false,
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
@@ -57,7 +58,7 @@ fn test_delete_from_empty_table() {
 
     // DELETE FROM empty_users;
     let stmt =
-        DeleteStmt { only: false, table_name: "empty_users".to_string(), where_clause: None };
+        DeleteStmt { only: false, table_name: "empty_users".to_string(), quoted: false, where_clause: None };
 
     let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(deleted, 0);
@@ -72,6 +73,7 @@ fn test_delete_column_not_found() {
     let stmt = DeleteStmt {
         only: false,
         table_name: "users".to_string(),
+        quoted: false,
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
                 table: None,

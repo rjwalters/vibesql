@@ -29,6 +29,7 @@ fn setup_products_table(db: &mut Database) {
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -45,6 +46,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
 fn replace_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt {
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -193,6 +195,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
         let stmt = vibesql_ast::InsertStmt {
             table_name: "users".to_string(),
+        quoted: false,
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -214,6 +217,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
     // REPLACE with same name (unique key conflict) - should delete old row and insert new
     let replace_stmt = vibesql_ast::InsertStmt {
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)), // Different id

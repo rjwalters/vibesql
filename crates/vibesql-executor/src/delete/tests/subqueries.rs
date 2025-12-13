@@ -212,6 +212,7 @@ mod in_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "employees".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::In {
                 expr: Box::new(Expression::ColumnRef {
                     table: None,
@@ -273,6 +274,7 @@ mod in_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "employees".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::In {
                 expr: Box::new(Expression::ColumnRef {
                     table: None,
@@ -345,6 +347,7 @@ mod scalar_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "employees".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef { table: None, column: "salary".to_string() }),
                 op: vibesql_ast::BinaryOperator::LessThan,
@@ -416,6 +419,7 @@ mod scalar_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "items".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
                 op: vibesql_ast::BinaryOperator::Equal,
@@ -477,6 +481,7 @@ mod scalar_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "employees".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef { table: None, column: "salary".to_string() }),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
@@ -538,6 +543,7 @@ mod empty_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "employees".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::In {
                 expr: Box::new(Expression::ColumnRef {
                     table: None,
@@ -615,6 +621,7 @@ mod complex_subquery {
         let stmt = DeleteStmt {
             only: false,
             table_name: "orders".to_string(),
+            quoted: false,
             where_clause: Some(WhereClause::Condition(Expression::In {
                 expr: Box::new(Expression::ColumnRef {
                     table: None,

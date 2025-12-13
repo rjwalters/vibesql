@@ -32,6 +32,7 @@ fn test_after_insert_trigger_fires() {
     // Insert a row - should fire trigger
     let insert = vibesql_ast::InsertStmt {
         table_name: "USERS".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -72,6 +73,7 @@ fn test_after_insert_trigger_fires_for_each_row() {
     // Insert 3 rows - should fire trigger 3 times
     let insert = vibesql_ast::InsertStmt {
         table_name: "USERS".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![
             vec![
@@ -126,6 +128,7 @@ fn test_before_insert_trigger_fires() {
     // Insert a row - should fire trigger
     let insert = vibesql_ast::InsertStmt {
         table_name: "USERS".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

@@ -33,6 +33,7 @@ fn setup_test_table(db: &mut Database) {
 fn insert_row(db: &mut Database, id: i64, name: &str, value: i64) {
     let stmt = vibesql_ast::InsertStmt {
         table_name: "test_table".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -340,6 +341,7 @@ fn test_alter_column_drop_not_null_invalidates_cache() {
     // Insert data
     let stmt = vibesql_ast::InsertStmt {
         table_name: "test_table".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -428,6 +430,7 @@ fn test_alter_column_drop_default_invalidates_cache() {
     // Insert data
     let stmt = vibesql_ast::InsertStmt {
         table_name: "test_table".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
