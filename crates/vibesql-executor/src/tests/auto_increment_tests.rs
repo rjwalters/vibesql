@@ -46,7 +46,7 @@ fn test_auto_increment_basic_inserts() {
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Insert without specifying id - should auto-generate 1
-    let insert1 = InsertStmt {
+    let insert1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         columns: vec!["username".to_string()],
@@ -60,7 +60,7 @@ fn test_auto_increment_basic_inserts() {
     assert!(result.is_ok(), "Failed to insert alice: {:?}", result.err());
 
     // Insert without specifying id - should auto-generate 2
-    let insert2 = InsertStmt {
+    let insert2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         columns: vec!["username".to_string()],
@@ -168,7 +168,7 @@ fn test_last_insert_rowid_basic() {
     assert_eq!(db.last_insert_rowid(), 0);
 
     // Insert first row - should auto-generate id=1
-    let insert1 = InsertStmt {
+    let insert1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         columns: vec!["username".to_string()],
@@ -185,7 +185,7 @@ fn test_last_insert_rowid_basic() {
     assert_eq!(db.last_insert_rowid(), 1);
 
     // Insert second row - should auto-generate id=2
-    let insert2 = InsertStmt {
+    let insert2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         columns: vec!["username".to_string()],
@@ -240,7 +240,7 @@ fn test_last_insert_rowid_multi_row_insert() {
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Multi-row insert - per MySQL semantics, LAST_INSERT_ID returns the FIRST generated ID
-    let multi_insert = InsertStmt {
+    let multi_insert = InsertStmt { quoted: false,
         table_name: "items".to_string(),
         quoted: false,
         columns: vec!["name".to_string()],
@@ -311,7 +311,7 @@ fn test_last_insert_rowid_no_auto_increment() {
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Insert with explicit ID - no auto-generation
-    let insert1 = InsertStmt {
+    let insert1 = InsertStmt { quoted: false,
         table_name: "manual".to_string(),
         quoted: false,
         columns: vec!["id".to_string(), "name".to_string()],
@@ -369,7 +369,7 @@ fn test_last_insert_rowid_via_select() {
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
     // Insert a row
-    let insert1 = InsertStmt {
+    let insert1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         columns: vec!["name".to_string()],

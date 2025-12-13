@@ -15,7 +15,7 @@ fn test_after_update_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt {
+    let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
         quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
@@ -47,6 +47,7 @@ fn test_after_update_trigger_fires() {
 
     // Update the user - should fire trigger
     let update = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "USERS".to_string(),
         quoted: false,
         assignments: vec![vibesql_ast::Assignment {
@@ -81,7 +82,7 @@ fn test_before_update_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt {
+    let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
         quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
@@ -113,6 +114,7 @@ fn test_before_update_trigger_fires() {
 
     // Update the user - should fire trigger
     let update = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "USERS".to_string(),
         quoted: false,
         assignments: vec![vibesql_ast::Assignment {

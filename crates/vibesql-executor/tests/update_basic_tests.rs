@@ -12,6 +12,7 @@ fn test_update_all_rows() {
     setup_test_table(&mut db);
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -37,6 +38,7 @@ fn test_update_with_where_clause() {
     setup_test_table(&mut db);
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -73,6 +75,7 @@ fn test_update_multiple_columns() {
     setup_test_table(&mut db);
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         quoted: false,
         assignments: vec![
@@ -109,6 +112,7 @@ fn test_update_with_expression() {
 
     // Give everyone a 10% raise: salary = salary * 110 DIV 100
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -146,6 +150,7 @@ fn test_update_table_not_found() {
     let mut db = Database::new();
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "nonexistent".to_string(),
         quoted: false,
         assignments: vec![],
@@ -163,6 +168,7 @@ fn test_update_column_not_found() {
     setup_test_table(&mut db);
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -183,6 +189,7 @@ fn test_update_no_matching_rows() {
     setup_test_table(&mut db);
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         quoted: false,
         assignments: vec![Assignment {

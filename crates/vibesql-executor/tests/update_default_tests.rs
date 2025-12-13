@@ -29,6 +29,7 @@ fn test_update_with_default_value() {
 
     // UPDATE users SET name = DEFAULT WHERE id = 1
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
@@ -75,6 +76,7 @@ fn test_update_default_no_default_value_defined() {
 
     // UPDATE users SET name = DEFAULT WHERE id = 1
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],

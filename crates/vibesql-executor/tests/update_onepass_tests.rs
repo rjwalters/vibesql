@@ -101,6 +101,7 @@ fn test_onepass_multiple_literal_assignments() {
 
     // UPDATE items SET name = 'Updated', price = 999, quantity = 50 WHERE id = 1
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "items".to_string(),
         quoted: false,
         assignments: vec![
@@ -147,6 +148,7 @@ fn test_onepass_single_literal_assignment() {
 
     // UPDATE items SET price = 777 WHERE id = 2
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "items".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -175,6 +177,7 @@ fn test_onepass_pk_not_found_returns_zero() {
 
     // UPDATE items SET price = 999 WHERE id = 999 (non-existent)
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "items".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -212,6 +215,7 @@ fn test_onepass_not_null_constraint_enforced() {
 
     // Try to set NOT NULL column to NULL
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "required".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -241,6 +245,7 @@ fn test_composite_pk_update_both_columns_specified() {
 
     // UPDATE order_items SET quantity = 99 WHERE order_id = 1 AND item_id = 1
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "order_items".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -290,6 +295,7 @@ fn test_composite_pk_update_reversed_order() {
     // UPDATE order_items SET price = 500 WHERE item_id = 2 AND order_id = 1
     // (columns in reverse order from PK definition)
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "order_items".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -334,6 +340,7 @@ fn test_composite_pk_partial_match_uses_scan() {
     // UPDATE order_items SET quantity = 1 WHERE order_id = 1
     // Only one PK column specified - should update multiple rows
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "order_items".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -365,6 +372,7 @@ fn test_composite_pk_not_found_returns_zero() {
 
     // UPDATE order_items SET quantity = 999 WHERE order_id = 99 AND item_id = 99
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "order_items".to_string(),
         quoted: false,
         assignments: vec![Assignment {
@@ -403,6 +411,7 @@ fn test_composite_pk_multiple_columns_updated() {
 
     // UPDATE order_items SET quantity = 100, price = 1000 WHERE order_id = 2 AND item_id = 1
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "order_items".to_string(),
         quoted: false,
         assignments: vec![

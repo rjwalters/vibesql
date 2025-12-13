@@ -12,7 +12,7 @@
 //! 5. Special characters (spaces, etc.) work in delimited identifiers
 
 use vibesql_ast::Statement;
-use vibesql_executor::{CreateTableExecutor, SelectExecutor};
+use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{SqlValue, StringValue};
@@ -41,25 +41,35 @@ fn execute_select(db: &Database, sql: &str) -> Result<Vec<Row>, String> {
     executor.execute(&select_stmt).map_err(|e| format!("Execution error: {:?}", e))
 }
 
+/// Helper to execute INSERT statements
+fn execute_insert_sql(db: &mut Database, sql: &str) -> Result<usize, String> {
+    let stmt = Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
+
+    match stmt {
+        Statement::Insert(insert_stmt) => {
+            InsertExecutor::execute(db, &insert_stmt).map_err(|e| format!("Execution error: {:?}", e))
+        }
+        other => Err(format!("Expected INSERT statement, got {:?}", other)),
+    }
+}
+
 // ========================================================================
 // Core Behavior: Quoted vs Unquoted Table Names
 // ========================================================================
 
 #[test]
-#[ignore] // TODO: Phase 7 - Need INSERT statement support for quoted identifiers
 fn test_quoted_vs_unquoted_table_names() {
     let mut db = Database::new();
 
     // Create table with unquoted name (normalized to lowercase 'users')
     execute_create_table(&mut db, "CREATE TABLE users (id INT)").unwrap();
-    // TODO: Replace with SQL INSERT once supported: INSERT INTO users VALUES (1)
-    db.insert_row("users", Row::new(vec![SqlValue::Integer(1)])).unwrap();
+    // SQL INSERT with unquoted table name - uses case-insensitive lookup
+    execute_insert_sql(&mut db, "INSERT INTO users VALUES (1)").unwrap();
 
     // Create DIFFERENT table with quoted uppercase name "USERS"
     execute_create_table(&mut db, r#"CREATE TABLE "USERS" (id INT)"#).unwrap();
-    // TODO: Replace with SQL INSERT once supported: INSERT INTO "USERS" VALUES (2)
-    // Note: The direct API call uses the global case_sensitive flag, not per-identifier quoted flag
-    db.insert_row("USERS", Row::new(vec![SqlValue::Integer(2)])).unwrap();
+    // SQL INSERT with quoted table name - uses case-sensitive lookup
+    execute_insert_sql(&mut db, r#"INSERT INTO "USERS" VALUES (2)"#).unwrap();
 
     // Verify they are DIFFERENT tables
     // Unquoted 'users' in query → normalized to lowercase 'users' → retrieves id=1
@@ -97,7 +107,6 @@ fn test_unquoted_identifier_normalization() {
 }
 
 #[test]
-#[ignore] // TODO: Phase 7 - Need INSERT statement support for quoted identifiers
 fn test_quoted_identifier_case_sensitivity() {
     let mut db = Database::new();
 
@@ -107,10 +116,9 @@ fn test_quoted_identifier_case_sensitivity() {
     execute_create_table(&mut db, r#"CREATE TABLE "products" (id INT)"#).unwrap();
 
     // Insert different values in each - note the exact case matters!
-    // TODO: Replace with SQL INSERT once supported
-    db.insert_row("Products", Row::new(vec![SqlValue::Integer(1)])).unwrap();
-    db.insert_row("PRODUCTS", Row::new(vec![SqlValue::Integer(2)])).unwrap();
-    db.insert_row("products", Row::new(vec![SqlValue::Integer(3)])).unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "Products" VALUES (1)"#).unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "PRODUCTS" VALUES (2)"#).unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "products" VALUES (3)"#).unwrap();
 
     // Each quoted identifier retrieves its specific table
     let result1 = execute_select(&db, r#"SELECT * FROM "Products""#).unwrap();
@@ -189,7 +197,6 @@ fn test_different_case_columns_are_distinct() {
 // ========================================================================
 
 #[test]
-#[ignore] // TODO: Need SQL INSERT support for quoted identifiers (Phase 7)
 fn test_reserved_words_as_table_names() {
     let mut db = Database::new();
 
@@ -199,7 +206,7 @@ fn test_reserved_words_as_table_names() {
     execute_create_table(&mut db, r#"CREATE TABLE "FROM" (id INT)"#).unwrap();
     execute_create_table(&mut db, r#"CREATE TABLE "WHERE" (id INT)"#).unwrap();
 
-    db.insert_row("SELECT", Row::new(vec![SqlValue::Integer(42)])).unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "SELECT" VALUES (42)"#).unwrap();
 
     let result = execute_select(&db, r#"SELECT * FROM "SELECT""#).unwrap();
     assert_eq!(result[0].values[0], SqlValue::Integer(42));
@@ -238,15 +245,13 @@ fn test_reserved_words_as_column_names() {
 // ========================================================================
 
 #[test]
-#[ignore] // TODO: Phase 7 - Need INSERT statement support for quoted identifiers
 fn test_spaces_in_table_names() {
     let mut db = Database::new();
 
     // Spaces only allowed in delimited identifiers
     execute_create_table(&mut db, r#"CREATE TABLE "My Table" (id INT)"#).unwrap();
 
-    // TODO: Replace with SQL INSERT once supported
-    db.insert_row("My Table", Row::new(vec![SqlValue::Integer(99)])).unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "My Table" VALUES (99)"#).unwrap();
 
     let result = execute_select(&db, r#"SELECT * FROM "My Table""#).unwrap();
     assert_eq!(result[0].values[0], SqlValue::Integer(99));
@@ -277,7 +282,6 @@ fn test_spaces_in_column_names() {
 }
 
 #[test]
-#[ignore] // TODO: Phase 7 - Need INSERT statement support for quoted identifiers
 fn test_escaped_quotes_in_identifiers() {
     let mut db = Database::new();
 
@@ -289,10 +293,9 @@ fn test_escaped_quotes_in_identifiers() {
     )
     .unwrap();
 
-    // TODO: Replace with SQL INSERT once supported
-    db.insert_row(
-        r#"O"Reilly Books"#,
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(StringValue::from("Learning Rust"))]),
+    execute_insert_sql(
+        &mut db,
+        r#"INSERT INTO "O""Reilly Books" VALUES (1, 'Learning Rust')"#,
     )
     .unwrap();
 
@@ -357,7 +360,7 @@ fn test_error_on_case_mismatch_quoted_table() {
 // ========================================================================
 
 #[test]
-#[ignore] // TODO: Schema-qualified quoted identifiers need more work in Phase 7/8
+#[ignore] // TODO: Schema-qualified quoted identifiers need parser support for INSERT
 fn test_quoted_schema_and_table_names() {
     let mut db = Database::new();
 
@@ -376,7 +379,7 @@ fn test_quoted_schema_and_table_names() {
     execute_create_table(&mut db, r#"CREATE TABLE "mySchema"."users" (id INT)"#).unwrap();
     execute_create_table(&mut db, r#"CREATE TABLE "MYSCHEMA"."users" (id INT)"#).unwrap();
 
-    // Insert different data
+    // Insert different data using direct storage API (parser doesn't support schema-qualified INSERT)
     db.insert_row("mySchema.users", Row::new(vec![SqlValue::Integer(1)])).unwrap();
     db.insert_row("MYSCHEMA.users", Row::new(vec![SqlValue::Integer(2)])).unwrap();
 
@@ -402,6 +405,7 @@ fn test_mixed_quoted_unquoted_schema_table() {
     // Create table: quoted schema, unquoted table (normalized to USERS)
     execute_create_table(&mut db, r#"CREATE TABLE "myApp".users (id INT)"#).unwrap();
 
+    // Insert using direct storage API (parser doesn't support schema-qualified INSERT)
     db.insert_row("myApp.users", Row::new(vec![SqlValue::Integer(42)])).unwrap();
 
     // Query with quoted schema, unquoted table

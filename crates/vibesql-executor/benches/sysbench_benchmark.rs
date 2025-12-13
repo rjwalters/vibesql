@@ -168,7 +168,7 @@ fn bind_select(stmt: &SelectStmt, params: &[SqlValue]) -> SelectStmt {
 /// Bind values to placeholders in a DeleteStmt
 fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
     DeleteStmt {
-        only: stmt.only,
+        quoted: false, only: stmt.only,
         table_name: stmt.table_name.clone(),
         where_clause: bind_where_clause(&stmt.where_clause, params),
     }

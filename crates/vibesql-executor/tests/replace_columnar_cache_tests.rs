@@ -27,7 +27,7 @@ fn setup_products_table(db: &mut Database) {
 
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
-    let stmt = vibesql_ast::InsertStmt {
+    let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         quoted: false,
         columns: vec![],
@@ -44,7 +44,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
 
 /// Helper to execute a REPLACE statement
 fn replace_product(db: &mut Database, id: i64, name: &str, price: i64) {
-    let stmt = vibesql_ast::InsertStmt {
+    let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         quoted: false,
         columns: vec![],
@@ -193,7 +193,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
 
     // Insert users
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
-        let stmt = vibesql_ast::InsertStmt {
+        let stmt = vibesql_ast::InsertStmt { quoted: false,
             table_name: "users".to_string(),
         quoted: false,
             columns: vec![],
@@ -215,7 +215,7 @@ fn test_replace_unique_constraint_invalidates_cache() {
     let _ = db.get_columnar("users").unwrap();
 
     // REPLACE with same name (unique key conflict) - should delete old row and insert new
-    let replace_stmt = vibesql_ast::InsertStmt {
+    let replace_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "users".to_string(),
         quoted: false,
         columns: vec![],

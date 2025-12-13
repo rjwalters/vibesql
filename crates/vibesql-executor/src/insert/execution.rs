@@ -1,3 +1,4 @@
+use vibesql_catalog::TableIdentifier;
 use vibesql_storage::statistics::CostEstimator;
 
 use crate::{dml_cost::DmlOptimizer, errors::ExecutorError, privilege_checker::PrivilegeChecker};
@@ -43,15 +44,21 @@ fn execute_insert_internal(
     PrivilegeChecker::check_insert(db, &stmt.table_name)?;
 
     // Get table schema from catalog (clone to avoid borrow issues)
+    // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
+    let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
     let schema = db
         .catalog
-        .get_table(&stmt.table_name)
+        .get_table_by_identifier(&table_id)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
         .clone();
 
+    // Use canonical table name from schema for all storage operations
+    // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
+    let table_name = &schema.name;
+
     // Determine target column indices and types
     let target_column_info =
-        super::validation::resolve_target_columns(&schema, &stmt.table_name, &stmt.columns)?;
+        super::validation::resolve_target_columns(&schema, table_name, &stmt.columns)?;
 
     // Get the rows to insert based on the source
     let rows_to_insert = match &stmt.source {
@@ -65,7 +72,7 @@ fn execute_insert_internal(
             if stmt.columns.is_empty() {
                 // Only attempt bulk transfer for INSERT INTO table SELECT (no column list)
                 if let Some(count) =
-                    super::bulk_transfer::try_bulk_transfer(db, &stmt.table_name, select_stmt)?
+                    super::bulk_transfer::try_bulk_transfer(db, table_name, select_stmt)?
                 {
                     // Fast path succeeded, return early
                     return Ok(count);
@@ -101,10 +108,10 @@ fn execute_insert_internal(
     // Estimate DML cost for query analysis and optimization decisions
     // This helps with profiling and can inform future batch size decisions
     if std::env::var("DML_COST_DEBUG").is_ok() {
-        if let Some(index_info) = db.get_table_index_info(&stmt.table_name) {
+        if let Some(index_info) = db.get_table_index_info(table_name) {
             // Get table statistics for cost estimation (use cached if available, or fallback to
             // estimate)
-            if let Some(table) = db.get_table(&stmt.table_name) {
+            if let Some(table) = db.get_table(table_name) {
                 let table_stats = table.get_statistics().cloned().unwrap_or_else(|| {
                     vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count())
                 });
@@ -180,7 +187,7 @@ fn execute_insert_internal(
         let validator = super::row_validator::RowValidator::new(
             db,
             &schema,
-            &stmt.table_name,
+            table_name,
             &primary_key_values,
             &unique_constraint_values,
             skip_duplicate_checks,
@@ -209,7 +216,7 @@ fn execute_insert_internal(
     // Check once if any INSERT triggers exist for this table (used for batch optimization)
     let has_insert_triggers = db
         .catalog
-        .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Insert))
+        .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Insert))
         .next()
         .is_some();
 
@@ -218,7 +225,7 @@ fn execute_insert_internal(
     if has_insert_triggers && trigger_context.is_none() {
         crate::TriggerFirer::execute_before_statement_triggers(
             db,
-            &stmt.table_name,
+            table_name,
             vibesql_ast::TriggerEvent::Insert,
         )?;
     }
@@ -231,7 +238,7 @@ fn execute_insert_internal(
     // Track row count before inserts for assertion rollback
     let row_count_before_all = if has_assertions {
         Some(
-            db.get_table(&stmt.table_name)
+            db.get_table(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
                 .row_count(),
         )
@@ -246,7 +253,7 @@ fn execute_insert_internal(
     if use_batch_insert && validated_rows.len() > 1 {
         // Fast path: Use batch insert for multiple rows without triggers
         // Use cost-based batch sizing to optimize for tables with many indexes
-        let optimizer = DmlOptimizer::new(db, &stmt.table_name);
+        let optimizer = DmlOptimizer::new(db, table_name);
         let optimal_batch_size = optimizer.optimal_insert_batch_size(validated_rows.len());
 
         // If optimal batch size is smaller than total rows, insert in batches
@@ -256,7 +263,7 @@ fn execute_insert_internal(
                 let rows: Vec<vibesql_storage::Row> =
                     chunk.iter().map(|v| vibesql_storage::Row::new(v.clone())).collect();
 
-                rows_inserted += db.insert_rows_batch(&stmt.table_name, rows).map_err(|e| {
+                rows_inserted += db.insert_rows_batch(table_name, rows).map_err(|e| {
                     ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
                 })?;
             }
@@ -265,7 +272,7 @@ fn execute_insert_internal(
             let rows: Vec<vibesql_storage::Row> =
                 validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
 
-            rows_inserted = db.insert_rows_batch(&stmt.table_name, rows).map_err(|e| {
+            rows_inserted = db.insert_rows_batch(table_name, rows).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
         }
@@ -277,7 +284,7 @@ fn execute_insert_internal(
                 // Try to update an existing row if there's a conflict
                 let update_result = super::duplicate_key_update::handle_duplicate_key_update(
                     db,
-                    &stmt.table_name,
+                    table_name,
                     &schema,
                     &full_row_values,
                     assignments,
@@ -293,7 +300,7 @@ fn execute_insert_internal(
                 // If REPLACE conflict clause, delete conflicting rows first
                 super::replace::handle_replace_conflicts(
                     db,
-                    &stmt.table_name,
+                    table_name,
                     &schema,
                     &full_row_values,
                 )?;
@@ -304,7 +311,7 @@ fn execute_insert_internal(
             if has_insert_triggers {
                 crate::TriggerFirer::execute_before_triggers(
                     db,
-                    &stmt.table_name,
+                    table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
                     Some(&row_to_insert),
@@ -313,13 +320,13 @@ fn execute_insert_internal(
 
             // Get row count before insert to enable rollback
             let row_count_before = db
-                .get_table(&stmt.table_name)
+                .get_table(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
                 .row_count();
 
             // Insert the row
             let row = vibesql_storage::Row::new(full_row_values);
-            db.insert_row(&stmt.table_name, row.clone()).map_err(|e| {
+            db.insert_row(table_name, row.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
 
@@ -328,7 +335,7 @@ fn execute_insert_internal(
             if has_insert_triggers {
                 let trigger_result = crate::TriggerFirer::execute_after_triggers(
                     db,
-                    &stmt.table_name,
+                    table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
                     Some(&row),
@@ -339,7 +346,7 @@ fn execute_insert_internal(
                     // Note: This is a simple rollback mechanism for Phase 3
                     // Full transaction support will come in a later phase
                     let table = db
-                        .get_table_mut(&stmt.table_name)
+                        .get_table_mut(table_name)
                         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
                     // Delete the last row (the one we just inserted)
@@ -355,7 +362,7 @@ fn execute_insert_internal(
                     });
 
                     // Rebuild indexes since we modified the table (handles compaction)
-                    db.rebuild_indexes(&stmt.table_name);
+                    db.rebuild_indexes(table_name);
 
                     // Re-throw the trigger error
                     return Err(trigger_error);
@@ -371,7 +378,7 @@ fn execute_insert_internal(
     if has_insert_triggers && trigger_context.is_none() {
         crate::TriggerFirer::execute_after_statement_triggers(
             db,
-            &stmt.table_name,
+            table_name,
             vibesql_ast::TriggerEvent::Insert,
         )?;
     }
@@ -387,7 +394,7 @@ fn execute_insert_internal(
     // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
     // - Database-level cache: used by Database::get_columnar() for cached access
     if rows_inserted > 0 {
-        db.invalidate_columnar_cache(&stmt.table_name);
+        db.invalidate_columnar_cache(table_name);
     }
 
     // Check all assertions after INSERT completes (SQL:1999 Feature F671/F672)
@@ -399,7 +406,7 @@ fn execute_insert_internal(
         if let Some(start_index) = row_count_before_all {
             if rows_inserted > 0 {
                 // Delete rows starting from start_index (the rows we inserted)
-                if let Some(table_mut) = db.get_table_mut(&stmt.table_name) {
+                if let Some(table_mut) = db.get_table_mut(table_name) {
                     use std::cell::Cell;
                     let current_index = Cell::new(0);
                     // Delete all rows from start_index onwards (the newly inserted rows)
@@ -411,8 +418,8 @@ fn execute_insert_internal(
                 }
 
                 // Rebuild indexes since we modified the table (handles compaction)
-                db.rebuild_indexes(&stmt.table_name);
-                db.invalidate_columnar_cache(&stmt.table_name);
+                db.rebuild_indexes(table_name);
+                db.invalidate_columnar_cache(table_name);
             }
         }
         return Err(assertion_error);

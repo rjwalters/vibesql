@@ -78,6 +78,56 @@ impl Operations {
         Ok(())
     }
 
+    /// Find a table by name with fallback lookups for quoted identifiers.
+    ///
+    /// This tries multiple lookup strategies to handle both quoted and unquoted identifiers:
+    /// 1. Direct lookup as-is (for quoted identifiers that preserve case)
+    /// 2. Normalized (lowercase) lookup
+    /// 3. Schema-qualified with original case
+    /// 4. Schema-qualified with normalized case
+    fn find_table_mut<'a>(
+        catalog: &vibesql_catalog::Catalog,
+        tables: &'a mut HashMap<String, Table>,
+        table_name: &str,
+    ) -> Result<&'a mut Table, StorageError> {
+        // Try 1: Direct lookup as-is (handles quoted identifiers correctly)
+        if tables.contains_key(table_name) {
+            return Ok(tables.get_mut(table_name).unwrap());
+        }
+
+        let normalized_name = if catalog.is_case_sensitive_identifiers() {
+            table_name.to_string()
+        } else {
+            table_name.to_lowercase()
+        };
+
+        // Try 2: Normalized name (for unquoted identifiers)
+        if normalized_name != table_name && tables.contains_key(&normalized_name) {
+            return Ok(tables.get_mut(&normalized_name).unwrap());
+        }
+
+        // Try with schema prefix if not already qualified
+        if !table_name.contains('.') {
+            let current_schema = catalog.get_current_schema();
+
+            // Try 3: Schema-qualified with original case (for quoted identifiers)
+            let qualified_original = format!("{}.{}", current_schema, table_name);
+            if tables.contains_key(&qualified_original) {
+                return Ok(tables.get_mut(&qualified_original).unwrap());
+            }
+
+            // Try 4: Schema-qualified with normalized case
+            if normalized_name != table_name {
+                let qualified_normalized = format!("{}.{}", current_schema, normalized_name);
+                if tables.contains_key(&qualified_normalized) {
+                    return Ok(tables.get_mut(&qualified_normalized).unwrap());
+                }
+            }
+        }
+
+        Err(StorageError::TableNotFound(table_name.to_string()))
+    }
+
     /// Drop a table from the catalog
     pub fn drop_table(
         &mut self,
@@ -125,26 +175,8 @@ impl Operations {
         table_name: &str,
         row: Row,
     ) -> Result<usize, StorageError> {
-        // Normalize table name for lookup (matches catalog normalization)
-        let normalized_name = if catalog.is_case_sensitive_identifiers() {
-            table_name.to_string()
-        } else {
-            table_name.to_lowercase()
-        };
-
-        // First try direct lookup, then try with schema prefix if needed
-        let table = if let Some(tbl) = tables.get_mut(&normalized_name) {
-            tbl
-        } else if !table_name.contains('.') {
-            // Try with schema prefix
-            let current_schema = catalog.get_current_schema();
-            let qualified_name = format!("{}.{}", current_schema, normalized_name);
-            tables
-                .get_mut(&qualified_name)
-                .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?
-        } else {
-            return Err(StorageError::TableNotFound(table_name.to_string()));
-        };
+        // Use the helper function for proper table lookup with fallbacks for quoted identifiers
+        let table = Self::find_table_mut(catalog, tables, table_name)?;
 
         let row_index = table.row_count();
 
@@ -195,26 +227,8 @@ impl Operations {
             return Ok(Vec::new());
         }
 
-        // Normalize table name for lookup (matches catalog normalization)
-        let normalized_name = if catalog.is_case_sensitive_identifiers() {
-            table_name.to_string()
-        } else {
-            table_name.to_lowercase()
-        };
-
-        // First try direct lookup, then try with schema prefix if needed
-        let table = if let Some(tbl) = tables.get_mut(&normalized_name) {
-            tbl
-        } else if !table_name.contains('.') {
-            // Try with schema prefix
-            let current_schema = catalog.get_current_schema();
-            let qualified_name = format!("{}.{}", current_schema, normalized_name);
-            tables
-                .get_mut(&qualified_name)
-                .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?
-        } else {
-            return Err(StorageError::TableNotFound(table_name.to_string()));
-        };
+        // Use the helper function for proper table lookup with fallbacks for quoted identifiers
+        let table = Self::find_table_mut(catalog, tables, table_name)?;
 
         // Get table schema once for all rows
         let table_schema = catalog.get_table(table_name);
