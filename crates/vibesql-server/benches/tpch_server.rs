@@ -205,8 +205,8 @@ impl PostgresExecutor {
     }
 
     async fn query(&self, sql: &str) -> Result<usize, tokio_postgres::Error> {
-        let msgs = self.client.simple_query(sql).await?;
-        Ok(msgs.iter().filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_))).count())
+        let rows = self.client.query(sql, &[]).await?;
+        Ok(rows.len())
     }
 }
 
