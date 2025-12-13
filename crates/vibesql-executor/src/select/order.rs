@@ -582,13 +582,15 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
 
 /// Resolve ORDER BY expression that might be a SELECT list alias or column position
 ///
-/// Handles four cases:
+/// Handles these cases:
 /// 1. Numeric literal (e.g., ORDER BY 1, 2, 3) - returns the expression from that position in
 ///    SELECT list
 /// 2. Simple column reference that matches a SELECT list alias - returns the SELECT list expression
 /// 3. Simple column reference that matches an aliased column's original name - returns a ColumnRef
 ///    to the alias
-/// 4. Otherwise - returns the original ORDER BY expression
+/// 4. Complex expressions containing alias references (e.g., ORDER BY -x, ORDER BY abs(x)) -
+///    recursively resolves alias references within the expression (#4436)
+/// 5. Otherwise - returns the original ORDER BY expression
 ///
 /// Returns an error if a numeric column position is out of range (0 or > column count)
 ///
@@ -675,8 +677,176 @@ pub(crate) fn resolve_order_by_alias<'a>(
         }
     }
 
+    // For complex expressions (UnaryOp, BinaryOp, Function calls, etc.), recursively resolve
+    // alias references within the expression (#4436)
+    // This handles cases like: ORDER BY -x, ORDER BY abs(x), ORDER BY 10-x
+    if let Some(resolved) = resolve_aliases_in_expression(order_expr, select_list) {
+        return Ok(Cow::Owned(resolved));
+    }
+
     // Not an alias or column position, use the original expression
     Ok(Cow::Borrowed(order_expr))
+}
+
+/// Recursively resolve alias references within an ORDER BY expression.
+///
+/// This handles complex expressions like:
+/// - `ORDER BY -x` where x is an alias
+/// - `ORDER BY abs(x)` where x is an alias
+/// - `ORDER BY 10-x` where x is an alias
+///
+/// Returns Some(resolved_expression) if any aliases were resolved, None otherwise.
+fn resolve_aliases_in_expression(
+    expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+) -> Option<vibesql_ast::Expression> {
+    match expr {
+        // Handle UnaryOp (e.g., -x, +x, NOT x)
+        vibesql_ast::Expression::UnaryOp { op, expr: inner } => {
+            // Try to resolve the inner expression
+            if let Some(resolved_inner) = resolve_alias_or_clone(inner, select_list) {
+                Some(vibesql_ast::Expression::UnaryOp {
+                    op: *op,
+                    expr: Box::new(resolved_inner),
+                })
+            } else {
+                None
+            }
+        }
+
+        // Handle BinaryOp (e.g., 10-x, x+y)
+        vibesql_ast::Expression::BinaryOp { left, op, right } => {
+            let resolved_left = resolve_alias_or_clone(left, select_list);
+            let resolved_right = resolve_alias_or_clone(right, select_list);
+
+            // Only return Some if at least one side was resolved
+            if resolved_left.is_some() || resolved_right.is_some() {
+                Some(vibesql_ast::Expression::BinaryOp {
+                    left: Box::new(resolved_left.unwrap_or_else(|| left.as_ref().clone())),
+                    op: *op,
+                    right: Box::new(resolved_right.unwrap_or_else(|| right.as_ref().clone())),
+                })
+            } else {
+                None
+            }
+        }
+
+        // Handle Function calls (e.g., abs(x), coalesce(x, 0))
+        vibesql_ast::Expression::Function { name, args, character_unit } => {
+            let mut any_resolved = false;
+            let resolved_args: Vec<_> = args
+                .iter()
+                .map(|arg| {
+                    if let Some(resolved) = resolve_alias_or_clone(arg, select_list) {
+                        any_resolved = true;
+                        resolved
+                    } else {
+                        arg.clone()
+                    }
+                })
+                .collect();
+
+            if any_resolved {
+                Some(vibesql_ast::Expression::Function {
+                    name: name.clone(),
+                    args: resolved_args,
+                    character_unit: character_unit.clone(),
+                })
+            } else {
+                None
+            }
+        }
+
+        // Handle CASE expressions
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+            let mut any_resolved = false;
+
+            let resolved_operand = operand.as_ref().map(|op| {
+                if let Some(resolved) = resolve_alias_or_clone(op, select_list) {
+                    any_resolved = true;
+                    Box::new(resolved)
+                } else {
+                    op.clone()
+                }
+            });
+
+            let resolved_when_clauses: Vec<_> = when_clauses
+                .iter()
+                .map(|clause| {
+                    let resolved_conditions: Vec<_> = clause
+                        .conditions
+                        .iter()
+                        .map(|cond| {
+                            if let Some(resolved) = resolve_alias_or_clone(cond, select_list) {
+                                any_resolved = true;
+                                resolved
+                            } else {
+                                cond.clone()
+                            }
+                        })
+                        .collect();
+
+                    let resolved_result =
+                        if let Some(resolved) = resolve_alias_or_clone(&clause.result, select_list)
+                        {
+                            any_resolved = true;
+                            resolved
+                        } else {
+                            clause.result.clone()
+                        };
+
+                    vibesql_ast::CaseWhen { conditions: resolved_conditions, result: resolved_result }
+                })
+                .collect();
+
+            let resolved_else = else_result.as_ref().map(|e| {
+                if let Some(resolved) = resolve_alias_or_clone(e, select_list) {
+                    any_resolved = true;
+                    Box::new(resolved)
+                } else {
+                    e.clone()
+                }
+            });
+
+            if any_resolved {
+                Some(vibesql_ast::Expression::Case {
+                    operand: resolved_operand,
+                    when_clauses: resolved_when_clauses,
+                    else_result: resolved_else,
+                })
+            } else {
+                None
+            }
+        }
+
+        // For other expression types, no resolution needed
+        _ => None,
+    }
+}
+
+/// Helper: resolve an alias in an expression, or return None if no alias was found.
+/// Returns Some(resolved_expression) if the expression contains an alias that was resolved.
+fn resolve_alias_or_clone(
+    expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+) -> Option<vibesql_ast::Expression> {
+    // Check if this is a simple column reference that matches an alias
+    if let vibesql_ast::Expression::ColumnRef { table: None, column } = expr {
+        // Search for matching alias in SELECT list
+        for item in select_list {
+            if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias: Some(alias_name), .. } =
+                item
+            {
+                if alias_name.eq_ignore_ascii_case(column) {
+                    // Found matching alias, return the SELECT list expression
+                    return Some(select_expr.clone());
+                }
+            }
+        }
+    }
+
+    // Try recursive resolution for complex expressions
+    resolve_aliases_in_expression(expr, select_list)
 }
 
 #[cfg(test)]
