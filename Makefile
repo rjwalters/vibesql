@@ -1,14 +1,16 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-fg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-fg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
 
-# Log file location for background runs
+# Log file locations for background runs
 LOG_FILE := /tmp/vibesql-make-all.log
 PID_FILE := /tmp/vibesql-make-all.pid
+BENCH_LOG_FILE := /tmp/vibesql-benchmark-all.log
+BENCH_PID_FILE := /tmp/vibesql-benchmark-all.pid
 
 # Build everything in background since it takes a long time
 # Use 'make all-fg' for foreground execution
@@ -60,6 +62,33 @@ status:
 		echo "No background make running. Use 'make all' to start."; \
 	fi
 
+# Tail the background benchmark output
+benchmark-logs:
+	@if [ -f $(BENCH_LOG_FILE) ]; then \
+		tail -f $(BENCH_LOG_FILE); \
+	else \
+		echo "No benchmark log file found. Run 'make benchmark-all' first."; \
+	fi
+
+# Check status of background benchmark
+benchmark-status:
+	@if [ -f $(BENCH_PID_FILE) ]; then \
+		PID=$$(cat $(BENCH_PID_FILE)); \
+		if ps -p $$PID > /dev/null 2>&1; then \
+			echo "✓ make benchmark-all is running (PID: $$PID)"; \
+			echo ""; \
+			echo "Last 10 lines of output:"; \
+			tail -10 $(BENCH_LOG_FILE) 2>/dev/null || echo "(no output yet)"; \
+		else \
+			echo "✗ make benchmark-all has finished"; \
+			echo ""; \
+			echo "Exit status (last 30 lines):"; \
+			tail -30 $(BENCH_LOG_FILE) 2>/dev/null; \
+		fi; \
+	else \
+		echo "No background benchmark running. Use 'make benchmark-all' to start."; \
+	fi
+
 # Help target
 help:
 	@echo "VibeSQL Makefile - Common development tasks"
@@ -95,7 +124,10 @@ help:
 	@echo "  make benchmark           - Run all benchmarks, VibeSQL only (~2.5 hours)"
 	@echo "  make benchmark-quick     - Quick CI run with reduced iterations (~25 min)"
 	@echo "  make benchmark-smoke     - Smoke test for pipeline validation (~30s)"
-	@echo "  make benchmark-all       - FULL matrix: tests + benchmarks with timing report"
+	@echo "  make benchmark-all       - FULL matrix: tests + benchmarks (runs in BACKGROUND)"
+	@echo "  make benchmark-all-fg    - Run 'make benchmark-all' in foreground (blocking)"
+	@echo "  make benchmark-logs      - Tail the background benchmark output"
+	@echo "  make benchmark-status    - Check if background benchmark is running"
 	@echo ""
 	@echo "Embedded benchmarks (VibeSQL, SQLite, DuckDB - in-process databases):"
 	@echo "  make benchmark-embedded-all  - All embedded benchmarks × all embedded engines"
@@ -337,7 +369,26 @@ benchmark-smoke:
 
 # Full benchmark matrix: tests + embedded + server benchmarks
 # Runs unit tests, sqllogictest, then all benchmarks with timing report
+# Runs in BACKGROUND by default - use 'make benchmark-all-fg' for foreground
 benchmark-all:
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "  Starting 'make benchmark-all' in background"
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "  Log file: $(BENCH_LOG_FILE)"
+	@echo ""
+	@echo "  Monitor progress:"
+	@echo "    make benchmark-status    - Quick status check with last 10 lines"
+	@echo "    make benchmark-logs      - Follow full output (Ctrl+C to stop)"
+	@echo "    tail -f $(BENCH_LOG_FILE)"
+	@echo ""
+	@nohup $(MAKE) benchmark-all-fg > $(BENCH_LOG_FILE) 2>&1 & echo $$! > $(BENCH_PID_FILE)
+	@echo "  PID: $$(cat $(BENCH_PID_FILE))"
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+
+# Run benchmark-all in foreground (blocking)
+benchmark-all-fg:
 	@./scripts/bench-all
 
 #
