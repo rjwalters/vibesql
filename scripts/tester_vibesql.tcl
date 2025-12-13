@@ -466,6 +466,16 @@ proc execsql2 {sql {db ""}} {
     # Execute SQL and return results with column names interleaved:
     # {colname1 value1 colname2 value2 ...} for each row, all in a flat list
     # This is used by SQLite tests to verify column name handling
+    #
+    # IMPORTANT: This mimics SQLite's TCL interface behavior with duplicate
+    # column names. When there are duplicate column names (e.g., from JOINs),
+    # SQLite's "db eval" uses an array where the column name is the key.
+    # Since arrays can't have duplicate keys, for duplicate column names,
+    # the LAST value for each column name wins. For example:
+    #   SELECT * FROM t3, t4 (where t3 has a,b and t4 has a,b)
+    #   Columns: a, b, a, b with values: 1, 2, 3, 4
+    #   Array becomes: data(a)=3, data(b)=4 (last values)
+    #   Output: a 3 b 4 a 3 b 4 (using last value for each column name occurrence)
 
     # Handle SQLite-specific statements
     set sql_upper [string toupper [string trim $sql]]
@@ -489,13 +499,20 @@ proc execsql2 {sql {db ""}} {
     set headers [lindex $parsed 0]
     set rows [lindex $parsed 1]
 
-    # Interleave column names with values
+    # Interleave column names with values, mimicking SQLite's duplicate handling
     set output {}
     foreach row $rows {
+        # Build a map from column name to its LAST value (mimics TCL array behavior)
+        array unset col_values
         set idx 0
         foreach col $headers {
-            lappend output $col [lindex $row $idx]
+            set col_values($col) [lindex $row $idx]
             incr idx
+        }
+
+        # Now output column name and looked-up value for each column position
+        foreach col $headers {
+            lappend output $col $col_values($col)
         }
     }
 
