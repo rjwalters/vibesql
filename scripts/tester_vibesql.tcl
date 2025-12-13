@@ -225,7 +225,10 @@ proc translate_error_to_sqlite {vibesql_error} {
 
     # Syntax/parse errors - parser now produces SQLite-compatible format directly
     # Format: "Parse error: near "X": syntax error" -> "near "X": syntax error"
-    if {[regexp -nocase {^Parse error: (near .+: syntax error)$} $error_msg -> parse_msg]} {
+    # Note: SQLite preserves the original case from input, our parser uses uppercase.
+    # This is a known limitation - we can't perfectly match SQLite's error messages
+    # without preserving original token case in the parser.
+    if {[regexp -nocase {^Parse error: (near "[^"]+": syntax error)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
@@ -569,10 +572,16 @@ proc execsql2 {sql {db ""}} {
     set pragma_prefix [build_pragma_prefix]
     set prefixed_sql "${pragma_prefix}$sql"
 
+    # Use catch to handle process errors and translate them to SQLite format
     if {$::db_file eq ""} {
-        set result [exec echo $prefixed_sql | $::vibesql_path 2>@1]
+        set exec_code [catch {exec echo $prefixed_sql | $::vibesql_path 2>@1} result]
     } else {
-        set result [exec echo $prefixed_sql | $::vibesql_path $::db_file 2>@1]
+        set exec_code [catch {exec echo $prefixed_sql | $::vibesql_path $::db_file 2>@1} result]
+    }
+
+    if {$exec_code != 0} {
+        # Process exited with error - translate and re-raise
+        error [translate_error_to_sqlite $result]
     }
 
     # Parse with headers
