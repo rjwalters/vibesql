@@ -406,7 +406,7 @@ impl<'arena> ArenaParser<'arena> {
             } else {
                 // Auto-generate unique alias for SQLite compatibility
                 let generated = format!(
-                    "__derived_{}",
+                    "(subquery-{})",
                     ARENA_DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
                 );
                 self.intern(&generated)
