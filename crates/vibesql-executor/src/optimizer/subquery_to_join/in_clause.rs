@@ -138,7 +138,18 @@ pub(super) fn try_convert_in_to_join(
 
         (Some(new_alias), qualified_expr, rewritten_col, rewritten_where)
     } else {
-        (table_alias.clone(), expr.clone(), subquery_column.clone(), subquery.where_clause.clone())
+        // Even when not a self-join, we need to qualify the subquery column
+        // to avoid ambiguity when both sides have the same column name.
+        // Use the effective table name (alias if present, otherwise table name).
+        let effective_table = table_alias.as_deref().unwrap_or(&table_name);
+        let qualified_subquery_column =
+            rewrite_column_refs_with_alias(&subquery_column, effective_table, effective_table);
+        let qualified_subquery_where = subquery
+            .where_clause
+            .as_ref()
+            .map(|w| rewrite_column_refs_with_alias(w, effective_table, effective_table));
+
+        (table_alias.clone(), expr.clone(), qualified_subquery_column, qualified_subquery_where)
     };
 
     // Create the join condition: expr = subquery_column
