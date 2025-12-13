@@ -31,7 +31,6 @@ fn test_update_with_default_value() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "users".to_string(),
-        quoted: false,
         assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             op: BinaryOperator::Equal,
@@ -78,7 +77,6 @@ fn test_update_default_no_default_value_defined() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "users".to_string(),
-        quoted: false,
         assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             op: BinaryOperator::Equal,

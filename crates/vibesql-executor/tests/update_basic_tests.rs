@@ -14,7 +14,6 @@ fn test_update_all_rows() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(50000)),
@@ -40,7 +39,6 @@ fn test_update_with_where_clause() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(60000)),
@@ -77,7 +75,6 @@ fn test_update_multiple_columns() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![
             Assignment {
                 column: "salary".to_string(),
@@ -114,7 +111,6 @@ fn test_update_with_expression() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::BinaryOp {
@@ -152,7 +148,6 @@ fn test_update_table_not_found() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "nonexistent".to_string(),
-        quoted: false,
         assignments: vec![],
         where_clause: None,
     };
@@ -170,7 +165,6 @@ fn test_update_column_not_found() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "nonexistent_column".to_string(),
             value: Expression::Literal(SqlValue::Integer(123)),
@@ -191,7 +185,6 @@ fn test_update_no_matching_rows() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(99999)),

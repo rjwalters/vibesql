@@ -49,7 +49,6 @@ fn test_update_with_pk_index_performance() {
     for i in 0..1000 {
         let stmt = UpdateStmt {
             table_name: "test_table".to_string(),
-            quoted: false,
             assignments: vec![Assignment {
                 column: "value".to_string(),
                 value: Expression::BinaryOp {
@@ -66,6 +65,7 @@ fn test_update_with_pk_index_performance() {
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(i))),
             })),
+            quoted: false,
         };
 
         UpdateExecutor::execute(&stmt, &mut db).unwrap();

@@ -28,7 +28,6 @@ fn test_basic_savepoint() {
     // Insert initial row
     let insert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "accounts".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "balance".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -46,7 +45,6 @@ fn test_basic_savepoint() {
     // Insert another row
     let insert_stmt2 = vibesql_ast::InsertStmt { quoted: false,
         table_name: "accounts".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "balance".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
@@ -95,7 +93,6 @@ fn test_nested_savepoints() {
     // Insert initial row
     let insert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "accounts".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "balance".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -113,7 +110,6 @@ fn test_nested_savepoints() {
     // Insert second row
     let insert_stmt2 = vibesql_ast::InsertStmt { quoted: false,
         table_name: "accounts".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "balance".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
@@ -131,7 +127,6 @@ fn test_nested_savepoints() {
     // Insert third row
     let insert_stmt3 = vibesql_ast::InsertStmt { quoted: false,
         table_name: "accounts".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "balance".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)),

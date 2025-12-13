@@ -48,9 +48,9 @@ fn test_select_1_with_alias() {
             assert_eq!(result.rows.len(), 1);
             assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Integer(1));
 
-            // Check that the alias is used (parser uppercases identifiers by default)
+            // Check that the alias is used (parser preserves case for unquoted identifiers)
             assert_eq!(result.columns.len(), 1);
-            assert_eq!(result.columns[0], "RESULT");
+            assert_eq!(result.columns[0], "result");
         }
         _ => panic!("Expected SELECT statement"),
     }

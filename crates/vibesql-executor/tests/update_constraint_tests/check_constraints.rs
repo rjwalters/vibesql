@@ -20,7 +20,6 @@ fn test_update_check_constraint_passes() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "products".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "price".to_string(),
             value: Expression::Literal(SqlValue::Integer(100)),
@@ -44,7 +43,6 @@ fn test_update_check_constraint_violation() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "products".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "price".to_string(),
             value: Expression::Literal(SqlValue::Integer(-10)),
@@ -75,7 +73,6 @@ fn test_update_check_constraint_with_null() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "products".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "price".to_string(),
             value: Expression::Literal(SqlValue::Null),
@@ -103,7 +100,6 @@ fn test_update_check_constraint_with_expression() {
     let stmt1 = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "bonus".to_string(),
             value: Expression::Literal(SqlValue::Integer(15000)),
@@ -117,7 +113,6 @@ fn test_update_check_constraint_with_expression() {
     let stmt2 = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
-        quoted: false,
         assignments: vec![Assignment {
             column: "bonus".to_string(),
             value: Expression::Literal(SqlValue::Integer(60000)),

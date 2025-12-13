@@ -17,7 +17,6 @@ fn test_after_update_trigger_fires() {
     // Insert a user first
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -49,7 +48,6 @@ fn test_after_update_trigger_fires() {
     let update = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
             value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -84,7 +82,6 @@ fn test_before_update_trigger_fires() {
     // Insert a user first
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -116,7 +113,6 @@ fn test_before_update_trigger_fires() {
     let update = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
             value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(

@@ -31,7 +31,6 @@ fn test_trigger_failure_causes_rollback() {
     // Try to insert - should fail due to trigger error
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "users".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -98,7 +97,6 @@ fn test_recursion_prevention() {
     // Try to insert - should fail with recursion depth error
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "users".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

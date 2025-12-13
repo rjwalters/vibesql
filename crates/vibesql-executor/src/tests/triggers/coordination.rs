@@ -47,7 +47,6 @@ fn test_multiple_triggers_fire_in_order() {
     // Insert a row - should fire both triggers
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -89,7 +88,6 @@ fn test_trigger_with_multiple_statements() {
     // Insert a row - should fire trigger with both statements
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -132,7 +130,6 @@ fn test_before_trigger_executes_first() {
     // Initialize counter to 0
     let init_insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "COUNTER".to_string(),
-        quoted: false,
         columns: vec!["value".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             vibesql_types::SqlValue::Integer(0),
@@ -158,7 +155,6 @@ fn test_before_trigger_executes_first() {
     // Insert a row
     let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
-        quoted: false,
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),

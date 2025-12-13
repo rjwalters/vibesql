@@ -30,7 +30,6 @@ fn setup_products_table(db: &mut Database) {
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
-        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -251,7 +250,6 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
     // Insert data into parent using InsertExecutor
     let parent_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "categories".to_string(),
-        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -267,7 +265,6 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
     // Insert data into child using InsertExecutor
     let child_stmt1 = vibesql_ast::InsertStmt { quoted: false,
         table_name: "items".to_string(),
-        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),
@@ -281,7 +278,6 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
 
     let child_stmt2 = vibesql_ast::InsertStmt { quoted: false,
         table_name: "items".to_string(),
-        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(2)),
