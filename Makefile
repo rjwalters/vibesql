@@ -95,7 +95,7 @@ help:
 	@echo "  make benchmark           - Run all benchmarks, VibeSQL only (~2.5 hours)"
 	@echo "  make benchmark-quick     - Quick CI run with reduced iterations (~25 min)"
 	@echo "  make benchmark-smoke     - Smoke test for pipeline validation (~30s)"
-	@echo "  make benchmark-all       - FULL matrix: embedded + server benchmarks (~8+ hours)"
+	@echo "  make benchmark-all       - FULL matrix: tests + benchmarks with timing report"
 	@echo ""
 	@echo "Embedded benchmarks (VibeSQL, SQLite, DuckDB - in-process databases):"
 	@echo "  make benchmark-embedded-all  - All embedded benchmarks × all embedded engines"
@@ -335,9 +335,10 @@ benchmark-quick:
 benchmark-smoke:
 	@./scripts/bench --smoke --all
 
-# Full benchmark matrix: embedded + server benchmarks
-# This is the most comprehensive benchmark (~8+ hours)
-benchmark-all: benchmark-embedded-all benchmark-server-all
+# Full benchmark matrix: tests + embedded + server benchmarks
+# Runs unit tests, sqllogictest, then all benchmarks with timing report
+benchmark-all:
+	@./scripts/bench-all
 
 #
 # Embedded Benchmarks (in-process databases: VibeSQL, SQLite, DuckDB)
