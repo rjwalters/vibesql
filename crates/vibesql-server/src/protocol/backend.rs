@@ -49,6 +49,33 @@ pub enum BackendMessage {
     /// Empty query response
     EmptyQueryResponse,
 
+    // =========================================================================
+    // Extended Query Protocol Response Messages
+    // =========================================================================
+    /// ParseComplete ('1') - Sent after successful Parse
+    ParseComplete,
+
+    /// BindComplete ('2') - Sent after successful Bind
+    BindComplete,
+
+    /// CloseComplete ('3') - Sent after successful Close
+    CloseComplete,
+
+    /// NoData ('n') - Sent by Describe when query returns no rows
+    NoData,
+
+    /// ParameterDescription ('t') - Describes prepared statement parameters
+    ParameterDescription {
+        /// OIDs of parameter types
+        param_types: Vec<i32>,
+    },
+
+    /// PortalSuspended ('s') - Execute completed but more rows exist
+    PortalSuspended,
+
+    // =========================================================================
+    // Subscription Protocol Messages (VibeSQL Extension)
+    // =========================================================================
     /// Subscription data (0xF2) - query result update
     SubscriptionData {
         subscription_id: [u8; 16],
@@ -208,6 +235,47 @@ impl BackendMessage {
                 buf.put_i32(4);
             }
 
+            // =================================================================
+            // Extended Query Protocol Response Messages
+            // =================================================================
+            BackendMessage::ParseComplete => {
+                buf.put_u8(b'1'); // ParseComplete
+                buf.put_i32(4); // Length (just the length field itself)
+            }
+
+            BackendMessage::BindComplete => {
+                buf.put_u8(b'2'); // BindComplete
+                buf.put_i32(4);
+            }
+
+            BackendMessage::CloseComplete => {
+                buf.put_u8(b'3'); // CloseComplete
+                buf.put_i32(4);
+            }
+
+            BackendMessage::NoData => {
+                buf.put_u8(b'n'); // NoData
+                buf.put_i32(4);
+            }
+
+            BackendMessage::ParameterDescription { param_types } => {
+                buf.put_u8(b't'); // ParameterDescription
+                let len = 4 + 2 + (param_types.len() * 4); // length + count + OIDs
+                buf.put_i32(len as i32);
+                buf.put_i16(param_types.len() as i16);
+                for oid in param_types {
+                    buf.put_i32(*oid);
+                }
+            }
+
+            BackendMessage::PortalSuspended => {
+                buf.put_u8(b's'); // PortalSuspended
+                buf.put_i32(4);
+            }
+
+            // =================================================================
+            // Subscription Protocol Messages (VibeSQL Extension)
+            // =================================================================
             BackendMessage::SubscriptionData { subscription_id, update_type, rows } => {
                 buf.put_u8(0xF2); // SubscriptionData
 

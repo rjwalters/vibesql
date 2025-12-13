@@ -253,19 +253,9 @@ impl PostgresTPCCExecutor {
     }
 
     async fn query(&self, sql: &str) -> Result<Vec<tokio_postgres::Row>, tokio_postgres::Error> {
-        // Use simple_query since vibesql-server only supports the simple query protocol.
-        // The extended query protocol (Parse/Bind/Execute/Sync) is not implemented.
-        let msgs = self.client.simple_query(sql).await?;
-
-        // Convert SimpleQueryMessage to Vec<Row> - we can't return actual Row structs
-        // from simple_query, so we return an empty vec with count for success tracking.
-        // The transactions don't need the actual row data, just success/failure.
-        let row_count = msgs.iter()
-            .filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_)))
-            .count();
-
-        // Return empty vec - the TPC-C transactions only check for errors, not row content
-        Ok(Vec::with_capacity(row_count))
+        // Use the extended query protocol (Parse/Bind/Execute/Sync) which is now supported
+        // by vibesql-server for improved compatibility with PostgreSQL clients.
+        self.client.query(sql, &[]).await
     }
 
     /// Execute New-Order transaction
