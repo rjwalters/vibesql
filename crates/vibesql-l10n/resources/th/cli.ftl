@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - ฐานข้อมูลที่รองรับ SQL:1999 FULL Compliance
 cli-help-hint = พิมพ์ \help เพื่อดูความช่วยเหลือ, \quit เพื่อออก
 cli-goodbye = ลาก่อน!
+locale-changed = เปลี่ยนภาษาเป็น { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = ตั้งค่ารูปแบบผลลัพธ์เป็น: { $format }
 database-saved = บันทึกฐานข้อมูลไปยัง: { $path }
 no-database-file = ข้อผิดพลาด: ไม่ได้ระบุไฟล์ฐานข้อมูล ใช้ \save <filename> หรือเริ่มต้นด้วย --database flag
+cannot-save-memory-database = ข้อผิดพลาด: ไม่สามารถบันทึกไปยัง '{ $path }' ได้ - นี่คือตัวระบุฐานข้อมูลในหน่วยความจำ ไม่ใช่พาธไฟล์ ใช้ \save <filename> แทน
 
 # =============================================================================
 # Error Display

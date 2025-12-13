@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - Database con conformità FULL allo standard SQL:1999
 cli-help-hint = Digita \help per la guida, \quit per uscire
 cli-goodbye = Arrivederci!
+locale-changed = Lingua cambiata in { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = Formato output impostato a: { $format }
 database-saved = Database salvato in: { $path }
 no-database-file = Errore: Nessun file database specificato. Usa \save <nomefile> o avvia con il flag --database
+cannot-save-memory-database = Errore: Impossibile salvare in '{ $path }' - questo è l'identificatore del database in memoria, non un percorso file. Usa invece \save <nomefile>.
 
 # =============================================================================
 # Error Display

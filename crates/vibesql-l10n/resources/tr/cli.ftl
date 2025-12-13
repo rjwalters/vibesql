@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - SQL:1999 TAM Uyumluluk Veritabanı
 cli-help-hint = Yardım için \help, çıkmak için \quit yazın
 cli-goodbye = Hoşça kalın!
+locale-changed = Dil { $locale } olarak değiştirildi
 
 # =============================================================================
 # Komut Yardım Metinleri (Clap Argümanları)
@@ -166,6 +167,7 @@ help-example-errors = \errors
 format-changed = Çıktı formatı ayarlandı: { $format }
 database-saved = Veritabanı kaydedildi: { $path }
 no-database-file = Hata: Veritabanı dosyası belirtilmedi. \save <dosyaadı> kullanın veya --database bayrağı ile başlatın
+cannot-save-memory-database = Hata: '{ $path }' konumuna kaydedilemiyor - bu bellek içi veritabanı tanımlayıcısıdır, dosya yolu değil. Bunun yerine \save <dosyaadı> kullanın.
 
 # =============================================================================
 # Hata Görüntüleme

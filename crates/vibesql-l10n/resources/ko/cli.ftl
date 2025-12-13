@@ -166,6 +166,7 @@ help-example-errors = \errors
 format-changed = 출력 형식이 설정됨: { $format }
 database-saved = 데이터베이스가 저장됨: { $path }
 no-database-file = 오류: 데이터베이스 파일이 지정되지 않았습니다. \save <filename>을 사용하거나 --database 플래그로 시작하세요
+cannot-save-memory-database = 오류: '{ $path }'에 저장할 수 없습니다 - 이것은 인메모리 데이터베이스 식별자이며, 파일 경로가 아닙니다. 대신 \save <filename>을 사용하세요.
 
 # =============================================================================
 # Error Display

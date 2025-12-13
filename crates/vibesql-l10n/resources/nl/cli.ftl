@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - SQL:1999 VOLLEDIG Compliant Database
 cli-help-hint = Typ \help voor hulp, \quit om af te sluiten
 cli-goodbye = Tot ziens!
+locale-changed = Taal gewijzigd naar { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -166,6 +167,7 @@ help-example-errors = \errors
 format-changed = Uitvoerformaat ingesteld op: { $format }
 database-saved = Database opgeslagen naar: { $path }
 no-database-file = Fout: Geen databasebestand opgegeven. Gebruik \save <bestandsnaam> of start met --database vlag
+cannot-save-memory-database = Fout: Kan niet opslaan naar '{ $path }' - dit is de in-memory database-identificatie, geen bestandspad. Gebruik in plaats daarvan \save <bestandsnaam>.
 
 # =============================================================================
 # Error Display

@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - Database dengan Kepatuhan PENUH SQL:1999
 cli-help-hint = Ketik \help untuk bantuan, \quit untuk keluar
 cli-goodbye = Sampai jumpa!
+locale-changed = Bahasa diubah ke { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = Format output diatur ke: { $format }
 database-saved = Database disimpan ke: { $path }
 no-database-file = Kesalahan: Tidak ada file database yang ditentukan. Gunakan \save <namafile> atau mulai dengan flag --database
+cannot-save-memory-database = Kesalahan: Tidak dapat menyimpan ke '{ $path }' - ini adalah pengidentifikasi database di memori, bukan path file. Gunakan \save <namafile> sebagai gantinya.
 
 # =============================================================================
 # Error Display

@@ -166,6 +166,7 @@ help-example-errors = \errors
 format-changed = Formato de saída definido para: { $format }
 database-saved = Banco de dados salvo em: { $path }
 no-database-file = Erro: Nenhum arquivo de banco de dados especificado. Use \save <nome_arquivo> ou inicie com a flag --database
+cannot-save-memory-database = Erro: Não é possível salvar em '{ $path }' - este é o identificador do banco de dados em memória, não um caminho de arquivo. Use \save <nome_arquivo> em vez disso.
 
 # =============================================================================
 # Exibição de Erros

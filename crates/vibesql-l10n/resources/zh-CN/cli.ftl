@@ -166,6 +166,7 @@ help-example-errors = \errors
 format-changed = 输出格式已设置为：{ $format }
 database-saved = 数据库已保存到：{ $path }
 no-database-file = 错误：未指定数据库文件。请使用 \save <文件名> 或使用 --database 参数启动
+cannot-save-memory-database = 错误：无法保存到 '{ $path }' - 这是内存数据库标识符，不是文件路径。请改用 \save <文件名>。
 
 # =============================================================================
 # 错误显示

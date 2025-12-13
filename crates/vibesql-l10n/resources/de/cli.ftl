@@ -166,6 +166,7 @@ help-example-errors = \errors
 format-changed = Ausgabeformat festgelegt auf: { $format }
 database-saved = Datenbank gespeichert unter: { $path }
 no-database-file = Fehler: Keine Datenbankdatei angegeben. Verwenden Sie \save <dateiname> oder starten Sie mit dem --database-Flag
+cannot-save-memory-database = Fehler: Speichern nach '{ $path }' nicht möglich - dies ist die In-Memory-Datenbank-Kennung, kein Dateipfad. Verwenden Sie stattdessen \save <dateiname>.
 
 # =============================================================================
 # Fehleranzeige

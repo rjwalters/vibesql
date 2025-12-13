@@ -8,6 +8,7 @@
 cli-banner = VibeSQL الإصدار { $version } - قاعدة بيانات متوافقة مع SQL:1999 FULL
 cli-help-hint = اكتب \help للمساعدة، \quit للخروج
 cli-goodbye = إلى اللقاء!
+locale-changed = تم تغيير اللغة إلى { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = تم تعيين تنسيق الإخراج إلى: { $format }
 database-saved = تم حفظ قاعدة البيانات إلى: { $path }
 no-database-file = خطأ: لم يتم تحديد ملف قاعدة البيانات. استخدم \save <filename> أو ابدأ مع علامة --database
+cannot-save-memory-database = خطأ: لا يمكن الحفظ إلى '{ $path }' - هذا هو معرف قاعدة البيانات في الذاكرة، وليس مسار ملف. استخدم \save <filename> بدلاً من ذلك.
 
 # =============================================================================
 # Error Display

@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - SQL:1999 पूर्ण अनुपालन डेटाबेस
 cli-help-hint = मदद के लिए \help टाइप करें, बाहर निकलने के लिए \quit
 cli-goodbye = अलविदा!
+locale-changed = भाषा { $locale } में बदल गई
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = आउटपुट फ़ॉर्मेट सेट किया गया: { $format }
 database-saved = डेटाबेस सहेजा गया: { $path }
 no-database-file = त्रुटि: कोई डेटाबेस फ़ाइल निर्दिष्ट नहीं है। \save <filename> का उपयोग करें या --database फ्लैग के साथ शुरू करें
+cannot-save-memory-database = त्रुटि: '{ $path }' में सहेजा नहीं जा सकता - यह इन-मेमोरी डेटाबेस पहचानकर्ता है, फ़ाइल पथ नहीं। इसके बजाय \save <filename> का उपयोग करें।
 
 # =============================================================================
 # Error Display

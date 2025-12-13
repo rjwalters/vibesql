@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - Cơ sở dữ liệu tuân thủ SQL:1999 FULL
 cli-help-hint = Gõ \help để xem trợ giúp, \quit để thoát
 cli-goodbye = Tạm biệt!
+locale-changed = Ngôn ngữ đã được đổi thành { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = Đã đặt định dạng đầu ra thành: { $format }
 database-saved = Đã lưu cơ sở dữ liệu vào: { $path }
 no-database-file = Lỗi: Chưa chỉ định file cơ sở dữ liệu. Sử dụng \save <filename> hoặc khởi động với cờ --database
+cannot-save-memory-database = Lỗi: Không thể lưu vào '{ $path }' - đây là định danh cơ sở dữ liệu trong bộ nhớ, không phải đường dẫn file. Sử dụng \save <filename> thay thế.
 
 # =============================================================================
 # Error Display

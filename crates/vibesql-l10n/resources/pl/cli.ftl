@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - Baza danych z pełną zgodnością SQL:1999
 cli-help-hint = Wpisz \help aby uzyskać pomoc, \quit aby wyjść
 cli-goodbye = Do widzenia!
+locale-changed = Język zmieniony na { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = Format wyjściowy ustawiony na: { $format }
 database-saved = Baza danych zapisana do: { $path }
 no-database-file = Błąd: Nie podano pliku bazy danych. Użyj \save <nazwa_pliku> lub uruchom z flagą --database
+cannot-save-memory-database = Błąd: Nie można zapisać do '{ $path }' - to jest identyfikator bazy danych w pamięci, nie ścieżka pliku. Użyj zamiast tego \save <nazwa_pliku>.
 
 # =============================================================================
 # Error Display

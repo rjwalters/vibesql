@@ -8,6 +8,7 @@
 cli-banner = VibeSQL v{ $version } - SQL:1999 FULL-kompatibel databas
 cli-help-hint = Skriv \help för hjälp, \quit för att avsluta
 cli-goodbye = Hej då!
+locale-changed = Språk ändrat till { $locale }
 
 # =============================================================================
 # Command Help Text (Clap Arguments)
@@ -165,6 +166,7 @@ help-example-errors = \errors
 format-changed = Utdataformat ändrat till: { $format }
 database-saved = Databas sparad till: { $path }
 no-database-file = Fel: Ingen databasfil angiven. Använd \save <filnamn> eller starta med --database-flagga
+cannot-save-memory-database = Fel: Kan inte spara till '{ $path }' - detta är identifieraren för minnesdatabasen, inte en filsökväg. Använd istället \save <filnamn>.
 
 # =============================================================================
 # Error Display

@@ -166,6 +166,7 @@ help-example-errors = \errors
 format-changed = Formato de salida establecido a: { $format }
 database-saved = Base de datos guardada en: { $path }
 no-database-file = Error: No se especificó archivo de base de datos. Use \save <nombre_archivo> o inicie con el flag --database
+cannot-save-memory-database = Error: No se puede guardar en '{ $path }' - este es el identificador de la base de datos en memoria, no una ruta de archivo. Use \save <nombre_archivo> en su lugar.
 
 # =============================================================================
 # Visualización de Errores
