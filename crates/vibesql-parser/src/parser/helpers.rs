@@ -93,6 +93,9 @@ impl Parser {
     /// Parse an identifier or keyword as an alias name.
     /// In SQL, keywords can be used as aliases after AS (e.g., `d_year AS year`).
     /// This is standard SQL behavior supported by most databases.
+    ///
+    /// SQLite also allows single-quoted strings as aliases (e.g., `SELECT 1 AS 'a'`).
+    /// In this context, the string literal is treated as an identifier name.
     pub(super) fn parse_alias_name(&mut self) -> Result<String, ParseError> {
         match self.peek() {
             Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
@@ -105,6 +108,13 @@ impl Parser {
                 let name = kw.to_string();
                 self.advance();
                 Ok(name)
+            }
+            Token::String(s) => {
+                // SQLite compatibility: single-quoted strings can be used as aliases
+                // e.g., SELECT 1 AS 'a' - the 'a' is treated as an identifier
+                let alias = s.clone();
+                self.advance();
+                Ok(alias)
             }
             _ => Err(ParseError { message: self.peek().syntax_error() })
         }

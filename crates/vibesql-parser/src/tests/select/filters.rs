@@ -107,6 +107,46 @@ fn test_parse_select_mixed_aliases() {
     }
 }
 
+/// SQLite compatibility: single-quoted strings can be used as column aliases
+/// e.g., SELECT 1 AS 'a' - the 'a' is treated as an identifier, not a string literal
+#[test]
+fn test_parse_select_with_single_quoted_alias() {
+    let result = Parser::parse_sql("SELECT 1 AS 'a', 'hello' AS 'b', 2 AS 'c';");
+    assert!(result.is_ok());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert_eq!(select.select_list.len(), 3);
+
+            // First column: 1 AS 'a'
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_ref().unwrap(), "a");
+                }
+                _ => panic!("Expected Expression select item"),
+            }
+
+            // Second column: 'hello' AS 'b'
+            match &select.select_list[1] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_ref().unwrap(), "b");
+                }
+                _ => panic!("Expected Expression select item"),
+            }
+
+            // Third column: 2 AS 'c'
+            match &select.select_list[2] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert_eq!(alias.as_ref().unwrap(), "c");
+                }
+                _ => panic!("Expected Expression select item"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
 #[test]
 fn test_parse_precedence() {
     // Test that 1 + 2 * 3 parses as 1 + (2 * 3)
