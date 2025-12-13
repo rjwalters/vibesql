@@ -147,7 +147,7 @@ impl Parser {
                         _ => {
                             // Auto-generate unique alias for SQLite compatibility
                             format!(
-                                "__derived_{}",
+                                "(subquery-{})",
                                 DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
                             )
                         }
