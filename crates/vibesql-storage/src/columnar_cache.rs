@@ -353,15 +353,17 @@ impl ColumnarCache {
     }
 
     /// Check if a table is cached
+    /// Table names are normalized for case-insensitive matching.
     pub fn contains(&self, table_name: &str) -> bool {
+        let key = normalize_cache_key(table_name);
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.cache.read().contains(table_name)
+            self.cache.read().contains(&key)
         }
 
         #[cfg(target_arch = "wasm32")]
         {
-            self.cache.read().unwrap().contains(table_name)
+            self.cache.read().unwrap().contains(&key)
         }
     }
 }
