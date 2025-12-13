@@ -54,7 +54,8 @@ impl Parser {
         self.expect_keyword(Keyword::For)?;
 
         // Query expression (SELECT statement)
-        let query = Box::new(self.parse_select_statement()?);
+        // Use embedded variant since FOR READ ONLY/UPDATE may follow
+        let query = Box::new(self.parse_embedded_select_statement()?);
 
         // Optional FOR {READ ONLY | UPDATE [OF column_list]}
         let updatability = if self.try_consume_keyword(Keyword::For) {
