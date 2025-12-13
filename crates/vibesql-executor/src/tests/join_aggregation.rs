@@ -204,10 +204,10 @@ fn test_inner_join_with_group_by_count() {
     // Should have 3 departments with employees
     assert_eq!(result.rows.len(), 3);
 
-    // Verify column names (now include table prefix per full_column_names format)
+    // Verify column names (short format by default)
     assert_eq!(
         result.columns,
-        vec!["departments.dept_name".to_string(), "emp_count".to_string()]
+        vec!["dept_name".to_string(), "emp_count".to_string()]
     );
 
     // Verify the results (Engineering: 2, Sales: 2, HR: 1)
