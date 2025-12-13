@@ -106,8 +106,23 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
+        // Issue #4448: Reject ORDER BY after LIMIT/OFFSET
+        // SQLite rejects: SELECT f1 FROM test1 LIMIT 5 OFFSET 1 ORDER BY f2
+        if (limit.is_some() || offset.is_some()) && self.peek_keyword(Keyword::Order) {
+            return Err(ParseError { message: self.peek().syntax_error() });
+        }
+
         // Parse set operations (UNION, INTERSECT, EXCEPT)
         let set_operation = self.parse_set_operation()?;
+
+        // Issue #4448: Validate no unexpected tokens before semicolon/EOF
+        // This catches incomplete input like: SELECT f1 FROM test1 AS 'hi', test2 AS
+        // and unexpected keywords like: SELECT f1 FROM test1 ORDER BY f1 desc, f2 where
+        // Note: RParen is valid because SELECT can appear in subqueries/CTEs
+        match self.peek() {
+            Token::Semicolon | Token::Eof | Token::RParen => {}
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
+        }
 
         let stmt = SelectStmt {
             with_clause,
@@ -415,11 +430,16 @@ impl<'arena> ArenaParser<'arena> {
             self.expect_token(Token::RParen)?;
 
             // Parse optional alias - SQLite allows derived tables without aliases
-            self.try_consume_keyword(Keyword::As);
+            // Issue #4448: If AS is present, an alias MUST follow
+            let has_as = self.try_consume_keyword(Keyword::As);
             let alias = if let Token::Identifier(name) = self.peek() {
                 let name = name.clone();
                 self.advance();
                 self.intern(&name)
+            } else if has_as {
+                // AS was present but no identifier follows - call parse_alias_name
+                // to get proper alias handling (keywords, strings, etc.) or error
+                self.parse_alias_name_symbol()?
             } else {
                 // Auto-generate unique alias for SQLite compatibility
                 let generated = format!(
@@ -451,7 +471,8 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         // Check for alias
-        self.try_consume_keyword(Keyword::As);
+        // Issue #4448: If AS is present, an alias MUST follow
+        let has_as = self.try_consume_keyword(Keyword::As);
         let alias = if let Token::Identifier(alias) = self.peek() {
             // Make sure it's not a keyword that would start a new clause
             if !matches!(
@@ -475,9 +496,16 @@ impl<'arena> ArenaParser<'arena> {
                 let alias = alias.clone();
                 self.advance();
                 Some(self.intern(&alias))
+            } else if has_as {
+                // AS was present but followed by a clause keyword - error
+                return Err(ParseError { message: self.peek().syntax_error() });
             } else {
                 None
             }
+        } else if has_as {
+            // AS was present but no valid alias follows - must call parse_alias_name
+            // to get proper alias handling (keywords, strings, etc.) or error
+            Some(self.parse_alias_name_symbol()?)
         } else {
             None
         };

@@ -77,7 +77,8 @@ impl Parser {
         self.expect_keyword(Keyword::As)?;
 
         // Parse the SELECT statement
-        let query = Box::new(self.parse_select_statement()?);
+        // Use embedded variant since WITH CHECK OPTION may follow
+        let query = Box::new(self.parse_embedded_select_statement()?);
 
         // Check for optional WITH CHECK OPTION
         let with_check_option = if self.peek_keyword(Keyword::With) {

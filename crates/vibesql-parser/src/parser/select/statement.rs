@@ -3,7 +3,13 @@ use super::*;
 impl Parser {
     /// Parse SELECT statement (public entry point)
     pub(crate) fn parse_select_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
-        self.parse_select_statement_internal(true)
+        self.parse_select_statement_internal(true, true)
+    }
+
+    /// Parse SELECT statement when embedded in another statement (cursor, view, etc.)
+    /// This allows tokens after SELECT that belong to the outer statement.
+    pub(crate) fn parse_embedded_select_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
+        self.parse_select_statement_internal(true, false)
     }
 
     /// Internal SELECT parser with control over ORDER BY/LIMIT parsing
@@ -11,9 +17,15 @@ impl Parser {
     /// The `allow_order_limit` parameter controls whether ORDER BY, LIMIT, and OFFSET
     /// are parsed. This is set to false when parsing the right-hand side of set operations
     /// to ensure these clauses only apply to the outermost query.
+    ///
+    /// The `validate_end_tokens` parameter controls whether to validate that no
+    /// unexpected tokens follow the SELECT statement. This is set to false when parsing
+    /// SELECT as part of another statement (cursor, view, etc.) where additional tokens
+    /// belong to the outer statement.
     fn parse_select_statement_internal(
         &mut self,
         allow_order_limit: bool,
+        validate_end_tokens: bool,
     ) -> Result<vibesql_ast::SelectStmt, ParseError> {
         // Parse optional WITH clause (CTEs)
         let with_clause = if self.peek_keyword(Keyword::With) {
@@ -144,9 +156,9 @@ impl Parser {
             let right = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume '('
                 let stmt = if self.peek_keyword(Keyword::Values) {
-                    self.parse_values_statement_internal(false)?
+                    self.parse_values_statement_internal(false, true)?
                 } else {
-                    self.parse_select_statement_internal(false)?
+                    self.parse_select_statement_internal(false, true)?
                 };
                 if !matches!(self.peek(), Token::RParen) {
                     return Err(ParseError {
@@ -157,9 +169,9 @@ impl Parser {
                 self.advance(); // consume ')'
                 Box::new(stmt)
             } else if self.peek_keyword(Keyword::Values) {
-                Box::new(self.parse_values_statement_internal(false)?)
+                Box::new(self.parse_values_statement_internal(false, true)?)
             } else {
-                Box::new(self.parse_select_statement_internal(false)?)
+                Box::new(self.parse_select_statement_internal(false, true)?)
             };
 
             Some(vibesql_ast::SetOperation { op, all, right })
@@ -234,6 +246,43 @@ impl Parser {
         } else {
             None
         };
+
+        // Issue #4448: Reject ORDER BY after LIMIT/OFFSET
+        // SQLite rejects: SELECT f1 FROM test1 LIMIT 5 OFFSET 1 ORDER BY f2
+        if (limit.is_some() || offset.is_some()) && self.peek_keyword(Keyword::Order) {
+            return Err(ParseError { message: self.peek().syntax_error() });
+        }
+
+        // Issue #4448: Validate no unexpected tokens before semicolon/EOF
+        // This catches incomplete input like: SELECT f1 FROM test1 AS 'hi', test2 AS
+        // and unexpected keywords like: SELECT f1 FROM test1 ORDER BY f1 desc, f2 where
+        //
+        // We only validate when validate_end_tokens is true. When false, we skip
+        // validation because the SELECT is embedded in another statement (cursor, view, etc.)
+        // that may have additional tokens.
+        //
+        // When allow_order_limit is false, we're nested inside a set operation and
+        // ORDER/LIMIT/OFFSET tokens belong to the outer statement.
+        //
+        // Even when validating, we allow RParen because SELECT can appear in:
+        // - Subqueries in FROM clause
+        // - CTEs (WITH ... AS (SELECT ...))
+        // - Parenthesized subexpressions
+        if validate_end_tokens {
+            if allow_order_limit {
+                // Top-level: only allow semicolon, EOF, or ) (for subqueries/CTEs)
+                if !matches!(self.peek(), Token::Semicolon | Token::Eof | Token::RParen) {
+                    return Err(ParseError { message: self.peek().syntax_error() });
+                }
+            } else {
+                // Nested in set operation: also allow ORDER/LIMIT/OFFSET for outer statement
+                match self.peek() {
+                    Token::Semicolon | Token::Eof | Token::RParen => {}
+                    Token::Keyword(Keyword::Order) | Token::Keyword(Keyword::Limit) | Token::Keyword(Keyword::Offset) => {}
+                    _ => return Err(ParseError { message: self.peek().syntax_error() }),
+                }
+            }
+        }
 
         // Expect semicolon or EOF
         if matches!(self.peek(), Token::Semicolon) {
@@ -346,13 +395,17 @@ impl Parser {
     /// - VALUES(1),(2),(3);
     /// - VALUES(1) UNION VALUES(2);
     pub(crate) fn parse_values_statement(&mut self) -> Result<vibesql_ast::SelectStmt, ParseError> {
-        self.parse_values_statement_internal(true)
+        self.parse_values_statement_internal(true, true)
     }
 
     /// Internal VALUES parser with control over ORDER BY/LIMIT parsing
+    ///
+    /// The `validate_end_tokens` parameter controls whether to validate that no
+    /// unexpected tokens follow the statement.
     fn parse_values_statement_internal(
         &mut self,
         allow_order_limit: bool,
+        validate_end_tokens: bool,
     ) -> Result<vibesql_ast::SelectStmt, ParseError> {
         // Parse the VALUES rows
         let rows = self.parse_values_rows()?;
@@ -387,9 +440,9 @@ impl Parser {
             let right = if matches!(self.peek(), Token::LParen) {
                 self.advance(); // consume '('
                 let stmt = if self.peek_keyword(Keyword::Values) {
-                    self.parse_values_statement_internal(false)?
+                    self.parse_values_statement_internal(false, true)?
                 } else {
-                    self.parse_select_statement_internal(false)?
+                    self.parse_select_statement_internal(false, true)?
                 };
                 if !matches!(self.peek(), Token::RParen) {
                     return Err(ParseError {
@@ -400,9 +453,9 @@ impl Parser {
                 self.advance(); // consume ')'
                 Box::new(stmt)
             } else if self.peek_keyword(Keyword::Values) {
-                Box::new(self.parse_values_statement_internal(false)?)
+                Box::new(self.parse_values_statement_internal(false, true)?)
             } else {
-                Box::new(self.parse_select_statement_internal(false)?)
+                Box::new(self.parse_select_statement_internal(false, true)?)
             };
 
             Some(vibesql_ast::SetOperation { op, all, right })
@@ -469,6 +522,30 @@ impl Parser {
         } else {
             None
         };
+
+        // Issue #4448: Reject ORDER BY after LIMIT/OFFSET
+        if (limit.is_some() || offset.is_some()) && self.peek_keyword(Keyword::Order) {
+            return Err(ParseError { message: self.peek().syntax_error() });
+        }
+
+        // Issue #4448: Validate no unexpected tokens before semicolon/EOF
+        // Only validate when validate_end_tokens is true. When false, the VALUES statement
+        // is embedded in another statement that may have additional tokens.
+        if validate_end_tokens {
+            // Note: RParen is valid because VALUES can appear in subqueries/CTEs
+            // Note: When allow_order_limit is false (nested in set operation right side),
+            //       ORDER/LIMIT/OFFSET may follow and belong to the outer statement
+            let valid_end_token = match self.peek() {
+                Token::Semicolon | Token::Eof | Token::RParen => true,
+                // When nested, allow ORDER BY/LIMIT/OFFSET for outer statement
+                Token::Keyword(Keyword::Order) | Token::Keyword(Keyword::Limit) | Token::Keyword(Keyword::Offset)
+                    if !allow_order_limit => true,
+                _ => false,
+            };
+            if !valid_end_token {
+                return Err(ParseError { message: self.peek().syntax_error() });
+            }
+        }
 
         // Consume optional semicolon
         if matches!(self.peek(), Token::Semicolon) {

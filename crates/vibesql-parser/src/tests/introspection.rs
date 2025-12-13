@@ -398,8 +398,9 @@ fn test_explain_query_plan_with_where() {
 
 #[test]
 fn test_explain_query_plan_with_join() {
+    // Note: Using LIKE instead of GLOB since GLOB is not yet implemented as an operator
     let stmt = Parser::parse_sql(
-        "EXPLAIN QUERY PLAN SELECT * FROM t400, t401, t402 WHERE t402.z GLOB 'abc*'",
+        "EXPLAIN QUERY PLAN SELECT * FROM t400, t401, t402 WHERE t402.z LIKE 'abc%'",
     )
     .unwrap();
 

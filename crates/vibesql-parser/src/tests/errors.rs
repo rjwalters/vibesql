@@ -395,3 +395,100 @@ fn test_error_message_includes_suggestion() {
         error_msg
     );
 }
+
+// Issue #4448: Parser should reject incomplete input and syntax errors
+// https://github.com/rjwalters/vibesql/issues/4448
+
+#[test]
+fn test_issue_4448_incomplete_alias_in_from() {
+    // Issue #4448 Case 1: Incomplete input - missing alias after AS
+    // SQLite returns: near ";": syntax error
+    // VibeSQL should also return syntax error
+    let result = Parser::parse_sql("SELECT f1 FROM test1 as 'hi', test2 as");
+    assert!(
+        result.is_err(),
+        "Should fail with incomplete alias after AS, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_issue_4448_incomplete_alias_with_semicolon() {
+    // Same as above but with explicit semicolon
+    let result = Parser::parse_sql("SELECT f1 FROM test1 as 'hi', test2 as;");
+    assert!(
+        result.is_err(),
+        "Should fail with incomplete alias after AS, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_issue_4448_order_by_after_limit_offset() {
+    // Issue #4448 Case 2: ORDER BY after LIMIT/OFFSET is rejected by SQLite
+    // SQLite: SELECT f1 FROM test1 LIMIT 5+3 OFFSET 1 ORDER BY f2
+    // Returns: near "ORDER": syntax error
+    let result = Parser::parse_sql("SELECT f1 FROM test1 LIMIT 8 OFFSET 1 ORDER BY f2");
+    assert!(
+        result.is_err(),
+        "Should fail with ORDER BY after LIMIT/OFFSET, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_issue_4448_order_by_after_limit_only() {
+    // ORDER BY after just LIMIT (no OFFSET) should also be rejected
+    let result = Parser::parse_sql("SELECT f1 FROM test1 LIMIT 5 ORDER BY f2");
+    assert!(
+        result.is_err(),
+        "Should fail with ORDER BY after LIMIT, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_issue_4448_unexpected_keyword_after_order_by() {
+    // Issue #4448 Case 3: Unexpected keyword after ORDER BY items
+    // SQLite: SELECT f1 FROM test1 ORDER BY f1 desc, f2 where
+    // Returns: near "where": syntax error
+    let result = Parser::parse_sql("SELECT f1 FROM test1 ORDER BY f1 desc, f2 where");
+    assert!(
+        result.is_err(),
+        "Should fail with unexpected keyword 'where' after ORDER BY, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_issue_4448_unexpected_keyword_from_after_order_by() {
+    // Similar test with FROM keyword
+    let result = Parser::parse_sql("SELECT f1 FROM test1 ORDER BY f1 from");
+    assert!(
+        result.is_err(),
+        "Should fail with unexpected keyword 'from' after ORDER BY, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_issue_4448_valid_order_by_before_limit() {
+    // Valid SQL: ORDER BY should come BEFORE LIMIT/OFFSET
+    let result = Parser::parse_sql("SELECT f1 FROM test1 ORDER BY f1 LIMIT 5");
+    assert!(
+        result.is_ok(),
+        "Should succeed with valid ORDER BY ... LIMIT, got error: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_issue_4448_valid_order_by_before_limit_offset() {
+    // Valid SQL: ORDER BY should come BEFORE LIMIT and OFFSET
+    let result = Parser::parse_sql("SELECT f1 FROM test1 ORDER BY f1 LIMIT 5 OFFSET 2");
+    assert!(
+        result.is_ok(),
+        "Should succeed with valid ORDER BY ... LIMIT ... OFFSET, got error: {:?}",
+        result.err()
+    );
+}
