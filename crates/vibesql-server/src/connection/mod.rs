@@ -21,6 +21,7 @@
 //! - `updates`: Subscription update sending logic
 
 mod auth;
+mod extended;
 mod io;
 mod protocol;
 mod query;
@@ -60,6 +61,10 @@ use crate::{
     subscription::SubscriptionManager,
 };
 
+use self::extended::{
+    handle_bind, handle_close, handle_describe, handle_execute, handle_flush, handle_parse,
+    handle_sync, ExtendedQueryState,
+};
 use self::io::read_message;
 use self::protocol::{
     send_backend_key_data, send_parameter_status, send_ready_for_query,
@@ -108,6 +113,8 @@ pub struct ConnectionHandler {
     mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     /// Broadcast receiver for receiving mutation notifications from other connections
     mutation_broadcast_rx: broadcast::Receiver<TableMutationNotification>,
+    /// Extended query protocol state (prepared statements and portals)
+    extended_state: ExtendedQueryState,
 }
 
 impl ConnectionHandler {
@@ -151,6 +158,7 @@ impl ConnectionHandler {
             subscription_manager,
             mutation_broadcast_tx,
             mutation_broadcast_rx,
+            extended_state: ExtendedQueryState::new(),
         }
     }
 
@@ -374,6 +382,95 @@ impl ConnectionHandler {
                 Ok(ClientMessageResult::Continue)
             }
 
+            // =================================================================
+            // Extended Query Protocol Messages
+            // =================================================================
+            FrontendMessage::Parse { name, query, param_types } => {
+                handle_parse(
+                    &mut self.session,
+                    &mut self.extended_state,
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    name,
+                    query,
+                    param_types,
+                )
+                .await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Bind {
+                portal,
+                statement,
+                param_formats,
+                param_values,
+                result_formats,
+            } => {
+                handle_bind(
+                    &mut self.session,
+                    &mut self.extended_state,
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    portal,
+                    statement,
+                    param_formats,
+                    param_values,
+                    result_formats,
+                )
+                .await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Describe { target_type, name } => {
+                handle_describe(
+                    &self.extended_state,
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    target_type,
+                    name,
+                )
+                .await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Execute { portal, max_rows } => {
+                handle_execute(
+                    &mut self.session,
+                    &self.extended_state,
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    portal,
+                    max_rows,
+                )
+                .await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Sync => {
+                handle_sync(&mut self.write_half, &mut self.write_buf).await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Flush => {
+                handle_flush(&mut self.write_half).await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::Close { target_type, name } => {
+                handle_close(
+                    &mut self.extended_state,
+                    &mut self.write_half,
+                    &mut self.write_buf,
+                    target_type,
+                    name,
+                )
+                .await?;
+                Ok(ClientMessageResult::Continue)
+            }
+
+            // =================================================================
+            // Subscription Protocol Messages
+            // =================================================================
             FrontendMessage::Subscribe { query, params, filter, selective_updates_config } => {
                 debug!(
                     "Subscribe: {} (filter: {:?}, selective_config: {:?})",
@@ -406,6 +503,18 @@ impl ConnectionHandler {
                     }
                 }
                 // No response needed per protocol spec
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::SubscriptionPause { subscription_id } => {
+                debug!("SubscriptionPause: {:?}", subscription_id);
+                // TODO: Implement pause functionality
+                Ok(ClientMessageResult::Continue)
+            }
+
+            FrontendMessage::SubscriptionResume { subscription_id } => {
+                debug!("SubscriptionResume: {:?}", subscription_id);
+                // TODO: Implement resume functionality
                 Ok(ClientMessageResult::Continue)
             }
 

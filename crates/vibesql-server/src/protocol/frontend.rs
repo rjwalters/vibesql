@@ -18,7 +18,7 @@ pub enum FrontendMessage {
     /// Password message
     Password { password: String },
 
-    /// Query message
+    /// Query message (simple query protocol)
     Query { query: String },
 
     /// Terminate message
@@ -27,6 +27,88 @@ pub enum FrontendMessage {
     /// SSL request
     SSLRequest,
 
+    // =========================================================================
+    // Extended Query Protocol Messages
+    // =========================================================================
+    /// Parse message ('P') - Prepare a statement
+    ///
+    /// Creates a prepared statement from a SQL query string. The statement can
+    /// optionally specify parameter types (OIDs). An empty name creates an
+    /// unnamed prepared statement.
+    Parse {
+        /// Name of the prepared statement (empty string for unnamed)
+        name: String,
+        /// SQL query with optional $1, $2, ... parameter placeholders
+        query: String,
+        /// OIDs of parameter types (0 means unspecified, let server infer)
+        param_types: Vec<i32>,
+    },
+
+    /// Bind message ('B') - Bind parameters to a prepared statement
+    ///
+    /// Creates a portal by binding parameter values to a prepared statement.
+    /// An empty portal name creates an unnamed portal.
+    Bind {
+        /// Name of the destination portal (empty string for unnamed)
+        portal: String,
+        /// Name of the source prepared statement (empty string for unnamed)
+        statement: String,
+        /// Format codes for parameters (0=text, 1=binary)
+        /// If empty, all parameters use text format
+        /// If one element, it applies to all parameters
+        /// Otherwise, one per parameter
+        param_formats: Vec<i16>,
+        /// Parameter values (None for NULL)
+        param_values: Vec<Option<Vec<u8>>>,
+        /// Format codes for result columns
+        /// Same rules as param_formats
+        result_formats: Vec<i16>,
+    },
+
+    /// Describe message ('D') - Get description of prepared statement or portal
+    ///
+    /// Returns parameter types (for statement) or row description (for portal).
+    Describe {
+        /// 'S' for prepared statement, 'P' for portal
+        target_type: u8,
+        /// Name of the statement or portal (empty string for unnamed)
+        name: String,
+    },
+
+    /// Execute message ('E') - Execute a bound portal
+    ///
+    /// Executes a portal and returns rows. Use max_rows=0 for unlimited.
+    Execute {
+        /// Name of the portal (empty string for unnamed)
+        portal: String,
+        /// Maximum number of rows to return (0 = unlimited)
+        max_rows: i32,
+    },
+
+    /// Sync message ('S') - Synchronization point
+    ///
+    /// Marks the end of an extended query sequence. The server will respond
+    /// with ReadyForQuery and close any implicit transaction.
+    Sync,
+
+    /// Flush message ('H') - Flush output buffer
+    ///
+    /// Requests the server to send any pending output immediately.
+    Flush,
+
+    /// Close message ('C') - Close a prepared statement or portal
+    ///
+    /// Closes and deallocates a named statement or portal.
+    Close {
+        /// 'S' for prepared statement, 'P' for portal
+        target_type: u8,
+        /// Name of the statement or portal to close
+        name: String,
+    },
+
+    // =========================================================================
+    // Subscription Protocol Messages (VibeSQL Extension)
+    // =========================================================================
     /// Subscribe message (0xF0) - subscribe to query
     /// The optional filter is a SQL WHERE clause expression applied to subscription updates.
     /// The optional selective_updates_config allows clients to override server-level selective
@@ -101,6 +183,104 @@ impl FrontendMessage {
                 Ok(Some(FrontendMessage::Terminate))
             }
 
+            // =================================================================
+            // Extended Query Protocol Messages
+            // =================================================================
+            b'P' => {
+                // Parse message - prepare a statement
+                buf.advance(4); // length
+                let name = read_cstring(buf)?;
+                let query = read_cstring(buf)?;
+                let param_count = buf.get_i16() as usize;
+                let mut param_types = Vec::with_capacity(param_count);
+                for _ in 0..param_count {
+                    param_types.push(buf.get_i32());
+                }
+                Ok(Some(FrontendMessage::Parse { name, query, param_types }))
+            }
+
+            b'B' => {
+                // Bind message - bind parameters to a prepared statement
+                buf.advance(4); // length
+                let portal = read_cstring(buf)?;
+                let statement = read_cstring(buf)?;
+
+                // Parameter format codes
+                let format_count = buf.get_i16() as usize;
+                let mut param_formats = Vec::with_capacity(format_count);
+                for _ in 0..format_count {
+                    param_formats.push(buf.get_i16());
+                }
+
+                // Parameter values
+                let param_count = buf.get_i16() as usize;
+                let mut param_values = Vec::with_capacity(param_count);
+                for _ in 0..param_count {
+                    let value_len = buf.get_i32();
+                    if value_len < 0 {
+                        param_values.push(None); // NULL
+                    } else {
+                        let mut value = vec![0u8; value_len as usize];
+                        buf.copy_to_slice(&mut value);
+                        param_values.push(Some(value));
+                    }
+                }
+
+                // Result format codes
+                let result_format_count = buf.get_i16() as usize;
+                let mut result_formats = Vec::with_capacity(result_format_count);
+                for _ in 0..result_format_count {
+                    result_formats.push(buf.get_i16());
+                }
+
+                Ok(Some(FrontendMessage::Bind {
+                    portal,
+                    statement,
+                    param_formats,
+                    param_values,
+                    result_formats,
+                }))
+            }
+
+            b'D' => {
+                // Describe message - get description of statement or portal
+                buf.advance(4); // length
+                let target_type = buf.get_u8();
+                let name = read_cstring(buf)?;
+                Ok(Some(FrontendMessage::Describe { target_type, name }))
+            }
+
+            b'E' => {
+                // Execute message - execute a portal
+                buf.advance(4); // length
+                let portal = read_cstring(buf)?;
+                let max_rows = buf.get_i32();
+                Ok(Some(FrontendMessage::Execute { portal, max_rows }))
+            }
+
+            b'S' => {
+                // Sync message - end of extended query sequence
+                buf.advance(4); // length
+                Ok(Some(FrontendMessage::Sync))
+            }
+
+            b'H' => {
+                // Flush message - flush output buffer
+                buf.advance(4); // length
+                Ok(Some(FrontendMessage::Flush))
+            }
+
+            b'C' => {
+                // Close message - close statement or portal
+                buf.advance(4); // length
+                let target_type = buf.get_u8();
+                let name = read_cstring(buf)?;
+                Ok(Some(FrontendMessage::Close { target_type, name }))
+            }
+
+            // =================================================================
+            // Subscription Protocol Messages (VibeSQL Extension)
+            // =================================================================
             0xF0 => {
                 // Subscribe message
                 buf.advance(4); // length
