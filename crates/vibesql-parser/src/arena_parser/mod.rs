@@ -631,9 +631,12 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse an identifier or keyword as an alias name, returning a Symbol.
+    ///
+    /// SQLite also allows single-quoted strings as aliases (e.g., `SELECT 1 AS 'a'`).
+    /// In this context, the string literal is treated as an identifier name.
     fn parse_alias_name_symbol(&mut self) -> Result<Symbol, ParseError> {
         match self.peek() {
-            Token::Identifier(name) => {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                 let name = name.clone();
                 self.advance();
                 Ok(self.intern(&name))
@@ -643,6 +646,12 @@ impl<'arena> ArenaParser<'arena> {
                 let name = kw.to_string();
                 self.advance();
                 Ok(self.intern(&name))
+            }
+            Token::String(s) => {
+                // SQLite compatibility: single-quoted strings can be used as aliases
+                let alias = s.clone();
+                self.advance();
+                Ok(self.intern(&alias))
             }
             _ => Err(ParseError { message: self.peek().syntax_error() })
         }

@@ -256,15 +256,10 @@ impl<'arena> ArenaParser<'arena> {
             let _ = t; // silence warning
         }
 
-        // Check for alias
+        // Check for alias - supports identifiers, delimited identifiers, keywords, and
+        // single-quoted strings (SQLite compatibility: SELECT 1 AS 'a')
         let alias = if self.try_consume_keyword(Keyword::As) {
-            if let Token::Identifier(name) = self.peek() {
-                let name = name.clone();
-                self.advance();
-                Some(self.intern(&name))
-            } else {
-                return Err(ParseError { message: "Expected alias after AS".to_string() });
-            }
+            Some(self.parse_alias_name_symbol()?)
         } else if let Token::Identifier(name) = self.peek() {
             // Implicit alias (no AS keyword)
             let name = name.clone();
