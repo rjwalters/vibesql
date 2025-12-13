@@ -180,15 +180,15 @@ fn test_select_column_names_and_values_issue_3810() {
 
 #[test]
 fn test_select_column_names_from_table() {
-    // Verify column names include table prefix (full_column_names format)
+    // Verify column names use short format by default (short_column_names=ON)
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50))").unwrap();
     executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
 
     let result = executor.execute("SELECT id, name FROM users").unwrap();
 
-    // Column names include table prefix (full_column_names format)
-    assert_eq!(result.columns, vec!["users.id", "users.name"]);
+    // Default: short_column_names=ON, so just column names without table prefix
+    assert_eq!(result.columns, vec!["id", "name"]);
 
     // Values should be display format
     assert_eq!(result.rows[0][0], Some("1".to_string()));
@@ -197,15 +197,15 @@ fn test_select_column_names_from_table() {
 
 #[test]
 fn test_select_wildcard_column_names() {
-    // Verify SELECT * returns column names with table prefix
+    // Verify SELECT * returns column names in short format by default
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE products (sku VARCHAR(20) PRIMARY KEY, price INT)").unwrap();
     executor.execute("INSERT INTO products VALUES ('ABC123', 99)").unwrap();
 
     let result = executor.execute("SELECT * FROM products").unwrap();
 
-    // Column names include table prefix (full_column_names format)
-    assert_eq!(result.columns, vec!["products.sku", "products.price"]);
+    // Default: short_column_names=ON, so just column names without table prefix
+    assert_eq!(result.columns, vec!["sku", "price"]);
     assert_eq!(result.rows[0][0], Some("ABC123".to_string()));
     assert_eq!(result.rows[0][1], Some("99".to_string()));
 }
