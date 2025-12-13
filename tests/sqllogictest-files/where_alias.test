@@ -1,0 +1,114 @@
+# SQLite extension: Column aliases in WHERE clause
+# Issue: #4446
+
+statement ok
+CREATE TABLE test1(f1 int, f2 int)
+
+statement ok
+INSERT INTO test1 VALUES(11, 22)
+
+statement ok
+INSERT INTO test1 VALUES(33, 44)
+
+# Test case from issue #4446 - SELECT alias x and y used in WHERE
+query II nosort
+SELECT f1-22 AS x, f2-22 AS y FROM test1 WHERE x > 0 AND y < 50
+----
+11
+22
+
+# All rows (verify the data exists)
+query II nosort
+SELECT f1, f2 FROM test1
+----
+11
+22
+33
+44
+
+# Simple alias in WHERE - filter on computed column
+query I nosort
+SELECT f1 * 2 AS doubled FROM test1 WHERE doubled > 50
+----
+66
+
+# Alias with arithmetic in WHERE
+query I nosort
+SELECT f1 + f2 AS total FROM test1 WHERE total > 70
+----
+77
+
+# Case-insensitive alias matching (SQLite behavior)
+query I nosort
+SELECT f1 AS myalias FROM test1 WHERE MYALIAS > 20
+----
+33
+
+# Alias used in complex WHERE with AND
+query II nosort
+SELECT f1 AS a, f2 AS b FROM test1 WHERE a > 10 AND b < 30
+----
+11
+22
+
+# Alias used in complex WHERE with OR
+query II nosort
+SELECT f1 AS a, f2 AS b FROM test1 WHERE a < 20 OR b > 40
+----
+11
+22
+33
+44
+
+# No matches using alias filter
+query I nosort
+SELECT f1-100 AS x FROM test1 WHERE x > 0
+----
+
+# Alias with function result
+statement ok
+CREATE TABLE strings(name TEXT)
+
+statement ok
+INSERT INTO strings VALUES('hello')
+
+statement ok
+INSERT INTO strings VALUES('hi')
+
+statement ok
+INSERT INTO strings VALUES('world')
+
+query I nosort
+SELECT LENGTH(name) AS len FROM strings WHERE len > 2
+----
+5
+5
+
+# Alias with NULL handling
+statement ok
+CREATE TABLE nulltest(a INT)
+
+statement ok
+INSERT INTO nulltest VALUES(10)
+
+statement ok
+INSERT INTO nulltest VALUES(NULL)
+
+statement ok
+INSERT INTO nulltest VALUES(5)
+
+query I nosort
+SELECT a + 1 AS x FROM nulltest WHERE x > 0
+----
+6
+11
+
+# Clean up
+statement ok
+DROP TABLE test1
+
+statement ok
+DROP TABLE strings
+
+statement ok
+DROP TABLE nulltest

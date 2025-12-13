@@ -114,6 +114,12 @@ impl SelectExecutor<'_> {
             _ => unreachable!("Fast path requires simple table FROM clause"),
         };
 
+        // Resolve SELECT aliases in WHERE clause BEFORE any processing (SQLite extension)
+        // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+        });
+
         // Try ultra-fast PK lookup path first
         if let Some(result) = self.try_pk_lookup_fast(table_name, alias, stmt)? {
             return Ok(result);
@@ -155,7 +161,7 @@ impl SelectExecutor<'_> {
             stmt.from.as_ref().unwrap(),
             &HashMap::new(), // No CTEs
             self.database,
-            stmt.where_clause.as_ref(),
+            resolved_where.as_ref(),
             stmt.order_by.as_deref(),
             stmt.limit, // LIMIT pushdown for ORDER BY optimization
             None,       // No outer row
@@ -169,10 +175,10 @@ impl SelectExecutor<'_> {
         let rows = from_result.into_rows();
 
         // Apply remaining WHERE clause if not already filtered
-        let filtered_rows = if where_filtered || stmt.where_clause.is_none() {
+        let filtered_rows = if where_filtered || resolved_where.is_none() {
             rows
         } else {
-            self.apply_where_filter_fast(stmt.where_clause.as_ref().unwrap(), rows, &schema)?
+            self.apply_where_filter_fast(resolved_where.as_ref().unwrap(), rows, &schema)?
         };
 
         // Apply ORDER BY sorting if needed (index didn't provide the order)

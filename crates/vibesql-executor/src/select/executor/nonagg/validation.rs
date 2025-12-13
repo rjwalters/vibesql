@@ -243,9 +243,17 @@ pub(super) fn validate_select_column_references_with_context(
         // Wildcards (*, table.*) don't need validation - they're handled separately
     }
 
-    // Validate WHERE clause column references (allowing procedure variables)
+    // Validate WHERE clause column references (allowing aliases and procedure variables)
+    // SQLite extension: SELECT aliases can be referenced in WHERE clause
     if let Some(where_expr) = &stmt.where_clause {
-        validate_expression_column_refs(where_expr, schema, outer_schema, &proc_vars)?;
+        let combined: std::collections::HashSet<String> =
+            select_aliases.union(&proc_vars).cloned().collect();
+        log::debug!(
+            "WHERE alias validation: select_aliases={:?}, combined={:?}",
+            select_aliases,
+            combined
+        );
+        validate_expression_column_refs(where_expr, schema, outer_schema, &combined)?;
     }
 
     // Validate ORDER BY column references (allowing aliases and procedure variables)

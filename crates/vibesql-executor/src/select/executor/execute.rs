@@ -295,6 +295,12 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<SelectResult, ExecutorError> {
+        // Resolve SELECT aliases in WHERE clause BEFORE predicate pushdown (SQLite extension)
+        // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+        });
+
         // First, get the FROM result to access the schema
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
@@ -318,7 +324,7 @@ impl SelectExecutor<'_> {
             Some(self.execute_from_with_where(
                 from_clause,
                 &cte_results,
-                stmt.where_clause.as_ref(),
+                resolved_where.as_ref(),
                 stmt.order_by.as_deref(),
                 stmt.limit,
                 Some(&stmt.select_list),
@@ -345,6 +351,12 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<SelectResult, ExecutorError> {
+        // Resolve SELECT aliases in WHERE clause BEFORE predicate pushdown (SQLite extension)
+        // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+        });
+
         // Execute the FROM clause to get combined schema
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
@@ -361,7 +373,7 @@ impl SelectExecutor<'_> {
             Some(self.execute_from_with_where(
                 from_clause,
                 &cte_results,
-                stmt.where_clause.as_ref(),
+                resolved_where.as_ref(),
                 stmt.order_by.as_deref(),
                 stmt.limit,
                 Some(&stmt.select_list),
@@ -681,8 +693,14 @@ impl SelectExecutor<'_> {
         // Execute pipeline stages with fallback on error
         // If any pipeline stage fails with UnsupportedFeature, fall back to row-oriented
 
+        // Resolve SELECT aliases in WHERE clause (SQLite extension)
+        // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+        });
+
         // Stage 1: Filter (WHERE clause)
-        let filtered = match pipeline.apply_filter(input, stmt.where_clause.as_ref(), &exec_ctx) {
+        let filtered = match pipeline.apply_filter(input, resolved_where.as_ref(), &exec_ctx) {
             Ok(result) => result,
             Err(ExecutorError::UnsupportedFeature(_))
             | Err(ExecutorError::UnsupportedExpression(_)) => {
@@ -838,13 +856,20 @@ impl SelectExecutor<'_> {
             //
             // Fixes issues #1807, #1895, #1896, and #1902.
 
+            // Resolve SELECT aliases in WHERE clause BEFORE predicate pushdown (SQLite extension)
+            // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+            // The alias 'x' is resolved to 'f1-22' so predicate pushdown can work correctly
+            let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+            });
+
             // Pass WHERE, ORDER BY, and LIMIT to execute_from for optimization
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
             // Pass select_list for table elimination optimization (#3556)
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,
-                stmt.where_clause.as_ref(),
+                resolved_where.as_ref(),
                 stmt.order_by.as_deref(),
                 stmt.limit,
                 Some(&stmt.select_list),
@@ -854,9 +879,10 @@ impl SelectExecutor<'_> {
             // This ensures column errors are caught even when tables are empty
             // Pass procedural context to allow procedure variables in WHERE clause
             // Pass outer_schema for correlated subqueries (#2694)
+            // Note: We validate with the resolved_where since that's what gets executed
             super::validation::validate_select_columns_with_context(
                 &stmt.select_list,
-                stmt.where_clause.as_ref(),
+                resolved_where.as_ref(),
                 &from_result.schema,
                 self.procedural_context,
                 self.outer_schema,
@@ -888,6 +914,11 @@ impl SelectExecutor<'_> {
             self.has_aggregates(&right_stmt.select_list) || right_stmt.having.is_some();
         let has_group_by = right_stmt.group_by.is_some();
 
+        // Resolve SELECT aliases in WHERE clause BEFORE predicate pushdown (SQLite extension)
+        let resolved_where = right_stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &right_stmt.select_list)
+        });
+
         let right_results = if has_aggregates || has_group_by {
             self.execute_with_aggregation(right_stmt, cte_results)?
         } else if let Some(from_clause) = &right_stmt.from {
@@ -896,7 +927,7 @@ impl SelectExecutor<'_> {
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,
-                right_stmt.where_clause.as_ref(),
+                resolved_where.as_ref(),
                 right_stmt.order_by.as_deref(),
                 None,
                 Some(&right_stmt.select_list),

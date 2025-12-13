@@ -183,12 +183,18 @@ impl SelectExecutor<'_> {
         schema: &crate::schema::CombinedSchema,
         evaluator: &CombinedExpressionEvaluator,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        // Resolve SELECT aliases in WHERE clause (SQLite extension)
+        // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+        });
+
         // Try spatial index optimization if feature is enabled
         #[cfg(feature = "spatial")]
         {
             if let Some(spatial_filtered) = try_spatial_index_optimization(
                 self.database,
-                stmt.where_clause.as_ref(),
+                resolved_where.as_ref(),
                 &rows,
                 schema,
             )? {
@@ -198,7 +204,7 @@ impl SelectExecutor<'_> {
         }
 
         // Fall back to full WHERE clause evaluation
-        let where_optimization = optimize_where_clause(stmt.where_clause.as_ref(), evaluator)?;
+        let where_optimization = optimize_where_clause(resolved_where.as_ref(), evaluator)?;
 
         match where_optimization {
             crate::optimizer::WhereOptimization::AlwaysTrue => {

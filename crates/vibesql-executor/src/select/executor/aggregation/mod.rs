@@ -123,8 +123,14 @@ impl SelectExecutor<'_> {
             }
             let evaluator = ctx.create_evaluator();
 
+            // Resolve SELECT aliases in WHERE clause (SQLite extension)
+            // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+            let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
+                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+            });
+
             // Optimize WHERE clause with constant folding and dead code elimination
-            let where_optimization = optimize_where_clause(stmt.where_clause.as_ref(), &evaluator)?;
+            let where_optimization = optimize_where_clause(resolved_where.as_ref(), &evaluator)?;
 
             // Apply WHERE clause to filter joined rows (optimized)
             match where_optimization {
