@@ -44,6 +44,14 @@ impl Metadata {
             SqlValue::Varchar(arcstr::ArcStr::from("utf8mb4")),
         );
 
+        // SQLite PRAGMA defaults for column naming:
+        // - short_column_names=ON (default): Use just column name ("f1")
+        // - full_column_names=OFF (default): Don't use table.column format
+        // When full_column_names=ON, use "table.column" format
+        // When both are OFF, use expression text as column name
+        session_variables.insert("SHORT_COLUMN_NAMES".to_string(), SqlValue::Integer(1));
+        session_variables.insert("FULL_COLUMN_NAMES".to_string(), SqlValue::Integer(0));
+
         Metadata { session_variables, routine_body_cache: HashMap::new() }
     }
 

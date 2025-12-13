@@ -3,21 +3,51 @@
 use super::builder::SelectExecutor;
 use crate::{errors::ExecutorError, schema::CombinedSchema, select::join::FromResult};
 
+/// Column naming mode based on PRAGMA settings
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum ColumnNamingMode {
+    /// full_column_names=ON: Always use "table.column" format
+    Full,
+    /// short_column_names=ON (default): Use just column name ("f1")
+    Short,
+    /// Both PRAGMAs OFF: Use full expression text as column name
+    Expression,
+}
+
 impl SelectExecutor<'_> {
+    /// Determine the column naming mode from database PRAGMA settings
+    fn get_column_naming_mode(&self) -> ColumnNamingMode {
+        let full = self.database.full_column_names();
+        let short = self.database.short_column_names();
+
+        // SQLite behavior:
+        // - full_column_names takes precedence when ON
+        // - Otherwise, if short_column_names is ON, use short names
+        // - If both are OFF, use expression text
+        if full {
+            ColumnNamingMode::Full
+        } else if short {
+            ColumnNamingMode::Short
+        } else {
+            ColumnNamingMode::Expression
+        }
+    }
+
     /// Derive column names from SELECT list
     ///
-    /// Column names follow SQLite's `full_column_names=ON` behavior:
-    /// - For wildcards (`SELECT *`), columns are prefixed with the table alias/name
-    ///   from the FROM clause (e.g., `a.f1` when using `FROM test1 a`)
-    /// - For explicit column references, columns are prefixed with the original
-    ///   table name from the schema (e.g., `test1.f1` even when using alias `a`)
-    /// - Explicit aliases always take precedence
+    /// Column naming follows SQLite's PRAGMA settings:
+    /// - `full_column_names=ON`: Use "table.column" format
+    /// - `short_column_names=ON` (default): Use just the column name
+    /// - Both OFF: Use the expression text (e.g., "test1 . f1" preserving spaces)
+    ///
+    /// Note: Explicit aliases always take precedence over PRAGMA-based naming.
     pub(super) fn derive_column_names(
         &self,
         select_list: &[vibesql_ast::SelectItem],
         from_result: Option<&FromResult>,
     ) -> Result<Vec<String>, ExecutorError> {
-        self.derive_column_names_internal(select_list, from_result, true)
+        let mode = self.get_column_naming_mode();
+        self.derive_column_names_internal(select_list, from_result, mode)
     }
 
     /// Derive simple column names (without table prefix) for internal use
@@ -29,15 +59,15 @@ impl SelectExecutor<'_> {
         select_list: &[vibesql_ast::SelectItem],
         from_result: Option<&FromResult>,
     ) -> Result<Vec<String>, ExecutorError> {
-        self.derive_column_names_internal(select_list, from_result, false)
+        self.derive_column_names_internal(select_list, from_result, ColumnNamingMode::Short)
     }
 
-    /// Internal implementation that can optionally include table prefixes
+    /// Internal implementation with configurable naming mode
     fn derive_column_names_internal(
         &self,
         select_list: &[vibesql_ast::SelectItem],
         from_result: Option<&FromResult>,
-        include_table_prefix: bool,
+        mode: ColumnNamingMode,
     ) -> Result<Vec<String>, ExecutorError> {
         let mut column_names = Vec::new();
         let schema = from_result.map(|fr| &fr.schema);
@@ -54,11 +84,15 @@ impl SelectExecutor<'_> {
                             &from_res.schema.table_schemas
                         {
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
-                                let col_name = if include_table_prefix {
-                                    // Use the table key (alias or table name) as the prefix
-                                    format!("{}.{}", table_key.as_str(), col_schema.name.clone())
-                                } else {
-                                    col_schema.name.clone()
+                                let col_name = match mode {
+                                    ColumnNamingMode::Full => {
+                                        // Use the table key (alias or table name) as the prefix
+                                        format!("{}.{}", table_key.as_str(), col_schema.name.clone())
+                                    }
+                                    ColumnNamingMode::Short | ColumnNamingMode::Expression => {
+                                        // For wildcards, short and expression mode both use just column name
+                                        col_schema.name.clone()
+                                    }
                                 };
                                 table_columns.push((start_index + col_idx, col_name));
                             }
@@ -108,11 +142,14 @@ impl SelectExecutor<'_> {
                             } else {
                                 // Add all column names from this table in order
                                 for col_schema in &table_schema.columns {
-                                    let col_name = if include_table_prefix {
-                                        // Use the qualifier (alias or table name) as the prefix
-                                        format!("{}.{}", qualifier, col_schema.name.clone())
-                                    } else {
-                                        col_schema.name.clone()
+                                    let col_name = match mode {
+                                        ColumnNamingMode::Full => {
+                                            // Use the qualifier (alias or table name) as the prefix
+                                            format!("{}.{}", qualifier, col_schema.name.clone())
+                                        }
+                                        ColumnNamingMode::Short | ColumnNamingMode::Expression => {
+                                            col_schema.name.clone()
+                                        }
                                     };
                                     column_names.push(col_name);
                                 }
@@ -127,22 +164,11 @@ impl SelectExecutor<'_> {
                     }
                 }
                 vibesql_ast::SelectItem::Expression { expr, alias, source_text, .. } => {
-                    // If there's an alias, use it
+                    // If there's an alias, use it (aliases always take precedence)
                     if let Some(alias_name) = alias {
                         column_names.push(alias_name.clone());
-                    } else if matches!(expr, vibesql_ast::Expression::ColumnRef { .. }) {
-                        // For simple column references, use full table.column format
-                        // when include_table_prefix is true
-                        column_names
-                            .push(derive_expression_name_impl(expr, schema, include_table_prefix));
-                    } else if let Some(src) = source_text {
-                        // For complex expressions, use original source text
-                        // (e.g., "f1+F2" preserves the exact expression text)
-                        column_names.push(src.clone());
                     } else {
-                        // Derive name from the expression, using schema to preserve original case
-                        column_names
-                            .push(derive_expression_name_impl(expr, schema, include_table_prefix));
+                        column_names.push(derive_expression_name_impl(expr, schema, source_text, mode));
                     }
                 }
             }
@@ -157,63 +183,93 @@ impl SelectExecutor<'_> {
 /// # Arguments
 /// * `expr` - The expression to derive a name from
 /// * `schema` - Optional schema to use for resolving original column names.
-///   When provided, ColumnRef expressions will use the schema's full column name
-///   (table.column format with original table name) instead of the parsed identifier.
-/// * `include_table_prefix` - Whether to include the table prefix for column references
+/// * `source_text` - Optional source text from the parser (preserves original formatting)
+/// * `mode` - Column naming mode based on PRAGMA settings
 fn derive_expression_name_impl(
     expr: &vibesql_ast::Expression,
     schema: Option<&CombinedSchema>,
-    include_table_prefix: bool,
+    source_text: &Option<String>,
+    mode: ColumnNamingMode,
 ) -> String {
     match expr {
         vibesql_ast::Expression::ColumnRef { table, column } => {
-            if include_table_prefix {
-                // Use schema to get the full column name (table.column format)
-                // with original table name from schema, not the query alias
-                if let Some(s) = schema {
-                    s.get_full_column_name(table.as_deref(), column)
-                } else {
-                    column.clone()
+            match mode {
+                ColumnNamingMode::Full => {
+                    // Use schema to get the full column name (table.column format)
+                    // with original table name from schema, not the query alias
+                    if let Some(s) = schema {
+                        s.get_full_column_name(table.as_deref(), column)
+                    } else if let Some(t) = table {
+                        format!("{}.{}", t, column)
+                    } else {
+                        column.clone()
+                    }
                 }
-            } else {
-                // Use schema to get just the original column name (preserves case)
-                if let Some(s) = schema {
-                    s.get_original_column_name(table.as_deref(), column)
-                } else {
-                    column.clone()
+                ColumnNamingMode::Short => {
+                    // Use schema to get just the original column name (preserves case)
+                    if let Some(s) = schema {
+                        s.get_original_column_name(table.as_deref(), column)
+                    } else {
+                        column.clone()
+                    }
+                }
+                ColumnNamingMode::Expression => {
+                    // Use the original source text to preserve exact formatting (e.g., "test1 . f1")
+                    if let Some(src) = source_text {
+                        src.clone()
+                    } else if let Some(s) = schema {
+                        s.get_full_column_name(table.as_deref(), column)
+                    } else if let Some(t) = table {
+                        format!("{}.{}", t, column)
+                    } else {
+                        column.clone()
+                    }
                 }
             }
         }
         vibesql_ast::Expression::Function { name, args, character_unit: _ } => {
-            // For functions, use name(args) format
+            // For functions, use source text in expression mode, otherwise generate name(args) format
+            if mode == ColumnNamingMode::Expression {
+                if let Some(src) = source_text {
+                    return src.clone();
+                }
+            }
             let args_str = if args.is_empty() {
                 "*".to_string()
             } else {
                 args.iter()
-                    .map(|e| derive_expression_name_impl(e, schema, include_table_prefix))
+                    .map(|e| derive_expression_name_impl(e, schema, &None, mode))
                     .collect::<Vec<_>>()
                     .join(", ")
             };
             format!("{}({})", name, args_str)
         }
         vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
-            // For aggregate functions, use name(DISTINCT args) format
+            // For aggregate functions, use source text in expression mode, otherwise generate name(args) format
+            if mode == ColumnNamingMode::Expression {
+                if let Some(src) = source_text {
+                    return src.clone();
+                }
+            }
             let distinct_str = if *distinct { "DISTINCT " } else { "" };
             let args_str = if args.is_empty() {
                 "*".to_string()
             } else {
                 args.iter()
-                    .map(|e| derive_expression_name_impl(e, schema, include_table_prefix))
+                    .map(|e| derive_expression_name_impl(e, schema, &None, mode))
                     .collect::<Vec<_>>()
                     .join(", ")
             };
             format!("{}({}{})", name, distinct_str, args_str)
         }
         vibesql_ast::Expression::BinaryOp { left, op, right } => {
-            // For binary operations, create descriptive name
+            // For binary operations, prefer source text to preserve formatting
+            if let Some(src) = source_text {
+                return src.clone();
+            }
             format!(
                 "({} {} {})",
-                derive_expression_name_impl(left, schema, include_table_prefix),
+                derive_expression_name_impl(left, schema, &None, mode),
                 match op {
                     vibesql_ast::BinaryOperator::Plus => "+",
                     vibesql_ast::BinaryOperator::Minus => "-",
@@ -230,7 +286,7 @@ fn derive_expression_name_impl(
                     vibesql_ast::BinaryOperator::Concat => "||",
                     _ => "?",
                 },
-                derive_expression_name_impl(right, schema, include_table_prefix)
+                derive_expression_name_impl(right, schema, &None, mode)
             )
         }
         vibesql_ast::Expression::Literal(val) => {
@@ -259,6 +315,13 @@ fn derive_expression_name_impl(
                 vibesql_types::SqlValue::Null => "NULL".to_string(),
             }
         }
-        _ => "?column?".to_string(), // Default for other expression types
+        _ => {
+            // For other expression types, use source text if available
+            if let Some(src) = source_text {
+                src.clone()
+            } else {
+                "?column?".to_string()
+            }
+        }
     }
 }
