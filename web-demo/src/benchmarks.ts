@@ -1977,6 +1977,44 @@ function groupTPCCBenchmarksByOperation(benchmarks: TPCCBenchmark[]): Map<string
 }
 
 /**
+ * Group TPC-C Server benchmarks by operation
+ * Handles names like: tpcc_server_mixed_vibesql_server, tpcc_server_mixed_mysql
+ */
+function groupTPCCServerBenchmarksByOperation(benchmarks: TPCCBenchmark[]): Map<string, Map<string, TPCCBenchmark>> {
+  const grouped = new Map<string, Map<string, TPCCBenchmark>>();
+
+  for (const bench of benchmarks) {
+    // Format: tpcc_server_[operation]_[database]
+    // vibesql_server ends with "vibesql_server", mysql ends with "mysql"
+    let database: string;
+    let operation: string;
+
+    if (bench.name.endsWith('_vibesql_server')) {
+      database = 'vibesql_server';
+      // Remove "tpcc_server_" prefix and "_vibesql_server" suffix
+      operation = bench.name.slice('tpcc_server_'.length, -'_vibesql_server'.length);
+    } else if (bench.name.endsWith('_mysql')) {
+      database = 'mysql';
+      // Remove "tpcc_server_" prefix and "_mysql" suffix
+      operation = bench.name.slice('tpcc_server_'.length, -'_mysql'.length);
+    } else {
+      // Fallback to generic parsing
+      const parts = bench.name.split('_');
+      database = parts[parts.length - 1];
+      operation = parts.slice(2, -1).join('_'); // Skip "tpcc_server_" prefix
+    }
+
+    if (!grouped.has(operation)) {
+      grouped.set(operation, new Map());
+    }
+
+    grouped.get(operation)!.set(database, bench);
+  }
+
+  return grouped;
+}
+
+/**
  * Render TPC-C results table (uses TPS instead of execution time)
  */
 function renderTPCCTable(data: TPCCResults): void {
@@ -2150,6 +2188,181 @@ function renderTPCCChart(data: TPCCResults): void {
           callbacks: {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             label: (context: any) => `${context.dataset.label}: ${(context.parsed.y * 1000).toLocaleString()} TPS`,
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Render TPC-C Server results table (VibeSQL Server vs MySQL)
+ */
+function renderTPCCServerTable(data: TPCCResults): void {
+  const tbody = document.getElementById('results-tbody');
+  const table = document.getElementById('results-table');
+  if (!tbody || !table) return;
+
+  // Update table headers for TPC-C Server view (TPS = higher is better)
+  const thead = table.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th class="px-4 py-3">Workload</th>
+      <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">VibeSQL Server (TPS)</th>
+      <th class="px-4 py-3 text-right" title="Transactions per second (higher is better)">MySQL (TPS)</th>
+    `;
+  }
+
+  tbody.innerHTML = '';
+
+  const grouped = groupTPCCServerBenchmarksByOperation(data.benchmarks);
+
+  const mysqlSpeedup = { total: 0, count: 0 };
+
+  for (const [operation, databases] of grouped.entries()) {
+    const vibesql = databases.get('vibesql_server');
+    const mysql = databases.get('mysql');
+
+    if (!vibesql && !mysql) continue;
+
+    const row = document.createElement('tr');
+    row.className = 'hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors';
+
+    // Operation name
+    const opCell = document.createElement('td');
+    opCell.className = 'px-4 py-3 font-medium text-gray-900 dark:text-gray-100';
+    const config = SUITE_CONFIGS['tpcc-server'];
+    const description = config.descriptions[operation];
+    if (description) {
+      opCell.innerHTML = `<span class="cursor-help" title="${description}">${operation.replace(/_/g, ' ').toUpperCase()}</span>`;
+    } else {
+      opCell.textContent = operation.replace(/_/g, ' ').toUpperCase();
+    }
+    row.appendChild(opCell);
+
+    // For TPS, higher is better - track which is the winner
+    const vibesqlTps = vibesql?.stats.tps ?? 0;
+    const mysqlTps = mysql?.stats.tps ?? 0;
+    const maxTps = Math.max(vibesqlTps, mysqlTps);
+    const vibesqlWins = vibesqlTps === maxTps && vibesqlTps > 0;
+    const mysqlWins = mysqlTps === maxTps && mysqlTps > 0 && !vibesqlWins;
+
+    // VibeSQL Server TPS
+    const vibesqlCell = document.createElement('td');
+    vibesqlCell.className = vibesqlWins
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+    vibesqlCell.textContent = vibesql ? formatTPS(vibesql.stats.tps) : t('bench-na');
+    row.appendChild(vibesqlCell);
+
+    // MySQL TPS
+    const mysqlCell = document.createElement('td');
+    mysqlCell.className = mysqlWins
+      ? 'px-4 py-3 text-right font-semibold text-green-600 dark:text-green-400'
+      : 'px-4 py-3 text-right text-gray-500 dark:text-gray-400';
+    mysqlCell.textContent = mysql ? formatTPS(mysql.stats.tps) : t('bench-na');
+    row.appendChild(mysqlCell);
+
+    // Track speedup for summary cards (TPS = higher is better, so vibesql/mysql)
+    if (vibesql && mysql && vibesql.stats.tps > 0 && mysql.stats.tps > 0) {
+      const speedup = vibesql.stats.tps / mysql.stats.tps;
+      mysqlSpeedup.total += speedup;
+      mysqlSpeedup.count++;
+    }
+
+    tbody.appendChild(row);
+  }
+
+  // Update summary cards (use MySQL comparison in the "vs SQLite" slot)
+  const sqliteEl = document.getElementById('avg-speedup-sqlite');
+  const sqliteHeader = document.querySelector('[data-i18n="bench-vs-sqlite"]');
+  if (sqliteEl && sqliteHeader) {
+    sqliteHeader.textContent = t('bench-vs-mysql');
+    if (mysqlSpeedup.count > 0) {
+      const avgSpeedup = mysqlSpeedup.total / mysqlSpeedup.count;
+      sqliteEl.textContent = `${avgSpeedup.toFixed(2)}x`;
+      sqliteEl.className = avgSpeedup >= 1
+        ? 'text-3xl font-bold text-green-600 dark:text-green-400'
+        : 'text-3xl font-bold text-red-600 dark:text-red-400';
+    } else {
+      sqliteEl.textContent = t('bench-na');
+      sqliteEl.className = 'text-3xl font-bold text-gray-500 dark:text-gray-400';
+    }
+  }
+
+  // Hide DuckDB card for server mode
+  const duckdbEl = document.getElementById('avg-speedup-duckdb');
+  const duckdbHeader = document.querySelector('[data-i18n="bench-vs-duckdb"]');
+  if (duckdbEl && duckdbHeader) {
+    duckdbHeader.textContent = ''; // Hide header
+    duckdbEl.textContent = '';
+    const duckdbLabel = document.getElementById('avg-speedup-duckdb-label');
+    if (duckdbLabel) duckdbLabel.textContent = '';
+  }
+
+  // Update ops tested count
+  const opsTestedEl = document.getElementById('ops-tested');
+  const opsLabelEl = document.getElementById('ops-tested-label');
+  if (opsTestedEl) {
+    opsTestedEl.textContent = grouped.size.toString();
+  }
+  if (opsLabelEl) {
+    opsLabelEl.textContent = 'TPC-C workloads';
+  }
+
+  // Update last updated timestamp
+  const timestamp = data.metadata?.timestamp || data.datetime;
+  const gitCommit = data.metadata?.git_commit || data.machine_info?.git_commit;
+  if (timestamp) {
+    updateLastUpdated(timestamp, gitCommit);
+  }
+}
+
+/**
+ * Render TPC-C Server comparison chart
+ */
+function renderTPCCServerChart(data: TPCCResults): void {
+  const canvas = document.getElementById('performance-chart') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  // Destroy existing chart if any
+  if (currentChart) {
+    currentChart.destroy();
+    currentChart = null;
+  }
+
+  const grouped = groupTPCCServerBenchmarksByOperation(data.benchmarks);
+
+  const labels: string[] = [];
+  const vibesqlData: number[] = [];
+  const mysqlData: number[] = [];
+
+  for (const [operation, databases] of grouped.entries()) {
+    const vibesql = databases.get('vibesql_server');
+    const mysql = databases.get('mysql');
+
+    labels.push(operation.replace(/_/g, ' ').toUpperCase());
+    vibesqlData.push(vibesql ? vibesql.stats.tps : 0);
+    mysqlData.push(mysql ? mysql.stats.tps : 0);
+  }
+
+  currentChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        createDataset('vibesql_server', vibesqlData),
+        createDataset('mysql', mysqlData),
+      ],
+    },
+    options: {
+      ...getLinearChartOptions('Transactions per Second (TPS) - Higher is Better'),
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: {
+          callbacks: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: (context: any) => `${context.dataset.label}: ${context.parsed.y.toLocaleString()} TPS`,
           },
         },
       },
@@ -2511,6 +2724,14 @@ async function loadBenchmarkData(suite: BenchmarkSuite): Promise<void> {
       const data: TPCCResults = await response.json();
       renderTPCCTable(data);
       renderTPCCChart(data);
+      return;
+    }
+
+    // Handle TPC-C Server suite (VibeSQL Server vs MySQL, uses TPS)
+    if (suite === 'tpcc-server') {
+      const data: TPCCResults = await response.json();
+      renderTPCCServerTable(data);
+      renderTPCCServerChart(data);
       return;
     }
 
