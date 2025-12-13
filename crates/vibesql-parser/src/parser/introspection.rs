@@ -12,9 +12,7 @@ impl Parser {
                 self.advance();
                 Ok(string_val)
             }
-            _ => Err(ParseError {
-                message: format!("Expected string literal, found {:?}", self.peek()),
-            }),
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 

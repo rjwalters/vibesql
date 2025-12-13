@@ -397,9 +397,7 @@ impl Parser {
                 let pragma_stmt = self.parse_pragma_statement()?;
                 Ok(vibesql_ast::Statement::Pragma(pragma_stmt))
             }
-            _ => {
-                Err(ParseError { message: format!("Expected statement, found {:?}", self.peek()) })
-            }
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 

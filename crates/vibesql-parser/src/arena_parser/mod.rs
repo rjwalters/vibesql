@@ -232,7 +232,7 @@ impl<'arena> ArenaParser<'arena> {
                 Ok(Statement::ReleaseSavepoint(stmt))
             }
 
-            _ => Err(ParseError { message: format!("Unexpected token: {:?}", self.peek()) }),
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -518,9 +518,7 @@ impl<'arena> ArenaParser<'arena> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError {
-                message: format!("Expected keyword {:?}, found {:?}", keyword, self.peek()),
-            })
+            Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -545,7 +543,7 @@ impl<'arena> ArenaParser<'arena> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError { message: format!("Expected {:?}, found {:?}", expected, self.peek()) })
+            Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -578,9 +576,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => {
-                Err(ParseError { message: format!("Expected identifier, found {:?}", self.peek()) })
-            }
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -648,9 +644,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            _ => {
-                Err(ParseError { message: format!("Expected alias name, found {:?}", self.peek()) })
-            }
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 

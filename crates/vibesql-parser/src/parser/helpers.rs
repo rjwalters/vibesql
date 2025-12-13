@@ -51,9 +51,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError {
-                message: format!("Expected keyword {:?}, found {:?}", keyword, self.peek()),
-            })
+            Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -68,7 +66,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError { message: format!("Expected {:?}, found {:?}", expected, self.peek()) })
+            Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -88,9 +86,7 @@ impl Parser {
                     ),
                 })
             }
-            _ => Err(ParseError {
-                message: format!("Expected identifier, found {:?}", self.peek())
-            }),
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -110,9 +106,7 @@ impl Parser {
                 self.advance();
                 Ok(name)
             }
-            _ => {
-                Err(ParseError { message: format!("Expected alias name, found {:?}", self.peek()) })
-            }
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 
@@ -233,9 +227,7 @@ impl Parser {
                     message: format!("Expected integer, found '{}'", num_str),
                 })
             }
-            _ => Err(ParseError {
-                message: format!("Expected integer literal, found {:?}", self.peek()),
-            }),
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 
@@ -290,9 +282,7 @@ impl Parser {
 
         // Expect closing parenthesis
         if self.peek() != &Token::RParen {
-            return Err(ParseError {
-                message: format!("Expected ')' after column alias list, found {:?}", self.peek()),
-            });
+            return Err(ParseError { message: self.peek().syntax_error() });
         }
         self.advance(); // Consume ')'
 

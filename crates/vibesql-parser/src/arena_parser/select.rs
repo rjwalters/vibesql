@@ -430,11 +430,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 (self.intern(&name), true)
             }
-            _ => {
-                return Err(ParseError {
-                    message: format!("Expected table name, found {:?}", self.peek()),
-                });
-            }
+            _ => return Err(ParseError { message: self.peek().syntax_error() })
         };
 
         // Check for alias
