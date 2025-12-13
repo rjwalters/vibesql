@@ -315,7 +315,7 @@ impl ExplainExecutor {
             let skip_info = skip_plan.skip_scan_info.as_ref().unwrap();
 
             let mut skip_node = PlanNode::new("Skip Scan").with_object(table_name);
-            skip_node.details.push(format!("Using index: {}", skip_plan.index_name));
+            skip_node.details.push(format!("USING INDEX {} ", skip_plan.index_name));
             skip_node.details.push(format!(
                 "Skip columns: {} (cardinality: {})",
                 skip_info.prefix_columns.join(", "),
@@ -327,7 +327,7 @@ impl ExplainExecutor {
             skip_node
         } else if let Some((index_name, sorted_cols)) = index_info {
             let mut idx_node = PlanNode::new("Index Scan").with_object(table_name);
-            idx_node.details.push(format!("Using index: {}", index_name));
+            idx_node.details.push(format!("USING INDEX {} ", index_name));
 
             if let Some(cols) = sorted_cols {
                 let col_strs: Vec<String> = cols

@@ -40,8 +40,50 @@ pub(in crate::evaluator::functions) fn position(
     }
 }
 
+/// Convert SqlValue to string for INSTR/POSITION/LOCATE functions
+/// SQLite converts numeric values to strings for these functions
+fn sql_value_to_string(val: &vibesql_types::SqlValue) -> Option<String> {
+    match val {
+        vibesql_types::SqlValue::Null => None,
+        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+            Some(s.to_string())
+        }
+        vibesql_types::SqlValue::Integer(n) | vibesql_types::SqlValue::Bigint(n) => {
+            Some(n.to_string())
+        }
+        vibesql_types::SqlValue::Smallint(n) => Some(n.to_string()),
+        vibesql_types::SqlValue::Unsigned(n) => Some(n.to_string()),
+        vibesql_types::SqlValue::Double(n) | vibesql_types::SqlValue::Numeric(n) => {
+            Some(n.to_string())
+        }
+        vibesql_types::SqlValue::Float(n) | vibesql_types::SqlValue::Real(n) => {
+            Some(n.to_string())
+        }
+        vibesql_types::SqlValue::Boolean(b) => Some(if *b { "1" } else { "0" }.to_string()),
+        _ => None,
+    }
+}
+
+/// Find character position (1-indexed) of needle in haystack
+/// Returns character position, not byte position, for proper Unicode handling
+fn find_char_position(haystack: &str, needle: &str) -> i64 {
+    if needle.is_empty() {
+        return 1; // SQLite: empty needle returns 1
+    }
+
+    // Find byte position first
+    if let Some(byte_pos) = haystack.find(needle) {
+        // Convert byte position to character position
+        let char_pos = haystack[..byte_pos].chars().count();
+        (char_pos + 1) as i64 // 1-indexed
+    } else {
+        0 // Not found
+    }
+}
+
 /// INSTR(string, substring) - Find position of substring (1-indexed, 0 if not found)
 /// MySQL/Oracle function - returns first occurrence position
+/// SQLite converts numeric arguments to strings automatically
 pub(in crate::evaluator::functions) fn instr(
     args: &[vibesql_types::SqlValue],
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
@@ -52,25 +94,31 @@ pub(in crate::evaluator::functions) fn instr(
         )));
     }
 
-    match (&args[0], &args[1]) {
-        (vibesql_types::SqlValue::Null, _) | (_, vibesql_types::SqlValue::Null) => {
-            Ok(vibesql_types::SqlValue::Null)
-        }
-        (
-            vibesql_types::SqlValue::Varchar(haystack)
-            | vibesql_types::SqlValue::Character(haystack),
-            vibesql_types::SqlValue::Varchar(needle) | vibesql_types::SqlValue::Character(needle),
-        ) => {
-            // Find returns 0-indexed position, convert to 1-indexed
-            // Return 0 if not found (SQL convention)
-            let position = haystack.find(&**needle).map(|pos| (pos + 1) as i64).unwrap_or(0);
-            Ok(vibesql_types::SqlValue::Integer(position))
-        }
-        (haystack, needle) => Err(ExecutorError::UnsupportedFeature(format!(
-            "INSTR requires string arguments, got {:?} and {:?}",
-            haystack, needle
-        ))),
+    // Handle NULL arguments
+    if matches!(&args[0], vibesql_types::SqlValue::Null)
+        || matches!(&args[1], vibesql_types::SqlValue::Null)
+    {
+        return Ok(vibesql_types::SqlValue::Null);
     }
+
+    // Convert both arguments to strings (SQLite does this for numbers)
+    let haystack = sql_value_to_string(&args[0]).ok_or_else(|| {
+        ExecutorError::UnsupportedFeature(format!(
+            "INSTR cannot convert first argument to string: {:?}",
+            args[0]
+        ))
+    })?;
+
+    let needle = sql_value_to_string(&args[1]).ok_or_else(|| {
+        ExecutorError::UnsupportedFeature(format!(
+            "INSTR cannot convert second argument to string: {:?}",
+            args[1]
+        ))
+    })?;
+
+    // Find character position (not byte position)
+    let position = find_char_position(&haystack, &needle);
+    Ok(vibesql_types::SqlValue::Integer(position))
 }
 
 /// LOCATE(substring, string, [start]) - Find position of substring with optional start

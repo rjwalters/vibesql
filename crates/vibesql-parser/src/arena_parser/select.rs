@@ -82,14 +82,28 @@ impl<'arena> ArenaParser<'arena> {
 
         // Parse LIMIT
         let limit = if self.try_consume_keyword(Keyword::Limit) {
-            if let Token::Number(n) = self.peek() {
+            // Check for negative LIMIT (SQLite treats LIMIT -1 as "unlimited")
+            if let Token::Symbol('-') = self.peek() {
+                self.advance(); // consume '-'
+                // Must have a number after the minus sign
+                if let Token::Number(_) = self.peek() {
+                    self.advance(); // consume the number
+                    None // Negative limit means no limit
+                } else {
+                    return Err(ParseError {
+                        message: "Expected number after LIMIT".to_string(),
+                    });
+                }
+            } else if let Token::Number(n) = self.peek() {
                 let n = n
                     .parse::<usize>()
                     .map_err(|_| ParseError { message: "Invalid LIMIT value".to_string() })?;
                 self.advance();
                 Some(n)
             } else {
-                return Err(ParseError { message: "Expected integer after LIMIT".to_string() });
+                return Err(ParseError {
+                    message: "Expected number after LIMIT".to_string(),
+                });
             }
         } else {
             None

@@ -114,6 +114,12 @@ proc translate_error_to_sqlite {vibesql_error} {
     }
 
     # Wrong number of arguments to function:
+    # "Unsupported feature: wrong number of arguments to function substr()" -> "wrong number of arguments to function substr()"
+    # Note: SQLite preserves the case from the SQL query, so we preserve it too
+    if {[regexp -nocase {wrong number of arguments to function\s+([a-zA-Z_]+)\(\)} $error_msg -> func_name]} {
+        return "wrong number of arguments to function ${func_name}()"
+    }
+
     # "Unsupported expression: Multi-argument COUNT requires DISTINCT" -> "wrong number of arguments to function count()"
     if {[regexp -nocase {Multi-argument COUNT} $error_msg]} {
         return "wrong number of arguments to function count()"
@@ -238,6 +244,12 @@ proc translate_error_to_sqlite {vibesql_error} {
 
     # Type mismatch
     if {[regexp -nocase {type mismatch} $error_msg]} {
+        return "datatype mismatch"
+    }
+
+    # Cannot convert to integer (type mismatch)
+    # "Cannot convert numeric '3.4' to Integer" -> "datatype mismatch"
+    if {[regexp -nocase {Cannot convert.*to Integer} $error_msg]} {
         return "datatype mismatch"
     }
 
@@ -644,6 +656,27 @@ proc do_test {name script expected} {
         return
     }
 
+    # Check if expected value is a regex pattern
+    if {[is_regex_pattern $expected]} {
+        # Use pattern matching instead of exact comparison
+        set result_str [normalize_result $result]
+        if {[match_regex_pattern $result_str $expected]} {
+            incr ::nPass
+            if {$::verbose} {
+                puts "ok"
+            }
+        } else {
+            incr ::nFail
+            lappend ::failList $name
+            if {$::verbose} {
+                puts "FAILED"
+                puts "    Expected pattern: $expected"
+                puts "    Got:              $result"
+            }
+        }
+        return
+    }
+
     # Normalize for comparison
     set result_norm [normalize_result $result]
     set expected_norm [normalize_result $expected]
@@ -680,6 +713,50 @@ proc normalize_result {val} {
     set val [string trim $val]
     regsub -all {\s+} $val " " val
     return $val
+}
+
+proc is_regex_pattern {expected} {
+    # Check if expected value is a regex pattern
+    # Patterns: /pattern/ (must contain) or ~/pattern/ (must not contain)
+    set trimmed [string trim $expected]
+    if {[string index $trimmed 0] eq "/" && [string index $trimmed end] eq "/"} {
+        return 1
+    }
+    if {[string range $trimmed 0 1] eq "~/" && [string index $trimmed end] eq "/"} {
+        return 1
+    }
+    return 0
+}
+
+proc match_regex_pattern {result expected} {
+    # Match result against a regex pattern
+    # /pattern/ - result must contain pattern
+    # ~/pattern/ - result must NOT contain pattern
+    # Returns 1 if match succeeds, 0 if fails
+    set trimmed [string trim $expected]
+
+    # Check for negative pattern: ~/pattern/
+    if {[string range $trimmed 0 1] eq "~/"} {
+        set pattern [string range $trimmed 2 end-1]
+        # Result should NOT match pattern
+        if {[regexp -- $pattern $result]} {
+            return 0  ;# Found pattern when we shouldn't
+        }
+        return 1  ;# Pattern not found, which is what we want
+    }
+
+    # Check for positive pattern: /pattern/
+    if {[string index $trimmed 0] eq "/"} {
+        set pattern [string range $trimmed 1 end-1]
+        # Result should match pattern
+        if {[regexp -- $pattern $result]} {
+            return 1  ;# Pattern found
+        }
+        return 0  ;# Pattern not found
+    }
+
+    # Not a pattern - shouldn't be called
+    return 0
 }
 
 #-----------------------------------------------------------------------------

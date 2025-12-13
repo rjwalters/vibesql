@@ -209,7 +209,7 @@ fn test_explain_index_scan_shows_index_name() {
 
     // If using index, should show the index name
     if output.contains("Index Scan") {
-        assert!(output.contains("Using index:"), "Index Scan should show index name:\n{}", output);
+        assert!(output.contains("USING INDEX"), "Index Scan should show index name:\n{}", output);
     }
 }
 
@@ -236,7 +236,7 @@ fn test_explain_skip_scan_format_when_applicable() {
 
     // If skip-scan is chosen, verify its format
     if output.contains("Skip Scan") {
-        assert!(output.contains("Using index:"), "Skip Scan should show index name:\n{}", output);
+        assert!(output.contains("USING INDEX"), "Skip Scan should show index name:\n{}", output);
         assert!(
             output.contains("Skip columns:"),
             "Skip Scan should show skip columns:\n{}",
