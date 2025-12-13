@@ -15,7 +15,7 @@ fn test_after_delete_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt {
+    let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -46,6 +46,7 @@ fn test_after_delete_trigger_fires() {
 
     // Delete the user - should fire trigger
     let delete = vibesql_ast::DeleteStmt {
+        quoted: false,
         only: false,
         table_name: "USERS".to_string(),
         where_clause: Some(vibesql_ast::WhereClause::Condition(
@@ -74,7 +75,7 @@ fn test_before_delete_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt {
+    let insert = vibesql_ast::InsertStmt { quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -105,6 +106,7 @@ fn test_before_delete_trigger_fires() {
 
     // Delete the user - should fire trigger
     let delete = vibesql_ast::DeleteStmt {
+        quoted: false,
         only: false,
         table_name: "USERS".to_string(),
         where_clause: Some(vibesql_ast::WhereClause::Condition(

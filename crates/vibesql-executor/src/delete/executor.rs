@@ -1,6 +1,7 @@
 //! DELETE statement execution
 
 use vibesql_ast::DeleteStmt;
+use vibesql_catalog::TableIdentifier;
 use vibesql_storage::Database;
 
 use super::integrity::check_no_child_references;
@@ -119,8 +120,11 @@ impl DeleteExecutor {
         // Check DELETE privilege on the table
         PrivilegeChecker::check_delete(database, &stmt.table_name)?;
 
+        // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
+        let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
+
         // Check table exists
-        if !database.catalog.table_exists(&stmt.table_name) {
+        if !database.catalog.table_exists_by_identifier(&table_id) {
             return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
         }
 
@@ -133,9 +137,13 @@ impl DeleteExecutor {
         // Step 1: Get schema (clone to avoid borrow issues)
         let schema = database
             .catalog
-            .get_table(&stmt.table_name)
+            .get_table_by_identifier(&table_id)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
             .clone();
+
+        // Use canonical table name from schema for all storage operations
+        // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
+        let table_name = &schema.name;
 
         // Fast path: Single-row PK delete without triggers/FKs
         // This avoids ExpressionEvaluator creation and row cloning
@@ -146,7 +154,7 @@ impl DeleteExecutor {
                     let has_triggers = database
                         .catalog
                         .get_triggers_for_table(
-                            &stmt.table_name,
+                            table_name,
                             Some(vibesql_ast::TriggerEvent::Delete),
                         )
                         .next()
@@ -161,7 +169,7 @@ impl DeleteExecutor {
                                 .get_table(t)
                                 .map(|s| {
                                     s.foreign_keys.iter().any(|fk| {
-                                        fk.parent_table.eq_ignore_ascii_case(&stmt.table_name)
+                                        fk.parent_table.eq_ignore_ascii_case(table_name)
                                     })
                                 })
                                 .unwrap_or(false)
@@ -169,7 +177,7 @@ impl DeleteExecutor {
 
                     if !has_triggers && !has_referencing_fks {
                         // Use the fast path - no triggers, no FKs, single row PK delete
-                        match database.delete_by_pk_fast(&stmt.table_name, &pk_values) {
+                        match database.delete_by_pk_fast(table_name, &pk_values) {
                             Ok(deleted) => {
                                 let count = if deleted { 1 } else { 0 };
                                 // Check all assertions after DELETE completes (SQL:1999 Feature
@@ -192,7 +200,7 @@ impl DeleteExecutor {
         // Step 2: Evaluate WHERE clause and collect rows to delete (two-phase execution)
         // Get table for scanning
         let table = database
-            .get_table(&stmt.table_name)
+            .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Create evaluator with database reference for subquery support (EXISTS, NOT EXISTS, IN
@@ -209,7 +217,7 @@ impl DeleteExecutor {
         // Check once if any DELETE triggers exist for this table (used for fast-path checks)
         let has_delete_triggers = database
             .catalog
-            .get_triggers_for_table(&stmt.table_name, Some(vibesql_ast::TriggerEvent::Delete))
+            .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
             .next()
             .is_some();
 
@@ -256,7 +264,7 @@ impl DeleteExecutor {
         }
 
         // Cost-based optimization: Log delete cost and check for early compaction recommendation
-        let optimizer = DmlOptimizer::new(database, &stmt.table_name);
+        let optimizer = DmlOptimizer::new(database, table_name);
         if optimizer.should_chunk_delete(rows_and_indices_to_delete.len()) {
             // Log recommendation for potential chunked delete (informational only)
             // Actual chunked delete would require transaction support to be safe
@@ -284,7 +292,7 @@ impl DeleteExecutor {
         if has_delete_triggers && trigger_context.is_none() {
             crate::TriggerFirer::execute_before_statement_triggers(
                 database,
-                &stmt.table_name,
+                table_name,
                 vibesql_ast::TriggerEvent::Delete,
             )?;
         }
@@ -294,7 +302,7 @@ impl DeleteExecutor {
             for (_, row) in &rows_and_indices_to_delete {
                 crate::TriggerFirer::execute_before_triggers(
                     database,
-                    &stmt.table_name,
+                    table_name,
                     vibesql_ast::TriggerEvent::Delete,
                     Some(row),
                     None,
@@ -305,7 +313,7 @@ impl DeleteExecutor {
         // Step 4: Handle referential integrity for each row to be deleted
         // This may CASCADE deletes, SET NULL, or SET DEFAULT in child tables
         for (_, row) in &rows_and_indices_to_delete {
-            check_no_child_references(database, &stmt.table_name, row)?;
+            check_no_child_references(database, table_name, row)?;
         }
 
         // Extract indices for deletion
@@ -317,18 +325,18 @@ impl DeleteExecutor {
         // BEFORE deleting rows (while row indices are still valid and we have old values)
         // First emit WAL entries for each row (needed for recovery replay)
         for (idx, row) in &rows_and_indices_to_delete {
-            database.emit_wal_delete(&stmt.table_name, *idx as u64, row.values.to_vec());
+            database.emit_wal_delete(table_name, *idx as u64, row.values.to_vec());
         }
 
         // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)
         // where d=deletes, m=indexes
         let rows_refs: Vec<(usize, &vibesql_storage::Row)> =
             rows_and_indices_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
-        database.batch_update_indexes_for_delete(&stmt.table_name, &rows_refs);
+        database.batch_update_indexes_for_delete(table_name, &rows_refs);
 
         // Step 5b: Actually delete the rows using fast path (no table scan needed)
         let table_mut = database
-            .get_table_mut(&stmt.table_name)
+            .get_table_mut(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Use delete_by_indices_batch for O(d) instead of O(n) where d = deletes
@@ -341,7 +349,7 @@ impl DeleteExecutor {
 
         // If compaction occurred, rebuild user-defined indexes since all row indices changed
         if delete_result.compacted {
-            database.rebuild_indexes(&stmt.table_name);
+            database.rebuild_indexes(table_name);
         }
 
         // Invalidate the database-level columnar cache since table data changed.
@@ -350,7 +358,7 @@ impl DeleteExecutor {
         // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
         // - Database-level cache: used by Database::get_columnar() for cached access
         if delete_result.deleted_count > 0 {
-            database.invalidate_columnar_cache(&stmt.table_name);
+            database.invalidate_columnar_cache(table_name);
         }
 
         // Step 6: Fire AFTER DELETE ROW triggers only if triggers exist
@@ -358,7 +366,7 @@ impl DeleteExecutor {
             for (_, row) in &rows_and_indices_to_delete {
                 crate::TriggerFirer::execute_after_triggers(
                     database,
-                    &stmt.table_name,
+                    table_name,
                     vibesql_ast::TriggerEvent::Delete,
                     Some(row),
                     None,
@@ -371,7 +379,7 @@ impl DeleteExecutor {
         if has_delete_triggers && trigger_context.is_none() {
             crate::TriggerFirer::execute_after_statement_triggers(
                 database,
-                &stmt.table_name,
+                table_name,
                 vibesql_ast::TriggerEvent::Delete,
             )?;
         }

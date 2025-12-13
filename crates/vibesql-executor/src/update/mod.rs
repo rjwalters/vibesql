@@ -29,6 +29,7 @@ use foreign_keys::ForeignKeyValidator;
 use row_selector::RowSelector;
 use value_updater::ValueUpdater;
 use vibesql_ast::{BinaryOperator, Expression, UpdateStmt};
+use vibesql_catalog::TableIdentifier;
 use vibesql_storage::{statistics::CostEstimator, Database};
 
 use crate::{
@@ -152,23 +153,29 @@ impl UpdateExecutor {
 
         // Step 1: Get table schema - clone it to avoid borrow issues
         // We need owned schema because we take mutable references to database later
+        // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
+        let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
         let schema_owned: vibesql_catalog::TableSchema = if let Some(s) = schema {
             s.clone()
         } else {
             database
                 .catalog
-                .get_table(&stmt.table_name)
+                .get_table_by_identifier(&table_id)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
                 .clone()
         };
         let schema = &schema_owned;
+
+        // Use canonical table name from schema for all storage operations
+        // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
+        let table_name = &schema_owned.name;
 
         // Check if table has UPDATE triggers (check once, use multiple times)
         let has_triggers = trigger_context.is_none()
             && database
                 .catalog
                 .get_triggers_for_table(
-                    &stmt.table_name,
+                    table_name,
                     Some(vibesql_ast::TriggerEvent::Update(None)),
                 )
                 .next()
@@ -186,7 +193,7 @@ impl UpdateExecutor {
             if let Some(result) = Self::try_fast_path_update(stmt, database, schema)? {
                 // Invalidate columnar cache after fast path update
                 if result > 0 {
-                    database.invalidate_columnar_cache(&stmt.table_name);
+                    database.invalidate_columnar_cache(table_name);
                 }
                 return Ok(result);
             }
@@ -196,7 +203,7 @@ impl UpdateExecutor {
         if has_triggers {
             crate::TriggerFirer::execute_before_statement_triggers(
                 database,
-                &stmt.table_name,
+                table_name,
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
         }
@@ -206,7 +213,7 @@ impl UpdateExecutor {
 
         // Step 2: Get table from storage (for reading rows)
         let table = database
-            .get_table(&stmt.table_name)
+            .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Step 3: Create expression evaluator with database reference for subquery support
@@ -226,7 +233,7 @@ impl UpdateExecutor {
 
         // Estimate DML cost for query analysis and optimization decisions
         if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {
-            if let Some(index_info) = database.get_table_index_info(&stmt.table_name) {
+            if let Some(index_info) = database.get_table_index_info(table_name) {
                 // Get table statistics for cost estimation (use cached if available, or fallback to
                 // estimate)
                 let table_stats = table.get_statistics().cloned().unwrap_or_else(|| {
@@ -264,7 +271,7 @@ impl UpdateExecutor {
         }
 
         // Step 5: Create value updater
-        let value_updater = ValueUpdater::new(schema, &evaluator, &stmt.table_name);
+        let value_updater = ValueUpdater::new(schema, &evaluator, table_name);
 
         // Step 6: Build list of updates (two-phase execution for SQL semantics)
         // Each update consists of: (row_index, old_row, new_row, changed_columns, updates_pk)
@@ -299,7 +306,7 @@ impl UpdateExecutor {
             let constraint_validator = ConstraintValidator::new(schema);
             constraint_validator.validate_row(
                 table,
-                &stmt.table_name,
+                table_name,
                 row_index,
                 &new_row,
                 &row,
@@ -308,7 +315,7 @@ impl UpdateExecutor {
             // Validate user-defined UNIQUE indexes (CREATE UNIQUE INDEX)
             constraint_validator.validate_unique_indexes(
                 database,
-                &stmt.table_name,
+                table_name,
                 &new_row,
                 &row,
             )?;
@@ -317,7 +324,7 @@ impl UpdateExecutor {
             if !schema.foreign_keys.is_empty() {
                 ForeignKeyValidator::validate_constraints(
                     database,
-                    &stmt.table_name,
+                    table_name,
                     &new_row.values,
                 )?;
             }
@@ -331,7 +338,7 @@ impl UpdateExecutor {
             if *updates_pk {
                 ForeignKeyValidator::check_no_child_references(
                     database,
-                    &stmt.table_name,
+                    table_name,
                     old_row,
                     new_row,
                 )?;
@@ -346,7 +353,7 @@ impl UpdateExecutor {
                 all_changed_columns.extend(changed_cols.iter().copied());
             }
 
-            let optimizer = DmlOptimizer::new(database, &stmt.table_name);
+            let optimizer = DmlOptimizer::new(database, table_name);
             let indexes_affected_ratio =
                 optimizer.compute_indexes_affected_ratio(&all_changed_columns, schema);
             let _update_cost =
@@ -368,7 +375,7 @@ impl UpdateExecutor {
             for (_row_index, old_row, new_row, _changed_columns, _updates_pk) in &updates {
                 crate::TriggerFirer::execute_before_triggers(
                     database,
-                    &stmt.table_name,
+                    table_name,
                     vibesql_ast::TriggerEvent::Update(None),
                     Some(old_row),
                     Some(new_row),
@@ -381,7 +388,7 @@ impl UpdateExecutor {
 
         // Get mutable table reference
         let table_mut = database
-            .get_table_mut(&stmt.table_name)
+            .get_table_mut(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Collect the updates first
@@ -399,7 +406,7 @@ impl UpdateExecutor {
             for (_index, old_row, new_row, _changed_columns) in &index_updates {
                 crate::TriggerFirer::execute_after_triggers(
                     database,
-                    &stmt.table_name,
+                    table_name,
                     vibesql_ast::TriggerEvent::Update(None),
                     Some(old_row),
                     Some(new_row),
@@ -416,7 +423,7 @@ impl UpdateExecutor {
             .collect();
         for (index, old_row, new_row, changed_columns) in index_updates {
             database.update_indexes_for_update(
-                &stmt.table_name,
+                table_name,
                 &old_row,
                 &new_row,
                 index,
@@ -430,14 +437,14 @@ impl UpdateExecutor {
         // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
         // - Database-level cache: used by Database::get_columnar() for cached access
         if update_count > 0 {
-            database.invalidate_columnar_cache(&stmt.table_name);
+            database.invalidate_columnar_cache(table_name);
         }
 
         // Fire AFTER STATEMENT triggers only if triggers exist
         if has_triggers {
             crate::TriggerFirer::execute_after_statement_triggers(
                 database,
-                &stmt.table_name,
+                table_name,
                 vibesql_ast::TriggerEvent::Update(None),
             )?;
         }
@@ -448,7 +455,7 @@ impl UpdateExecutor {
             crate::advanced_objects::AssertionChecker::check_all_assertions(database)
         {
             // Assertion violated - rollback the update by restoring old values
-            if let Some(table_mut) = database.get_table_mut(&stmt.table_name) {
+            if let Some(table_mut) = database.get_table_mut(table_name) {
                 for (index, old_row, changed_columns) in &index_updates_for_rollback {
                     // Restore the old row values for changed columns
                     let _ =
@@ -456,7 +463,7 @@ impl UpdateExecutor {
                 }
             }
             // Also invalidate cache after rollback
-            database.invalidate_columnar_cache(&stmt.table_name);
+            database.invalidate_columnar_cache(table_name);
             return Err(assertion_error);
         }
 
@@ -475,6 +482,9 @@ impl UpdateExecutor {
         database: &mut Database,
         schema: &vibesql_catalog::TableSchema,
     ) -> Result<Option<usize>, ExecutorError> {
+        // Use canonical table name from schema for all storage operations
+        let table_name = &schema.name;
+
         // Check if we have a simple PK lookup in WHERE clause
         let where_clause = match &stmt.where_clause {
             Some(vibesql_ast::WhereClause::Condition(expr)) => expr,
@@ -490,7 +500,7 @@ impl UpdateExecutor {
         // Get table and check for PK index, look up row index
         let row_index = {
             let table = database
-                .get_table(&stmt.table_name)
+                .get_table(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
             let pk_index = match table.primary_key_index() {
@@ -544,7 +554,7 @@ impl UpdateExecutor {
 
         // Re-borrow table to get the old row
         let table = database
-            .get_table(&stmt.table_name)
+            .get_table(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
         let old_row = table.scan()[row_index].clone();
 
@@ -620,7 +630,7 @@ impl UpdateExecutor {
         // Update user-defined indexes FIRST (while we still have both row references)
         // Pass changed_columns to skip indexes that don't involve any modified columns
         database.update_indexes_for_update(
-            &stmt.table_name,
+            table_name,
             &old_row,
             &new_row,
             row_index,
@@ -629,7 +639,7 @@ impl UpdateExecutor {
 
         // Apply the update directly (transfers ownership of new_row, no clone needed)
         let table_mut = database
-            .get_table_mut(&stmt.table_name)
+            .get_table_mut(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Use unchecked variant - row is already validated above
@@ -653,6 +663,9 @@ impl UpdateExecutor {
         schema: &vibesql_catalog::TableSchema,
         row_index: usize,
     ) -> Result<Option<usize>, ExecutorError> {
+        // Use canonical table name from schema for all storage operations
+        let table_name = &schema.name;
+
         // Collect all literal updates that can be done in-place
         let mut inplace_updates: Vec<(usize, vibesql_types::SqlValue)> = Vec::new();
 
@@ -696,7 +709,7 @@ impl UpdateExecutor {
             }
 
             // Check no user-defined indexes on this column
-            if database.has_index_on_column(&stmt.table_name, &assignment.column) {
+            if database.has_index_on_column(table_name, &assignment.column) {
                 return Ok(None); // Index update needs normal path
             }
 
@@ -709,7 +722,7 @@ impl UpdateExecutor {
         }
 
         let table_mut = database
-            .get_table_mut(&stmt.table_name)
+            .get_table_mut(table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
         // Apply all column updates in-place (no row cloning!)

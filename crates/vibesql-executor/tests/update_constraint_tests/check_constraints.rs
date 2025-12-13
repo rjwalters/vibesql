@@ -18,6 +18,7 @@ fn test_update_check_constraint_passes() {
 
     // Update to valid price (should succeed)
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "products".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
@@ -40,6 +41,7 @@ fn test_update_check_constraint_violation() {
 
     // Try to update to negative price (should fail)
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "products".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
@@ -69,6 +71,7 @@ fn test_update_check_constraint_with_null() {
 
     // Update to NULL (should succeed - NULL is treated as UNKNOWN which passes CHECK)
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "products".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
@@ -95,6 +98,7 @@ fn test_update_check_constraint_with_expression() {
 
     // Update bonus to still be less than salary (should succeed)
     let stmt1 = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "bonus".to_string(),
@@ -107,6 +111,7 @@ fn test_update_check_constraint_with_expression() {
 
     // Try to update bonus to be >= salary (should fail)
     let stmt2 = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "bonus".to_string(),

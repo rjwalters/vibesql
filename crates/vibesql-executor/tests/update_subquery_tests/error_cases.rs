@@ -58,6 +58,7 @@ fn test_update_with_subquery_multiple_rows_error() {
     });
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
@@ -138,6 +139,7 @@ fn test_update_with_subquery_multiple_columns_error() {
     });
 
     let stmt = UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),

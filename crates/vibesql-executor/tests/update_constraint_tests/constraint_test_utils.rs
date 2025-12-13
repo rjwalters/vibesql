@@ -170,6 +170,7 @@ pub fn create_update_with_id_clause(
     id: i64,
 ) -> vibesql_ast::UpdateStmt {
     vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: table_name.to_string(),
         assignments: vec![Assignment {
             column: column.to_string(),

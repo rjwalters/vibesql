@@ -33,7 +33,7 @@ fn test_on_duplicate_key_update_basic() {
     setup_products_table(&mut db);
 
     // Initial INSERT: INSERT INTO products VALUES (1, 'Widget', 10)
-    let initial_stmt = vibesql_ast::InsertStmt {
+    let initial_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -52,7 +52,7 @@ fn test_on_duplicate_key_update_basic() {
 
     // Upsert: INSERT INTO products VALUES (1, 'Widget', 20) ON DUPLICATE KEY UPDATE stock =
     // VALUES(stock)
-    let upsert_stmt = vibesql_ast::InsertStmt {
+    let upsert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -89,7 +89,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
     setup_products_table(&mut db);
 
     // Initial INSERT
-    let initial_stmt = vibesql_ast::InsertStmt {
+    let initial_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -106,7 +106,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
     InsertExecutor::execute(&mut db, &initial_stmt).unwrap();
 
     // Upsert with arithmetic: stock = stock + VALUES(stock)
-    let upsert_stmt = vibesql_ast::InsertStmt {
+    let upsert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -149,7 +149,7 @@ fn test_on_duplicate_key_update_no_conflict() {
     setup_products_table(&mut db);
 
     // INSERT with ON DUPLICATE KEY UPDATE - no conflict, should insert normally
-    let upsert_stmt = vibesql_ast::InsertStmt {
+    let upsert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![

@@ -232,6 +232,7 @@ fn test_not_in_delete_where() {
 
     // DELETE FROM tab0 WHERE NOT (col0 < 542)
     let stmt = vibesql_ast::DeleteStmt {
+        quoted: false,
         only: false,
         table_name: "tab0".to_string(),
         where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::UnaryOp {

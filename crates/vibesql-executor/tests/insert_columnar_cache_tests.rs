@@ -27,7 +27,7 @@ fn setup_products_table(db: &mut Database) {
 
 /// Helper to insert a row into products table
 fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
-    let stmt = vibesql_ast::InsertStmt {
+    let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -153,7 +153,7 @@ fn test_multi_row_insert_invalidates_cache() {
     let stats_before = db.columnar_cache_stats();
 
     // Multi-row INSERT
-    let stmt = vibesql_ast::InsertStmt {
+    let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![
@@ -231,7 +231,7 @@ fn test_insert_select_invalidates_cache() {
 
     // Populate source table
     let insert_source = |db: &mut Database, id: i64, name: &str, price: i64| {
-        let stmt = vibesql_ast::InsertStmt {
+        let stmt = vibesql_ast::InsertStmt { quoted: false,
             table_name: "source_products".to_string(),
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -275,7 +275,7 @@ fn test_insert_select_invalidates_cache() {
             values: None,
     };
 
-    let insert_stmt = vibesql_ast::InsertStmt {
+    let insert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),

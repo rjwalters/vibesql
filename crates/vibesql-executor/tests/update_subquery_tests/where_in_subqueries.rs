@@ -73,6 +73,7 @@ fn test_update_where_in_subquery() {
 
     // UPDATE employees SET salary = 80000 WHERE dept_id IN (SELECT dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
@@ -157,6 +158,7 @@ fn test_update_where_not_in_subquery() {
 
     // UPDATE employees SET active = FALSE WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "active".to_string(),
@@ -234,6 +236,7 @@ fn test_update_where_subquery_empty_result() {
 
     // UPDATE employees SET active = FALSE WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
     let stmt = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "active".to_string(),
@@ -326,6 +329,7 @@ fn test_update_where_complex_subquery_condition() {
     // UPDATE employees SET salary = 70000 WHERE dept_id IN (SELECT dept_id FROM departments WHERE
     // budget > 80000)
     let stmt = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
@@ -414,6 +418,7 @@ fn test_update_where_multiple_rows_in_subquery() {
 
     // UPDATE employees SET active = FALSE WHERE dept_id IN (SELECT dept_id FROM active_depts)
     let stmt = vibesql_ast::UpdateStmt {
+        quoted: false,
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "active".to_string(),

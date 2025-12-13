@@ -118,7 +118,7 @@ fn test_transaction_insert_commit() {
         .unwrap();
 
     // Insert a row
-    let insert_stmt = InsertStmt {
+    let insert_stmt = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -153,7 +153,7 @@ fn test_transaction_insert_rollback() {
         .unwrap();
 
     // Insert a row
-    let insert_stmt = InsertStmt {
+    let insert_stmt = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -184,7 +184,7 @@ fn test_transaction_multiple_operations_commit() {
     setup_test_table(&mut db);
 
     // Insert initial data outside transaction
-    let insert_stmt1 = InsertStmt {
+    let insert_stmt1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -201,7 +201,7 @@ fn test_transaction_multiple_operations_commit() {
         .unwrap();
 
     // Insert another row
-    let insert_stmt2 = InsertStmt {
+    let insert_stmt2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -231,7 +231,7 @@ fn test_transaction_multiple_operations_rollback() {
     setup_test_table(&mut db);
 
     // Insert initial data outside transaction
-    let insert_stmt1 = InsertStmt {
+    let insert_stmt1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -248,7 +248,7 @@ fn test_transaction_multiple_operations_rollback() {
         .unwrap();
 
     // Insert another row
-    let insert_stmt2 = InsertStmt {
+    let insert_stmt2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -286,7 +286,7 @@ fn test_transaction_isolation() {
     // db1 begins transaction and inserts
     BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db1)
         .unwrap();
-    let insert_stmt = InsertStmt {
+    let insert_stmt = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -324,7 +324,7 @@ fn test_transaction_nested_operations() {
 
     // Insert multiple rows
     for i in 1..=5 {
-        let insert_stmt = InsertStmt {
+        let insert_stmt = InsertStmt { quoted: false,
             table_name: "users".to_string(),
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -358,7 +358,7 @@ fn test_transaction_empty_rollback() {
     setup_test_table(&mut db);
 
     // Insert data outside transaction
-    let insert_stmt = InsertStmt {
+    let insert_stmt = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -390,7 +390,7 @@ fn test_multiple_transactions() {
     // First transaction
     BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
         .unwrap();
-    let insert_stmt1 = InsertStmt {
+    let insert_stmt1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -406,7 +406,7 @@ fn test_multiple_transactions() {
     // Second transaction
     BeginTransactionExecutor::execute(&BeginStmt { durability: DurabilityHint::Default }, &mut db)
         .unwrap();
-    let insert_stmt2 = InsertStmt {
+    let insert_stmt2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
