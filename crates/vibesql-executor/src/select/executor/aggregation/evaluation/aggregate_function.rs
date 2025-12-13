@@ -130,9 +130,10 @@ pub(super) fn evaluate(
     // This counts distinct combinations of values
     if name.to_uppercase() == "COUNT" && args.len() > 1 {
         if !distinct {
-            return Err(ExecutorError::UnsupportedExpression(
-                "Multi-argument COUNT requires DISTINCT".to_string(),
-            ));
+            // SQLite-compatible error message
+            return Err(ExecutorError::WrongNumberOfArguments {
+                function_name: name.clone(),
+            });
         }
 
         // Evaluate all arguments for each row and accumulate as tuples

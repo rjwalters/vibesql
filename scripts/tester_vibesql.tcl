@@ -144,7 +144,25 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "misuse of aggregate function"
     }
 
-    # "misuse of aggregate function min()" for aggregate in wrong context
+    # SQLite-compatible aggregate error messages
+    # VibeSQL now produces these exact formats, so pass through if already correct:
+
+    # "misuse of aggregate: X()" - for execution context errors (ORDER BY, etc.)
+    if {[regexp -nocase {^misuse of aggregate:\s*([A-Za-z_]+)\(\)$} $error_msg -> func_name]} {
+        return "misuse of aggregate: [string tolower $func_name]()"
+    }
+
+    # "misuse of aggregate function X()" - for name resolution errors (nested aggregates, WHERE)
+    if {[regexp -nocase {^misuse of aggregate function\s*([A-Za-z_]+)\(\)$} $error_msg -> func_name]} {
+        return "misuse of aggregate function [string tolower $func_name]()"
+    }
+
+    # "misuse of aliased aggregate X" - for aliased aggregate misuse in HAVING
+    if {[regexp -nocase {^misuse of aliased aggregate\s+([A-Za-z_][A-Za-z0-9_]*)$} $error_msg -> alias_name]} {
+        return "misuse of aliased aggregate $alias_name"
+    }
+
+    # Legacy fallback: transform other aggregate misuse errors
     if {[regexp -nocase {aggregate.*misuse|misuse.*aggregate|cannot use aggregate} $error_msg]} {
         # Try to extract function name
         if {[regexp -nocase {(min|max|sum|avg|count|total|group_concat)} $error_msg -> func_name]} {
@@ -153,16 +171,7 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "misuse of aggregate function"
     }
 
-    # Misuse of aliased aggregate:
-    # "misuse of aliased aggregate m" or "misuse of aliased aggregate cn"
-    if {[regexp -nocase {alias.*aggregate|aggregate.*alias} $error_msg -> alias_name]} {
-        if {[regexp -nocase {['"]?([a-z_][a-z0-9_]*)['"]?\s*$} $error_msg -> alias_name]} {
-            return "misuse of aliased aggregate [string tolower $alias_name]"
-        }
-        return "misuse of aliased aggregate"
-    }
-
-    # Aggregate in ORDER BY: "misuse of aggregate: min()"
+    # Legacy: Aggregate in ORDER BY context (for old error messages)
     if {[regexp -nocase {aggregate.*ORDER BY|ORDER BY.*aggregate} $error_msg]} {
         if {[regexp -nocase {(min|max|sum|avg|count)} $error_msg -> func_name]} {
             return "misuse of aggregate: [string tolower $func_name]()"

@@ -53,7 +53,13 @@ pub enum ExecutorError {
     },
     /// Misuse of aggregate function (SQLite-compatible error)
     /// e.g., aggregate in WHERE clause or nested aggregates
+    /// Format: "misuse of aggregate function X()"
     MisuseOfAggregate {
+        function_name: String,
+    },
+    /// Misuse of aggregate in ORDER BY or other execution contexts (SQLite-compatible)
+    /// Format: "misuse of aggregate: X()" (note the colon, not "function")
+    MisuseOfAggregateContext {
         function_name: String,
     },
     /// Misuse of aliased aggregate (SQLite-compatible error)
@@ -490,6 +496,11 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::MisuseOfAggregate { function_name } => {
                 // SQLite-compatible error message format
                 write!(f, "misuse of aggregate function {}()", function_name)
+            }
+            ExecutorError::MisuseOfAggregateContext { function_name } => {
+                // SQLite-compatible error message format for ORDER BY and execution contexts
+                // Note: uses colon instead of "function" to match SQLite's expr.c format
+                write!(f, "misuse of aggregate: {}()", function_name)
             }
             ExecutorError::MisuseOfAliasedAggregate { alias_name } => {
                 // SQLite-compatible error message format
