@@ -108,6 +108,23 @@ impl Token {
             Token::Eof => String::new(),
         }
     }
+
+    /// Generate a SQLite-compatible syntax error message for this token.
+    ///
+    /// SQLite uses the format: `near "TOKEN": syntax error`
+    /// where TOKEN is the actual text that caused the error.
+    ///
+    /// Special cases:
+    /// - EOF (end of input) is reported as `;` (SQLite convention)
+    /// - Keywords are reported in uppercase
+    pub fn syntax_error(&self) -> String {
+        let token_text = match self {
+            Token::Eof => ";".to_string(),
+            Token::Keyword(kw) => kw.to_string().to_uppercase(),
+            _ => self.to_sql(),
+        };
+        format!("near \"{}\": syntax error", token_text)
+    }
 }
 
 impl fmt::Display for Token {

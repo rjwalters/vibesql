@@ -182,8 +182,16 @@ impl Repl {
                 let save_path = path.or_else(|| self.database_path.clone());
                 match save_path {
                     Some(ref p) => {
-                        self.executor.save_database(p)?;
-                        println!("{}", vibe_msg!("database-saved", path = p.as_str()));
+                        // Prevent saving to :memory: which would create a literal file
+                        if is_memory_database(p) {
+                            eprintln!(
+                                "{}",
+                                vibe_msg!("cannot-save-memory-database", path = p.as_str())
+                            );
+                        } else {
+                            self.executor.save_database(p)?;
+                            println!("{}", vibe_msg!("database-saved", path = p.as_str()));
+                        }
                     }
                     None => {
                         eprintln!("{}", vibe_msg!("no-database-file"));

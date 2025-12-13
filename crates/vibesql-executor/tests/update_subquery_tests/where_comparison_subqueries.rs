@@ -60,6 +60,7 @@ fn test_update_where_scalar_subquery_equal() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(55000)),
@@ -139,6 +140,7 @@ fn test_update_where_scalar_subquery_less_than() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "bonus".to_string(),
             value: Expression::Literal(SqlValue::Integer(5000)),
@@ -212,6 +214,7 @@ fn test_update_where_subquery_returns_null() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(60000)),
@@ -295,6 +298,7 @@ fn test_update_where_subquery_with_aggregate() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "discounted".to_string(),
             value: Expression::Literal(SqlValue::Boolean(true)),
@@ -413,6 +417,7 @@ fn test_update_where_and_set_both_use_subqueries() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::ScalarSubquery(set_subquery),

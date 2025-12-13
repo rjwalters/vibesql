@@ -62,6 +62,47 @@ impl Database {
         self.sql_mode.clone()
     }
 
+    // ============================================================================
+    // PRAGMA Settings (SQLite compatibility)
+    // ============================================================================
+
+    /// Get the full_column_names PRAGMA setting
+    ///
+    /// When ON, column names in result sets use "table.column" format
+    pub fn full_column_names(&self) -> bool {
+        match self.get_session_variable("FULL_COLUMN_NAMES") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF
+        }
+    }
+
+    /// Set the full_column_names PRAGMA setting
+    pub fn set_full_column_names(&mut self, value: bool) {
+        self.set_session_variable(
+            "FULL_COLUMN_NAMES",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
+    /// Get the short_column_names PRAGMA setting
+    ///
+    /// When ON (default), column names use just the column name (e.g., "f1")
+    /// When OFF, column names may include expression text
+    pub fn short_column_names(&self) -> bool {
+        match self.get_session_variable("SHORT_COLUMN_NAMES") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => true, // Default: ON
+        }
+    }
+
+    /// Set the short_column_names PRAGMA setting
+    pub fn set_short_column_names(&mut self, value: bool) {
+        self.set_session_variable(
+            "SHORT_COLUMN_NAMES",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     /// Set the SQL compatibility mode at runtime
     ///
     /// This allows changing the SQL dialect (MySQL, SQLite, etc.) during a session.

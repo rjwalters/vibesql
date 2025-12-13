@@ -235,6 +235,7 @@ fn test_not_in_delete_where() {
         quoted: false,
         only: false,
         table_name: "tab0".to_string(),
+        quoted: false,
         where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {

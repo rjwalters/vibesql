@@ -82,6 +82,6 @@ impl Parser {
             return Ok(expr);
         }
 
-        Err(ParseError { message: format!("Expected expression, found {:?}", self.peek()) })
+        Err(ParseError { message: self.peek().syntax_error() })
     }
 }

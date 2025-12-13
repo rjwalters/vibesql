@@ -48,6 +48,7 @@ fn test_auto_increment_basic_inserts() {
     // Insert without specifying id - should auto-generate 1
     let insert1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             SqlValue::Varchar(arcstr::ArcStr::from("alice")),
@@ -61,6 +62,7 @@ fn test_auto_increment_basic_inserts() {
     // Insert without specifying id - should auto-generate 2
     let insert2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             SqlValue::Varchar(arcstr::ArcStr::from("bob")),
@@ -168,6 +170,7 @@ fn test_last_insert_rowid_basic() {
     // Insert first row - should auto-generate id=1
     let insert1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             SqlValue::Varchar(arcstr::ArcStr::from("alice")),
@@ -184,6 +187,7 @@ fn test_last_insert_rowid_basic() {
     // Insert second row - should auto-generate id=2
     let insert2 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["username".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             SqlValue::Varchar(arcstr::ArcStr::from("bob")),
@@ -238,6 +242,7 @@ fn test_last_insert_rowid_multi_row_insert() {
     // Multi-row insert - per MySQL semantics, LAST_INSERT_ID returns the FIRST generated ID
     let multi_insert = InsertStmt { quoted: false,
         table_name: "items".to_string(),
+        quoted: false,
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![
             vec![vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
@@ -308,6 +313,7 @@ fn test_last_insert_rowid_no_auto_increment() {
     // Insert with explicit ID - no auto-generation
     let insert1 = InsertStmt { quoted: false,
         table_name: "manual".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "name".to_string()],
         source: InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(100)),
@@ -365,6 +371,7 @@ fn test_last_insert_rowid_via_select() {
     // Insert a row
     let insert1 = InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
             SqlValue::Varchar(arcstr::ArcStr::from("alice")),

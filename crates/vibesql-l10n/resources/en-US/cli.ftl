@@ -166,6 +166,7 @@ help-example-errors = \errors
 format-changed = Output format set to: { $format }
 database-saved = Database saved to: { $path }
 no-database-file = Error: No database file specified. Use \save <filename> or start with --database flag
+cannot-save-memory-database = Error: Cannot save to '{ $path }' - this is the in-memory database identifier, not a file path. Use \save <filename> instead.
 
 # =============================================================================
 # Error Display

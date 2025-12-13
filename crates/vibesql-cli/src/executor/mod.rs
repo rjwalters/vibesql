@@ -386,6 +386,9 @@ impl SqlExecutor {
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
             }
+            vibesql_ast::Statement::Pragma(pragma_stmt) => {
+                result = self.execute_pragma(&pragma_stmt)?;
+            }
             _ => {
                 return Err(anyhow::anyhow!("Statement type not yet supported in CLI"));
             }
@@ -703,6 +706,109 @@ impl SqlExecutor {
             where_clause: None,
         };
         self.execute_show_columns(&show_stmt)
+    }
+
+    /// Execute PRAGMA statement
+    ///
+    /// Implements SQLite-compatible PRAGMA statements for session configuration.
+    /// Supports:
+    /// - PRAGMA full_column_names (get/set)
+    /// - PRAGMA short_column_names (get/set)
+    fn execute_pragma(
+        &mut self,
+        stmt: &vibesql_ast::PragmaStmt,
+    ) -> anyhow::Result<QueryResult> {
+        let pragma_name = stmt.name.to_uppercase();
+
+        // Handle setting vs querying
+        if let Some(value) = &stmt.value {
+            // SET operation
+            let bool_value = pragma_value_to_bool(value);
+
+            match pragma_name.as_str() {
+                "FULL_COLUMN_NAMES" => {
+                    self.db.set_full_column_names(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "SHORT_COLUMN_NAMES" => {
+                    self.db.set_short_column_names(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                _ => {
+                    // Unknown pragma - silently ignore for SQLite compatibility
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+            }
+        } else {
+            // QUERY operation - return current value
+            match pragma_name.as_str() {
+                "FULL_COLUMN_NAMES" => {
+                    let value = if self.db.full_column_names() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["full_column_names".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "SHORT_COLUMN_NAMES" => {
+                    let value = if self.db.short_column_names() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["short_column_names".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                _ => {
+                    // Unknown pragma - return empty result for compatibility
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+            }
+        }
+    }
+}
+
+/// Convert PRAGMA value to boolean
+/// ON/1/TRUE -> true, OFF/0/FALSE -> false
+fn pragma_value_to_bool(value: &vibesql_ast::PragmaValue) -> bool {
+    match value {
+        vibesql_ast::PragmaValue::Identifier(ident) => {
+            let upper = ident.to_uppercase();
+            matches!(upper.as_str(), "ON" | "TRUE" | "YES")
+        }
+        vibesql_ast::PragmaValue::Number(num) => num != "0",
+        vibesql_ast::PragmaValue::SignedNumber(num) => num != "0" && num != "-0",
+        vibesql_ast::PragmaValue::String(s) => {
+            let upper = s.to_uppercase();
+            matches!(upper.as_str(), "ON" | "TRUE" | "YES" | "1")
+        }
     }
 }
 

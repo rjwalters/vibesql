@@ -235,10 +235,10 @@ fn test_parse_derived_table_without_alias() {
             // FROM clause should be a Subquery with auto-generated alias
             match &select.from {
                 Some(vibesql_ast::FromClause::Subquery { alias, .. }) => {
-                    // Alias should start with __derived_
+                    // Alias should start with (subquery-
                     assert!(
-                        alias.starts_with("__derived_"),
-                        "Expected auto-generated alias starting with __derived_, got: {}",
+                        alias.starts_with("(subquery-"),
+                        "Expected auto-generated alias starting with (subquery-, got: {}",
                         alias
                     );
                 }
@@ -281,7 +281,7 @@ fn test_parse_derived_table_comma_join_without_alias() {
                     match right.as_ref() {
                         vibesql_ast::FromClause::Subquery { alias, .. } => {
                             assert!(
-                                alias.starts_with("__derived_"),
+                                alias.starts_with("(subquery-"),
                                 "Expected auto-generated alias, got: {}",
                                 alias
                             );
@@ -316,9 +316,9 @@ fn test_parse_multiple_derived_tables_without_aliases() {
                         _ => panic!("Expected Subquery on right side"),
                     };
 
-                    // Both should start with __derived_ and be unique
-                    assert!(left_alias.starts_with("__derived_"));
-                    assert!(right_alias.starts_with("__derived_"));
+                    // Both should start with (subquery- and be unique
+                    assert!(left_alias.starts_with("(subquery-"));
+                    assert!(right_alias.starts_with("(subquery-"));
                     assert_ne!(left_alias, right_alias, "Aliases should be unique");
                 }
                 _ => panic!("Expected Join in FROM clause"),
@@ -339,12 +339,12 @@ fn test_parse_nested_derived_tables_without_aliases() {
             match &select.from {
                 Some(vibesql_ast::FromClause::Subquery { query, alias, .. }) => {
                     // Outer subquery should have auto-generated alias
-                    assert!(alias.starts_with("__derived_"));
+                    assert!(alias.starts_with("(subquery-"));
 
                     // Inner subquery should also have auto-generated alias
                     match &query.from {
                         Some(vibesql_ast::FromClause::Subquery { alias: inner_alias, .. }) => {
-                            assert!(inner_alias.starts_with("__derived_"));
+                            assert!(inner_alias.starts_with("(subquery-"));
                         }
                         _ => panic!("Expected nested Subquery"),
                     }
@@ -368,7 +368,7 @@ fn test_parse_derived_table_with_limit_without_alias() {
                 Some(vibesql_ast::FromClause::Join { right, .. }) => {
                     match right.as_ref() {
                         vibesql_ast::FromClause::Subquery { query, alias, .. } => {
-                            assert!(alias.starts_with("__derived_"));
+                            assert!(alias.starts_with("(subquery-"));
                             // Verify LIMIT is parsed
                             assert!(query.limit.is_some());
                         }

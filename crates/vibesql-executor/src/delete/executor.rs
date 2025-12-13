@@ -72,6 +72,7 @@ impl DeleteExecutor {
     /// let stmt = DeleteStmt {
     ///     only: false,
     ///     table_name: "users".to_string(),
+    ///     quoted: false,
     ///     where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
     ///         left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
     ///         op: BinaryOperator::Equal,

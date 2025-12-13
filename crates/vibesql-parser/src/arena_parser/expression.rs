@@ -531,7 +531,7 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(first_expr);
         }
 
-        Err(ParseError { message: format!("Expected expression, found {:?}", self.peek()) })
+        Err(ParseError { message: self.peek().syntax_error() })
     }
 
     /// Parse literal values.
@@ -1007,11 +1007,7 @@ impl<'arena> ArenaParser<'arena> {
             Token::Keyword(Keyword::Interval) => "INTERVAL".to_string(),
             Token::Keyword(Keyword::Character) => "CHARACTER".to_string(),
             Token::Keyword(Keyword::Boolean) => "BOOLEAN".to_string(),
-            _ => {
-                return Err(ParseError {
-                    message: format!("Expected data type, found {:?}", self.peek()),
-                })
-            }
+            _ => return Err(ParseError { message: self.peek().syntax_error() })
         };
         self.advance();
 

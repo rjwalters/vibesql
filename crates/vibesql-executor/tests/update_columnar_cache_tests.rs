@@ -54,6 +54,7 @@ fn test_update_invalidates_columnar_cache() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(55000)),
@@ -119,6 +120,7 @@ fn test_update_invalidates_prewarmed_cache() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(75000)),
@@ -158,6 +160,7 @@ fn test_update_all_rows_invalidates_cache() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(60000)),
@@ -191,6 +194,7 @@ fn test_update_no_match_does_not_invalidate_cache() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(999999)),
@@ -229,6 +233,7 @@ fn test_multiple_updates_invalidate_cache() {
     let stmt1 = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(50000)),
@@ -253,6 +258,7 @@ fn test_multiple_updates_invalidate_cache() {
     let stmt2 = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(55000)),
@@ -293,6 +299,7 @@ fn test_update_multiple_columns_invalidates_cache() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![
             Assignment {
                 column: "salary".to_string(),

@@ -162,6 +162,7 @@ fn test_update_unique_constraint_composite() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         assignments: vec![
             Assignment {
                 column: "first_name".to_string(),

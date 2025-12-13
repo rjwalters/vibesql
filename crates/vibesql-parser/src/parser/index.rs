@@ -721,9 +721,7 @@ impl Parser {
                     }),
                 }
             }
-            _ => Err(ParseError {
-                message: format!("Expected PRAGMA value, found {:?}", self.peek()),
-            }),
+            _ => Err(ParseError { message: self.peek().syntax_error() })
         }
     }
 }

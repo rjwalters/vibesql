@@ -29,6 +29,7 @@ fn setup_products_table(db: &mut Database) {
 fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -45,6 +46,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
 fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -204,6 +206,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
     let insert = |db: &mut Database, id: i64, name: &str, score: i64| {
         let stmt = vibesql_ast::InsertStmt { quoted: false,
             table_name: "users".to_string(),
+        quoted: false,
             columns: vec![],
             source: vibesql_ast::InsertSource::Values(vec![vec![
                 vibesql_ast::Expression::Literal(SqlValue::Integer(id)),
@@ -225,6 +228,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
     // ON DUPLICATE KEY UPDATE with same name (unique key conflict) - should update existing row
     let upsert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(3)), // Different id
@@ -306,6 +310,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
     // ON DUPLICATE KEY UPDATE with arithmetic: stock = stock + VALUES(stock)
     let upsert_stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "products".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(1)),

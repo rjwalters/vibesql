@@ -103,6 +103,7 @@ fn test_onepass_multiple_literal_assignments() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "items".to_string(),
+        quoted: false,
         assignments: vec![
             Assignment {
                 column: "name".to_string(),
@@ -149,6 +150,7 @@ fn test_onepass_single_literal_assignment() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "price".to_string(),
             value: Expression::Literal(SqlValue::Integer(777)),
@@ -177,6 +179,7 @@ fn test_onepass_pk_not_found_returns_zero() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "price".to_string(),
             value: Expression::Literal(SqlValue::Integer(999)),
@@ -214,6 +217,7 @@ fn test_onepass_not_null_constraint_enforced() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "required".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "required_field".to_string(),
             value: Expression::Literal(SqlValue::Null),
@@ -243,6 +247,7 @@ fn test_composite_pk_update_both_columns_specified() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "order_items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "quantity".to_string(),
             value: Expression::Literal(SqlValue::Integer(99)),
@@ -292,6 +297,7 @@ fn test_composite_pk_update_reversed_order() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "order_items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "price".to_string(),
             value: Expression::Literal(SqlValue::Integer(500)),
@@ -336,6 +342,7 @@ fn test_composite_pk_partial_match_uses_scan() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "order_items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "quantity".to_string(),
             value: Expression::Literal(SqlValue::Integer(1)),
@@ -367,6 +374,7 @@ fn test_composite_pk_not_found_returns_zero() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "order_items".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "quantity".to_string(),
             value: Expression::Literal(SqlValue::Integer(999)),
@@ -405,6 +413,7 @@ fn test_composite_pk_multiple_columns_updated() {
     let stmt = UpdateStmt {
         quoted: false,
         table_name: "order_items".to_string(),
+        quoted: false,
         assignments: vec![
             Assignment {
                 column: "quantity".to_string(),

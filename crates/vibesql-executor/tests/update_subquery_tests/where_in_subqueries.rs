@@ -75,6 +75,7 @@ fn test_update_where_in_subquery() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(80000)),
@@ -160,6 +161,7 @@ fn test_update_where_not_in_subquery() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "active".to_string(),
             value: Expression::Literal(SqlValue::Boolean(false)),
@@ -238,6 +240,7 @@ fn test_update_where_subquery_empty_result() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "active".to_string(),
             value: Expression::Literal(SqlValue::Boolean(false)),
@@ -331,6 +334,7 @@ fn test_update_where_complex_subquery_condition() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "salary".to_string(),
             value: Expression::Literal(SqlValue::Integer(70000)),
@@ -420,6 +424,7 @@ fn test_update_where_multiple_rows_in_subquery() {
     let stmt = vibesql_ast::UpdateStmt {
         quoted: false,
         table_name: "employees".to_string(),
+        quoted: false,
         assignments: vec![Assignment {
             column: "active".to_string(),
             value: Expression::Literal(SqlValue::Boolean(false)),

@@ -27,6 +27,7 @@ fn test_character_varying_column_with_length() {
     // INSERT INTO test_cv VALUES (1, 'Test description')
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "test_cv".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -71,6 +72,7 @@ fn test_character_varying_column_without_length() {
     // INSERT INTO test_cv_nolen VALUES (1, 'Unlimited length text')
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "test_cv_nolen".to_string(),
+        quoted: false,
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -119,6 +121,7 @@ fn test_insert_with_default_value() {
     // INSERT INTO users (id, name) VALUES (DEFAULT, 'Alice')
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "name".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Default,
@@ -165,6 +168,7 @@ fn test_insert_default_no_default_value_defined() {
     // INSERT INTO users (id, name) VALUES (DEFAULT, 'Alice')
     let stmt = vibesql_ast::InsertStmt { quoted: false,
         table_name: "users".to_string(),
+        quoted: false,
         columns: vec!["id".to_string(), "name".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
             vibesql_ast::Expression::Default,
