@@ -30,6 +30,11 @@ set ::failList {}
 set ::sql_batch {}
 set ::in_transaction 0
 
+# PRAGMA state tracking - persists across process invocations
+# These are prepended to every SQL execution to maintain consistent state
+set ::pragma_full_column_names 0   ;# Default: OFF
+set ::pragma_short_column_names 1  ;# Default: ON
+
 #-----------------------------------------------------------------------------
 # SQLite Error Message Compatibility Layer
 #-----------------------------------------------------------------------------
@@ -241,6 +246,53 @@ proc translate_error_to_sqlite {vibesql_error} {
 # Core SQL execution
 #-----------------------------------------------------------------------------
 
+# Build PRAGMA prefix to prepend to SQL for consistent session state
+proc build_pragma_prefix {} {
+    set prefix ""
+    # For expression mode to work (both OFF), we need to set both PRAGMAs
+    # even when they have "default" values, because the combination matters
+    if {$::pragma_full_column_names != 0 || $::pragma_short_column_names != 1} {
+        # Set both values to ensure consistent state
+        append prefix "PRAGMA full_column_names=$::pragma_full_column_names;\n"
+        append prefix "PRAGMA short_column_names=$::pragma_short_column_names;\n"
+    }
+    return $prefix
+}
+
+# Track PRAGMA settings when they are executed
+# Handles both single PRAGMA statements and multi-statement SQL blocks
+proc track_pragma_setting {sql} {
+    set found 0
+    # Extract PRAGMA name and value - can appear anywhere in the SQL
+    # Patterns: PRAGMA name=value, PRAGMA name(value), PRAGMA name = value
+
+    # Look for full_column_names settings (find all occurrences, use last one)
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?full_column_names\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_full_column_names 1
+        } else {
+            set ::pragma_full_column_names 0
+        }
+        set found 1
+    }
+
+    # Look for short_column_names settings (find all occurrences, use last one)
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?short_column_names\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_short_column_names 1
+        } else {
+            set ::pragma_short_column_names 0
+        }
+        set found 1
+    }
+
+    return $found
+}
+
 proc flush_batch {} {
     # Execute accumulated SQL statements
     if {[llength $::sql_batch] == 0} return
@@ -264,10 +316,13 @@ proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
 
+    # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
+    track_pragma_setting $sql
+
     # Handle SQLite-specific statements
     set sql_upper [string toupper [string trim $sql]]
 
-    # Allow PRAGMA full_column_names and short_column_names through
+    # Skip unsupported PRAGMAs but allow column_names through
     if {[string match "PRAGMA*" $sql_upper]} {
         # Parse PRAGMA name from the statement
         # Patterns: PRAGMA name, PRAGMA name=value, PRAGMA name(value)
@@ -303,11 +358,13 @@ proc execsql {sql {db ""}} {
     }
 
     # Direct execution for non-transaction SQL
+    # Build PRAGMA prefix to maintain session state across process invocations
+    set pragma_prefix [build_pragma_prefix]
     # Use raw format for proper NULL handling:
     # - Actual NULL values become empty strings
     # - The literal string 'NULL' remains as "NULL"
     # This matches SQLite TCL interface behavior
-    set raw_sql ".mode raw\n$sql"
+    set raw_sql ".mode raw\n${pragma_prefix}$sql"
 
     # Use catch to handle process errors and translate them to SQLite format
     if {$::db_file eq ""} {
@@ -462,10 +519,18 @@ proc parse_result_with_headers {output} {
 
 proc execsql_with_headers {sql {db ""}} {
     # Execute SQL and return {headers rows} for iteration
+
+    # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
+    track_pragma_setting $sql
+
+    # Build PRAGMA prefix to maintain session state across process invocations
+    set pragma_prefix [build_pragma_prefix]
+    set prefixed_sql "${pragma_prefix}$sql"
+
     if {$::db_file eq ""} {
-        set result [exec echo $sql | $::vibesql_path 2>@1]
+        set result [exec echo $prefixed_sql | $::vibesql_path 2>@1]
     } else {
-        set result [exec echo $sql | $::vibesql_path $::db_file 2>@1]
+        set result [exec echo $prefixed_sql | $::vibesql_path $::db_file 2>@1]
     }
 
     return [parse_result_with_headers $result]
@@ -486,6 +551,9 @@ proc execsql2 {sql {db ""}} {
     #   Array becomes: data(a)=3, data(b)=4 (last values)
     #   Output: a 3 b 4 a 3 b 4 (using last value for each column name occurrence)
 
+    # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
+    track_pragma_setting $sql
+
     # Handle SQLite-specific statements
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
@@ -497,10 +565,14 @@ proc execsql2 {sql {db ""}} {
         }
     }
 
+    # Build PRAGMA prefix to maintain session state across process invocations
+    set pragma_prefix [build_pragma_prefix]
+    set prefixed_sql "${pragma_prefix}$sql"
+
     if {$::db_file eq ""} {
-        set result [exec echo $sql | $::vibesql_path 2>@1]
+        set result [exec echo $prefixed_sql | $::vibesql_path 2>@1]
     } else {
-        set result [exec echo $sql | $::vibesql_path $::db_file 2>@1]
+        set result [exec echo $prefixed_sql | $::vibesql_path $::db_file 2>@1]
     }
 
     # Parse with headers
@@ -639,6 +711,10 @@ proc sqlite3 {db filename args} {
         file delete -force $::db_file
     }
 
+    # Reset PRAGMA state to defaults for new database
+    set ::pragma_full_column_names 0
+    set ::pragma_short_column_names 1
+
     # Create db command alias - if name is not "db" (which already exists)
     # create an alias to the global db proc
     if {$db ne "db"} {
@@ -748,6 +824,9 @@ proc reset_db {} {
     if {$::db_file ne "" && [file exists $::db_file]} {
         file delete -force $::db_file
     }
+    # Reset PRAGMA state to defaults
+    set ::pragma_full_column_names 0
+    set ::pragma_short_column_names 1
 }
 
 proc forcedelete {args} {
