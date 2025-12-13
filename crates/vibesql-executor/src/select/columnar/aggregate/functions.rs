@@ -130,12 +130,12 @@ pub(super) fn compute_sum(
         }
     }
 
-    // Return appropriate type based on input types
+    // SQLite's SUM() always returns REAL (float) for numeric values
     Ok(if count > 0 {
         if has_float {
-            SqlValue::Double(float_sum)
+            SqlValue::Numeric(float_sum)
         } else {
-            SqlValue::Integer(int_sum)
+            SqlValue::Numeric(int_sum as f64)
         }
     } else {
         SqlValue::Null
@@ -166,11 +166,15 @@ pub(super) fn compute_avg(
     let count_result = compute_count(scan, filter_bitmap)?;
 
     match (sum_result, count_result) {
-        (SqlValue::Integer(sum), SqlValue::Integer(count)) if count > 0 => {
-            Ok(SqlValue::Double(sum as f64 / count as f64))
+        (SqlValue::Numeric(sum), SqlValue::Integer(count)) if count > 0 => {
+            Ok(SqlValue::Double(sum / count as f64))
         }
         (SqlValue::Double(sum), SqlValue::Integer(count)) if count > 0 => {
             Ok(SqlValue::Double(sum / count as f64))
+        }
+        (SqlValue::Integer(sum), SqlValue::Integer(count)) if count > 0 => {
+            // For backwards compatibility, though SUM should now return Numeric
+            Ok(SqlValue::Double(sum as f64 / count as f64))
         }
         (SqlValue::Null, _) | (_, SqlValue::Integer(0)) => Ok(SqlValue::Null),
         _ => Err(ExecutorError::UnsupportedExpression("Invalid AVG computation".to_string())),
@@ -297,6 +301,7 @@ pub(super) fn compute_batch_sum(
         batch_columns: batch.column_count(),
     })?;
 
+    // SQLite's SUM() always returns REAL (float) for numeric values
     match column {
         ColumnArray::Int64(values, nulls) => {
             if let Some(null_mask) = nulls {
@@ -310,13 +315,13 @@ pub(super) fn compute_batch_sum(
                 if filtered.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Integer(simd_sum_i64(&filtered)))
+                    Ok(SqlValue::Numeric(simd_sum_i64(&filtered) as f64))
                 }
             } else {
                 if values.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Integer(simd_sum_i64(values)))
+                    Ok(SqlValue::Numeric(simd_sum_i64(values) as f64))
                 }
             }
         }
@@ -331,13 +336,13 @@ pub(super) fn compute_batch_sum(
                 if filtered.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Double(simd_sum_f64(&filtered)))
+                    Ok(SqlValue::Numeric(simd_sum_f64(&filtered)))
                 }
             } else {
                 if values.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Double(simd_sum_f64(values)))
+                    Ok(SqlValue::Numeric(simd_sum_f64(values)))
                 }
             }
         }
@@ -646,11 +651,12 @@ fn compute_mixed_sum(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
     }
 
+    // SQLite's SUM() always returns REAL (float) for numeric values
     Ok(if count > 0 {
         if has_float {
-            SqlValue::Double(float_sum)
+            SqlValue::Numeric(float_sum)
         } else {
-            SqlValue::Integer(int_sum)
+            SqlValue::Numeric(int_sum as f64)
         }
     } else {
         SqlValue::Null

@@ -185,7 +185,8 @@ fn test_having_clause() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
-    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(300));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Numeric(300.0));
 }
 
 /// Test for issue #4432: Detect misuse of aliased aggregates in HAVING clause

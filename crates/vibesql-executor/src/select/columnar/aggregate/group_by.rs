@@ -263,7 +263,8 @@ fn compute_group_aggregate_indexed(
 
             match op {
                 AggregateOp::Sum => {
-                    Ok(SqlValue::Integer(sum_i64_indexed(values, indices, null_slice)))
+                    // SQLite's SUM() always returns REAL (float)
+                    Ok(SqlValue::Numeric(sum_i64_indexed(values, indices, null_slice) as f64))
                 }
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Avg => {
@@ -297,7 +298,8 @@ fn compute_group_aggregate_indexed(
 
             match op {
                 AggregateOp::Sum => {
-                    Ok(SqlValue::Double(sum_f64_indexed(values, indices, null_slice)))
+                    // SQLite's SUM() always returns REAL (Numeric)
+                    Ok(SqlValue::Numeric(sum_f64_indexed(values, indices, null_slice)))
                 }
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Avg => {
@@ -449,12 +451,13 @@ fn compute_group_aggregate_indexed(
             match op {
                 AggregateOp::Count => Ok(SqlValue::Integer(count as i64)),
                 AggregateOp::Sum => {
+                    // SQLite's SUM() always returns REAL (float)
                     let sum: i64 = indices
                         .iter()
                         .filter(|&&i| null_slice.is_none_or(|ns| !ns[i]))
                         .map(|&i| values[i] as i64)
                         .sum();
-                    Ok(SqlValue::Integer(sum))
+                    Ok(SqlValue::Numeric(sum as f64))
                 }
                 AggregateOp::Avg => {
                     let sum: i64 = indices
@@ -805,11 +808,11 @@ mod batch_tests {
 
         // Group A: 10 + 30 + 50 = 90
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("A"))));
-        assert_eq!(sorted[0].get(1), Some(&SqlValue::Integer(90)));
+        assert_eq!(sorted[0].get(1), Some(&SqlValue::Numeric(90.0)));
 
         // Group B: 20 + 40 = 60
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("B"))));
-        assert_eq!(sorted[1].get(1), Some(&SqlValue::Integer(60)));
+        assert_eq!(sorted[1].get(1), Some(&SqlValue::Numeric(60.0)));
     }
 
     #[test]

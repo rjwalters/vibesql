@@ -276,11 +276,12 @@ fn compute_scalar_aggregate(
                 }
             }
 
+            // SQLite's SUM() always returns REAL (float)
             Ok(if count > 0 {
                 if has_float {
-                    SqlValue::Double(float_sum)
+                    SqlValue::Numeric(float_sum)
                 } else {
-                    SqlValue::Integer(int_sum)
+                    SqlValue::Numeric(int_sum as f64)
                 }
             } else {
                 SqlValue::Null
@@ -315,11 +316,14 @@ fn compute_scalar_aggregate(
             )?;
 
             match (sum_result, count_result) {
-                (SqlValue::Integer(sum), SqlValue::Integer(count)) if count > 0 => {
-                    Ok(SqlValue::Double(sum as f64 / count as f64))
+                (SqlValue::Numeric(sum), SqlValue::Integer(count)) if count > 0 => {
+                    Ok(SqlValue::Double(sum / count as f64))
                 }
                 (SqlValue::Double(sum), SqlValue::Integer(count)) if count > 0 => {
                     Ok(SqlValue::Double(sum / count as f64))
+                }
+                (SqlValue::Integer(sum), SqlValue::Integer(count)) if count > 0 => {
+                    Ok(SqlValue::Double(sum as f64 / count as f64))
                 }
                 _ => Ok(SqlValue::Null),
             }

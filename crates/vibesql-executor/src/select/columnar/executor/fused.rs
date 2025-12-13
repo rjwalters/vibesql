@@ -164,11 +164,12 @@ fn compute_fused_i64_aggregate(
 ) -> Result<SqlValue, ExecutorError> {
     match op {
         AggregateOp::Sum => {
+            // SQLite's SUM() always returns REAL (float)
             let count = simd_ops::count_filtered(filter_mask);
             if count == 0 {
                 Ok(SqlValue::Null)
             } else {
-                Ok(SqlValue::Integer(simd_ops::sum_i64_filtered(values, filter_mask)))
+                Ok(SqlValue::Numeric(simd_ops::sum_i64_filtered(values, filter_mask) as f64))
             }
         }
         AggregateOp::Count => Ok(SqlValue::Integer(simd_ops::count_filtered(filter_mask))),

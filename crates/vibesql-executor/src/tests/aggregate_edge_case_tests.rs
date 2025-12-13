@@ -285,7 +285,8 @@ fn test_aggregate_with_case_expression() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM of credits only: 100 + 200 = 300 (debit of 50 becomes 0)
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(300));
+    // SQLite's SUM() always returns REAL (float)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(300.0));
 }
 
 #[test]

@@ -77,7 +77,8 @@ fn aggregate_sum(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 operation: "SUM".to_string(),
                 reason: "returned None".to_string(),
             })?;
-            Ok(SqlValue::Integer(sum_val))
+            // SQLite's SUM() always returns REAL (float)
+            Ok(SqlValue::Numeric(sum_val as f64))
         }
         arrow::datatypes::DataType::Float64 => {
             let arr = result_array.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
@@ -90,7 +91,8 @@ fn aggregate_sum(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 operation: "SUM".to_string(),
                 reason: "returned None".to_string(),
             })?;
-            Ok(SqlValue::Double(sum_val))
+            // SQLite's SUM() always returns REAL (Numeric)
+            Ok(SqlValue::Numeric(sum_val))
         }
         _ => Err(ExecutorError::UnsupportedArrayType {
             operation: "SUM".to_string(),
@@ -115,6 +117,9 @@ fn aggregate_avg(
     let count_result = try_simd_aggregate(rows, expr, AggregateOp::Count, schema)?;
 
     match (sum_result, count_result) {
+        (SqlValue::Numeric(sum), SqlValue::Integer(count)) if count > 0 => {
+            Ok(SqlValue::Double(sum / count as f64))
+        }
         (SqlValue::Double(sum), SqlValue::Integer(count)) if count > 0 => {
             Ok(SqlValue::Double(sum / count as f64))
         }
