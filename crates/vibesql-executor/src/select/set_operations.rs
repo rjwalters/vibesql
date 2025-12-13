@@ -26,15 +26,18 @@ pub(super) fn apply_set_operation(
     match set_op.op {
         vibesql_ast::SetOperator::Union => {
             if set_op.all {
-                // UNION ALL: combine all rows from both queries
+                // UNION ALL: combine all rows from both queries (preserves insertion order)
                 let mut result = left;
                 result.extend(right);
                 Ok(result)
             } else {
-                // UNION (DISTINCT): combine and remove duplicates
+                // UNION (DISTINCT): combine, remove duplicates, and sort
+                // SQLite sorts UNION results by all columns in ascending order
                 let mut result = left;
                 result.extend(right);
-                Ok(apply_distinct(result))
+                let mut result = apply_distinct(result);
+                result.sort_by(|a, b| a.values.cmp(&b.values));
+                Ok(result)
             }
         }
 
