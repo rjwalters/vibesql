@@ -863,19 +863,27 @@ fn expression_contains_aggregate(expr: &Expression) -> bool {
 /// inside another aggregate function in the HAVING clause (e.g., `HAVING max(m) < 10`),
 /// it's an error. This function detects such misuse.
 ///
+/// The `schema_columns` set contains column names from the actual table schema.
+/// If a column reference matches an actual table column, it's NOT a reference to an alias,
+/// even if an alias with the same name exists.
+///
 /// Returns Some(alias_name) if misuse is found, None otherwise.
 fn find_aliased_aggregate_misuse_in_expression(
     expr: &Expression,
     aggregate_aliases: &std::collections::HashSet<String>,
+    schema_columns: &std::collections::HashSet<String>,
     inside_aggregate: bool,
 ) -> Option<String> {
     match expr {
         // Check if this is an aggregate function - if so, mark that we're inside one
         Expression::AggregateFunction { args, .. } => {
             for arg in args {
-                if let Some(alias) =
-                    find_aliased_aggregate_misuse_in_expression(arg, aggregate_aliases, true)
-                {
+                if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
+                    arg,
+                    aggregate_aliases,
+                    schema_columns,
+                    true,
+                ) {
                     return Some(alias);
                 }
             }
@@ -895,6 +903,7 @@ fn find_aliased_aggregate_misuse_in_expression(
                 if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                     arg,
                     aggregate_aliases,
+                    schema_columns,
                     new_inside_aggregate,
                 ) {
                     return Some(alias);
@@ -904,6 +913,13 @@ fn find_aliased_aggregate_misuse_in_expression(
         }
         // Column reference - check if it's an aggregate alias used inside an aggregate
         Expression::ColumnRef { table: None, column } => {
+            // If this column exists in the actual table schema, it's a real column reference,
+            // not a reference to a SELECT alias (even if an alias with the same name exists).
+            // Table columns take precedence over aliases in HAVING clause.
+            if schema_columns.contains(&column.to_lowercase()) {
+                return None; // Real column, not an alias reference
+            }
+
             if inside_aggregate && aggregate_aliases.contains(&column.to_lowercase()) {
                 // Found misuse: aggregate alias used inside another aggregate
                 Some(column.clone())
@@ -914,26 +930,39 @@ fn find_aliased_aggregate_misuse_in_expression(
         Expression::ColumnRef { .. } => None, // Qualified refs can't be aliases
         // Recursively check composite expressions
         Expression::BinaryOp { left, right, .. } => {
-            find_aliased_aggregate_misuse_in_expression(left, aggregate_aliases, inside_aggregate)
-                .or_else(|| {
-                    find_aliased_aggregate_misuse_in_expression(
-                        right,
-                        aggregate_aliases,
-                        inside_aggregate,
-                    )
-                })
+            find_aliased_aggregate_misuse_in_expression(
+                left,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
+            .or_else(|| {
+                find_aliased_aggregate_misuse_in_expression(
+                    right,
+                    aggregate_aliases,
+                    schema_columns,
+                    inside_aggregate,
+                )
+            })
         }
-        Expression::UnaryOp { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-        }
-        Expression::Cast { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-        }
+        Expression::UnaryOp { expr, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
+        Expression::Cast { expr, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
         Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
                 if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                     op,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 ) {
                     return Some(alias);
@@ -944,6 +973,7 @@ fn find_aliased_aggregate_misuse_in_expression(
                     if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                         cond,
                         aggregate_aliases,
+                        schema_columns,
                         inside_aggregate,
                     ) {
                         return Some(alias);
@@ -952,6 +982,7 @@ fn find_aliased_aggregate_misuse_in_expression(
                 if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                     &when_clause.result,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 ) {
                     return Some(alias);
@@ -961,35 +992,45 @@ fn find_aliased_aggregate_misuse_in_expression(
                 return find_aliased_aggregate_misuse_in_expression(
                     else_expr,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 );
             }
             None
         }
-        Expression::IsNull { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-        }
-        Expression::Between { expr, low, high, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-                .or_else(|| {
-                    find_aliased_aggregate_misuse_in_expression(
-                        low,
-                        aggregate_aliases,
-                        inside_aggregate,
-                    )
-                })
-                .or_else(|| {
-                    find_aliased_aggregate_misuse_in_expression(
-                        high,
-                        aggregate_aliases,
-                        inside_aggregate,
-                    )
-                })
-        }
+        Expression::IsNull { expr, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
+        Expression::Between { expr, low, high, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        )
+        .or_else(|| {
+            find_aliased_aggregate_misuse_in_expression(
+                low,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
+        })
+        .or_else(|| {
+            find_aliased_aggregate_misuse_in_expression(
+                high,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
+        }),
         Expression::InList { expr, values, .. } => {
             if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                 expr,
                 aggregate_aliases,
+                schema_columns,
                 inside_aggregate,
             ) {
                 return Some(alias);
@@ -998,6 +1039,7 @@ fn find_aliased_aggregate_misuse_in_expression(
                 if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                     val,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 ) {
                     return Some(alias);
@@ -1005,29 +1047,38 @@ fn find_aliased_aggregate_misuse_in_expression(
             }
             None
         }
-        Expression::In { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-        }
-        Expression::Like { expr, pattern, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-                .or_else(|| {
-                    find_aliased_aggregate_misuse_in_expression(
-                        pattern,
-                        aggregate_aliases,
-                        inside_aggregate,
-                    )
-                })
-        }
+        Expression::In { expr, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
+        Expression::Like { expr, pattern, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        )
+        .or_else(|| {
+            find_aliased_aggregate_misuse_in_expression(
+                pattern,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
+        }),
         Expression::Position { substring, string, .. } => {
             find_aliased_aggregate_misuse_in_expression(
                 substring,
                 aggregate_aliases,
+                schema_columns,
                 inside_aggregate,
             )
             .or_else(|| {
                 find_aliased_aggregate_misuse_in_expression(
                     string,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 )
             })
@@ -1037,24 +1088,37 @@ fn find_aliased_aggregate_misuse_in_expression(
                 if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                     rc,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 ) {
                     return Some(alias);
                 }
             }
-            find_aliased_aggregate_misuse_in_expression(string, aggregate_aliases, inside_aggregate)
+            find_aliased_aggregate_misuse_in_expression(
+                string,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
         }
-        Expression::Extract { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-        }
-        Expression::Interval { value, .. } => {
-            find_aliased_aggregate_misuse_in_expression(value, aggregate_aliases, inside_aggregate)
-        }
+        Expression::Extract { expr, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
+        Expression::Interval { value, .. } => find_aliased_aggregate_misuse_in_expression(
+            value,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
         Expression::Conjunction(children) | Expression::Disjunction(children) => {
             for child in children {
                 if let Some(alias) = find_aliased_aggregate_misuse_in_expression(
                     child,
                     aggregate_aliases,
+                    schema_columns,
                     inside_aggregate,
                 ) {
                     return Some(alias);
@@ -1065,21 +1129,35 @@ fn find_aliased_aggregate_misuse_in_expression(
         // Subqueries have their own scope
         Expression::ScalarSubquery(_) | Expression::Exists { .. } => None,
         Expression::QuantifiedComparison { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
+            find_aliased_aggregate_misuse_in_expression(
+                expr,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
         }
         Expression::IsDistinctFrom { left, right, .. } => {
-            find_aliased_aggregate_misuse_in_expression(left, aggregate_aliases, inside_aggregate)
-                .or_else(|| {
-                    find_aliased_aggregate_misuse_in_expression(
-                        right,
-                        aggregate_aliases,
-                        inside_aggregate,
-                    )
-                })
+            find_aliased_aggregate_misuse_in_expression(
+                left,
+                aggregate_aliases,
+                schema_columns,
+                inside_aggregate,
+            )
+            .or_else(|| {
+                find_aliased_aggregate_misuse_in_expression(
+                    right,
+                    aggregate_aliases,
+                    schema_columns,
+                    inside_aggregate,
+                )
+            })
         }
-        Expression::IsTruthValue { expr, .. } => {
-            find_aliased_aggregate_misuse_in_expression(expr, aggregate_aliases, inside_aggregate)
-        }
+        Expression::IsTruthValue { expr, .. } => find_aliased_aggregate_misuse_in_expression(
+            expr,
+            aggregate_aliases,
+            schema_columns,
+            inside_aggregate,
+        ),
         // Other expressions don't contain column refs that could be aggregate aliases
         _ => None,
     }
@@ -1089,9 +1167,14 @@ fn find_aliased_aggregate_misuse_in_expression(
 ///
 /// This should be called after building the aggregate aliases from the SELECT list.
 /// Returns an error if an aggregate alias is used inside another aggregate in HAVING.
+///
+/// The `schema` parameter provides the actual table columns. If a column reference
+/// matches an actual table column, it's not considered an alias reference, even if
+/// an alias with the same name exists in the SELECT list.
 pub fn validate_having_aliased_aggregates(
     having_clause: Option<&Expression>,
     select_list: &[SelectItem],
+    schema: &CombinedSchema,
 ) -> Result<(), ExecutorError> {
     let Some(having_expr) = having_clause else {
         return Ok(());
@@ -1104,10 +1187,20 @@ pub fn validate_having_aliased_aggregates(
         return Ok(()); // No aggregate aliases to check
     }
 
+    // Build the set of actual table column names (lowercase for case-insensitive matching)
+    let schema_columns: std::collections::HashSet<String> = schema
+        .table_schemas
+        .values()
+        .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.to_lowercase()))
+        .collect();
+
     // Check for misuse in HAVING clause
-    if let Some(alias_name) =
-        find_aliased_aggregate_misuse_in_expression(having_expr, &aggregate_aliases, false)
-    {
+    if let Some(alias_name) = find_aliased_aggregate_misuse_in_expression(
+        having_expr,
+        &aggregate_aliases,
+        &schema_columns,
+        false,
+    ) {
         return Err(ExecutorError::MisuseOfAliasedAggregate { alias_name });
     }
 
@@ -1296,10 +1389,31 @@ mod tests {
 
     // Tests for misuse of aliased aggregates (#4432)
 
+    /// Create a schema with f1 and f2 columns (for aliased aggregate tests)
+    fn make_f1_f2_schema() -> CombinedSchema {
+        let columns = vec![
+            ColumnSchema {
+                name: "f1".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "f2".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ];
+        let table_schema = TableSchema::new("test1".to_string(), columns);
+        CombinedSchema::from_table("test1".to_string(), table_schema)
+    }
+
     #[test]
     fn test_having_with_aliased_aggregate_inside_aggregate() {
         // SELECT min(f1) AS m FROM test1 GROUP BY f1 HAVING max(m+5)<10
         // The alias 'm' refers to an aggregate and is used inside max() - should error
+        // Note: 'm' is NOT a column in the table, so it's treated as an alias reference
         let select_list = vec![SelectItem::Expression {
             expr: Expression::AggregateFunction {
                 name: "min".to_string(),
@@ -1325,7 +1439,9 @@ mod tests {
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         };
 
-        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list);
+        // Use schema with f1, f2 - 'm' is not a column, so it's an alias reference
+        let schema = make_f1_f2_schema();
+        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list, &schema);
         assert!(result.is_err());
         match result {
             Err(ExecutorError::MisuseOfAliasedAggregate { alias_name }) => {
@@ -1361,7 +1477,8 @@ mod tests {
 
         // This should pass our current validation (alias not inside aggregate)
         // SQLite would error on this too, but we'll catch it later during evaluation
-        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list);
+        let schema = make_f1_f2_schema();
+        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list, &schema);
         assert!(result.is_ok());
     }
 
@@ -1385,7 +1502,8 @@ mod tests {
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         };
 
-        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list);
+        let schema = make_f1_f2_schema();
+        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list, &schema);
         assert!(result.is_ok());
     }
 
@@ -1421,8 +1539,77 @@ mod tests {
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         };
 
-        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list);
+        let schema = make_f1_f2_schema();
+        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list, &schema);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_having_alias_shadows_column_uses_column() {
+        // SELECT - col2 * - AVG(-col2) AS col0 FROM tab0 GROUP BY col2 HAVING AVG(col0) IS NULL
+        // The alias 'col0' happens to match the aggregate expression, but 'col0' is also
+        // a real column in the table. In this case, the HAVING clause refers to the
+        // actual column col0, NOT the alias. This should NOT be an error.
+        let select_list = vec![SelectItem::Expression {
+            expr: Expression::BinaryOp {
+                op: vibesql_ast::BinaryOperator::Multiply,
+                left: Box::new(Expression::UnaryOp {
+                    op: vibesql_ast::UnaryOperator::Minus,
+                    expr: Box::new(Expression::ColumnRef { table: None, column: "col2".to_string() }),
+                }),
+                right: Box::new(Expression::UnaryOp {
+                    op: vibesql_ast::UnaryOperator::Minus,
+                    expr: Box::new(Expression::AggregateFunction {
+                        name: "AVG".to_string(),
+                        distinct: false,
+                        args: vec![Expression::UnaryOp {
+                            op: vibesql_ast::UnaryOperator::Minus,
+                            expr: Box::new(Expression::ColumnRef { table: None, column: "col2".to_string() }),
+                        }],
+                    }),
+                }),
+            },
+            alias: Some("col0".to_string()), // Alias matches a column name!
+            source_text: None,
+        }];
+
+        // HAVING AVG(col0) IS NULL - col0 is a real column, not the alias
+        let having_expr = Expression::IsNull {
+            expr: Box::new(Expression::AggregateFunction {
+                name: "AVG".to_string(),
+                distinct: false,
+                args: vec![Expression::ColumnRef { table: None, column: "col0".to_string() }],
+            }),
+            negated: false,
+        };
+
+        // Schema with col0, col1, col2 - col0 exists as an actual column
+        let columns = vec![
+            ColumnSchema {
+                name: "col0".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "col1".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+            ColumnSchema {
+                name: "col2".to_string(),
+                data_type: DataType::Integer,
+                nullable: true,
+                default_value: None,
+            },
+        ];
+        let table_schema = TableSchema::new("tab0".to_string(), columns);
+        let schema = CombinedSchema::from_table("tab0".to_string(), table_schema);
+
+        // This should pass - col0 refers to the real column, not the alias
+        let result = validate_having_aliased_aggregates(Some(&having_expr), &select_list, &schema);
+        assert!(result.is_ok(), "Expected Ok but got {:?}", result);
     }
 
     #[test]
