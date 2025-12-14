@@ -50,9 +50,10 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
         }
 
         // AggregateFunction: case-insensitive name, check distinct, recurse into args
+        // Note: order_by is ignored in equality check for grouping purposes
         (
-            Expression::AggregateFunction { name: n1, distinct: d1, args: a1 },
-            Expression::AggregateFunction { name: n2, distinct: d2, args: a2 },
+            Expression::AggregateFunction { name: n1, distinct: d1, args: a1, .. },
+            Expression::AggregateFunction { name: n2, distinct: d2, args: a2, .. },
         ) => {
             n1.eq_ignore_ascii_case(n2)
                 && d1 == d2
@@ -314,7 +315,7 @@ mod tests {
     }
 
     fn agg(name: &str, args: Vec<Expression>, distinct: bool) -> Expression {
-        Expression::AggregateFunction { name: name.to_string(), distinct, args }
+        Expression::AggregateFunction { name: name.to_string(), distinct, args, order_by: None }
     }
 
     // --- ColumnRef tests ---

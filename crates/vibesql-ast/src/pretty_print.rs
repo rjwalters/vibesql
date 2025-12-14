@@ -332,12 +332,35 @@ impl ToSql for Expression {
                 result
             }
 
-            Expression::AggregateFunction { name, distinct, args } => {
+            Expression::AggregateFunction { name, distinct, args, order_by } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
+                let order_by_sql = order_by.as_ref().map(|items| {
+                    let items_sql: Vec<String> = items
+                        .iter()
+                        .map(|item| {
+                            let dir = match item.direction {
+                                crate::OrderDirection::Asc => "",
+                                crate::OrderDirection::Desc => " DESC",
+                            };
+                            format!("{}{}", item.expr.to_sql(), dir)
+                        })
+                        .collect();
+                    format!(" ORDER BY {}", items_sql.join(", "))
+                });
                 if *distinct {
-                    format!("{}(DISTINCT {})", name.to_uppercase(), args_sql.join(", "))
+                    format!(
+                        "{}(DISTINCT {}{})",
+                        name.to_uppercase(),
+                        args_sql.join(", "),
+                        order_by_sql.unwrap_or_default()
+                    )
                 } else {
-                    format!("{}({})", name.to_uppercase(), args_sql.join(", "))
+                    format!(
+                        "{}({}{})",
+                        name.to_uppercase(),
+                        args_sql.join(", "),
+                        order_by_sql.unwrap_or_default()
+                    )
                 }
             }
 
@@ -1250,6 +1273,7 @@ mod tests {
             name: "count".to_string(),
             distinct: true,
             args: vec![Expression::ColumnRef { table: None, column: "id".to_string() }],
+            order_by: None,
         };
         assert_eq!(expr.to_sql(), "COUNT(DISTINCT id)");
     }

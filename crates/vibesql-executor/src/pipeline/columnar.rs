@@ -531,7 +531,7 @@ mod tests {
         let count_expr = Expression::AggregateFunction {
             name: "COUNT".to_string(),
             args: vec![Expression::Wildcard],
-            distinct: false,
+            distinct: false, order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -540,7 +540,7 @@ mod tests {
         let count_lower = Expression::AggregateFunction {
             name: "count".to_string(),
             args: vec![Expression::Wildcard],
-            distinct: false,
+            distinct: false, order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&count_lower, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Integer(0));
@@ -555,7 +555,7 @@ mod tests {
         let sum_expr = Expression::AggregateFunction {
             name: "SUM".to_string(),
             args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
-            distinct: false,
+            distinct: false, order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
@@ -571,7 +571,7 @@ mod tests {
             let expr = Expression::AggregateFunction {
                 name: agg_name.to_string(),
                 args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
-                distinct: false,
+                distinct: false, order_by: None,
             };
             let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
             assert_eq!(result, SqlValue::Null, "{} should return NULL for empty set", agg_name);
@@ -600,7 +600,7 @@ mod tests {
             left: Box::new(Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
-                distinct: false,
+                distinct: false, order_by: None,
             }),
             op: vibesql_ast::BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
@@ -621,7 +621,7 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
-                distinct: false,
+                distinct: false, order_by: None,
             }),
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
@@ -639,7 +639,7 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
-                distinct: false,
+                distinct: false, order_by: None,
             }),
             data_type: vibesql_types::DataType::Varchar { max_length: None },
         };
@@ -691,7 +691,7 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
-                distinct: false,
+                distinct: false, order_by: None,
             }),
         };
         let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None , source_text: None }];
@@ -723,7 +723,7 @@ mod tests {
             expr: Box::new(Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 args: vec![Expression::Wildcard],
-                distinct: false,
+                distinct: false, order_by: None,
             }),
         };
         let select_items = vec![SelectItem::Expression { expr: complex_agg, alias: None , source_text: None }];

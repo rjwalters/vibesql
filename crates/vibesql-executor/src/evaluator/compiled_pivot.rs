@@ -131,7 +131,7 @@ impl PivotAggregateGroup {
     ) -> Option<PivotCandidate> {
         // Must be an aggregate function
         let (name, distinct, args) = match expr {
-            Expression::AggregateFunction { name, distinct, args } => (name, *distinct, args),
+            Expression::AggregateFunction { name, distinct, args, .. } => (name, *distinct, args),
             _ => return None,
         };
 
@@ -339,6 +339,7 @@ mod tests {
                 }],
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
+            order_by: None,
         }
     }
 
@@ -426,6 +427,7 @@ mod tests {
                 }],
                 else_result: Some(Box::new(Expression::Literal(SqlValue::Null))),
             }],
+            order_by: None,
         };
 
         let select_list = vec![

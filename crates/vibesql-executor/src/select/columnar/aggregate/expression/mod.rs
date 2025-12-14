@@ -76,7 +76,7 @@ pub fn extract_aggregates(
 
     for expr in exprs.iter() {
         match expr {
-            Expression::AggregateFunction { name, distinct, args } => {
+            Expression::AggregateFunction { name, distinct, args, .. } => {
                 // DISTINCT not supported for columnar optimization
                 if *distinct {
                     return None;

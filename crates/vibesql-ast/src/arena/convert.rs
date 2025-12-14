@@ -181,6 +181,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     name: self.resolve(*name),
                     distinct: *distinct,
                     args: args.iter().map(|e| self.convert_expression(e)).collect(),
+                    order_by: None, // Arena parser doesn't support ORDER BY in aggregates yet
                 }
             }
             arena_expr::ExtendedExpr::Case { operand, when_clauses, else_result } => {

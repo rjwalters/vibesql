@@ -65,11 +65,16 @@ pub enum Expression {
 
     /// Aggregate function call (COUNT, SUM, AVG, MIN, MAX)
     /// SQL:1999 Section 6.16: Set functions
+    /// SQL:2003 ordered set functions with ORDER BY clause
     /// Example: COUNT(DISTINCT customer_id), SUM(ALL amount)
+    /// Example: GROUP_CONCAT(name ORDER BY name ASC)
     AggregateFunction {
         name: String,
         distinct: bool, // true = DISTINCT, false = ALL (implicit)
         args: Vec<Expression>,
+        /// Optional ORDER BY clause within the aggregate function
+        /// Example: GROUP_CONCAT(a ORDER BY b DESC)
+        order_by: Option<Vec<OrderByItem>>,
     },
 
     /// IS NULL / IS NOT NULL

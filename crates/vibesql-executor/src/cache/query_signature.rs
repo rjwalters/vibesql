@@ -349,12 +349,20 @@ impl QuerySignature {
                 }
             }
 
-            Expression::AggregateFunction { name, distinct, args } => {
+            Expression::AggregateFunction { name, distinct, args, order_by } => {
                 "AGGREGATE".hash(hasher);
                 name.to_lowercase().hash(hasher);
                 distinct.hash(hasher);
                 for arg in args {
                     Self::hash_expression(arg, hasher);
+                }
+                // Hash order_by clause if present
+                if let Some(items) = order_by {
+                    "ORDER_BY".hash(hasher);
+                    for item in items {
+                        Self::hash_expression(&item.expr, hasher);
+                        std::mem::discriminant(&item.direction).hash(hasher);
+                    }
                 }
             }
 

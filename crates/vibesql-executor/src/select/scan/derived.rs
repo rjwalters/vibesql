@@ -17,7 +17,7 @@ fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
             };
             format!("{}({})", name, args_str)
         }
-        vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+        vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
             let distinct_str = if *distinct { "DISTINCT " } else { "" };
             let args_str = if args.is_empty() {
                 "*".to_string()

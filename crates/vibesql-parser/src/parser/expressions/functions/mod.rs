@@ -141,6 +141,7 @@ impl Parser {
         // Parse function arguments
         let mut args = Vec::new();
         let mut character_unit = None;
+        let mut order_by = None;
 
         // Check for empty argument list or '*'
         if matches!(self.peek(), Token::RParen) {
@@ -163,6 +164,40 @@ impl Parser {
                 } else {
                     break;
                 }
+            }
+
+            // Parse optional ORDER BY clause for aggregate functions
+            // SQL:2003 syntax: aggregate(expr ORDER BY order_list)
+            // Example: GROUP_CONCAT(name ORDER BY name ASC)
+            if might_be_aggregate && matches!(self.peek(), Token::Keyword(Keyword::Order)) {
+                self.advance(); // consume ORDER
+                self.expect_keyword(Keyword::By)?;
+
+                let mut order_items = Vec::new();
+                loop {
+                    let expr = self.parse_expression()?;
+
+                    // Check for optional ASC/DESC
+                    let direction = if matches!(self.peek(), Token::Keyword(Keyword::Asc)) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Asc
+                    } else if matches!(self.peek(), Token::Keyword(Keyword::Desc)) {
+                        self.advance();
+                        vibesql_ast::OrderDirection::Desc
+                    } else {
+                        vibesql_ast::OrderDirection::Asc // Default
+                    };
+
+                    order_items.push(vibesql_ast::OrderByItem { expr, direction });
+
+                    if matches!(self.peek(), Token::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+
+                order_by = Some(order_items);
             }
 
             // Parse optional USING clause for string functions BEFORE closing paren
@@ -206,8 +241,22 @@ impl Parser {
         // SQL:1999 normalizes unquoted identifiers to lowercase
         let normalized_name = first.to_lowercase();
         if is_aggregate {
-            Ok(Some(vibesql_ast::Expression::AggregateFunction { name: normalized_name, distinct, args }))
+            Ok(Some(vibesql_ast::Expression::AggregateFunction {
+                name: normalized_name,
+                distinct,
+                args,
+                order_by,
+            }))
         } else {
+            // ORDER BY is only allowed in aggregate functions
+            if order_by.is_some() {
+                return Err(ParseError {
+                    message: format!(
+                        "ORDER BY may not be used with non-aggregate {}()",
+                        normalized_name.to_uppercase()
+                    ),
+                });
+            }
             Ok(Some(vibesql_ast::Expression::Function { name: normalized_name, args, character_unit }))
         }
     }

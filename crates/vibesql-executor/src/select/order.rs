@@ -1073,10 +1073,16 @@ fn resolve_where_expression_with_schema(
         ),
 
         // Aggregate functions (resolve arguments)
-        Expression::AggregateFunction { name, args, distinct } => Expression::AggregateFunction {
+        Expression::AggregateFunction { name, args, distinct, order_by } => Expression::AggregateFunction {
             name: name.clone(),
             args: args.iter().map(|arg| resolve_where_expression_with_schema(arg, select_list, table_columns)).collect(),
             distinct: *distinct,
+            order_by: order_by.as_ref().map(|items| {
+                items.iter().map(|item| vibesql_ast::OrderByItem {
+                    expr: resolve_where_expression_with_schema(&item.expr, select_list, table_columns),
+                    direction: item.direction.clone(),
+                }).collect()
+            }),
         },
 
         // RowValueConstructor

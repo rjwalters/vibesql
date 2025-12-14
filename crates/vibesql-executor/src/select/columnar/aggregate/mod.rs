@@ -302,6 +302,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
+            order_by: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -316,6 +317,7 @@ mod tests {
             name: "COUNT".to_string(),
             distinct: false,
             args: vec![Expression::Wildcard],
+            order_by: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -331,11 +333,13 @@ mod tests {
                 name: "SUM".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
+                order_by: None,
             },
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "col2".to_string() }],
+                order_by: None,
             },
         ];
 
@@ -368,6 +372,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: true,
             args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
+            order_by: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -399,6 +404,7 @@ mod tests {
                 set_operation: None,
             values: None,
             }))],
+            order_by: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
@@ -435,6 +441,7 @@ mod tests {
                     column: "discount".to_string(),
                 }),
             }],
+            order_by: None,
         }];
 
         let result = extract_aggregates(&exprs, &combined_schema);

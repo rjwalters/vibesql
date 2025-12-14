@@ -244,7 +244,7 @@ fn derive_expression_name_impl(
             };
             format!("{}({})", name, args_str)
         }
-        vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+        vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
             // For aggregate functions, use source text in expression mode, otherwise generate name(args) format
             if mode == ColumnNamingMode::Expression {
                 if let Some(src) = source_text {

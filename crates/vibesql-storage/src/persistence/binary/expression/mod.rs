@@ -170,13 +170,28 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_character_unit(writer, unit)?;
             }
         }
-        Expression::AggregateFunction { name, distinct, args } => {
+        Expression::AggregateFunction { name, distinct, args, order_by } => {
             write_tag!(writer, ExprTag::AggregateFunction);
             write_string(writer, name)?;
             write_bool(writer, *distinct)?;
             write_u32(writer, args.len() as u32)?;
             for arg in args {
                 write_expression(writer, arg)?;
+            }
+            // Write order_by clause (v2 format extension)
+            write_bool(writer, order_by.is_some())?;
+            if let Some(items) = order_by {
+                write_u32(writer, items.len() as u32)?;
+                for item in items {
+                    write_expression(writer, &item.expr)?;
+                    write_u8(
+                        writer,
+                        match item.direction {
+                            vibesql_ast::OrderDirection::Asc => 0,
+                            vibesql_ast::OrderDirection::Desc => 1,
+                        },
+                    )?;
+                }
             }
         }
         Expression::IsNull { expr, negated } => {
@@ -443,7 +458,25 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             for _ in 0..arg_count {
                 args.push(read_expression(reader)?);
             }
-            Ok(Expression::AggregateFunction { name, distinct, args })
+            // Read order_by clause (v2 format extension)
+            let has_order_by = read_bool(reader)?;
+            let order_by = if has_order_by {
+                let count = read_u32(reader)?;
+                let mut items = Vec::with_capacity(count as usize);
+                for _ in 0..count {
+                    let expr = read_expression(reader)?;
+                    let direction = match read_u8(reader)? {
+                        0 => vibesql_ast::OrderDirection::Asc,
+                        1 => vibesql_ast::OrderDirection::Desc,
+                        _ => vibesql_ast::OrderDirection::Asc, // Default to Asc for unknown
+                    };
+                    items.push(vibesql_ast::OrderByItem { expr, direction });
+                }
+                Some(items)
+            } else {
+                None
+            };
+            Ok(Expression::AggregateFunction { name, distinct, args, order_by })
         }
         ExprTag::IsNull => {
             let expr = Box::new(read_expression(reader)?);

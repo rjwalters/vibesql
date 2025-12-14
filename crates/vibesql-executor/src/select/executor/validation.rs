@@ -192,7 +192,7 @@ fn is_aggregate_function(name: &str) -> bool {
 /// Returns Some((function_name, arg_count)) if there's an error, None otherwise
 fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::AggregateFunction { name, args, distinct } => {
+        Expression::AggregateFunction { name, args, distinct, .. } => {
             let upper = name.to_uppercase();
             let arg_count = args.len();
 
@@ -1373,6 +1373,7 @@ mod tests {
             name: "MIN".to_string(),
             distinct: false,
             args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
+            order_by: None,
         };
         let result = check_aggregate_arg_count(&expr);
         assert!(result.is_some(), "MIN(*) should be invalid");
@@ -1386,6 +1387,7 @@ mod tests {
             name: "MAX".to_string(),
             distinct: false,
             args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
+            order_by: None,
         };
         let result = check_aggregate_arg_count(&expr);
         assert!(result.is_some(), "MAX(*) should be invalid");
@@ -1399,6 +1401,7 @@ mod tests {
             name: "MIN".to_string(),
             distinct: false,
             args: vec![],
+            order_by: None,
         };
         let result = check_aggregate_arg_count(&expr);
         assert!(result.is_some(), "MIN() should be invalid");
@@ -1413,6 +1416,7 @@ mod tests {
                 name: "MIN".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "*".to_string() }],
+                order_by: None,
             },
             alias: None,
             source_text: None,
@@ -1453,6 +1457,7 @@ mod tests {
                 name: "min".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "f1".to_string() }],
+                order_by: None,
             },
             alias: Some("m".to_string()),
             source_text: None,
@@ -1469,6 +1474,7 @@ mod tests {
                     left: Box::new(Expression::ColumnRef { table: None, column: "m".to_string() }),
                     right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
                 }],
+                order_by: None,
             }),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         };
@@ -1497,6 +1503,7 @@ mod tests {
                 name: "min".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "f1".to_string() }],
+                order_by: None,
             },
             alias: Some("m".to_string()),
             source_text: None,
@@ -1525,6 +1532,7 @@ mod tests {
                 name: "count".to_string(),
                 distinct: false,
                 args: vec![Expression::Wildcard],
+                order_by: None,
             },
             alias: None, // No alias
             source_text: None,
@@ -1556,6 +1564,7 @@ mod tests {
                     name: "count".to_string(),
                     distinct: false,
                     args: vec![Expression::Wildcard],
+                    order_by: None,
                 },
                 alias: None,
                 source_text: None,
@@ -1569,6 +1578,7 @@ mod tests {
                 name: "max".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
+                order_by: None,
             }),
             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(10))),
         };
@@ -1600,6 +1610,7 @@ mod tests {
                             op: vibesql_ast::UnaryOperator::Minus,
                             expr: Box::new(Expression::ColumnRef { table: None, column: "col2".to_string() }),
                         }],
+                        order_by: None,
                     }),
                 }),
             },
@@ -1613,6 +1624,7 @@ mod tests {
                 name: "AVG".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "col0".to_string() }],
+                order_by: None,
             }),
             negated: false,
         };
@@ -1655,6 +1667,7 @@ mod tests {
                     name: "min".to_string(),
                     distinct: false,
                     args: vec![Expression::ColumnRef { table: None, column: "f1".to_string() }],
+                    order_by: None,
                 },
                 alias: Some("m".to_string()),
                 source_text: None,
@@ -1675,6 +1688,7 @@ mod tests {
                                 name: "min".to_string(),
                                 distinct: false,
                                 args: vec![Expression::ColumnRef { table: None, column: "f1".to_string() }],
+                                order_by: None,
                             }),
                             right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
                         },
