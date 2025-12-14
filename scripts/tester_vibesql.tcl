@@ -254,6 +254,10 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (near "[^"]+": syntax error)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # Special case for "incomplete input" - return as-is (SQLite format)
+    if {[regexp -nocase {^Parse error: incomplete input$} $error_msg]} {
+        return "incomplete input"
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"
