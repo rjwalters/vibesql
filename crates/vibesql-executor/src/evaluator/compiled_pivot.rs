@@ -498,8 +498,8 @@ mod tests {
             .find(|e| matches!(&e.condition_value, SqlValue::Varchar(s) if s.as_str() == "Tuesday"))
             .unwrap();
 
-        assert_eq!(results.get(&sun_key.cache_key), Some(&SqlValue::Numeric(300.0))); // 100 + 200
-        assert_eq!(results.get(&mon_key.cache_key), Some(&SqlValue::Numeric(50.0)));
+        assert_eq!(results.get(&sun_key.cache_key), Some(&SqlValue::Integer(300))); // 100 + 200
+        assert_eq!(results.get(&mon_key.cache_key), Some(&SqlValue::Integer(50)));
         assert_eq!(results.get(&tue_key.cache_key), Some(&SqlValue::Null)); // No Tuesday rows
     }
 

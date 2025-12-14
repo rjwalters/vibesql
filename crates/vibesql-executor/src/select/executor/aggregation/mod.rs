@@ -35,6 +35,7 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        eprintln!("[DEBUG aggregation] execute_with_aggregation called");
         // Note: Aggregate argument validation is done in execute_with_ctes() to catch
         // all execution paths. See issue #4367.
 

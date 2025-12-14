@@ -85,11 +85,12 @@ fn test_avg_precision_decimal() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // AVG(10.50, 20.75, 15.25) = 46.50 / 3 = 15.50
+    // AVG always returns Double (SQLite's REAL type)
     match &result[0].values[0] {
-        vibesql_types::SqlValue::Numeric(value) => {
+        vibesql_types::SqlValue::Double(value) => {
             assert!((value - 15.50).abs() < 0.01, "Expected 15.50, got {}", value);
         }
-        other => panic!("Expected Numeric value, got {:?}", other),
+        other => panic!("Expected Double value, got {:?}", other),
     }
 }
 
@@ -174,7 +175,8 @@ fn test_sum_mixed_numeric_types() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM(100.50, 200.25, 150.00) = 450.75
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric("450.75".parse().unwrap()));
+    // SUM of floats/decimals returns Double (SQLite's REAL type)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Double(450.75));
 }
 
 #[test]
@@ -286,7 +288,7 @@ fn test_aggregate_with_case_expression() {
     assert_eq!(result.len(), 1);
     // SUM of credits only: 100 + 200 = 300 (debit of 50 becomes 0)
     // SQLite's SUM() always returns REAL (float)
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(300.0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(300));
 }
 
 #[test]

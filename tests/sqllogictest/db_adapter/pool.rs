@@ -8,7 +8,8 @@
 use std::cell::RefCell;
 
 use vibesql_executor::clear_in_subquery_cache;
-use vibesql_storage::Database;
+use vibesql_storage::{Database, DatabaseConfig};
+use vibesql_types::{MySqlModeFlags, SqlMode};
 
 // Thread-local Database pool for reuse across test files within the same worker thread.
 // This avoids the overhead of creating a new Database for each test file (622 files in full suite).
@@ -42,10 +43,17 @@ pub fn get_pooled_database() -> Database {
                 db
             }
             None => {
-                // First use - create new database with MySQL mode (default)
-                // The dolthub/sqllogictest corpus was regenerated against MySQL 8.x
-                // and expects MySQL semantics including decimal division
-                vibesql_storage::Database::new()
+                // First use - create new database with MySQL mode + SQLite division semantics
+                // The SQLLogicTest corpus expects MySQL syntax (e.g., CAST...AS SIGNED)
+                // but SQLite integer division semantics (INTEGER / INTEGER → INTEGER)
+                // because the expected results were generated using SQLite.
+                let config = DatabaseConfig {
+                    sql_mode: SqlMode::MySQL {
+                        flags: MySqlModeFlags::with_sqlite_division_semantics(),
+                    },
+                    ..DatabaseConfig::default()
+                };
+                Database::with_config(config)
             }
         }
     })

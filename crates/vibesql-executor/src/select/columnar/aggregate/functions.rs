@@ -130,12 +130,13 @@ pub(super) fn compute_sum(
         }
     }
 
-    // SQLite's SUM() always returns REAL (float) for numeric values
+    // SQLite's SUM() preserves integer type for integer inputs
+    // Only TOTAL() always returns REAL
     Ok(if count > 0 {
         if has_float {
-            SqlValue::Numeric(float_sum)
+            SqlValue::Double(float_sum)
         } else {
-            SqlValue::Numeric(int_sum as f64)
+            SqlValue::Integer(int_sum)
         }
     } else {
         SqlValue::Null
@@ -383,7 +384,7 @@ pub(super) fn compute_batch_sum(
         batch_columns: batch.column_count(),
     })?;
 
-    // SQLite's SUM() always returns REAL (float) for numeric values
+    // SQLite's SUM() preserves integer type for integer inputs
     match column {
         ColumnArray::Int64(values, nulls) => {
             if let Some(null_mask) = nulls {
@@ -397,13 +398,13 @@ pub(super) fn compute_batch_sum(
                 if filtered.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Numeric(simd_sum_i64(&filtered) as f64))
+                    Ok(SqlValue::Integer(simd_sum_i64(&filtered)))
                 }
             } else {
                 if values.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Numeric(simd_sum_i64(values) as f64))
+                    Ok(SqlValue::Integer(simd_sum_i64(values)))
                 }
             }
         }
@@ -418,13 +419,13 @@ pub(super) fn compute_batch_sum(
                 if filtered.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Numeric(simd_sum_f64(&filtered)))
+                    Ok(SqlValue::Double(simd_sum_f64(&filtered)))
                 }
             } else {
                 if values.is_empty() {
                     Ok(SqlValue::Null)
                 } else {
-                    Ok(SqlValue::Numeric(simd_sum_f64(values)))
+                    Ok(SqlValue::Double(simd_sum_f64(values)))
                 }
             }
         }
@@ -733,12 +734,12 @@ fn compute_mixed_sum(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
     }
 
-    // SQLite's SUM() always returns REAL (float) for numeric values
+    // SQLite's SUM() preserves integer type for integer inputs
     Ok(if count > 0 {
         if has_float {
-            SqlValue::Numeric(float_sum)
+            SqlValue::Double(float_sum)
         } else {
-            SqlValue::Numeric(int_sum as f64)
+            SqlValue::Integer(int_sum)
         }
     } else {
         SqlValue::Null

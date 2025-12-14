@@ -151,7 +151,7 @@ mod tests {
 
         let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].get(0), Some(&SqlValue::Numeric(100.0)));
+        assert_eq!(result[0].get(0), Some(&SqlValue::Integer(100)));
     }
 
     #[test]
@@ -165,7 +165,7 @@ mod tests {
         let result = execute_columnar_batch(&batch, &predicates, &aggregates, None).unwrap();
         assert_eq!(result.len(), 1);
         // Only rows 0 (10) and 1 (20) pass the filter
-        assert_eq!(result[0].get(0), Some(&SqlValue::Numeric(30.0)));
+        assert_eq!(result[0].get(0), Some(&SqlValue::Integer(30)));
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(result[0].len(), 3);
 
         // SUM(col0) = 100
-        assert_eq!(result[0].get(0), Some(&SqlValue::Numeric(100.0)));
+        assert_eq!(result[0].get(0), Some(&SqlValue::Integer(100)));
 
         // AVG(col1) = 3.0
         if let Some(SqlValue::Double(avg)) = result[0].get(1) {
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(result.len(), 1);
 
         // SUM(col0) should be 10 + 30 + 40 = 80 (NULL excluded)
-        assert_eq!(result[0].get(0), Some(&SqlValue::Numeric(80.0)));
+        assert_eq!(result[0].get(0), Some(&SqlValue::Integer(80)));
 
         // SUM(col1) should be 1.5 + 2.5 + 4.5 = 8.5 (NULL excluded)
         if let Some(SqlValue::Double(sum)) = result[0].get(1) {

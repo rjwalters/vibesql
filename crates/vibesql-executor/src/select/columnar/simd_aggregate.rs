@@ -168,8 +168,8 @@ pub fn simd_aggregate_i64(
     // Return aggregated result
     match op {
         AggregateOp::Sum => {
-            // SQLite's SUM() always returns REAL (float)
-            Ok(SqlValue::Numeric(sum as f64))
+            // SQLite's SUM() preserves integer type for integer inputs
+            Ok(SqlValue::Integer(sum))
         }
         AggregateOp::Avg => Ok(SqlValue::Double(sum as f64 / count as f64)),
         AggregateOp::Min => Ok(match original_type.unwrap_or(SqlValue::Bigint(0)) {
@@ -297,7 +297,7 @@ pub fn simd_aggregate_f64(
 
     // Return aggregated result
     match op {
-        AggregateOp::Sum => Ok(SqlValue::Numeric(sum)),  // SQLite's SUM() always returns REAL (Numeric)
+        AggregateOp::Sum => Ok(SqlValue::Double(sum)),  // SUM of floats returns Double
         AggregateOp::Avg => Ok(SqlValue::Double(sum / count as f64)),
         AggregateOp::Min => Ok(SqlValue::Double(min)),
         AggregateOp::Max => Ok(SqlValue::Double(max)),
@@ -353,7 +353,7 @@ mod tests {
 
         let result = simd_aggregate_i64(&scan, 0, AggregateOp::Sum, None).unwrap();
         // SQLite's SUM() always returns REAL (Numeric)
-        assert_eq!(result, SqlValue::Numeric(60.0));
+        assert_eq!(result, SqlValue::Integer(60));
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
 
         let result = simd_aggregate_i64(&scan, 0, AggregateOp::Sum, None).unwrap();
         // SQLite's SUM() always returns REAL (Numeric)
-        assert_eq!(result, SqlValue::Numeric(40.0));
+        assert_eq!(result, SqlValue::Integer(40));
 
         let count_result = simd_aggregate_i64(&scan, 0, AggregateOp::Count, None).unwrap();
         assert_eq!(count_result, SqlValue::Integer(2));
@@ -428,7 +428,7 @@ mod tests {
 
         let result = simd_aggregate_i64(&scan, 0, AggregateOp::Sum, Some(&filter)).unwrap();
         // SQLite's SUM() always returns REAL (Numeric)
-        assert_eq!(result, SqlValue::Numeric(40.0));
+        assert_eq!(result, SqlValue::Integer(40));
     }
 
     #[test]
@@ -441,7 +441,7 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = simd_aggregate_f64(&scan, 0, AggregateOp::Sum, None).unwrap();
-        assert!(matches!(result, SqlValue::Numeric(sum) if (sum - 7.5).abs() < 0.001));
+        assert!(matches!(result, SqlValue::Double(sum) if (sum - 7.5).abs() < 0.001));
     }
 
     #[test]
@@ -483,7 +483,7 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = simd_aggregate_f64(&scan, 0, AggregateOp::Sum, None).unwrap();
-        assert!(matches!(result, SqlValue::Numeric(sum) if (sum - 5.0).abs() < 0.001));
+        assert!(matches!(result, SqlValue::Double(sum) if (sum - 5.0).abs() < 0.001));
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
         let filter = vec![true, false, true]; // Include rows 0 and 2
 
         let result = simd_aggregate_f64(&scan, 0, AggregateOp::Sum, Some(&filter)).unwrap();
-        assert!(matches!(result, SqlValue::Numeric(sum) if (sum - 5.0).abs() < 0.001));
+        assert!(matches!(result, SqlValue::Double(sum) if (sum - 5.0).abs() < 0.001));
     }
 
     #[test]

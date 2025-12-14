@@ -332,13 +332,13 @@ fn test_left_join_with_group_by_avg_salary() {
         .unwrap();
 
     // Engineering: (95000 + 87000) / 2 = 91000
-    assert_eq!(engineering_row.get(1).unwrap(), &SqlValue::Numeric(91000.0));
+    assert_eq!(engineering_row.get(1).unwrap(), &SqlValue::Double(91000.0));
 
     // Sales: (75000 + 72000) / 2 = 73500
-    assert_eq!(sales_row.get(1).unwrap(), &SqlValue::Numeric(73500.0));
+    assert_eq!(sales_row.get(1).unwrap(), &SqlValue::Double(73500.0));
 
     // HR: 65000 / 1 = 65000
-    assert_eq!(hr_row.get(1).unwrap(), &SqlValue::Numeric(65000.0));
+    assert_eq!(hr_row.get(1).unwrap(), &SqlValue::Double(65000.0));
 }
 
 #[test]

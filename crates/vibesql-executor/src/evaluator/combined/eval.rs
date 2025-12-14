@@ -367,7 +367,10 @@ impl CombinedExpressionEvaluator<'_> {
                 // This error occurs when an aggregate is evaluated outside of aggregation,
                 // such as in ORDER BY clauses of non-aggregate queries.
                 // Uses "misuse of aggregate: X()" format (with colon) to match SQLite's expr.c
-                Err(ExecutorError::MisuseOfAggregateContext { function_name: name.clone() })
+                eprintln!("[ERROR combined/eval] Aggregate function {} evaluated outside aggregation context!", name);
+                eprintln!("[ERROR] Expression: {:?}", expr);
+                panic!("[DEBUG] Aggregate evaluated outside context");
+                // Err(ExecutorError::MisuseOfAggregateContext { function_name: name.clone() })
             }
 
             // Full-text search

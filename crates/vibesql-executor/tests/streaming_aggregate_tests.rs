@@ -60,8 +60,8 @@ fn test_streaming_aggregate_sum_full_range() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    // SQLite's SUM() always returns REAL (Numeric)
-    assert_eq!(result[0].values[0], SqlValue::Numeric(550.0), "SUM(k) for id 1-10 should be 550");
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(result[0].values[0], SqlValue::Integer(550), "SUM(k) for id 1-10 should be 550");
 }
 
 #[test]
@@ -74,8 +74,8 @@ fn test_streaming_aggregate_sum_partial_range() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    // SQLite's SUM() always returns REAL (Numeric)
-    assert_eq!(result[0].values[0], SqlValue::Numeric(250.0), "SUM(k) for id 3-7 should be 250");
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(result[0].values[0], SqlValue::Integer(250), "SUM(k) for id 3-7 should be 250");
 }
 
 #[test]
@@ -88,8 +88,8 @@ fn test_streaming_aggregate_sum_single_row() {
     let result = executor.execute(&stmt).unwrap();
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
-    // SQLite's SUM() always returns REAL (Numeric)
-    assert_eq!(result[0].values[0], SqlValue::Numeric(50.0), "SUM(k) for id 5-5 should be 50");
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(result[0].values[0], SqlValue::Integer(50), "SUM(k) for id 5-5 should be 50");
 }
 
 // =============================================================================
@@ -192,8 +192,8 @@ fn test_streaming_aggregate_multiple() {
 
     assert_eq!(result.len(), 1, "Should return exactly one row");
     // SUM(k) for id 1-5 = 10 + 20 + 30 + 40 + 50 = 150
-    // SQLite's SUM() always returns REAL (Numeric)
-    assert_eq!(result[0].values[0], SqlValue::Numeric(150.0), "SUM(k) for id 1-5 should be 150");
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(result[0].values[0], SqlValue::Integer(150), "SUM(k) for id 1-5 should be 150");
     // COUNT(k) = 5
     assert_eq!(result[0].values[1], SqlValue::Integer(5), "COUNT(k) for id 1-5 should be 5");
     // MIN(k) = 10
@@ -251,14 +251,14 @@ fn test_streaming_aggregate_prepared_statement() {
         session.execute_prepared(&stmt, &[SqlValue::Integer(1), SqlValue::Integer(5)]).unwrap();
     let rows1 = result1.rows().unwrap();
     assert_eq!(rows1.len(), 1);
-    // SQLite's SUM() always returns REAL (Numeric)
-    assert_eq!(rows1[0].values[0], SqlValue::Numeric(150.0), "SUM(k) for id 1-5 should be 150");
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(rows1[0].values[0], SqlValue::Integer(150), "SUM(k) for id 1-5 should be 150");
 
     let result2 =
         session.execute_prepared(&stmt, &[SqlValue::Integer(6), SqlValue::Integer(10)]).unwrap();
     let rows2 = result2.rows().unwrap();
     assert_eq!(rows2.len(), 1);
     // SUM(k) for id 6-10 = 60 + 70 + 80 + 90 + 100 = 400
-    // SQLite's SUM() always returns REAL (Numeric)
-    assert_eq!(rows2[0].values[0], SqlValue::Numeric(400.0), "SUM(k) for id 6-10 should be 400");
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(rows2[0].values[0], SqlValue::Integer(400), "SUM(k) for id 6-10 should be 400");
 }

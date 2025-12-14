@@ -44,6 +44,7 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        eprintln!("[DEBUG] SelectExecutor::execute() called");
         // Validate aggregate function argument counts FIRST (issue #4367)
         // This catches errors like max(), min(*), sum(*) before any execution
         // Must happen before any fast paths or strategy selection
@@ -87,14 +88,18 @@ impl SelectExecutor<'_> {
         // Streaming aggregate fast path (#3815)
         // For queries like: SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?
         // Accumulates aggregates inline during PK range scan without materializing rows
+        eprintln!("[DEBUG execute] Checking streaming aggregate path: subquery_depth={}, outer_row={:?}, is_streaming={}",
+            self.subquery_depth, self.outer_row.is_some(), super::fast_path::is_streaming_aggregate_query(stmt));
         if self.subquery_depth == 0
             && self.outer_row.is_none()
             && self.cte_context.is_none()
             && super::fast_path::is_streaming_aggregate_query(stmt)
         {
+            eprintln!("[DEBUG execute] Using streaming aggregate path");
             if let Ok(result) = self.execute_streaming_aggregate(stmt) {
                 return Ok(result);
             }
+            eprintln!("[DEBUG execute] Streaming aggregate failed, falling through");
             // Fall through to standard path if streaming aggregate fails
         }
 
@@ -418,6 +423,7 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+        eprintln!("[DEBUG] execute_with_ctes called");
         // Note: Aggregate argument validation is done in execute() at the entry point.
         // See issue #4367.
 
