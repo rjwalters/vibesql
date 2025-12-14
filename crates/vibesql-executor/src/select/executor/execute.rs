@@ -584,7 +584,7 @@ impl SelectExecutor<'_> {
             // Apply ORDER BY after set operations (if specified)
             // The UNION's default sort is overridden by explicit ORDER BY
             if let Some(order_by) = &stmt.order_by {
-                results = self.sort_set_operation_results(results, order_by)?;
+                results = self.sort_set_operation_results(results, order_by, &stmt.select_list)?;
             }
 
             // Apply LIMIT/OFFSET to the final result (after all set operations and ORDER BY)
@@ -1021,39 +1021,89 @@ impl SelectExecutor<'_> {
 
     /// Sort set operation results by ORDER BY clause
     ///
-    /// ORDER BY on a UNION/INTERSECT/EXCEPT uses column positions (e.g., ORDER BY 1 DESC)
-    /// since the columns come from different source SELECTs.
+    /// ORDER BY on a UNION/INTERSECT/EXCEPT can use:
+    /// 1. Column positions (e.g., ORDER BY 1, 2 DESC)
+    /// 2. Column names from the first SELECT (e.g., ORDER BY x)
+    /// 3. Original column names from expressions (e.g., ORDER BY a when SELECT a AS x)
+    ///
+    /// The select_list parameter provides column names from the first SELECT for name resolution.
     fn sort_set_operation_results(
         &self,
         mut rows: Vec<vibesql_storage::Row>,
         order_by: &[vibesql_ast::OrderByItem],
+        select_list: &[vibesql_ast::SelectItem],
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         use crate::select::grouping::compare_sql_values;
         use std::cmp::Ordering;
 
-        // Parse order_by items - they should be column numbers (e.g., ORDER BY 1, 2 DESC)
-        let mut sort_columns: Vec<(usize, bool)> = Vec::new(); // (column_index, is_desc)
-        for item in order_by {
-            match &item.expr {
-                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
-                    let col_idx = (*n as usize).saturating_sub(1); // 1-based to 0-based
-                    let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
-                    sort_columns.push((col_idx, is_desc));
+        // Build column name map for the UNION result
+        // Each column can have both an alias name and an underlying expression name
+        // SQLite allows ORDER BY to reference either one
+        let mut column_info: Vec<(String, Option<String>)> = Vec::new(); // (alias_or_derived_name, original_expr_name)
+        for item in select_list {
+            match item {
+                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                    let alias_name = if let Some(a) = alias {
+                        a.clone()
+                    } else {
+                        // Derive from expression when no alias
+                        match expr {
+                            vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+                            _ => "?column?".to_string(),
+                        }
+                    };
+
+                    // Extract original column name from expression (if it's a column reference)
+                    let orig_name = match expr {
+                        vibesql_ast::Expression::ColumnRef { column, .. } => {
+                            // Only track if different from alias (for SELECT a AS x case)
+                            if alias.is_some() && alias.as_ref() != Some(column) {
+                                Some(column.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+
+                    column_info.push((alias_name, orig_name));
                 }
-                vibesql_ast::Expression::ColumnRef { column, .. } => {
-                    // Try to parse as numeric column reference or match by name
-                    if let Ok(n) = column.parse::<usize>() {
-                        let col_idx = n.saturating_sub(1);
-                        let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
-                        sort_columns.push((col_idx, is_desc));
-                    }
-                    // Otherwise fall through - column names don't work on UNION results
-                }
-                _ => {
-                    // Complex expressions in ORDER BY on UNION not supported
-                    // Just skip them
+                vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                    column_info.push(("*".to_string(), None));
                 }
             }
+        }
+
+        // Parse order_by items and resolve to column indices
+        let mut sort_columns: Vec<(usize, bool)> = Vec::new(); // (column_index, is_desc)
+        for item in order_by {
+            let col_idx_opt = match &item.expr {
+                // Numeric literal: ORDER BY 1
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
+                    Some((*n as usize).saturating_sub(1)) // 1-based to 0-based
+                }
+                // Column reference: ORDER BY x or ORDER BY a
+                vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    // Try to parse as numeric column reference first
+                    if let Ok(n) = column.parse::<usize>() {
+                        Some(n.saturating_sub(1))
+                    } else {
+                        // Try to match by alias name first, then by original expression name
+                        column_info.iter().position(|(alias, orig)| {
+                            alias == column || orig.as_ref() == Some(column)
+                        })
+                    }
+                }
+                // Complex expressions not supported
+                _ => None,
+            };
+
+            if let Some(col_idx) = col_idx_opt {
+                let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
+                sort_columns.push((col_idx, is_desc));
+            }
+            // Skip columns that can't be resolved
         }
 
         if sort_columns.is_empty() {
