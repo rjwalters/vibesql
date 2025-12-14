@@ -14,6 +14,12 @@ pub fn enforce_primary_key_constraint(
         let new_pk_values: Vec<vibesql_types::SqlValue> =
             pk_indices.iter().map(|&idx| row_values[idx].clone()).collect();
 
+        // Skip uniqueness check if any primary key value is NULL
+        // (NULL != NULL in SQL, so multiple NULLs are allowed in non-INTEGER PRIMARY KEY)
+        if new_pk_values.contains(&vibesql_types::SqlValue::Null) {
+            return Ok(());
+        }
+
         // Check for duplicates within the batch of rows being inserted
         if batch_pk_values.contains(&new_pk_values) {
             let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();

@@ -314,27 +314,32 @@ impl AggregateAccumulator {
                 if *count == 0 {
                     vibesql_types::SqlValue::Null
                 } else {
-                    // SQLite's SUM() preserves integer type for integer inputs.
-                    // Only TOTAL() always returns REAL (and 0.0 for empty sets).
-                    // Integer types are preserved, float types normalize to Double.
+                    // SQLite's SUM() always returns REAL (float) for numeric values
+                    // This differs from TOTAL() which also returns 0.0 for empty sets
                     match sum {
-                        // Integer types: preserve as-is
-                        vibesql_types::SqlValue::Integer(_)
-                        | vibesql_types::SqlValue::Bigint(_)
-                        | vibesql_types::SqlValue::Smallint(_) => sum.clone(),
-                        // Float types: normalize to Double for consistency
+                        vibesql_types::SqlValue::Integer(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        vibesql_types::SqlValue::Bigint(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        vibesql_types::SqlValue::Smallint(v) => {
+                            vibesql_types::SqlValue::Numeric(*v as f64)
+                        }
+                        // Already float types - normalize to Numeric for consistency
                         vibesql_types::SqlValue::Float(v) => {
-                            vibesql_types::SqlValue::Double(*v as f64)
+                            vibesql_types::SqlValue::Numeric(*v as f64)
                         }
-                        vibesql_types::SqlValue::Double(_) => sum.clone(),
+                        vibesql_types::SqlValue::Double(v) => {
+                            vibesql_types::SqlValue::Numeric(*v)
+                        }
                         vibesql_types::SqlValue::Real(v) => {
-                            vibesql_types::SqlValue::Double(*v as f64)
+                            vibesql_types::SqlValue::Numeric(*v as f64)
                         }
-                        vibesql_types::SqlValue::Numeric(v) => {
-                            vibesql_types::SqlValue::Double(*v)
-                        }
-                        // Fallback for unexpected types
-                        _ => sum.clone(),
+                        // Already Numeric
+                        vibesql_types::SqlValue::Numeric(_) => sum.clone(),
+                        // Fallback for unexpected types (shouldn't happen)
+                        _ => vibesql_types::SqlValue::Numeric(0.0),
                     }
                 }
             }
@@ -1031,13 +1036,12 @@ mod tests {
         acc.accumulate(&SqlValue::Integer(5));
         acc.accumulate(&SqlValue::Integer(-5));
 
-        // Finalize should return 0 (as Integer when using type-preserving addition), not NULL
-        // SQLite's SUM() preserves integer type for integer inputs
+        // Finalize should return 0.0 (as Numeric/REAL), not NULL
+        // SQLite's SUM() always returns REAL (float) for numeric values
         let result = acc.finalize();
-        match &result {
-            SqlValue::Integer(0) => {} // OK - SUM of integers returns Integer
-            SqlValue::Double(n) if *n == 0.0 => {} // Also OK - some paths return Double
-            _ => panic!("SUM of values that sum to 0 should return 0, got {:?}", result),
+        match result {
+            SqlValue::Numeric(n) if n == 0.0 => {} // OK - SUM returns REAL
+            _ => panic!("SUM of values that sum to 0 should return 0.0, got {:?}", result),
         }
     }
 

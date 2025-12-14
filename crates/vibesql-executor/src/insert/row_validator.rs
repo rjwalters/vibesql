@@ -140,7 +140,12 @@ impl<'a> RowValidator<'a> {
         }
 
         // Store extracted keys in result
-        result.primary_key = pk_values;
+        // Only store PRIMARY KEY if no NULL values (multiple NULLs allowed in non-INTEGER PRIMARY KEY)
+        if let Some(pk_vals) = pk_values {
+            if !pk_vals.contains(&vibesql_types::SqlValue::Null) {
+                result.primary_key = Some(pk_vals);
+            }
+        }
 
         // Only store UNIQUE keys if no NULL values (multiple NULLs allowed)
         for (constraint_idx, values) in unique_values.into_iter().enumerate() {
