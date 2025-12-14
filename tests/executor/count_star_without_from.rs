@@ -23,6 +23,7 @@ fn test_count_star_without_from() {
                 name: "COUNT".to_string(),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
+                order_by: None,
             },
             alias: None,
             source_text: None,
@@ -75,6 +76,7 @@ fn test_count_star_in_expression_without_from() {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
+                    order_by: None,
                 }),
             },
             alias: None,
@@ -115,6 +117,7 @@ fn test_complex_expression_without_from() {
         name: "COUNT".to_string(),
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
+        order_by: None,
     };
 
     // - COUNT(*)
