@@ -1,0 +1,14 @@
+-- VibeSQL Database Dump
+-- Generated: 2025-12-14 08:05:07.147329 UTC
+--
+
+-- Schemas
+
+-- Roles
+
+-- Tables and Data
+CREATE TABLE test1 (f1 INTEGER);
+
+-- Indexes
+
+-- End of dump

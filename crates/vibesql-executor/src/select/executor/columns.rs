@@ -77,6 +77,8 @@ impl SelectExecutor<'_> {
                 vibesql_ast::SelectItem::Wildcard { alias } => {
                     // SELECT * [AS (col1, col2, ...)] - expand to all column names from schema
                     // Skip hidden columns (from NATURAL JOIN deduplication)
+                    // IMPORTANT: SELECT * always uses short names (just column name),
+                    // regardless of full_column_names PRAGMA. This matches SQLite behavior.
                     if let Some(from_res) = from_result {
                         // Get all column names in order from the combined schema
                         let mut table_columns: Vec<(usize, String)> = Vec::new();
@@ -90,16 +92,8 @@ impl SelectExecutor<'_> {
                                 if from_res.schema.is_column_hidden(abs_idx) {
                                     continue;
                                 }
-                                let col_name = match mode {
-                                    ColumnNamingMode::Full => {
-                                        // Use the table key (alias or table name) as the prefix
-                                        format!("{}.{}", table_key.as_str(), col_schema.name.clone())
-                                    }
-                                    ColumnNamingMode::Short | ColumnNamingMode::Expression => {
-                                        // For wildcards, short and expression mode both use just column name
-                                        col_schema.name.clone()
-                                    }
-                                };
+                                // SELECT * always uses short column names (SQLite quirk)
+                                let col_name = col_schema.name.clone();
                                 table_columns.push((abs_idx, col_name));
                             }
                         }
@@ -128,8 +122,9 @@ impl SelectExecutor<'_> {
                     }
                 }
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
-                    // SELECT table.* [AS (col1, col2, ...)] or SELECT alias.* [AS (col1, col2,
-                    // ...)]
+                    // SELECT table.* [AS (col1, col2, ...)] or SELECT alias.* [AS (col1, col2, ...)]
+                    // IMPORTANT: SELECT table.* always uses short names (just column name),
+                    // regardless of full_column_names PRAGMA. This matches SQLite behavior.
                     if let Some(from_res) = from_result {
                         // Find the table/alias in the schema
                         // TableKey lookup is case-insensitive
@@ -147,17 +142,9 @@ impl SelectExecutor<'_> {
                                 column_names.extend(derived_cols.clone());
                             } else {
                                 // Add all column names from this table in order
+                                // SELECT table.* always uses short column names (SQLite quirk)
                                 for col_schema in &table_schema.columns {
-                                    let col_name = match mode {
-                                        ColumnNamingMode::Full => {
-                                            // Use the qualifier (alias or table name) as the prefix
-                                            format!("{}.{}", qualifier, col_schema.name.clone())
-                                        }
-                                        ColumnNamingMode::Short | ColumnNamingMode::Expression => {
-                                            col_schema.name.clone()
-                                        }
-                                    };
-                                    column_names.push(col_name);
+                                    column_names.push(col_schema.name.clone());
                                 }
                             }
                         } else {
