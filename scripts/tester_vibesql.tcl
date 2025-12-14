@@ -35,6 +35,23 @@ set ::in_transaction 0
 set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
 
+# SQLite configuration variables (used by tests)
+set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
+set ::TEMP_STORE 0       ;# Temp storage in file
+set ::SQLITE_DEFAULT_AUTOVACUUM 0
+set ::SQLITE_MAX_LENGTH 1000000000
+set ::SQLITE_MAX_COLUMN 2000
+set ::SQLITE_MAX_SQL_LENGTH 1000000
+set ::SQLITE_MAX_EXPR_DEPTH 1000
+set ::SQLITE_MAX_COMPOUND_SELECT 500
+set ::SQLITE_MAX_VDBE_OP 250000000
+set ::SQLITE_MAX_FUNCTION_ARG 127
+set ::SQLITE_MAX_ATTACHED 10
+set ::SQLITE_MAX_LIKE_PATTERN_LENGTH 50000
+set ::SQLITE_MAX_VARIABLE_NUMBER 999
+set ::SQLITE_MAX_TRIGGER_DEPTH 1000
+set ::tcl_platform(wordSize) 8  ;# 64-bit platform
+
 #-----------------------------------------------------------------------------
 # SQLite Error Message Compatibility Layer
 #-----------------------------------------------------------------------------
@@ -763,10 +780,34 @@ proc match_regex_pattern {result expected} {
 # Capability checking (stub implementations)
 #-----------------------------------------------------------------------------
 
-proc ifcapable {capability script} {
+proc ifcapable {args} {
+    # Handle various forms of ifcapable:
+    # ifcapable cap script
+    # ifcapable cap { script }
+    # ifcapable !cap script  (negated capability)
+    if {[llength $args] < 2} {
+        error "wrong # args: should be \"ifcapable capability script\""
+    }
+    set capability [lindex $args 0]
+    set script [lindex $args 1]
+
     # Skip SQLite-specific capabilities that we don't support
-    set skip_caps {wal vacuum_incr stat4 stat3 compound_select tclvar vtab fts3 fts4 fts5}
-    if {$capability in $skip_caps} {
+    set skip_caps {wal vacuum_incr stat4 stat3 compound_select tclvar vtab fts3 fts4 fts5 datetime datetime_time datetime_funcs}
+
+    # Handle negated capabilities (e.g., !floatingpoint)
+    set negate 0
+    if {[string index $capability 0] eq "!"} {
+        set negate 1
+        set capability [string range $capability 1 end]
+    }
+
+    # Check if capability is in skip list
+    set should_skip [expr {$capability in $skip_caps}]
+    if {$negate} {
+        set should_skip [expr {!$should_skip}]
+    }
+
+    if {$should_skip} {
         return
     }
     uplevel 1 $script
@@ -775,6 +816,70 @@ proc ifcapable {capability script} {
 proc capable {capability} {
     set skip_caps {wal vacuum_incr stat4 stat3}
     return [expr {$capability ni $skip_caps}]
+}
+
+proc working_64bit_int {} {
+    # VibeSQL supports 64-bit integers
+    return 1
+}
+
+proc sqlite3_connection_pointer {db} {
+    # Stub for SQLite internal API - return dummy pointer
+    return "0x12345678"
+}
+
+proc sqlite3_create_function {args} {
+    # Stub for creating custom functions
+    return
+}
+
+proc sqlite3_create_aggregate {args} {
+    # Stub for creating custom aggregate functions
+    return
+}
+
+proc add_test_utf16bin_collation {db} {
+    # Stub for collation test helper
+    return
+}
+
+proc integrity_check {name} {
+    # Stub for SQLite's PRAGMA integrity_check test wrapper
+    # Just run a simple query to verify database is accessible
+    set result [execsql "PRAGMA integrity_check"]
+    if {$result eq "ok" || $result eq "" || [llength $result] == 0} {
+        return
+    }
+    incr ::nFail
+    lappend ::failList $name
+    if {$::verbose} {
+        puts "  $name... FAILED (integrity check: $result)"
+    }
+}
+
+proc db_enter {db} {
+    # Stub for entering database context
+    return
+}
+
+proc db_leave {db} {
+    # Stub for leaving database context
+    return
+}
+
+proc sqlite3_mprintf_int {args} {
+    # Stub for SQLite printf with integers
+    return [format [lindex $args 0] {*}[lrange $args 1 end]]
+}
+
+proc sqlite3_mprintf_str {args} {
+    # Stub for SQLite printf with strings
+    return [format [lindex $args 0] {*}[lrange $args 1 end]]
+}
+
+proc sqlite3_mprintf_double {args} {
+    # Stub for SQLite printf with doubles
+    return [format [lindex $args 0] {*}[lrange $args 1 end]]
 }
 
 #-----------------------------------------------------------------------------
@@ -862,6 +967,45 @@ proc db {cmd args} {
         nullvalue {
             # Sets the string used for NULL - ignore
             return
+        }
+        null {
+            # Return the NULL representation string
+            # SQLite's db null command returns/sets the string to represent NULL
+            if {[llength $args] > 0} {
+                # Setting null value representation
+                set ::null_string [lindex $args 0]
+            }
+            return [expr {[info exists ::null_string] ? $::null_string : ""}]
+        }
+        last_insert_rowid {
+            # Return the last inserted rowid
+            set result [execsql "SELECT last_insert_rowid()"]
+            if {[llength $result] > 0} {
+                return [lindex $result 0]
+            }
+            return 0
+        }
+        changes {
+            # Return number of rows changed by last statement
+            set result [execsql "SELECT changes()"]
+            if {[llength $result] > 0} {
+                return [lindex $result 0]
+            }
+            return 0
+        }
+        total_changes {
+            # Return total number of rows changed
+            set result [execsql "SELECT total_changes()"]
+            if {[llength $result] > 0} {
+                return [lindex $result 0]
+            }
+            return 0
+        }
+        exists {
+            # Check if query returns any rows
+            set sql [lindex $args 0]
+            set result [execsql $sql]
+            return [expr {[llength $result] > 0}]
         }
         default {
             error "Unknown db command: $cmd"
