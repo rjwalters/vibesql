@@ -176,11 +176,11 @@ fn extract_non_join_predicates_recursive(
 pub(super) fn build_combined_schema(
     batches: &[(String, Option<String>, columnar::ColumnarBatch, vibesql_catalog::TableSchema)],
 ) -> CombinedSchema {
-    let mut combined = CombinedSchema { table_schemas: HashMap::new(), table_display_names: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new() };
+    let mut combined = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new() };
 
     for (table_name, alias, _batch, schema) in batches {
         let name = alias.as_ref().unwrap_or(table_name);
-        combined.insert_table(name, combined.total_columns, schema.clone());
+        combined.insert_table(name.clone(), combined.total_columns, schema.clone());
         combined.total_columns += schema.columns.len();
     }
 

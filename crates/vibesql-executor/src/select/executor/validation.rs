@@ -566,9 +566,9 @@ fn validate_column_ref(
         if let Some(ref qualifier) = col_ref.table {
             let qualifier_lower = qualifier.to_lowercase();
             let table_exists =
-                schema.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower);
+                schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower);
             let table_in_outer = outer_schema.is_some_and(|outer| {
-                outer.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower)
+                outer.table_schemas.keys().any(|k| k.canonical() == qualifier_lower)
             });
             if table_exists || table_in_outer {
                 return Ok(());
@@ -686,9 +686,9 @@ pub fn validate_select_columns_with_context(
                 // Validate that the qualifier matches a known table (check both schemas)
                 let qualifier_lower = qualifier.to_lowercase();
                 let table_in_inner =
-                    schema.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower);
+                    schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower);
                 let table_in_outer = outer_schema.is_some_and(|outer| {
-                    outer.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower)
+                    outer.table_schemas.keys().any(|k| k.canonical() == qualifier_lower)
                 });
 
                 if !table_in_inner && !table_in_outer {

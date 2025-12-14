@@ -83,14 +83,11 @@ impl SelectExecutor<'_> {
                         // Store (index, column_name, table_name_for_display)
                         let mut table_columns: Vec<(usize, String, String)> = Vec::new();
 
-                        for (table_key, (start_index, table_schema)) in
+                        for (table_id, (start_index, table_schema)) in
                             &from_res.schema.table_schemas
                         {
-                            // Get the effective table name (alias if present, original name otherwise)
-                            let effective_table_name = from_res.schema.table_display_names
-                                .get(table_key)
-                                .cloned()
-                                .unwrap_or_else(|| table_schema.name.clone());
+                            // Get the effective table name using TableIdentifier's display form
+                            let effective_table_name = table_id.display().to_string();
 
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                                 let abs_idx = start_index + col_idx;

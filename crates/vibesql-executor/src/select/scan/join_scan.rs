@@ -220,8 +220,8 @@ where
         // Build combined schema for WHERE clause analysis using SchemaBuilder for O(n) performance
         let mut schema_builder =
             crate::schema::SchemaBuilder::from_schema(left_result.schema.clone());
-        for (table_name, (_start_idx, table_schema)) in &right_result.schema.table_schemas {
-            schema_builder.add_table(table_name.clone(), table_schema.clone());
+        for (table_id, (_start_idx, table_schema)) in &right_result.schema.table_schemas {
+            schema_builder.add_table(table_id.display().to_string(), table_schema.clone());
         }
         let combined_schema = schema_builder.build();
 
@@ -898,7 +898,7 @@ fn parse_semi_join_condition(
     let conjuncts = flatten_conjuncts(cond);
 
     let left_tables: HashSet<String> =
-        left_result.schema.table_schemas.keys().map(|s| s.to_lowercase()).collect();
+        left_result.schema.table_schemas.keys().map(|s| s.canonical().to_string()).collect();
 
     let right_table_lower = right_table_name.to_lowercase();
 

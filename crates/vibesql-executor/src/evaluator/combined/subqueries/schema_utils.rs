@@ -39,8 +39,8 @@ pub(super) fn build_merged_outer_schema<'a>(
         let mut builder = crate::schema::SchemaBuilder::from_schema(outer.clone());
 
         // Add all tables from current schema
-        for (table_name, (_offset, table_schema)) in &current_schema.table_schemas {
-            builder.add_table(table_name.clone(), table_schema.clone());
+        for (table_id, (_offset, table_schema)) in &current_schema.table_schemas {
+            builder.add_table(table_id.display().to_string(), table_schema.clone());
         }
 
         std::borrow::Cow::Owned(builder.build())
