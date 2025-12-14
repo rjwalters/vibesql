@@ -415,9 +415,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             name: self.resolve(cte.name),
             columns: cte.columns.as_ref().map(|v| v.iter().map(|s| self.resolve(*s)).collect()),
             query: Box::new(self.convert_select(cte.query)),
-            // Arena mode CTEs default to non-recursive
-            // TODO: Add recursive support to arena mode
-            recursive: false,
+            recursive: cte.recursive,
         }
     }
 

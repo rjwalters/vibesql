@@ -52,9 +52,14 @@ where
     // Execute each CTE in order
     // CTEs can reference previously defined CTEs
     for cte in ctes {
-        // Execute the CTE query with accumulated CTE results so far
-        // This allows later CTEs to reference earlier ones
-        let rows = executor(&cte.query, &cte_results)?;
+        // Check if this is a recursive CTE
+        let rows = if cte.recursive {
+            // Recursive CTE: execute base term, then iteratively execute recursive term
+            execute_recursive_cte(cte, &cte_results, &executor, &memory_check)?
+        } else {
+            // Non-recursive CTE: execute query directly
+            executor(&cte.query, &cte_results)?
+        };
 
         // Track memory for this CTE result before storing
         let estimated_size = super::helpers::estimate_result_size(&rows);
@@ -156,6 +161,129 @@ pub(super) fn derive_cte_schema(
 
         Ok(vibesql_catalog::TableSchema::new(cte.name.clone(), columns))
     }
+}
+
+/// Execute a recursive CTE using iterative evaluation
+///
+/// Recursive CTEs in SQL:1999/SQLite are defined with UNION ALL:
+/// ```sql
+/// WITH RECURSIVE cte AS (
+///   base_query          -- Executed once to get initial rows
+///   UNION ALL
+///   recursive_query     -- References 'cte', executed iteratively
+/// )
+/// ```
+///
+/// Algorithm:
+/// 1. Split query into base and recursive terms (before/after UNION ALL)
+/// 2. Execute base term to get initial working table
+/// 3. Repeat until no new rows or max depth reached:
+///    - Make working table available as CTE
+///    - Execute recursive term
+///    - Add new rows to result
+///    - Update working table to new rows
+fn execute_recursive_cte<F, M>(
+    cte: &vibesql_ast::CommonTableExpr,
+    cte_results: &HashMap<String, CteResult>,
+    executor: &F,
+    memory_check: &M,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
+    // Maximum recursion depth (SQLite default is 1000)
+    const MAX_RECURSION_DEPTH: usize = 1000;
+
+    // Validate that recursive CTE uses UNION ALL
+    let set_op = cte.query.set_operation.as_ref().ok_or_else(|| {
+        ExecutorError::UnsupportedFeature(format!(
+            "Recursive CTE '{}' must use UNION ALL",
+            cte.name
+        ))
+    })?;
+
+    if set_op.op != vibesql_ast::SetOperator::Union || !set_op.all {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "Recursive CTE '{}' must use UNION ALL (not UNION, INTERSECT, or EXCEPT)",
+            cte.name
+        )));
+    }
+
+    // Extract base and recursive terms
+    // Base term: the main SELECT (before UNION ALL)
+    // Recursive term: the right side of UNION ALL
+
+    // Create base-only query without the UNION ALL set operation
+    // This prevents the base term from trying to reference the CTE before it exists
+    let base_query = vibesql_ast::SelectStmt {
+        with_clause: cte.query.with_clause.clone(),
+        distinct: cte.query.distinct,
+        select_list: cte.query.select_list.clone(),
+        into_table: cte.query.into_table.clone(),
+        into_variables: cte.query.into_variables.clone(),
+        from: cte.query.from.clone(),
+        where_clause: cte.query.where_clause.clone(),
+        group_by: cte.query.group_by.clone(),
+        having: cte.query.having.clone(),
+        order_by: cte.query.order_by.clone(),
+        limit: cte.query.limit,
+        offset: cte.query.offset,
+        set_operation: None,  // Remove UNION ALL for base term execution
+        values: cte.query.values.clone(),
+    };
+    let recursive_query = &set_op.right;
+
+    // Step 1: Execute base term to get initial rows
+    let mut all_rows = executor(&base_query, cte_results)?;
+    let mut working_table = all_rows.clone();
+
+    // Derive schema from base term result
+    let schema = derive_cte_schema(cte, &all_rows)?;
+
+    // Step 2: Iterative evaluation
+    let mut depth = 0;
+    while !working_table.is_empty() && depth < MAX_RECURSION_DEPTH {
+        depth += 1;
+
+        // Make working table available as this CTE for recursive reference
+        let mut recursive_cte_results = cte_results.clone();
+        recursive_cte_results.insert(
+            cte.name.clone(),
+            (schema.clone(), Arc::new(working_table.clone())),
+        );
+
+        // Execute recursive term with working table as CTE
+        let new_rows = executor(recursive_query, &recursive_cte_results)?;
+
+        // If no new rows, we're done
+        if new_rows.is_empty() {
+            break;
+        }
+
+        // Check memory before adding new rows
+        let estimated_size = super::helpers::estimate_result_size(&new_rows);
+        memory_check(estimated_size)?;
+
+        // Add new rows to result
+        all_rows.extend(new_rows.clone());
+
+        // Update working table to be the new rows for next iteration
+        working_table = new_rows;
+    }
+
+    // Check if we hit max recursion depth
+    if depth >= MAX_RECURSION_DEPTH {
+        return Err(ExecutorError::UnsupportedFeature(format!(
+            "Recursive CTE '{}' exceeded maximum recursion depth of {}",
+            cte.name, MAX_RECURSION_DEPTH
+        )));
+    }
+
+    Ok(all_rows)
 }
 
 /// Infer data type from a SQL value
