@@ -1224,32 +1224,32 @@ fn remove_duplicate_columns_for_natural_join(
     use std::collections::{HashMap, HashSet};
 
     // Find common column names (case-insensitive)
+    // Use table_start_idx to compute correct absolute positions
+    // (HashMap iteration order is non-deterministic, so we can't use a sequential counter)
     let mut left_column_map: HashMap<String, Vec<(String, String, usize)>> = HashMap::new(); // lowercase -> [(table, actual_name, idx)]
-    let mut col_idx = 0;
-    for (table_name, (_table_idx, table_schema)) in &left_schema.table_schemas {
-        for col in &table_schema.columns {
+    for (table_name, (table_start_idx, table_schema)) in &left_schema.table_schemas {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             left_column_map.entry(lowercase).or_default().push((
                 table_name.to_string(),
                 col.name.clone(),
-                col_idx,
+                table_start_idx + col_idx,
             ));
-            col_idx += 1;
         }
     }
 
     // Identify which columns from the right side are duplicates
+    // Use table_start_idx from right_schema to compute correct absolute positions
+    let left_col_count = left_schema.total_columns;
     let mut right_duplicate_indices: HashSet<usize> = HashSet::new();
-    let left_col_count = col_idx;
-    col_idx = 0;
-    for (_table_idx, table_schema) in right_schema.table_schemas.values() {
-        for col in &table_schema.columns {
+    for (_table_name, (table_start_idx, table_schema)) in &right_schema.table_schemas {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if left_column_map.contains_key(&lowercase) {
                 // This is a common column, mark it as a duplicate to remove
-                right_duplicate_indices.insert(left_col_count + col_idx);
+                // Position in result = left_col_count + position_in_right_schema
+                right_duplicate_indices.insert(left_col_count + table_start_idx + col_idx);
             }
-            col_idx += 1;
         }
     }
 
@@ -1259,13 +1259,18 @@ fn remove_duplicate_columns_for_natural_join(
     }
 
     // Project out the duplicate columns from the result
-    let total_cols = left_col_count + col_idx;
+    let total_cols = left_col_count + right_schema.total_columns;
     let keep_indices: Vec<usize> =
         (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
 
     // Build new schema without duplicate columns
+    // Sort tables by their start index to ensure consistent ordering
+    // (HashMap iteration order is non-deterministic)
+    let mut sorted_tables: Vec<_> = result.schema.table_schemas.iter().collect();
+    sorted_tables.sort_by_key(|(_, (start_idx, _))| *start_idx);
+
     let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
-    for (table_name, (table_start_idx, table_schema)) in &result.schema.table_schemas {
+    for (table_name, (table_start_idx, table_schema)) in sorted_tables {
         let mut new_cols = Vec::new();
 
         for (idx, col) in table_schema.columns.iter().enumerate() {
@@ -1321,16 +1326,18 @@ fn remove_duplicate_columns_for_using_join(
     let left_col_count = left_schema.total_columns;
 
     // Identify which columns from the right side are USING columns to remove
+    // Use table_start_idx from right_schema to compute correct absolute positions
+    // (HashMap iteration order is non-deterministic, so we can't use a sequential counter)
     let mut right_duplicate_indices: HashSet<usize> = HashSet::new();
-    let mut col_idx = 0;
-    for (_table_idx, table_schema) in right_schema.table_schemas.values() {
-        for col in &table_schema.columns {
+    for (_table_name, (table_start_idx, table_schema)) in &right_schema.table_schemas {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if using_cols_lower.contains(&lowercase) {
                 // This is a USING column, mark it as a duplicate to remove
-                right_duplicate_indices.insert(left_col_count + col_idx);
+                // Position in result = left_col_count + position_in_right_schema
+                // Position in right schema = table_start_idx + col_idx
+                right_duplicate_indices.insert(left_col_count + table_start_idx + col_idx);
             }
-            col_idx += 1;
         }
     }
 
@@ -1340,14 +1347,19 @@ fn remove_duplicate_columns_for_using_join(
     }
 
     // Project out the duplicate columns from the result
-    let total_cols = left_col_count + col_idx;
+    let total_cols = left_col_count + right_schema.total_columns;
     let keep_indices: Vec<usize> =
         (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
 
     // Build new schema without duplicate columns
+    // Sort tables by their start index to ensure consistent ordering
+    // (HashMap iteration order is non-deterministic)
     use std::collections::HashMap;
+    let mut sorted_tables: Vec<_> = result.schema.table_schemas.iter().collect();
+    sorted_tables.sort_by_key(|(_, (start_idx, _))| *start_idx);
+
     let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
-    for (table_name, (table_start_idx, table_schema)) in &result.schema.table_schemas {
+    for (table_name, (table_start_idx, table_schema)) in sorted_tables {
         let mut new_cols = Vec::new();
 
         for (idx, col) in table_schema.columns.iter().enumerate() {
