@@ -479,6 +479,7 @@ where
                 join_type,
                 &None, // No ON condition (using additional_equijoins instead)
                 false, // Not a NATURAL JOIN
+                None,  // No USING clause
                 database,
                 &applicable_conditions, // Pass only the applicable conditions for this join
                 &timeout_ctx,
@@ -777,6 +778,7 @@ where
         semi_join_type,
         semi_condition,
         false, // not natural
+        None,  // no using clause
         database,
         &[], // no additional equijoins
         &timeout_ctx,
@@ -984,6 +986,7 @@ where
                 semi_join_type,
                 semi_condition,
                 false,
+                None, // no using clause
                 database,
                 &[],
                 &timeout_ctx,
@@ -1034,6 +1037,7 @@ where
         semi_join_type,
         semi_condition,
         false,
+        None, // no using clause
         database,
         &[],
         &timeout_ctx,
@@ -1189,6 +1193,7 @@ where
             &join_type,
             &join_condition,
             false,
+            None, // no using clause
             database,
             &equijoins,
             &timeout_ctx,

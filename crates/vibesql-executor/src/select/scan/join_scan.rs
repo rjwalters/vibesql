@@ -269,12 +269,15 @@ where
     // is a future improvement (see issue #2631 for context)
     let timeout_ctx = TimeoutContext::new_default();
     // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve CTEs
+    // Note: We pass None for using_columns here because USING clause deduplication is handled
+    // as post-processing below. The join condition was already built from the USING columns.
     let mut result = nested_loop_join(
         left_result,
         right_result,
         join_type,
         &effective_condition,
         natural,
+        None, // USING clause deduplication handled below as post-processing
         database,
         &equijoin_predicates,
         &timeout_ctx,
@@ -311,16 +314,17 @@ fn remove_duplicate_columns_for_using_join(
     let left_col_count = left_schema.total_columns;
 
     // Identify which columns from the right side are USING columns to remove
+    // Use table_start_idx from right_schema to compute correct absolute positions
+    // (HashMap iteration order is non-deterministic, so we can't use a sequential counter)
     let mut right_duplicate_indices: HashSet<usize> = HashSet::new();
-    let mut col_idx = 0;
-    for (_table_idx, table_schema) in right_schema.table_schemas.values() {
-        for col in &table_schema.columns {
+    for (_table_name, (table_start_idx, table_schema)) in &right_schema.table_schemas {
+        for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if using_cols_lower.contains(&lowercase) {
                 // This is a USING column, mark it as a duplicate to remove
-                right_duplicate_indices.insert(left_col_count + col_idx);
+                // Position in result = left_col_count + position_in_right_schema
+                right_duplicate_indices.insert(left_col_count + table_start_idx + col_idx);
             }
-            col_idx += 1;
         }
     }
 
@@ -330,13 +334,18 @@ fn remove_duplicate_columns_for_using_join(
     }
 
     // Project out the duplicate columns from the result
-    let total_cols = left_col_count + col_idx;
+    let total_cols = left_col_count + right_schema.total_columns;
     let keep_indices: Vec<usize> =
         (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
 
     // Build new schema without duplicate columns
+    // Sort tables by their start index to ensure consistent ordering
+    // (HashMap iteration order is non-deterministic)
+    let mut sorted_tables: Vec<_> = result.schema.table_schemas.iter().collect();
+    sorted_tables.sort_by_key(|(_, (start_idx, _))| *start_idx);
+
     let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
-    for (table_name, (table_start_idx, table_schema)) in &result.schema.table_schemas {
+    for (table_name, (table_start_idx, table_schema)) in sorted_tables {
         let mut new_cols = Vec::new();
 
         for (idx, col) in table_schema.columns.iter().enumerate() {
