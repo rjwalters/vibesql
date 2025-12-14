@@ -1248,7 +1248,7 @@ fn remove_duplicate_columns_for_natural_join(
     // Identify which columns from the right side are duplicates
     // Use table_start_idx from right_schema to compute correct absolute positions
     let left_col_count = left_schema.total_columns;
-    for (_table_name, (table_start_idx, table_schema)) in &right_schema.table_schemas {
+    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
         for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if left_column_map.contains_key(&lowercase) {
@@ -1291,7 +1291,7 @@ fn remove_duplicate_columns_for_using_join(
 
     // Identify which columns from the right side are USING columns to hide
     // Use table_start_idx from right_schema to compute correct absolute positions
-    for (_table_name, (table_start_idx, table_schema)) in &right_schema.table_schemas {
+    for (table_start_idx, table_schema) in right_schema.table_schemas.values() {
         for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if using_cols_lower.contains(&lowercase) {

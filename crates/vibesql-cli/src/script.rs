@@ -313,7 +313,12 @@ fn parse_statements(script: &str) -> Vec<String> {
         }
 
         // Handle statement delimiter (semicolon)
+        // Include the semicolon in the statement so the parser can see it.
+        // This allows the parser to distinguish between:
+        // - "SELECT f1 FROM test1 ORDER BY"   → incomplete input (no semicolon)
+        // - "SELECT f1 FROM test1 ORDER BY;"  → syntax error (has semicolon, but invalid)
         if !in_string && ch == ';' {
+            current_statement.push(ch); // Include the semicolon
             let trimmed = current_statement.trim();
             if !trimmed.is_empty() {
                 statements.push(trimmed.to_string());
@@ -355,7 +360,7 @@ mod tests {
         let script = "SELECT * FROM users;";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "SELECT * FROM users");
+        assert_eq!(stmts[0], "SELECT * FROM users;");
     }
 
     #[test]
@@ -363,8 +368,8 @@ mod tests {
         let script = "CREATE TABLE users (id INT); INSERT INTO users VALUES (1);";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 2);
-        assert_eq!(stmts[0], "CREATE TABLE users (id INT)");
-        assert_eq!(stmts[1], "INSERT INTO users VALUES (1)");
+        assert_eq!(stmts[0], "CREATE TABLE users (id INT);");
+        assert_eq!(stmts[1], "INSERT INTO users VALUES (1);");
     }
 
     #[test]
@@ -372,17 +377,17 @@ mod tests {
         let script = "  SELECT 1;  \n  SELECT 2;  ";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 2);
-        assert_eq!(stmts[0], "SELECT 1");
-        assert_eq!(stmts[1], "SELECT 2");
+        assert_eq!(stmts[0], "SELECT 1;");
+        assert_eq!(stmts[1], "SELECT 2;");
     }
 
     #[test]
     fn test_parse_with_comments() {
         let script = "-- This is a comment\nSELECT 1;";
         let stmts = parse_statements(script);
-        // Comment lines starting with -- are filtered out, leaving only SELECT 1
+        // Comment lines starting with -- are filtered out, leaving only SELECT 1;
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[0], "SELECT 1;");
     }
 
     #[test]
@@ -399,7 +404,7 @@ mod tests {
         let script = "INSERT INTO test VALUES (1, 'Error at position 10; expected value');";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "INSERT INTO test VALUES (1, 'Error at position 10; expected value')");
+        assert_eq!(stmts[0], "INSERT INTO test VALUES (1, 'Error at position 10; expected value');");
     }
 
     #[test]
@@ -408,7 +413,7 @@ mod tests {
         let script = "INSERT INTO test VALUES ('It''s a test');";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "INSERT INTO test VALUES ('It''s a test')");
+        assert_eq!(stmts[0], "INSERT INTO test VALUES ('It''s a test');");
     }
 
     #[test]
@@ -416,7 +421,7 @@ mod tests {
         let script = "/* This is a\nmulti-line comment */\nSELECT 1;";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[0], "SELECT 1;");
     }
 
     #[test]
@@ -424,7 +429,7 @@ mod tests {
         let script = "-- This comment has a semicolon; but it should be ignored\nSELECT 1;";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[0], "SELECT 1;");
     }
 
     #[test]
@@ -461,7 +466,7 @@ INSERT INTO logs VALUES (2, 'Success');
         assert_eq!(stmts.len(), 3);
         assert_eq!(stmts[0], ".tables");
         assert_eq!(stmts[1], ".schema users");
-        assert_eq!(stmts[2], "SELECT * FROM users");
+        assert_eq!(stmts[2], "SELECT * FROM users;");
     }
 
     #[test]
@@ -472,7 +477,7 @@ INSERT INTO logs VALUES (2, 'Success');
         assert_eq!(stmts.len(), 3);
         assert_eq!(stmts[0], "\\dt");
         assert_eq!(stmts[1], "\\d users");
-        assert_eq!(stmts[2], "SELECT 1");
+        assert_eq!(stmts[2], "SELECT 1;");
     }
 
     #[test]
@@ -481,7 +486,7 @@ INSERT INTO logs VALUES (2, 'Success');
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 3);
         assert_eq!(stmts[0], ".mode json");
-        assert_eq!(stmts[1], "SELECT * FROM users");
+        assert_eq!(stmts[1], "SELECT * FROM users;");
         assert_eq!(stmts[2], ".tables");
     }
 }

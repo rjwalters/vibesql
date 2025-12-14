@@ -83,8 +83,8 @@ impl SelectExecutor<'_> {
                         // Get all column names in order from the combined schema
                         let mut table_columns: Vec<(usize, String)> = Vec::new();
 
-                        for (table_key, (start_index, table_schema)) in
-                            &from_res.schema.table_schemas
+                        for (start_index, table_schema) in
+                            from_res.schema.table_schemas.values()
                         {
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                                 let abs_idx = start_index + col_idx;

@@ -124,10 +124,11 @@ fn bind_expression(expr: &Expression, params: &[SqlValue]) -> Expression {
             args: args.iter().map(|a| bind_expression(a, params)).collect(),
             character_unit: character_unit.clone(),
         },
-        Expression::AggregateFunction { name, distinct, args } => Expression::AggregateFunction {
+        Expression::AggregateFunction { name, distinct, args, order_by } => Expression::AggregateFunction {
             name: name.clone(),
             distinct: *distinct,
             args: args.iter().map(|a| bind_expression(a, params)).collect(),
+            order_by: order_by.clone(),
         },
         // Pass through expressions that don't contain placeholders
         _ => expr.clone(),

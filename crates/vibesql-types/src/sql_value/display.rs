@@ -40,8 +40,8 @@ fn format_f64(n: f64) -> String {
     // SQLite behavior: format whole numbers without decimal point
     // This matches SQLite's TCL interface which returns "45" not "45.0"
     // Strip ".0" suffix for whole numbers
-    if s.ends_with(".0") {
-        s[..s.len() - 2].to_string()
+    if let Some(stripped) = s.strip_suffix(".0") {
+        stripped.to_string()
     } else {
         s.to_string()
     }
@@ -81,8 +81,8 @@ fn format_f32(n: f32) -> String {
 
     // SQLite behavior: format whole numbers without decimal point
     // Strip ".0" suffix for whole numbers
-    if s.ends_with(".0") {
-        s[..s.len() - 2].to_string()
+    if let Some(stripped) = s.strip_suffix(".0") {
+        stripped.to_string()
     } else {
         s.to_string()
     }
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(format_f64(1.0), "1.0");
         assert_eq!(format_f64(2.0), "2.0");
         assert_eq!(format_f64(0.0), "0.0");
-        assert_eq!(format_f64(3.14158), "3.14158");
+        assert_eq!(format_f64(123.456), "123.456");
         assert_eq!(format_f64(0.5), "0.5");
         assert_eq!(format_f64(100.0), "100.0");
         assert_eq!(format_f64(-4373.0), "-4373.0");
@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(format_f32(2.2f32), "2.2");
         assert_eq!(format_f32(1.0f32), "1.0");
         assert_eq!(format_f32(0.0f32), "0.0");
-        assert_eq!(format_f32(3.14158f32), "3.14158");
+        assert_eq!(format_f32(123.456f32), "123.456");
         assert_eq!(format_f32(0.5f32), "0.5");
         assert_eq!(format_f32(100.0f32), "100.0");
         assert_eq!(format_f32(-4373.0f32), "-4373.0");
@@ -225,6 +225,6 @@ mod tests {
         assert_eq!(format_f64(100.0), "100");
         assert_eq!(format_f64(0.0), "0");
         assert_eq!(format_f64(45.5), "45.5");
-        assert_eq!(format_f64(3.14159), "3.14159");
+        assert_eq!(format_f64(123.456), "123.456");
     }
 }
