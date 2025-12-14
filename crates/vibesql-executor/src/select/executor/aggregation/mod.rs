@@ -562,7 +562,9 @@ impl SelectExecutor<'_> {
 ///
 /// Returns None for complex FROM clauses (subqueries, CTEs, etc.) where we can't
 /// easily determine the schema without execution.
-fn build_early_schema(
+/// Build schema from FROM clause without executing it.
+/// This enables schema-aware WHERE clause alias resolution before execution.
+pub(crate) fn build_early_schema(
     from_clause: &vibesql_ast::FromClause,
     database: &vibesql_storage::Database,
 ) -> Option<crate::schema::CombinedSchema> {
