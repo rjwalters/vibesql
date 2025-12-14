@@ -296,12 +296,19 @@ where
     Ok(result)
 }
 
-/// Remove duplicate columns from a USING clause join result
+/// Mark USING columns as hidden for USING clause join result
 ///
-/// USING clause should only include join columns once (from the left side).
-/// This function identifies USING columns in the right side and removes them.
+/// USING clause should only include join columns once (from the left side) in `SELECT *`.
+/// However, qualified wildcards like `SELECT t1.*` should still return all columns from t1.
+///
+/// This function marks USING columns from the right side as hidden in the schema,
+/// rather than removing them. This allows:
+/// - `SELECT *` to correctly deduplicate columns (skips hidden columns)
+/// - `SELECT t1.*` to return all columns from t1 (includes hidden columns)
+///
+/// Issue #4466: table.* should return all columns in NATURAL JOIN context
 fn remove_duplicate_columns_for_using_join(
-    result: super::FromResult,
+    mut result: super::FromResult,
     left_schema: &CombinedSchema,
     right_schema: &CombinedSchema,
     using_columns: &[String],
@@ -313,73 +320,21 @@ fn remove_duplicate_columns_for_using_join(
     // Count columns in left schema
     let left_col_count = left_schema.total_columns;
 
-    // Identify which columns from the right side are USING columns to remove
+    // Identify which columns from the right side are USING columns to hide
     // Use table_start_idx from right_schema to compute correct absolute positions
-    // (HashMap iteration order is non-deterministic, so we can't use a sequential counter)
-    let mut right_duplicate_indices: HashSet<usize> = HashSet::new();
     for (_table_name, (table_start_idx, table_schema)) in &right_schema.table_schemas {
         for (col_idx, col) in table_schema.columns.iter().enumerate() {
             let lowercase = col.name.to_lowercase();
             if using_cols_lower.contains(&lowercase) {
-                // This is a USING column, mark it as a duplicate to remove
+                // This is a USING column, mark it as hidden for SELECT * expansion
                 // Position in result = left_col_count + position_in_right_schema
-                right_duplicate_indices.insert(left_col_count + table_start_idx + col_idx);
+                let hidden_idx = left_col_count + table_start_idx + col_idx;
+                result.schema.hide_column(hidden_idx);
             }
         }
     }
 
-    // If no duplicates, return as-is
-    if right_duplicate_indices.is_empty() {
-        return Ok(result);
-    }
-
-    // Project out the duplicate columns from the result
-    let total_cols = left_col_count + right_schema.total_columns;
-    let keep_indices: Vec<usize> =
-        (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
-
-    // Build new schema without duplicate columns
-    // Sort tables by their start index to ensure consistent ordering
-    // (HashMap iteration order is non-deterministic)
-    let mut sorted_tables: Vec<_> = result.schema.table_schemas.iter().collect();
-    sorted_tables.sort_by_key(|(_, (start_idx, _))| *start_idx);
-
-    let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
-    for (table_name, (table_start_idx, table_schema)) in sorted_tables {
-        let mut new_cols = Vec::new();
-
-        for (idx, col) in table_schema.columns.iter().enumerate() {
-            // Calculate absolute column index
-            let abs_col_idx = table_start_idx + idx;
-
-            if keep_indices.contains(&abs_col_idx) {
-                new_cols.push(col.clone());
-            }
-        }
-
-        if !new_cols.is_empty() {
-            let new_table_schema =
-                vibesql_catalog::TableSchema::new(table_schema.name.clone(), new_cols);
-            new_schema
-                .table_schemas
-                .insert(table_name.clone(), (new_schema.total_columns, new_table_schema.clone()));
-            new_schema.total_columns += new_table_schema.columns.len();
-        }
-    }
-
-    // Project the rows
-    let new_rows: Vec<vibesql_storage::Row> = result
-        .data
-        .as_slice()
-        .iter()
-        .map(|row| {
-            let new_values: Vec<vibesql_types::SqlValue> =
-                keep_indices.iter().filter_map(|&i| row.values.get(i).cloned()).collect();
-            vibesql_storage::Row::new(new_values)
-        })
-        .collect();
-
-    Ok(super::FromResult::from_rows(new_schema, new_rows))
+    Ok(result)
 }
 
 /// Generate the implicit join condition for a NATURAL JOIN

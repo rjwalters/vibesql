@@ -207,6 +207,7 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
     let combined_schema = CombinedSchema {
         table_schemas: combined_tables,
         total_columns: orders_combined.total_columns + customers_combined.total_columns,
+        hidden_columns: std::collections::HashSet::new(),
     };
 
     let where_expr = vibesql_ast::Expression::BinaryOp {

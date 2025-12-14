@@ -25,7 +25,7 @@
 //!
 //! This is particularly beneficial for OLTP workloads with high query rates.
 
-use std::{cmp::Ordering, collections::HashMap};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}};
 
 use vibesql_ast::arena::{
     ArenaInterner, Expression as ArenaExpression, ExtendedExpr as ArenaExtendedExpr,
@@ -119,7 +119,7 @@ impl SelectExecutor<'_> {
         interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         // Create an empty schema and row for expression evaluation
-        let schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
+        let schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new() };
         let empty_row = Row::new(vec![]);
         let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);
 

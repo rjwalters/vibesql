@@ -42,3 +42,58 @@ DROP TABLE orders
 
 statement ok
 DROP TABLE customers
+
+# Issue #4466: table.* should return all columns in NATURAL JOIN context
+statement ok
+CREATE TABLE t1(a, b, c)
+
+statement ok
+CREATE TABLE t2(b, c, d)
+
+statement ok
+INSERT INTO t1 VALUES(1, 2, 3)
+
+statement ok
+INSERT INTO t2 VALUES(2, 3, 4)
+
+# SELECT t1.* from NATURAL JOIN should return all columns from t1
+query III rowsort
+SELECT t1.* FROM t2 NATURAL JOIN t1
+----
+1 2 3
+
+# SELECT t2.* from NATURAL JOIN should return all columns from t2
+query III rowsort
+SELECT t2.* FROM t2 NATURAL JOIN t1
+----
+2 3 4
+
+# SELECT * from NATURAL JOIN should deduplicate columns
+query IIII rowsort
+SELECT * FROM t2 NATURAL JOIN t1
+----
+2 3 4 1
+
+# Mixed wildcards should return all columns from each table
+query IIIIII rowsort
+SELECT t1.*, t2.* FROM t2 NATURAL JOIN t1
+----
+1 2 3 2 3 4
+
+# USING clause: table.* should return all columns
+query III rowsort
+SELECT t1.* FROM t1 JOIN t2 USING(b, c)
+----
+1 2 3
+
+# USING clause: SELECT * should deduplicate columns
+query IIII rowsort
+SELECT * FROM t1 JOIN t2 USING(b, c)
+----
+1 2 3 4
+
+statement ok
+DROP TABLE t1
+
+statement ok
+DROP TABLE t2

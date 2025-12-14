@@ -119,8 +119,14 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             right_total += schema.columns.len();
         }
 
+        // Merge hidden columns, adjusting right side indices
+        let mut hidden_columns = left_schema.hidden_columns.clone();
+        for idx in right_schema.hidden_columns.iter() {
+            hidden_columns.insert(left_total + idx);
+        }
+
         let combined_schema =
-            CombinedSchema { table_schemas, total_columns: left_total + right_total };
+            CombinedSchema { table_schemas, total_columns: left_total + right_total, hidden_columns };
 
         let right_count = right_rows.len();
 

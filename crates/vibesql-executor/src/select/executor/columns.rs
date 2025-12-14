@@ -76,6 +76,7 @@ impl SelectExecutor<'_> {
             match item {
                 vibesql_ast::SelectItem::Wildcard { alias } => {
                     // SELECT * [AS (col1, col2, ...)] - expand to all column names from schema
+                    // Skip hidden columns (from NATURAL JOIN deduplication)
                     if let Some(from_res) = from_result {
                         // Get all column names in order from the combined schema
                         let mut table_columns: Vec<(usize, String)> = Vec::new();
@@ -84,6 +85,11 @@ impl SelectExecutor<'_> {
                             &from_res.schema.table_schemas
                         {
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
+                                let abs_idx = start_index + col_idx;
+                                // Skip hidden columns (from NATURAL JOIN deduplication)
+                                if from_res.schema.is_column_hidden(abs_idx) {
+                                    continue;
+                                }
                                 let col_name = match mode {
                                     ColumnNamingMode::Full => {
                                         // Use the table key (alias or table name) as the prefix
@@ -94,7 +100,7 @@ impl SelectExecutor<'_> {
                                         col_schema.name.clone()
                                     }
                                 };
-                                table_columns.push((start_index + col_idx, col_name));
+                                table_columns.push((abs_idx, col_name));
                             }
                         }
 
