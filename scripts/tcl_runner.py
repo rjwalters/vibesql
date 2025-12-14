@@ -850,7 +850,7 @@ def main():
     parser.add_argument("--output", "-o", help="Output JSON file")
     parser.add_argument("--parallel", action="store_true", help="Run tests in parallel")
     parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--timeout", type=float, default=5.0, help="Per-test timeout in seconds")
+    parser.add_argument("--timeout", type=float, default=None, help="Per-test timeout in seconds (default: 5 for static mode, 300 for native TCL)")
     parser.add_argument("--native-tcl", action="store_true",
                         help="Run tests using native tclsh instead of parsing (for files with TCL loops)")
     parser.add_argument("--tcl-shim", default=None,
@@ -861,6 +861,13 @@ def main():
     if not os.path.exists(args.vibesql):
         print(f"Error: VibeSQL binary not found: {args.vibesql}", file=sys.stderr)
         sys.exit(1)
+
+    # Set appropriate timeout defaults based on mode
+    if args.timeout is None:
+        if args.native_tcl:
+            args.timeout = 300.0  # 5 minutes for native TCL (handles heavy INSERT tests)
+        else:
+            args.timeout = 5.0   # 5 seconds for static parsing mode
 
     # Determine files to run
     if args.file:

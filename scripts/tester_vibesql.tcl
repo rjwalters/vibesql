@@ -327,18 +327,28 @@ proc track_pragma_setting {sql} {
 
 proc flush_batch {} {
     # Execute accumulated SQL statements
+    # Uses a temp file to avoid "argument list too long" errors for large batches
     if {[llength $::sql_batch] == 0} return
 
     set combined [join $::sql_batch ";\n"]
     set ::sql_batch {}
 
+    # Write SQL to temp file to avoid command line length limits
+    set tmpfile "/tmp/vibesql_batch_[pid].sql"
+    set f [open $tmpfile w]
+    puts $f $combined
+    close $f
+
     if {$::db_file eq ""} {
-        set cmd [list echo $combined | $::vibesql_path]
+        set exec_code [catch {exec $::vibesql_path < $tmpfile 2>@1} result]
     } else {
-        set cmd [list echo $combined | $::vibesql_path $::db_file]
+        set exec_code [catch {exec $::vibesql_path $::db_file < $tmpfile 2>@1} result]
     }
 
-    if {[catch {exec {*}$cmd 2>@1} result]} {
+    # Clean up temp file
+    file delete -force $tmpfile
+
+    if {$exec_code != 0} {
         error $result
     }
     return $result
@@ -372,11 +382,23 @@ proc execsql {sql {db ""}} {
     }
 
     # Handle transaction batching
-    if {$sql_upper eq "BEGIN" || [string match "BEGIN*" $sql_upper]} {
+    # Since vibesql doesn't persist transaction state across process invocations,
+    # we must batch all SQL from BEGIN to COMMIT and execute it in one process.
+    # Count BEGIN, COMMIT, ROLLBACK to track transaction state changes in this SQL
+    # Note: TCL uses \m and \M for word boundaries (not \b like PCRE)
+    set begin_count [regexp -all -nocase {\mBEGIN\M} $sql]
+    set end_count [expr {[regexp -all -nocase {\mCOMMIT\M} $sql] + [regexp -all -nocase {\mROLLBACK\M} $sql]}]
+    set net_begin [expr {$begin_count - $end_count}]
+
+    if {$net_begin > 0} {
+        # SQL opens a transaction (e.g., "BEGIN" or "CREATE TABLE...; BEGIN;")
+        # Add to batch and defer execution until COMMIT
         set ::in_transaction 1
         lappend ::sql_batch $sql
         return {}
-    } elseif {$sql_upper eq "COMMIT" || $sql_upper eq "ROLLBACK"} {
+    } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0)} {
+        # SQL closes a transaction (e.g., "COMMIT" or has more COMMITs than BEGINs)
+        # Flush the entire batch including this statement
         lappend ::sql_batch $sql
         set ::in_transaction 0
         if {[catch {flush_batch} result]} {
@@ -384,7 +406,12 @@ proc execsql {sql {db ""}} {
             error [translate_error_to_sqlite $result]
         }
         return [parse_result $result]
+    } elseif {$begin_count > 0 && $end_count > 0 && $begin_count == $end_count} {
+        # Balanced BEGIN/COMMIT in one statement - execute directly
+        # (e.g., "BEGIN; INSERT...; COMMIT;")
+        # Fall through to direct execution below
     } elseif {$::in_transaction} {
+        # Inside a transaction - add to batch
         lappend ::sql_batch $sql
         return {}
     }
