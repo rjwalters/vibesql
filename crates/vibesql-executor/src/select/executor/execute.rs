@@ -928,11 +928,18 @@ impl SelectExecutor<'_> {
             // Pass WHERE, ORDER BY, and LIMIT to execute_from for optimization
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
             // Pass select_list for table elimination optimization (#3556)
+            //
+            // Don't pass ORDER BY if there's a set operation - it will be handled at the set operation level
+            let order_by_hint = if stmt.set_operation.is_some() {
+                None
+            } else {
+                stmt.order_by.as_deref()
+            };
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,
                 resolved_where.as_ref(),
-                stmt.order_by.as_deref(),
+                order_by_hint,
                 stmt.limit,
                 Some(&stmt.select_list),
             )?;
