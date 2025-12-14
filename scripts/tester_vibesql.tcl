@@ -223,7 +223,7 @@ proc translate_error_to_sqlite {vibesql_error} {
     }
 
     # No tables specified: "no tables specified"
-    if {[regexp -nocase {no tables? specified|FROM clause.*required} $error_msg]} {
+    if {[regexp -nocase {no tables? specified|FROM clause.*required|SELECT \* requires FROM clause} $error_msg]} {
         return "no tables specified"
     }
 
@@ -934,10 +934,12 @@ proc db {cmd args} {
                 set headers [lindex $raw_result 0]
                 set rows [lindex $raw_result 1]
 
+                # Set arr(*) to the column names (SQLite behavior)
+                upvar 1 $varname arr
+                set arr(*) $headers
+
                 # Iterate over each row
                 foreach row $rows {
-                    # Set up the array variable in caller's scope
-                    upvar 1 $varname arr
                     set idx 0
                     foreach col $headers {
                         set arr($col) [lindex $row $idx]
