@@ -22,7 +22,9 @@ impl<'arena> ArenaParser<'arena> {
     ) -> Result<&'arena SelectStmt<'arena>, ParseError> {
         // Parse optional WITH clause
         let with_clause = if self.try_consume_keyword(Keyword::With) {
-            Some(self.parse_with_clause()?)
+            // Check for optional RECURSIVE keyword (SQL:1999, SQLite)
+            let recursive = self.try_consume_keyword(Keyword::Recursive);
+            Some(self.parse_with_clause(recursive)?)
         } else {
             None
         };
@@ -160,13 +162,17 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse WITH clause (CTEs).
+    ///
+    /// If `recursive` is true, all CTEs in this list are marked as recursive.
+    /// In SQL:1999/SQLite, the RECURSIVE keyword applies to all CTEs in the WITH clause.
     fn parse_with_clause(
         &mut self,
+        recursive: bool,
     ) -> Result<BumpVec<'arena, CommonTableExpr<'arena>>, ParseError> {
         let mut ctes = BumpVec::new_in(self.arena);
 
         loop {
-            let cte = self.parse_cte()?;
+            let cte = self.parse_cte(recursive)?;
             ctes.push(cte);
 
             if !self.try_consume(&Token::Comma) {
@@ -178,7 +184,11 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse a single CTE.
-    fn parse_cte(&mut self) -> Result<CommonTableExpr<'arena>, ParseError> {
+    ///
+    /// The `recursive` parameter indicates whether this CTE was declared in a
+    /// WITH RECURSIVE clause. In SQL:1999/SQLite, RECURSIVE applies to all CTEs
+    /// in the WITH clause, even if they don't actually recurse.
+    fn parse_cte(&mut self, recursive: bool) -> Result<CommonTableExpr<'arena>, ParseError> {
         // Parse CTE name
         let name = if let Token::Identifier(name) = self.peek() {
             let name = name.clone();
@@ -210,7 +220,7 @@ impl<'arena> ArenaParser<'arena> {
         let query = self.parse_select_statement()?;
         self.expect_token(Token::RParen)?;
 
-        Ok(CommonTableExpr { name, columns, query })
+        Ok(CommonTableExpr { name, columns, query, recursive })
     }
 
     /// Parse select list.

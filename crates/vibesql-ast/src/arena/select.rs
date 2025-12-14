@@ -13,6 +13,8 @@ pub struct CommonTableExpr<'arena> {
     pub name: Symbol,
     pub columns: Option<BumpVec<'arena, Symbol>>,
     pub query: &'arena SelectStmt<'arena>,
+    /// Whether this is a RECURSIVE CTE
+    pub recursive: bool,
 }
 
 /// Arena-allocated SELECT statement structure
