@@ -264,6 +264,18 @@ where
             break;
         }
 
+        // Validate that recursive term returns same number of columns as base term
+        // This check is done on first iteration to catch schema mismatches early
+        if depth == 1 && !new_rows.is_empty() && !all_rows.is_empty() {
+            let base_col_count = all_rows[0].values.len();
+            let recursive_col_count = new_rows[0].values.len();
+            if base_col_count != recursive_col_count {
+                return Err(ExecutorError::UnsupportedFeature(
+                    "SELECTs to the left and right of UNION ALL do not have the same number of result columns".to_string()
+                ));
+            }
+        }
+
         // Check memory before adding new rows
         let estimated_size = super::helpers::estimate_result_size(&new_rows);
         memory_check(estimated_size)?;

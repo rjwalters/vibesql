@@ -533,3 +533,58 @@ fn test_cte_in_not_exists_subquery() {
         vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Gizmo"))
     );
 }
+
+/// Test that recursive CTE validates column count between base and recursive terms (issue #4482)
+///
+/// SQLite rejects recursive CTEs where the base term and recursive term return different
+/// numbers of columns. VibeSQL should match this behavior.
+#[test]
+fn test_recursive_cte_column_count_validation() {
+    let mut db = vibesql_storage::Database::new();
+
+    // This should fail: base term returns 1 column, recursive term returns 2 columns
+    let query = "
+        WITH RECURSIVE bad AS (
+            SELECT 1 AS x
+            UNION ALL
+            SELECT x+1, x+2 FROM bad WHERE x<3
+        )
+        SELECT * FROM bad
+    ";
+
+    let result = execute_sql(&mut db, query);
+
+    // Should get error about column count mismatch
+    assert!(result.is_err(), "Expected error for mismatched column counts");
+    let err = result.unwrap_err();
+    let err_msg = format!("{:?}", err);
+    assert!(
+        err_msg.contains("SELECTs to the left and right of UNION ALL do not have the same number of result columns"),
+        "Expected specific SQLite error message, got: {}",
+        err_msg
+    );
+}
+
+/// Test that recursive CTE with matching column counts works correctly (issue #4482)
+#[test]
+fn test_recursive_cte_matching_columns() {
+    let mut db = vibesql_storage::Database::new();
+
+    // This should work: both base and recursive term return 1 column
+    let query = "
+        WITH RECURSIVE good AS (
+            SELECT 1 AS x
+            UNION ALL
+            SELECT x+1 FROM good WHERE x<3
+        )
+        SELECT * FROM good
+    ";
+
+    let result = execute_sql(&mut db, query).unwrap();
+
+    // Should return rows: 1, 2, 3
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(3));
+}
