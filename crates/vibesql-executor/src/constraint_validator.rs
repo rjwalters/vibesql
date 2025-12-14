@@ -9,6 +9,7 @@ use vibesql_ast::{
     ColumnConstraintKind, ColumnDef, Expression, TableConstraint, TableConstraintKind,
 };
 use vibesql_catalog::{ColumnSchema, TableSchema};
+use vibesql_types::DataType;
 
 use crate::errors::ExecutorError;
 
@@ -76,7 +77,11 @@ impl ConstraintValidator {
                             return Err(ExecutorError::MultiplePrimaryKeys);
                         }
                         result.primary_key = Some(vec![col_def.name.clone()]);
-                        result.not_null_columns.push(col_def.name.clone());
+                        // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
+                        // Other types (TEXT, REAL, BLOB, etc.) can have NULL in PRIMARY KEY
+                        if col_def.data_type == DataType::Integer {
+                            result.not_null_columns.push(col_def.name.clone());
+                        }
                         has_column_level_pk = true;
                     }
                     ColumnConstraintKind::Unique => {
@@ -120,10 +125,15 @@ impl ConstraintValidator {
                     let column_names: Vec<String> =
                         pk_cols.iter().map(|c| c.column_name.clone()).collect();
                     result.primary_key = Some(column_names.clone());
-                    // All PK columns must be NOT NULL
+                    // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
+                    // For table-level constraints, check each column's type
                     for col_name in &column_names {
-                        if !result.not_null_columns.contains(col_name) {
-                            result.not_null_columns.push(col_name.clone());
+                        if let Some(col_def) = columns.iter().find(|c| &c.name == col_name) {
+                            if col_def.data_type == DataType::Integer
+                                && !result.not_null_columns.contains(col_name)
+                            {
+                                result.not_null_columns.push(col_name.clone());
+                            }
                         }
                     }
                 }
@@ -200,9 +210,17 @@ mod tests {
     use super::*;
 
     fn make_column_def(name: &str, constraint_kinds: Vec<ColumnConstraintKind>) -> ColumnDef {
+        make_column_def_with_type(name, DataType::Integer, constraint_kinds)
+    }
+
+    fn make_column_def_with_type(
+        name: &str,
+        data_type: DataType,
+        constraint_kinds: Vec<ColumnConstraintKind>,
+    ) -> ColumnDef {
         ColumnDef {
             name: name.to_string(),
-            data_type: DataType::Integer,
+            data_type,
             nullable: true,
             constraints: constraint_kinds
                 .into_iter()
@@ -331,5 +349,112 @@ mod tests {
 
         assert!(!columns[0].nullable); // id should be NOT NULL
         assert!(columns[1].nullable); // name should still be nullable
+    }
+
+    // Tests for SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
+
+    #[test]
+    fn test_text_primary_key_allows_null() {
+        // TEXT PRIMARY KEY should NOT have implicit NOT NULL
+        let columns = vec![make_column_def_with_type(
+            "name",
+            DataType::Varchar { max_length: None },
+            vec![ColumnConstraintKind::PrimaryKey],
+        )];
+        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["name".to_string()]));
+        // NOT NULL should NOT be added for non-INTEGER PRIMARY KEY
+        assert!(!result.not_null_columns.contains(&"name".to_string()));
+    }
+
+    #[test]
+    fn test_typeless_primary_key_allows_null() {
+        // Typeless columns (parsed as Varchar) should NOT have implicit NOT NULL
+        let columns = vec![make_column_def_with_type(
+            "c",
+            DataType::Varchar { max_length: None },
+            vec![ColumnConstraintKind::PrimaryKey],
+        )];
+        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["c".to_string()]));
+        assert!(!result.not_null_columns.contains(&"c".to_string()));
+    }
+
+    #[test]
+    fn test_integer_primary_key_has_not_null() {
+        // INTEGER PRIMARY KEY should still have implicit NOT NULL
+        let columns = vec![make_column_def_with_type(
+            "id",
+            DataType::Integer,
+            vec![ColumnConstraintKind::PrimaryKey],
+        )];
+        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
+        assert!(result.not_null_columns.contains(&"id".to_string()));
+    }
+
+    #[test]
+    fn test_table_level_pk_with_mixed_types() {
+        // Table-level PK with mixed types: only INTEGER columns get NOT NULL
+        let columns = vec![
+            make_column_def_with_type("id", DataType::Integer, vec![]),
+            make_column_def_with_type("code", DataType::Varchar { max_length: None }, vec![]),
+        ];
+        let constraints = vec![TableConstraint {
+            name: None,
+            kind: TableConstraintKind::PrimaryKey {
+                columns: vec![
+                    vibesql_ast::IndexColumn {
+                        column_name: "id".to_string(),
+                        direction: vibesql_ast::OrderDirection::Asc,
+                        prefix_length: None,
+                    },
+                    vibesql_ast::IndexColumn {
+                        column_name: "code".to_string(),
+                        direction: vibesql_ast::OrderDirection::Asc,
+                        prefix_length: None,
+                    },
+                ],
+            },
+        }];
+
+        let result = ConstraintValidator::process_constraints(&columns, &constraints).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["id".to_string(), "code".to_string()]));
+        // Only the INTEGER column should have NOT NULL
+        assert!(result.not_null_columns.contains(&"id".to_string()));
+        assert!(!result.not_null_columns.contains(&"code".to_string()));
+    }
+
+    #[test]
+    fn test_real_primary_key_allows_null() {
+        // REAL PRIMARY KEY should NOT have implicit NOT NULL
+        let columns = vec![make_column_def_with_type(
+            "value",
+            DataType::Real,
+            vec![ColumnConstraintKind::PrimaryKey],
+        )];
+        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["value".to_string()]));
+        assert!(!result.not_null_columns.contains(&"value".to_string()));
+    }
+
+    #[test]
+    fn test_bigint_primary_key_allows_null() {
+        // BIGINT is not INTEGER, so should allow NULL in PRIMARY KEY
+        let columns = vec![make_column_def_with_type(
+            "big_id",
+            DataType::Bigint,
+            vec![ColumnConstraintKind::PrimaryKey],
+        )];
+        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["big_id".to_string()]));
+        // SQLite only treats INTEGER (not INT, BIGINT, etc.) specially
+        assert!(!result.not_null_columns.contains(&"big_id".to_string()));
     }
 }
