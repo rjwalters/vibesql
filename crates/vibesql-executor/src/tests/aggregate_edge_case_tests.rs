@@ -175,8 +175,8 @@ fn test_sum_mixed_numeric_types() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM(100.50, 200.25, 150.00) = 450.75
-    // SUM of floats/decimals returns Double (SQLite's REAL type)
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Double(450.75));
+    // SUM preserves type: Numeric + Numeric = Numeric (maintains precision)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric("450.75".parse().unwrap()));
 }
 
 #[test]
