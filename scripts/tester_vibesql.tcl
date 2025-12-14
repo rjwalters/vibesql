@@ -714,14 +714,20 @@ proc do_test {name script expected} {
     }
 }
 
-proc do_execsql_test {name sql expected} {
+proc do_execsql_test {name sql {expected {}}} {
     # Convenience wrapper for SQL execution tests
+    # Expected is optional - if not provided, just execute the SQL
     do_test $name [list execsql $sql] $expected
 }
 
 proc do_catchsql_test {name sql expected} {
     # Test that expects a specific error
     do_test $name [list catchsql $sql] $expected
+}
+
+proc do_eqp_test {name sql expected} {
+    # EXPLAIN QUERY PLAN test - skip since we don't support EQP
+    omit_test $name "EXPLAIN QUERY PLAN not supported"
 }
 
 proc normalize_result {val} {
