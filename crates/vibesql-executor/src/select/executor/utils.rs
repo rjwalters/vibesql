@@ -133,6 +133,8 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
         vibesql_ast::Expression::RowValueConstructor(values) => {
             values.iter().any(expression_references_column)
         }
+
+        vibesql_ast::Expression::Collate { expr, .. } => expression_references_column(expr),
     }
 }
 

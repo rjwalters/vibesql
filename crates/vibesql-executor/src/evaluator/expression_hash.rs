@@ -178,6 +178,8 @@ impl ExpressionHasher {
                 children.iter().all(Self::is_deterministic)
             }
 
+            vibesql_ast::Expression::Collate { expr, .. } => Self::is_deterministic(expr),
+
             // MATCH AGAINST is deterministic if the search term is constant
             vibesql_ast::Expression::MatchAgainst { .. } => {
                 // MATCH AGAINST always operates on columns, which are non-deterministic
@@ -424,6 +426,12 @@ impl ExpressionHasher {
                 for child in children {
                     Self::hash_expression(child, hasher);
                 }
+            }
+
+            vibesql_ast::Expression::Collate { expr, collation } => {
+                "COLLATE".hash(hasher);
+                Self::hash_expression(expr, hasher);
+                collation.hash(hasher);
             }
         }
     }

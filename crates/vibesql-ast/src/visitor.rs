@@ -418,6 +418,8 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
             }
             VisitResult::Continue
         }
+
+        Expression::Collate { expr: inner, .. } => walk_expression(visitor, inner),
     };
 
     if result.should_stop() {
@@ -692,6 +694,11 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
         Expression::RowValueConstructor(values) => Expression::RowValueConstructor(
             values.into_iter().map(|v| transform_expression(visitor, v)).collect(),
         ),
+
+        Expression::Collate { expr: inner, collation } => Expression::Collate {
+            expr: Box::new(transform_expression(visitor, *inner)),
+            collation,
+        },
     };
 
     // Post-order transform

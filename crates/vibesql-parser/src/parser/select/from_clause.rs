@@ -41,7 +41,8 @@ impl Parser {
                     let (condition, using_columns) = if self.peek_keyword(Keyword::On) {
                         if natural {
                             return Err(ParseError {
-                                message: "NATURAL JOIN cannot have an ON clause".to_string(),
+                                message: "a NATURAL join may not have an ON or USING clause"
+                                    .to_string(),
                             });
                         }
                         self.consume_keyword(Keyword::On)?;
@@ -49,7 +50,8 @@ impl Parser {
                     } else if self.peek_keyword(Keyword::Using) {
                         if natural {
                             return Err(ParseError {
-                                message: "NATURAL JOIN cannot have a USING clause".to_string(),
+                                message: "a NATURAL join may not have an ON or USING clause"
+                                    .to_string(),
                             });
                         }
                         self.consume_keyword(Keyword::Using)?;

@@ -354,6 +354,15 @@ pub(super) fn rewrite_expression_with_context(
                 .collect(),
         ),
 
+        Expression::Collate { expr, collation } => Expression::Collate {
+            expr: Box::new(rewrite_expression_with_context(
+                expr,
+                rewrite_subquery_fn,
+                outer_tables,
+            )),
+            collation: collation.clone(),
+        },
+
         // Literals, column refs, and special expressions don't need rewriting
         Expression::Literal(_)
         | Expression::ColumnRef { .. }

@@ -348,6 +348,10 @@ impl LiteralExtractor {
                 }
             }
 
+            Expression::Collate { expr, .. } => {
+                Self::extract_from_expression(expr, literals);
+            }
+
             Expression::UnaryOp { expr, .. } => {
                 Self::extract_from_expression(expr, literals);
             }

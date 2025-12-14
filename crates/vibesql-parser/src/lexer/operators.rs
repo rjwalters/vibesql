@@ -88,6 +88,7 @@ impl<'a> Lexer<'a> {
                     Err(LexerError {
                         message: "Unexpected character: '|' (did you mean '||'?)".to_string(),
                         position: self.position() - 1,
+                        near_token: Some("|".to_string()),
                     })
                 }
             }

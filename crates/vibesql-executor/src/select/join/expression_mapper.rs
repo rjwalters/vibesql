@@ -305,6 +305,10 @@ impl ExpressionMapper {
                     self.walk_expression(child, tables, columns, resolvable);
                 }
             }
+
+            Expression::Collate { expr, .. } => {
+                self.walk_expression(expr, tables, columns, resolvable);
+            }
         }
     }
 }

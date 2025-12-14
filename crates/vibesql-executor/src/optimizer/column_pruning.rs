@@ -326,6 +326,10 @@ fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<ColumnRef>
             }
         }
 
+        Expression::Collate { expr, .. } => {
+            collect_columns_from_expr(expr, columns);
+        }
+
         // Expressions that don't reference columns
         Expression::Literal(_)
         | Expression::Placeholder(_)

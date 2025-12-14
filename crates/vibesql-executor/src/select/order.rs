@@ -1084,6 +1084,12 @@ fn resolve_where_expression_with_schema(
             children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
         ),
 
+        // Collate
+        Expression::Collate { expr, collation } => Expression::Collate {
+            expr: Box::new(resolve_where_expression_with_schema(expr, select_list, table_columns)),
+            collation: collation.clone(),
+        },
+
         // TRIM
         Expression::Trim { position, removal_char, string } => Expression::Trim {
             position: position.clone(),

@@ -652,47 +652,14 @@ impl Parser {
             }
             "CLOB" => Ok(vibesql_types::DataType::CharacterLargeObject),
             _ => {
-                // Check if this is a known non-standard type that we should support
-                if Self::is_supported_extension_type(&type_upper) {
-                    Ok(vibesql_types::DataType::UserDefined { type_name })
-                } else {
-                    Err(ParseError { message: format!("Unknown data type: {}", type_name) })
-                }
+                // SQLite compatibility: Accept ANY string as a type name.
+                // SQLite uses type affinity rules to determine storage, but accepts
+                // any type name including typos like "IMTEGES" or "INTEGES".
+                // Map all unknown types to UserDefined, which provides BLOB/NUMERIC
+                // affinity behavior in the executor.
+                Ok(vibesql_types::DataType::UserDefined { type_name })
             }
         }
-    }
-
-    /// Check if a type name is a supported extension type (non-SQL:1999)
-    /// These types are outside the SQL:1999 standard but should parse gracefully
-    /// as user-defined types, including:
-    /// - Spatial/geometric types from SQL/MM standard
-    /// - MySQL-specific types
-    /// - Other database extensions
-    fn is_supported_extension_type(type_name: &str) -> bool {
-        matches!(
-            type_name,
-            // 2D basic types (SQL/MM standard)
-            "POINT" | "LINESTRING" | "POLYGON" |
-            // Multi types (SQL/MM standard)
-            "MULTIPOINT" | "MULTILINESTRING" | "MULTIPOLYGON" |
-            // Collection types (SQL/MM standard)
-            "GEOMETRY" | "GEOMETRYCOLLECTION" |
-            // MySQL numeric types
-            "TINYINT" | "MEDIUMINT" | "SERIAL" | "FIXED" |
-            // MySQL temporal types
-            "YEAR" |
-            // MySQL string types
-            "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" |
-            // Note: BLOB/TINYBLOB/MEDIUMBLOB/LONGBLOB are handled explicitly above
-            // to map to BinaryLargeObject instead of UserDefined
-            "BINARY" | "VARBINARY" |
-            // MySQL JSON type
-            "JSON" |
-            // MySQL enumeration types
-            "ENUM" | "SET" |
-            // Other common extension types
-            "UUID"
-        )
     }
 
     /// Parse interval field (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)

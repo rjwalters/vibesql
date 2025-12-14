@@ -322,6 +322,15 @@ pub enum Expression {
     /// Example: (rowid, 1) <= (5, 0)
     /// Row values are compared element by element, left to right
     RowValueConstructor(Vec<Expression>),
+
+    /// COLLATE expression for specifying collation
+    /// Example: column_name COLLATE NOCASE
+    /// Example: 'text' COLLATE RTRIM
+    /// SQLite supports: BINARY (default), NOCASE, RTRIM
+    Collate {
+        expr: Box<Expression>,
+        collation: String,
+    },
 }
 
 /// Full-text search mode specification

@@ -43,11 +43,18 @@ impl Span {
 pub struct LexerError {
     pub message: String,
     pub position: usize,
+    /// The token text that caused the error (for SQLite-compatible error messages)
+    pub near_token: Option<String>,
 }
 
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Lexer error at position {}: {}", self.position, self.message)
+        // SQLite-compatible error format: near "TOKEN": syntax error
+        if let Some(ref token) = self.near_token {
+            write!(f, "near \"{}\": syntax error", token)
+        } else {
+            write!(f, "Lexer error at position {}: {}", self.position, self.message)
+        }
     }
 }
 
@@ -177,9 +184,11 @@ impl<'a> Lexer<'a> {
                 if self.peek_byte(1).map(|b| b.is_ascii_digit()).unwrap_or(false) {
                     self.tokenize_numbered_placeholder()
                 } else {
+                    let token = self.extract_error_token();
                     Err(LexerError {
                         message: "Expected digit after '$' for numbered placeholder".to_string(),
                         position: self.position(),
+                        near_token: Some(token),
                     })
                 }
             }
@@ -194,10 +203,15 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Symbol(':'))
                 }
             }
-            _ => Err(LexerError {
-                message: format!("Unexpected character: '{}'", ch),
-                position: self.byte_pos,
-            }),
+            _ => {
+                // SQLite-compatible error: extract a token-like span for "near" message
+                let token = self.extract_error_token();
+                Err(LexerError {
+                    message: format!("Unexpected character: '{}'", ch),
+                    position: self.byte_pos,
+                    near_token: Some(token),
+                })
+            }
         }
     }
 
@@ -304,6 +318,32 @@ impl<'a> Lexer<'a> {
         &self.input[start..self.byte_pos]
     }
 
+    /// Extract a token-like span from current position for error messages.
+    /// SQLite shows the problematic token in error messages like: near "#1": syntax error
+    /// This reads ahead to capture a reasonable token span (alphanumeric, symbols, etc.)
+    fn extract_error_token(&self) -> String {
+        let start = self.byte_pos;
+        let mut end = start;
+        let bytes = self.input.as_bytes();
+
+        // Read ahead to capture a token-like span
+        while end < bytes.len() {
+            let b = bytes[end];
+            // Continue for alphanumeric, symbols that could be part of a token
+            if b.is_ascii_alphanumeric() || b == b'_' || b == b'#' || b == b'$' || b == b'@' {
+                end += 1;
+            } else if end == start {
+                // Include at least one character
+                end += 1;
+                break;
+            } else {
+                break;
+            }
+        }
+
+        self.input[start..end].to_string()
+    }
+
     /// Tokenize a session variable (@@variable, @@session.variable, @@global.variable).
     fn tokenize_session_variable(&mut self) -> Result<Token, LexerError> {
         self.advance(); // Skip first @
@@ -325,6 +365,7 @@ impl<'a> Lexer<'a> {
             return Err(LexerError {
                 message: "Expected variable name after @@".to_string(),
                 position: self.byte_pos,
+                near_token: Some("@@".to_string()),
             });
         }
 
@@ -352,6 +393,7 @@ impl<'a> Lexer<'a> {
             return Err(LexerError {
                 message: "Expected variable name after @".to_string(),
                 position: self.byte_pos,
+                near_token: Some("@".to_string()),
             });
         }
 
@@ -382,12 +424,14 @@ impl<'a> Lexer<'a> {
             return Err(LexerError {
                 message: "Expected digit after '$' for numbered placeholder".to_string(),
                 position: start_pos,
+                near_token: Some("$".to_string()),
             });
         }
 
         let index: usize = num_str.parse().map_err(|_| LexerError {
             message: format!("Invalid numbered placeholder: ${}", num_str),
             position: start_pos,
+            near_token: Some(format!("${}", num_str)),
         })?;
 
         // PostgreSQL requires $1 or higher (no $0)
@@ -395,6 +439,7 @@ impl<'a> Lexer<'a> {
             return Err(LexerError {
                 message: "Numbered placeholder must be $1 or higher (no $0)".to_string(),
                 position: start_pos,
+                near_token: Some("$0".to_string()),
             });
         }
 
@@ -422,6 +467,7 @@ impl<'a> Lexer<'a> {
             return Err(LexerError {
                 message: "Expected identifier after ':' for named placeholder".to_string(),
                 position: self.position(),
+                near_token: Some(":".to_string()),
             });
         }
 

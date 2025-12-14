@@ -49,10 +49,12 @@ impl<'a> Lexer<'a> {
 
                 // Verify we got at least one exponent digit
                 if self.position() == exp_start {
+                    let partial = self.slice_from(start);
                     return Err(LexerError {
                         message: "Invalid scientific notation: expected digits after 'E'"
                             .to_string(),
                         position: self.position(),
+                        near_token: Some(partial.to_string()),
                     });
                 }
             }

@@ -197,6 +197,8 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
             children.iter().any(|child| has_external_column_refs(child, subquery))
         }
 
+        Expression::Collate { expr, .. } => has_external_column_refs(expr, subquery),
+
         // Literals and special expressions don't reference columns
         Expression::Literal(_)
         | Expression::Wildcard

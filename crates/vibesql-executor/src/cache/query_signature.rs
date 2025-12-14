@@ -581,6 +581,12 @@ impl QuerySignature {
                     Self::hash_expression(child, hasher);
                 }
             }
+
+            Expression::Collate { expr, collation } => {
+                "COLLATE".hash(hasher);
+                Self::hash_expression(expr, hasher);
+                collation.hash(hasher);
+            }
         }
     }
 

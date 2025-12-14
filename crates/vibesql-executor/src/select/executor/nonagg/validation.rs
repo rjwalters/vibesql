@@ -586,5 +586,9 @@ fn validate_expression_column_refs(
             }
             Ok(())
         }
+
+        Expression::Collate { expr, .. } => {
+            validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)
+        }
     }
 }

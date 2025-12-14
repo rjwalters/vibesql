@@ -127,18 +127,22 @@ fn test_spatial_types_case_insensitive() {
 }
 
 #[test]
-fn test_unknown_type_still_fails() {
-    // Non-spatial unknown types should still fail
+fn test_unknown_type_accepted_as_userdefined() {
+    // SQLite compatibility: ANY string is accepted as a type name.
+    // Unknown types are mapped to UserDefined which provides BLOB/NUMERIC affinity.
     let result = Parser::parse_sql("CREATE TABLE t1(c1 UNKNOWNTYPE);");
-    assert!(result.is_err(), "Unknown non-spatial types should fail");
+    assert!(result.is_ok(), "Unknown types should be accepted (SQLite compatibility)");
 
-    if let Err(e) = result {
-        // Use case-insensitive matching since the error message may have different case
-        assert!(
-            e.to_string().to_lowercase().contains("unknown data type")
-                && e.to_string().to_lowercase().contains("unknowntype"),
-            "Error should mention unknown type, got: {e}",
-        );
+    if let Ok(Statement::CreateTable(ct)) = result {
+        assert_eq!(ct.columns.len(), 1);
+        match &ct.columns[0].data_type {
+            vibesql_types::DataType::UserDefined { type_name } => {
+                assert_eq!(type_name, "UNKNOWNTYPE");
+            }
+            other => panic!("Expected UserDefined type, got {:?}", other),
+        }
+    } else {
+        panic!("Expected CreateTable statement");
     }
 }
 

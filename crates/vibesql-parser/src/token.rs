@@ -115,15 +115,17 @@ impl Token {
     /// where TOKEN is the actual text that caused the error.
     ///
     /// Special cases:
-    /// - EOF (end of input) is reported as `;` (SQLite convention)
+    /// - EOF (end of input) returns "incomplete input" (SQLite convention for truncated statements)
     /// - Keywords are reported in uppercase
     pub fn syntax_error(&self) -> String {
-        let token_text = match self {
-            Token::Eof => ";".to_string(),
-            Token::Keyword(kw) => kw.to_string().to_uppercase(),
-            _ => self.to_sql(),
-        };
-        format!("near \"{}\": syntax error", token_text)
+        match self {
+            // For EOF/truncated input, SQLite returns "incomplete input"
+            Token::Eof => "incomplete input".to_string(),
+            Token::Keyword(kw) => {
+                format!("near \"{}\": syntax error", kw.to_string().to_uppercase())
+            }
+            _ => format!("near \"{}\": syntax error", self.to_sql()),
+        }
     }
 }
 

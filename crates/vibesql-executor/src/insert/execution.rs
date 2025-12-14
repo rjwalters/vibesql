@@ -85,8 +85,10 @@ fn execute_insert_internal(
 
             // Validate column count
             if select_result.columns.len() != target_column_info.len() {
+                // Match SQLite's error message format exactly
                 return Err(ExecutorError::UnsupportedExpression(format!(
-                    "INSERT column count mismatch: expected {}, got {} from SELECT",
+                    "table {} has {} columns but {} values were supplied",
+                    table_name,
                     target_column_info.len(),
                     select_result.columns.len()
                 )));
@@ -103,7 +105,11 @@ fn execute_insert_internal(
     };
 
     // Validate each row has correct number of values
-    super::validation::validate_row_column_counts(&rows_to_insert, target_column_info.len())?;
+    super::validation::validate_row_column_counts(
+        &rows_to_insert,
+        target_column_info.len(),
+        table_name,
+    )?;
 
     // Estimate DML cost for query analysis and optimization decisions
     // This helps with profiling and can inform future batch size decisions

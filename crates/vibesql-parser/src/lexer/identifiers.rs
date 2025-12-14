@@ -83,6 +83,7 @@ impl<'a> Lexer<'a> {
                         return Err(LexerError {
                             message: "Empty delimited identifier is not allowed".to_string(),
                             position: self.position(),
+                            near_token: Some("\"\"".to_string()),
                         });
                     }
                     return Ok(Token::DelimitedIdentifier(identifier));
@@ -96,6 +97,7 @@ impl<'a> Lexer<'a> {
         Err(LexerError {
             message: "Unterminated delimited identifier".to_string(),
             position: self.position(),
+            near_token: Some(format!("\"{}", identifier)),
         })
     }
 
@@ -122,6 +124,7 @@ impl<'a> Lexer<'a> {
                         return Err(LexerError {
                             message: "Empty delimited identifier is not allowed".to_string(),
                             position: self.position(),
+                            near_token: Some("``".to_string()),
                         });
                     }
                     return Ok(Token::DelimitedIdentifier(identifier));
@@ -135,6 +138,7 @@ impl<'a> Lexer<'a> {
         Err(LexerError {
             message: "Unterminated delimited identifier".to_string(),
             position: self.position(),
+            near_token: Some(format!("`{}", identifier)),
         })
     }
 }

@@ -414,6 +414,10 @@ impl ExpressionEvaluator<'_> {
             vibesql_ast::Expression::RowValueConstructor(_) => Err(ExecutorError::UnsupportedExpression(
                 "Row value constructors are not supported in this context".to_string(),
             )),
+
+            // COLLATE expression - evaluate inner expression (collation affects string comparison)
+            // TODO: Full collation support - for now just evaluate the inner expression
+            vibesql_ast::Expression::Collate { expr, .. } => self.eval(expr, row),
         }
     }
 

@@ -602,6 +602,10 @@ impl TableSchema {
             vibesql_ast::Expression::RowValueConstructor(values) => {
                 values.iter().any(|val| Self::expression_references_column(val, column_name))
             }
+
+            vibesql_ast::Expression::Collate { expr, .. } => {
+                Self::expression_references_column(expr, column_name)
+            }
         }
     }
 }

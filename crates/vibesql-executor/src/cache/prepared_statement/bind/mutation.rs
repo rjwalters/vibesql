@@ -272,6 +272,10 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             }
         }
 
+        Expression::Collate { expr, .. } => {
+            bind_expression_mut(expr, params);
+        }
+
         Expression::UnaryOp { expr: inner, .. } => {
             bind_expression_mut(inner, params);
         }
@@ -646,6 +650,10 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             for child in children {
                 bind_expression_named_mut(child, params);
             }
+        }
+
+        Expression::Collate { expr, .. } => {
+            bind_expression_named_mut(expr, params);
         }
 
         Expression::UnaryOp { expr: inner, .. } => {

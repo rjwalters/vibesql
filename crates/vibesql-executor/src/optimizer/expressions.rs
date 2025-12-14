@@ -392,6 +392,11 @@ pub fn optimize_expression(
                 children.iter().map(|child| optimize_expression(child, evaluator)).collect();
             Ok(Expression::RowValueConstructor(optimized?))
         }
+
+        Expression::Collate { expr, collation } => {
+            let optimized_expr = optimize_expression(expr, evaluator)?;
+            Ok(Expression::Collate { expr: Box::new(optimized_expr), collation: collation.clone() })
+        }
     }
 }
 

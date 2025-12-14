@@ -76,6 +76,7 @@ enum ExprTag {
     IsDistinctFrom = 0x21,
     IsTruthValue = 0x22,
     RowValueConstructor = 0x23,
+    Collate = 0x24,
 }
 
 impl ExprTag {
@@ -117,6 +118,7 @@ impl ExprTag {
             0x21 => Ok(ExprTag::IsDistinctFrom),
             0x22 => Ok(ExprTag::IsTruthValue),
             0x23 => Ok(ExprTag::RowValueConstructor),
+            0x24 => Ok(ExprTag::Collate),
             _ => {
                 Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
             }
@@ -394,6 +396,11 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_expression(writer, val)?;
             }
         }
+        Expression::Collate { expr, collation } => {
+            write_tag!(writer, ExprTag::Collate);
+            write_expression(writer, expr)?;
+            write_string(writer, collation)?;
+        }
     }
     Ok(())
 }
@@ -617,6 +624,11 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
                 values.push(read_expression(reader)?);
             }
             Ok(Expression::RowValueConstructor(values))
+        }
+        ExprTag::Collate => {
+            let expr = read_expression(reader)?;
+            let collation = read_string(reader)?;
+            Ok(Expression::Collate { expr: Box::new(expr), collation })
         }
     }
 }
