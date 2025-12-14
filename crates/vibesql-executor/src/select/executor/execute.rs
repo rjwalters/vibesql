@@ -44,7 +44,6 @@ impl SelectExecutor<'_> {
         &self,
         stmt: &vibesql_ast::SelectStmt,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-        eprintln!("[DEBUG] SelectExecutor::execute() called");
         // Validate aggregate function argument counts FIRST (issue #4367)
         // This catches errors like max(), min(*), sum(*) before any execution
         // Must happen before any fast paths or strategy selection
@@ -88,18 +87,14 @@ impl SelectExecutor<'_> {
         // Streaming aggregate fast path (#3815)
         // For queries like: SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN ? AND ?
         // Accumulates aggregates inline during PK range scan without materializing rows
-        eprintln!("[DEBUG execute] Checking streaming aggregate path: subquery_depth={}, outer_row={:?}, is_streaming={}",
-            self.subquery_depth, self.outer_row.is_some(), super::fast_path::is_streaming_aggregate_query(stmt));
         if self.subquery_depth == 0
             && self.outer_row.is_none()
             && self.cte_context.is_none()
             && super::fast_path::is_streaming_aggregate_query(stmt)
         {
-            eprintln!("[DEBUG execute] Using streaming aggregate path");
             if let Ok(result) = self.execute_streaming_aggregate(stmt) {
                 return Ok(result);
             }
-            eprintln!("[DEBUG execute] Streaming aggregate failed, falling through");
             // Fall through to standard path if streaming aggregate fails
         }
 
@@ -423,7 +418,6 @@ impl SelectExecutor<'_> {
         stmt: &vibesql_ast::SelectStmt,
         cte_results: &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-        eprintln!("[DEBUG] execute_with_ctes called");
         // Note: Aggregate argument validation is done in execute() at the entry point.
         // See issue #4367.
 
@@ -707,8 +701,16 @@ impl SelectExecutor<'_> {
 
         // Resolve SELECT aliases in WHERE clause (SQLite extension)
         // This allows queries like: SELECT f1-22 AS x FROM t1 WHERE x > 0
+        // IMPORTANT: Use schema-aware resolution to avoid incorrectly substituting
+        // table column names with aggregate aliases (issue #4XXX)
+        // Example: SELECT COUNT(*) AS col1 FROM tab0 WHERE col1 > 0
+        // Here 'col1' in WHERE refers to the TABLE COLUMN, not the COUNT(*) alias
         let resolved_where = stmt.where_clause.as_ref().map(|where_expr| {
-            crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+            crate::select::order::resolve_where_aliases_with_schema(
+                where_expr,
+                &stmt.select_list,
+                &from_result.schema,
+            )
         });
 
         // Stage 1: Filter (WHERE clause)

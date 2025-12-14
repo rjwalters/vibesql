@@ -234,7 +234,9 @@ fn test_instr_wrong_arg_count() {
 }
 
 #[test]
-fn test_instr_wrong_type() {
+fn test_instr_integer_coercion() {
+    // SQLite coerces integers to strings for INSTR
+    // INSTR(123, 'l') -> INSTR('123', 'l') -> 0 (not found)
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
         name: "INSTR".to_string(),
@@ -246,8 +248,8 @@ fn test_instr_wrong_type() {
         ],
         character_unit: None,
     };
-    let result = evaluator.eval(&expr, &row);
-    assert!(result.is_err());
+    let result = evaluator.eval(&expr, &row).unwrap();
+    assert_eq!(result, vibesql_types::SqlValue::Integer(0));
 }
 
 #[test]
