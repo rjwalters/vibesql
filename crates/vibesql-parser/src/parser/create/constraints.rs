@@ -152,13 +152,13 @@ impl Parser {
             };
 
             match self.peek() {
-                Token::Keyword(Keyword::Null) => {
+                Token::Keyword { keyword: Keyword::Null, .. } => {
                     // MySQL allows standalone NULL keyword to explicitly indicate nullable column
                     // (which is the default anyway), so we just consume it and skip it
                     self.advance(); // consume NULL
                                     // This is a no-op - nullable is the default
                 }
-                Token::Keyword(Keyword::Not) => {
+                Token::Keyword { keyword: Keyword::Not, .. } => {
                     self.advance(); // consume NOT
                     self.expect_keyword(Keyword::Null)?;
                     constraints.push(vibesql_ast::ColumnConstraint {
@@ -166,7 +166,7 @@ impl Parser {
                         kind: vibesql_ast::ColumnConstraintKind::NotNull,
                     });
                 }
-                Token::Keyword(Keyword::Primary) => {
+                Token::Keyword { keyword: Keyword::Primary, .. } => {
                     self.advance(); // consume PRIMARY
                     self.expect_keyword(Keyword::Key)?;
                     constraints.push(vibesql_ast::ColumnConstraint {
@@ -174,7 +174,7 @@ impl Parser {
                         kind: vibesql_ast::ColumnConstraintKind::PrimaryKey,
                     });
                 }
-                Token::Keyword(Keyword::Unique) => {
+                Token::Keyword { keyword: Keyword::Unique, .. } => {
                     self.advance(); // consume UNIQUE
                                     // MySQL allows optional KEY keyword after UNIQUE
                     if self.peek_keyword(Keyword::Key) {
@@ -185,7 +185,7 @@ impl Parser {
                         kind: vibesql_ast::ColumnConstraintKind::Unique,
                     });
                 }
-                Token::Keyword(Keyword::Check) => {
+                Token::Keyword { keyword: Keyword::Check, .. } => {
                     self.advance(); // consume CHECK
                     self.expect_token(Token::LParen)?;
                     let expr = self.parse_expression()?;
@@ -195,7 +195,7 @@ impl Parser {
                         kind: vibesql_ast::ColumnConstraintKind::Check(Box::new(expr)),
                     });
                 }
-                Token::Keyword(Keyword::References) => {
+                Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance(); // consume REFERENCES
                     let table = match self.peek() {
                         Token::Identifier(t) => {
@@ -237,14 +237,14 @@ impl Parser {
                         },
                     });
                 }
-                Token::Keyword(Keyword::AutoIncrement) => {
+                Token::Keyword { keyword: Keyword::AutoIncrement, .. } => {
                     self.advance(); // consume AUTO_INCREMENT or AUTOINCREMENT
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
                         kind: vibesql_ast::ColumnConstraintKind::AutoIncrement,
                     });
                 }
-                Token::Keyword(Keyword::Key) => {
+                Token::Keyword { keyword: Keyword::Key, .. } => {
                     self.advance(); // consume KEY
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
@@ -290,7 +290,7 @@ impl Parser {
         };
 
         let kind = match self.peek() {
-            Token::Keyword(Keyword::Primary) => {
+            Token::Keyword { keyword: Keyword::Primary, .. } => {
                 self.advance(); // consume PRIMARY
                 self.expect_keyword(Keyword::Key)?;
                 self.expect_token(Token::LParen)?;
@@ -309,7 +309,7 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 vibesql_ast::TableConstraintKind::PrimaryKey { columns }
             }
-            Token::Keyword(Keyword::Foreign) => {
+            Token::Keyword { keyword: Keyword::Foreign, .. } => {
                 self.advance(); // consume FOREIGN
                 self.expect_keyword(Keyword::Key)?;
                 self.expect_token(Token::LParen)?;
@@ -386,7 +386,7 @@ impl Parser {
                     on_update,
                 }
             }
-            Token::Keyword(Keyword::Unique) => {
+            Token::Keyword { keyword: Keyword::Unique, .. } => {
                 self.advance(); // consume UNIQUE
                 self.expect_token(Token::LParen)?;
 
@@ -404,14 +404,14 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 vibesql_ast::TableConstraintKind::Unique { columns }
             }
-            Token::Keyword(Keyword::Check) => {
+            Token::Keyword { keyword: Keyword::Check, .. } => {
                 self.advance(); // consume CHECK
                 self.expect_token(Token::LParen)?;
                 let expr = self.parse_expression()?;
                 self.expect_token(Token::RParen)?;
                 vibesql_ast::TableConstraintKind::Check { expr: Box::new(expr) }
             }
-            Token::Keyword(Keyword::Fulltext) => {
+            Token::Keyword { keyword: Keyword::Fulltext, .. } => {
                 self.advance(); // consume FULLTEXT
 
                 // Optional INDEX keyword

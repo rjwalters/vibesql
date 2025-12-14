@@ -188,7 +188,7 @@ fn test_keyword_display_in() {
 
 #[test]
 fn test_token_display_keyword() {
-    let token = Token::Keyword(Keyword::Select);
+    let token = Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() };
     assert_eq!(format!("{}", token), "Keyword(SELECT)");
 }
 

@@ -81,7 +81,7 @@ pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
 
     // Check first token to determine statement type
     if let Some(first_token) = tokens.first() {
-        if matches!(first_token, Token::Keyword(Keyword::Select) | Token::Keyword(Keyword::With)) {
+        if matches!(first_token, Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. }) {
             // Use arena parsing for SELECT statements (including WITH CTEs)
             match arena_parser::parse_select_to_owned(sql) {
                 Ok(select_stmt) => {

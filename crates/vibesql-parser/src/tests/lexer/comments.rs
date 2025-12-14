@@ -8,7 +8,7 @@ fn test_line_comment_simple() {
 
     assert_eq!(
         tokens,
-        vec![Token::Keyword(Keyword::Select), Token::Number("1".to_string()), Token::Eof,]
+        vec![Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() }, Token::Number("1".to_string()), Token::Eof,]
     );
 }
 
@@ -20,7 +20,7 @@ fn test_line_comment_at_end() {
 
     assert_eq!(
         tokens,
-        vec![Token::Keyword(Keyword::Select), Token::Number("1".to_string()), Token::Eof,]
+        vec![Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() }, Token::Number("1".to_string()), Token::Eof,]
     );
 }
 
@@ -35,7 +35,7 @@ SELECT 1 -- inline comment
 
     assert_eq!(
         tokens,
-        vec![Token::Keyword(Keyword::Select), Token::Number("1".to_string()), Token::Eof,]
+        vec![Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() }, Token::Number("1".to_string()), Token::Eof,]
     );
 }
 
@@ -48,9 +48,9 @@ fn test_comment_with_sql_keywords() {
     assert_eq!(
         tokens,
         vec![
-            Token::Keyword(Keyword::Select),
+            Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() },
             Token::Symbol('*'),
-            Token::Keyword(Keyword::From),
+            Token::Keyword { keyword: Keyword::From, original: "FROM".to_string() },
             Token::Identifier("users".to_string()),
             Token::Eof,
         ]
@@ -67,7 +67,7 @@ fn test_dash_vs_comment() {
     assert_eq!(
         tokens,
         vec![
-            Token::Keyword(Keyword::Select),
+            Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() },
             Token::Number("5".to_string()),
             Token::Symbol('-'),
             Token::Number("3".to_string()),
@@ -85,9 +85,9 @@ fn test_default_demo_sql() {
     assert_eq!(
         tokens,
         vec![
-            Token::Keyword(Keyword::Select),
+            Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() },
             Token::Symbol('*'),
-            Token::Keyword(Keyword::From),
+            Token::Keyword { keyword: Keyword::From, original: "FROM".to_string() },
             Token::Identifier("employees".to_string()),
             Token::Semicolon,
             Token::Eof,

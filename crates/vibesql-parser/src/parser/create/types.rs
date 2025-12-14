@@ -12,16 +12,16 @@ impl Parser {
         // but store the lowercase form.
         let type_name = match self.peek() {
             Token::Identifier(name) => name.clone(),
-            Token::Keyword(Keyword::Date) => "date".to_string(),
-            Token::Keyword(Keyword::Time) => "time".to_string(),
-            Token::Keyword(Keyword::Timestamp) => "timestamp".to_string(),
-            Token::Keyword(Keyword::Interval) => "interval".to_string(),
-            Token::Keyword(Keyword::Character) => "character".to_string(),
-            Token::Keyword(Keyword::Boolean) => "boolean".to_string(),
+            Token::Keyword { keyword: Keyword::Date, .. } => "date".to_string(),
+            Token::Keyword { keyword: Keyword::Time, .. } => "time".to_string(),
+            Token::Keyword { keyword: Keyword::Timestamp, .. } => "timestamp".to_string(),
+            Token::Keyword { keyword: Keyword::Interval, .. } => "interval".to_string(),
+            Token::Keyword { keyword: Keyword::Character, .. } => "character".to_string(),
+            Token::Keyword { keyword: Keyword::Boolean, .. } => "boolean".to_string(),
             // MySQL-specific types that are keywords
-            Token::Keyword(Keyword::Set) => "set".to_string(),
-            Token::Keyword(Keyword::Year) => "year".to_string(),
-            Token::Keyword(Keyword::Fixed) => "fixed".to_string(),
+            Token::Keyword { keyword: Keyword::Set, .. } => "set".to_string(),
+            Token::Keyword { keyword: Keyword::Year, .. } => "year".to_string(),
+            Token::Keyword { keyword: Keyword::Fixed, .. } => "fixed".to_string(),
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();
@@ -193,7 +193,7 @@ impl Parser {
 
                 // Check for TO keyword (multi-field interval)
                 let end_field = match self.peek() {
-                    Token::Keyword(Keyword::To) => {
+                    Token::Keyword { keyword: Keyword::To, .. } => {
                         self.advance(); // consume TO keyword
                         Some(self.parse_interval_field()?)
                     }
@@ -519,7 +519,7 @@ impl Parser {
                 // Look ahead to determine which national type follows
                 let next = match self.peek() {
                     Token::Identifier(word) => word.to_uppercase(),
-                    Token::Keyword(Keyword::Character) => "CHARACTER".to_string(),
+                    Token::Keyword { keyword: Keyword::Character, .. } => "CHARACTER".to_string(),
                     _ => {
                         return Err(ParseError {
                             message: "Expected VARCHAR, CHARACTER, or CHAR after NATIONAL"
@@ -668,12 +668,12 @@ impl Parser {
     ) -> Result<vibesql_types::IntervalField, ParseError> {
         let field_upper = match self.peek() {
             Token::Identifier(field) => field.to_uppercase(),
-            Token::Keyword(Keyword::Year) => "YEAR".to_string(),
-            Token::Keyword(Keyword::Month) => "MONTH".to_string(),
-            Token::Keyword(Keyword::Day) => "DAY".to_string(),
-            Token::Keyword(Keyword::Hour) => "HOUR".to_string(),
-            Token::Keyword(Keyword::Minute) => "MINUTE".to_string(),
-            Token::Keyword(Keyword::Second) => "SECOND".to_string(),
+            Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
+            Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
+            Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
+            Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
+            Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
+            Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
             _ => {
                 return Err(ParseError {
                     message: "Expected interval field (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)"
@@ -698,7 +698,7 @@ impl Parser {
     /// Returns true if WITH TIME ZONE, false if WITHOUT TIME ZONE or no modifier
     pub(in crate::parser) fn parse_timezone_modifier(&mut self) -> Result<bool, ParseError> {
         // Check for WITH keyword
-        if matches!(self.peek(), Token::Keyword(Keyword::With)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::With, .. }) {
             self.advance(); // consume WITH
 
             // Expect TIME keyword
@@ -710,7 +710,7 @@ impl Parser {
         }
 
         // Check for WITHOUT keyword
-        if matches!(self.peek(), Token::Keyword(Keyword::Without)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Without, .. }) {
             self.advance(); // consume WITHOUT
 
             // Expect TIME keyword

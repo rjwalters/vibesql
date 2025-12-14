@@ -19,7 +19,7 @@ fn parse_savepoint_name(parser: &mut super::Parser) -> Result<String, ParseError
             parser.advance();
             Ok(preserved)
         }
-        Token::Keyword(kw) => Err(ParseError {
+        Token::Keyword { keyword: kw, .. } => Err(ParseError {
             message: format!(
                 "Expected savepoint name, found reserved keyword '{}'. Use delimited identifiers (e.g., \"{}\") to use keywords as names.",
                 kw, kw

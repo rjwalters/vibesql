@@ -139,12 +139,12 @@ impl Parser {
         // Collect tokens until matching END
         loop {
             match self.peek() {
-                Token::Keyword(Keyword::Begin) => {
+                Token::Keyword { keyword: Keyword::Begin, .. } => {
                     sql_parts.push("BEGIN".to_string());
                     depth += 1;
                     self.advance();
                 }
-                Token::Keyword(Keyword::End) => {
+                Token::Keyword { keyword: Keyword::End, .. } => {
                     sql_parts.push("END".to_string());
                     depth -= 1;
                     self.advance();

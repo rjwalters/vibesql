@@ -26,7 +26,7 @@ impl Parser {
         let string = self.parse_primary_expression()?;
 
         // Parse optional USING clause
-        let character_unit = if matches!(self.peek(), Token::Keyword(Keyword::Using)) {
+        let character_unit = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. }) {
             self.advance(); // consume USING
             Some(self.parse_character_unit()?)
         } else {
@@ -86,15 +86,15 @@ impl Parser {
 
         // Check for BOTH/LEADING/TRAILING keywords
         match self.peek() {
-            Token::Keyword(Keyword::Both) => {
+            Token::Keyword { keyword: Keyword::Both, .. } => {
                 self.advance();
                 position = Some(vibesql_ast::TrimPosition::Both);
             }
-            Token::Keyword(Keyword::Leading) => {
+            Token::Keyword { keyword: Keyword::Leading, .. } => {
                 self.advance();
                 position = Some(vibesql_ast::TrimPosition::Leading);
             }
-            Token::Keyword(Keyword::Trailing) => {
+            Token::Keyword { keyword: Keyword::Trailing, .. } => {
                 self.advance();
                 position = Some(vibesql_ast::TrimPosition::Trailing);
             }
@@ -103,7 +103,7 @@ impl Parser {
 
         // Check if FROM comes immediately (no removal char specified)
         // This handles: TRIM(FROM 'foo'), TRIM(BOTH FROM 'foo'), etc.
-        if matches!(self.peek(), Token::Keyword(Keyword::From)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::From, .. }) {
             self.advance(); // consume FROM
             removal_char = None; // Default to space
             let string = self.parse_primary_expression()?;
@@ -121,7 +121,7 @@ impl Parser {
         let first_expr = self.parse_primary_expression()?;
 
         // Check if this is followed by FROM keyword
-        if matches!(self.peek(), Token::Keyword(Keyword::From)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::From, .. }) {
             self.advance(); // consume FROM
                             // first_expr is the removal_char, now parse the string
             removal_char = Some(Box::new(first_expr));
@@ -176,7 +176,7 @@ impl Parser {
         };
 
         // Parse optional USING clause
-        let character_unit = if matches!(self.peek(), Token::Keyword(Keyword::Using)) {
+        let character_unit = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. }) {
             self.advance(); // consume USING
             Some(self.parse_character_unit()?)
         } else {
@@ -201,11 +201,11 @@ impl Parser {
         &mut self,
     ) -> Result<vibesql_ast::CharacterUnit, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::Characters) => {
+            Token::Keyword { keyword: Keyword::Characters, .. } => {
                 self.advance();
                 Ok(vibesql_ast::CharacterUnit::Characters)
             }
-            Token::Keyword(Keyword::Octets) => {
+            Token::Keyword { keyword: Keyword::Octets, .. } => {
                 self.advance();
                 Ok(vibesql_ast::CharacterUnit::Octets)
             }

@@ -109,7 +109,7 @@ impl Parser {
                 Token::Symbol('*') => vibesql_ast::BinaryOperator::Multiply,
                 Token::Symbol('/') => vibesql_ast::BinaryOperator::Divide,
                 Token::Symbol('%') => vibesql_ast::BinaryOperator::Modulo,
-                Token::Keyword(Keyword::Div) => vibesql_ast::BinaryOperator::IntegerDivide,
+                Token::Keyword { keyword: Keyword::Div, .. } => vibesql_ast::BinaryOperator::IntegerDivide,
                 _ => break,
             };
             self.advance();
@@ -464,7 +464,7 @@ impl Parser {
                     self.advance();
                     name
                 }
-                Token::Keyword(kw) => {
+                Token::Keyword { keyword: kw, .. } => {
                     // Allow keywords like BINARY, NOCASE, RTRIM as collation names
                     let name = kw.to_string();
                     self.advance();

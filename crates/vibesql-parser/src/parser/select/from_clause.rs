@@ -140,7 +140,7 @@ impl Parser {
                             self.advance();
                             alias
                         }
-                        Token::Keyword(kw) => {
+                        Token::Keyword { keyword: kw, .. } => {
                             // Allow keywords as alias names for derived tables
                             let alias = kw.to_string();
                             self.advance();
@@ -189,7 +189,7 @@ impl Parser {
                             self.advance();
                             alias
                         }
-                        Token::Keyword(kw) => {
+                        Token::Keyword { keyword: kw, .. } => {
                             let alias = kw.to_string();
                             self.advance();
                             alias
@@ -250,14 +250,14 @@ impl Parser {
                         }
                         _ => None,
                     }
-                } else if matches!(self.peek(), Token::Keyword(_))
+                } else if matches!(self.peek(), Token::Keyword { keyword: _, .. })
                     && !self.is_join_keyword()
                     && !self.is_clause_keyword()
                 {
                     // Allow non-reserved keywords as implicit aliases (e.g., FROM t m)
                     // Keywords like M, YEAR, etc. can be used as aliases
                     match self.peek() {
-                        Token::Keyword(kw) => {
+                        Token::Keyword { keyword: kw, .. } => {
                             let alias = kw.to_string();
                             self.advance();
                             Some(alias)
@@ -291,13 +291,13 @@ impl Parser {
     pub(crate) fn is_join_keyword(&self) -> bool {
         matches!(
             self.peek(),
-            Token::Keyword(Keyword::Join)
-                | Token::Keyword(Keyword::Inner)
-                | Token::Keyword(Keyword::Left)
-                | Token::Keyword(Keyword::Right)
-                | Token::Keyword(Keyword::Cross)
-                | Token::Keyword(Keyword::Full)
-                | Token::Keyword(Keyword::Natural)
+            Token::Keyword { keyword: Keyword::Join, .. }
+                | Token::Keyword { keyword: Keyword::Inner, .. }
+                | Token::Keyword { keyword: Keyword::Left, .. }
+                | Token::Keyword { keyword: Keyword::Right, .. }
+                | Token::Keyword { keyword: Keyword::Cross, .. }
+                | Token::Keyword { keyword: Keyword::Full, .. }
+                | Token::Keyword { keyword: Keyword::Natural, .. }
         )
     }
 
@@ -306,18 +306,18 @@ impl Parser {
     pub(crate) fn is_clause_keyword(&self) -> bool {
         matches!(
             self.peek(),
-            Token::Keyword(Keyword::On)
-                | Token::Keyword(Keyword::Where)
-                | Token::Keyword(Keyword::Group)
-                | Token::Keyword(Keyword::Having)
-                | Token::Keyword(Keyword::Order)
-                | Token::Keyword(Keyword::Limit)
-                | Token::Keyword(Keyword::Offset)
-                | Token::Keyword(Keyword::Union)
-                | Token::Keyword(Keyword::Intersect)
-                | Token::Keyword(Keyword::Except)
-                | Token::Keyword(Keyword::Using)
-                | Token::Keyword(Keyword::For)
+            Token::Keyword { keyword: Keyword::On, .. }
+                | Token::Keyword { keyword: Keyword::Where, .. }
+                | Token::Keyword { keyword: Keyword::Group, .. }
+                | Token::Keyword { keyword: Keyword::Having, .. }
+                | Token::Keyword { keyword: Keyword::Order, .. }
+                | Token::Keyword { keyword: Keyword::Limit, .. }
+                | Token::Keyword { keyword: Keyword::Offset, .. }
+                | Token::Keyword { keyword: Keyword::Union, .. }
+                | Token::Keyword { keyword: Keyword::Intersect, .. }
+                | Token::Keyword { keyword: Keyword::Except, .. }
+                | Token::Keyword { keyword: Keyword::Using, .. }
+                | Token::Keyword { keyword: Keyword::For, .. }
         )
     }
 
@@ -333,16 +333,16 @@ impl Parser {
         };
 
         let join_type = match self.peek() {
-            Token::Keyword(Keyword::Join) => {
+            Token::Keyword { keyword: Keyword::Join, .. } => {
                 self.advance();
                 vibesql_ast::JoinType::Inner // Default JOIN is INNER JOIN
             }
-            Token::Keyword(Keyword::Inner) => {
+            Token::Keyword { keyword: Keyword::Inner, .. } => {
                 self.advance();
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::Inner
             }
-            Token::Keyword(Keyword::Left) => {
+            Token::Keyword { keyword: Keyword::Left, .. } => {
                 self.advance();
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
@@ -351,7 +351,7 @@ impl Parser {
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::LeftOuter
             }
-            Token::Keyword(Keyword::Right) => {
+            Token::Keyword { keyword: Keyword::Right, .. } => {
                 self.advance();
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {
@@ -360,12 +360,12 @@ impl Parser {
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::RightOuter
             }
-            Token::Keyword(Keyword::Cross) => {
+            Token::Keyword { keyword: Keyword::Cross, .. } => {
                 self.advance();
                 self.expect_keyword(Keyword::Join)?;
                 vibesql_ast::JoinType::Cross
             }
-            Token::Keyword(Keyword::Full) => {
+            Token::Keyword { keyword: Keyword::Full, .. } => {
                 self.advance();
                 // Optional OUTER keyword
                 if self.peek_keyword(Keyword::Outer) {

@@ -318,21 +318,22 @@ impl<'arena> ArenaParser<'arena> {
 
         // Dispatch based on operation
         let stmt = match self.peek() {
-            Token::Keyword(Keyword::Add) => {
+            Token::Keyword { keyword: Keyword::Add, .. } => {
                 self.advance();
                 match self.peek() {
-                    Token::Keyword(Keyword::Column) => {
+                    Token::Keyword { keyword: Keyword::Column, .. } => {
                         self.advance();
                         self.parse_add_column(table_name)?
                     }
                     // SQL:1999 allows adding constraints with or without CONSTRAINT keyword
-                    Token::Keyword(
-                        Keyword::Constraint
+                    Token::Keyword {
+                        keyword: Keyword::Constraint
                         | Keyword::Check
                         | Keyword::Unique
                         | Keyword::Primary
                         | Keyword::Foreign,
-                    ) => self.parse_add_constraint(table_name)?,
+                        ..
+                    } => self.parse_add_constraint(table_name)?,
                     // SQL:1999 allows ADD COLUMN without the COLUMN keyword
                     Token::Identifier(_) => self.parse_add_column(table_name)?,
                     _ => {
@@ -344,14 +345,14 @@ impl<'arena> ArenaParser<'arena> {
                     }
                 }
             }
-            Token::Keyword(Keyword::Drop) => {
+            Token::Keyword { keyword: Keyword::Drop, .. } => {
                 self.advance();
                 match self.peek() {
-                    Token::Keyword(Keyword::Column) => {
+                    Token::Keyword { keyword: Keyword::Column, .. } => {
                         self.advance();
                         self.parse_drop_column(table_name)?
                     }
-                    Token::Keyword(Keyword::Constraint) => {
+                    Token::Keyword { keyword: Keyword::Constraint, .. } => {
                         self.advance();
                         self.parse_drop_constraint(table_name)?
                     }
@@ -362,20 +363,20 @@ impl<'arena> ArenaParser<'arena> {
                     }
                 }
             }
-            Token::Keyword(Keyword::Alter) => {
+            Token::Keyword { keyword: Keyword::Alter, .. } => {
                 self.advance();
                 self.expect_keyword(Keyword::Column)?;
                 self.parse_alter_column(table_name)?
             }
-            Token::Keyword(Keyword::Rename) => {
+            Token::Keyword { keyword: Keyword::Rename, .. } => {
                 self.advance();
                 self.parse_rename_table(table_name)?
             }
-            Token::Keyword(Keyword::Modify) => {
+            Token::Keyword { keyword: Keyword::Modify, .. } => {
                 self.advance();
                 self.parse_modify_column(table_name)?
             }
-            Token::Keyword(Keyword::Change) => {
+            Token::Keyword { keyword: Keyword::Change, .. } => {
                 self.advance();
                 self.parse_change_column(table_name)?
             }
@@ -439,12 +440,12 @@ impl<'arena> ArenaParser<'arena> {
 
         loop {
             match self.peek() {
-                Token::Keyword(Keyword::Not) => {
+                Token::Keyword { keyword: Keyword::Not, .. } => {
                     self.advance();
                     self.expect_keyword(Keyword::Null)?;
                     nullable = false;
                 }
-                Token::Keyword(Keyword::Primary) => {
+                Token::Keyword { keyword: Keyword::Primary, .. } => {
                     self.advance();
                     self.expect_keyword(Keyword::Key)?;
                     constraints.push(ColumnConstraint {
@@ -452,12 +453,12 @@ impl<'arena> ArenaParser<'arena> {
                         kind: ColumnConstraintKind::PrimaryKey,
                     });
                 }
-                Token::Keyword(Keyword::Unique) => {
+                Token::Keyword { keyword: Keyword::Unique, .. } => {
                     self.advance();
                     constraints
                         .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
                 }
-                Token::Keyword(Keyword::References) => {
+                Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance();
                     let ref_table = self.parse_table_name()?;
                     self.expect_token(Token::LParen)?;
@@ -510,10 +511,10 @@ impl<'arena> ArenaParser<'arena> {
         let column_name = self.parse_column_name()?;
 
         match self.peek() {
-            Token::Keyword(Keyword::Set) => {
+            Token::Keyword { keyword: Keyword::Set, .. } => {
                 self.advance();
                 match self.peek() {
-                    Token::Keyword(Keyword::Default) => {
+                    Token::Keyword { keyword: Keyword::Default, .. } => {
                         self.advance();
                         let default = self.parse_expression()?;
                         Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::SetDefault {
@@ -522,7 +523,7 @@ impl<'arena> ArenaParser<'arena> {
                             default,
                         }))
                     }
-                    Token::Keyword(Keyword::Not) => {
+                    Token::Keyword { keyword: Keyword::Not, .. } => {
                         self.advance();
                         self.expect_keyword(Keyword::Null)?;
                         Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::SetNotNull {
@@ -535,17 +536,17 @@ impl<'arena> ArenaParser<'arena> {
                     }),
                 }
             }
-            Token::Keyword(Keyword::Drop) => {
+            Token::Keyword { keyword: Keyword::Drop, .. } => {
                 self.advance();
                 match self.peek() {
-                    Token::Keyword(Keyword::Default) => {
+                    Token::Keyword { keyword: Keyword::Default, .. } => {
                         self.advance();
                         Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::DropDefault {
                             table_name,
                             column_name,
                         }))
                     }
-                    Token::Keyword(Keyword::Not) => {
+                    Token::Keyword { keyword: Keyword::Not, .. } => {
                         self.advance();
                         self.expect_keyword(Keyword::Null)?;
                         Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::DropNotNull {
@@ -684,12 +685,12 @@ impl<'arena> ArenaParser<'arena> {
 
         loop {
             match self.peek() {
-                Token::Keyword(Keyword::Not) => {
+                Token::Keyword { keyword: Keyword::Not, .. } => {
                     self.advance();
                     self.expect_keyword(Keyword::Null)?;
                     nullable = false;
                 }
-                Token::Keyword(Keyword::Primary) => {
+                Token::Keyword { keyword: Keyword::Primary, .. } => {
                     self.advance();
                     self.expect_keyword(Keyword::Key)?;
                     constraints.push(ColumnConstraint {
@@ -697,12 +698,12 @@ impl<'arena> ArenaParser<'arena> {
                         kind: ColumnConstraintKind::PrimaryKey,
                     });
                 }
-                Token::Keyword(Keyword::Unique) => {
+                Token::Keyword { keyword: Keyword::Unique, .. } => {
                     self.advance();
                     constraints
                         .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
                 }
-                Token::Keyword(Keyword::References) => {
+                Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance();
                     let ref_table = self.parse_table_name()?;
                     self.expect_token(Token::LParen)?;
@@ -735,7 +736,7 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         let kind = match self.peek() {
-            Token::Keyword(Keyword::Primary) => {
+            Token::Keyword { keyword: Keyword::Primary, .. } => {
                 self.advance();
                 self.expect_keyword(Keyword::Key)?;
                 self.expect_token(Token::LParen)?;
@@ -743,14 +744,14 @@ impl<'arena> ArenaParser<'arena> {
                 self.expect_token(Token::RParen)?;
                 TableConstraintKind::PrimaryKey { columns }
             }
-            Token::Keyword(Keyword::Unique) => {
+            Token::Keyword { keyword: Keyword::Unique, .. } => {
                 self.advance();
                 self.expect_token(Token::LParen)?;
                 let columns = self.parse_index_column_list()?;
                 self.expect_token(Token::RParen)?;
                 TableConstraintKind::Unique { columns }
             }
-            Token::Keyword(Keyword::Foreign) => {
+            Token::Keyword { keyword: Keyword::Foreign, .. } => {
                 self.advance();
                 self.expect_keyword(Keyword::Key)?;
                 self.expect_token(Token::LParen)?;
@@ -772,7 +773,7 @@ impl<'arena> ArenaParser<'arena> {
                     on_update,
                 }
             }
-            Token::Keyword(Keyword::Check) => {
+            Token::Keyword { keyword: Keyword::Check, .. } => {
                 self.advance();
                 self.expect_token(Token::LParen)?;
                 let expr = self.parse_expression()?;
@@ -1008,7 +1009,7 @@ impl<'arena> ArenaParser<'arena> {
                 let sym = self.interner.intern(&ident);
                 Ok(PragmaValue::Identifier(sym))
             }
-            Token::Keyword(kw) => {
+            Token::Keyword { keyword: kw, .. } => {
                 self.advance();
                 let sym = self.interner.intern(&kw.to_string());
                 Ok(PragmaValue::Identifier(sym))

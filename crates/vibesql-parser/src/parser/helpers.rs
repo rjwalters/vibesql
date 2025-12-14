@@ -37,12 +37,12 @@ impl Parser {
 
     /// Check if current token is a specific keyword.
     pub(super) fn peek_keyword(&self, keyword: Keyword) -> bool {
-        matches!(self.peek(), Token::Keyword(k) if k == &keyword)
+        matches!(self.peek(), Token::Keyword { keyword: k, .. } if k == &keyword)
     }
 
     /// Check if next token is a specific keyword.
     pub(super) fn peek_next_keyword(&self, keyword: Keyword) -> bool {
-        matches!(self.peek_next(), Token::Keyword(k) if k == &keyword)
+        matches!(self.peek_next(), Token::Keyword { keyword: k, .. } if k == &keyword)
     }
 
     /// Expect and consume a specific keyword.
@@ -78,7 +78,7 @@ impl Parser {
                 self.advance();
                 Ok(identifier)
             }
-            Token::Keyword(kw) => {
+            Token::Keyword { keyword: kw, .. } => {
                 Err(ParseError {
                     message: format!(
                         "Expected identifier, found reserved keyword '{}'. Use delimited identifiers (e.g., \"{}\") to use keywords as names, or choose a different identifier.",
@@ -103,7 +103,7 @@ impl Parser {
                 self.advance();
                 Ok(identifier)
             }
-            Token::Keyword(kw) => {
+            Token::Keyword { keyword: kw, .. } => {
                 // Allow keywords as alias names - convert to uppercase string
                 let name = kw.to_string();
                 self.advance();
@@ -185,7 +185,7 @@ impl Parser {
                 self.advance();
                 (identifier, true)
             }
-            Token::Keyword(keyword) => {
+            Token::Keyword { keyword, .. } => {
                 let identifier = keyword.to_string();
                 self.advance();
                 (identifier, false) // Keywords are treated as unquoted
@@ -207,7 +207,7 @@ impl Parser {
                     self.advance();
                     (identifier, true)
                 }
-                Token::Keyword(keyword) => {
+                Token::Keyword { keyword, .. } => {
                     let identifier = keyword.to_string();
                     self.advance();
                     (identifier, false)

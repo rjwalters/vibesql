@@ -682,7 +682,7 @@ impl Parser {
                 self.advance();
                 Ok(vibesql_ast::PragmaValue::Identifier(ident))
             }
-            Token::Keyword(kw) => {
+            Token::Keyword { keyword: kw, .. } => {
                 // Allow keywords like ON, OFF, TRUE, FALSE as identifiers
                 self.advance();
                 Ok(vibesql_ast::PragmaValue::Identifier(kw.to_string()))

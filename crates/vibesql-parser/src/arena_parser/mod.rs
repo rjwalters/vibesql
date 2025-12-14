@@ -163,57 +163,57 @@ impl<'arena> ArenaParser<'arena> {
 
         match self.peek() {
             // DML statements
-            Token::Keyword(Keyword::Select) | Token::Keyword(Keyword::With) => {
+            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
                 let stmt = self.parse_select_statement()?;
                 Ok(Statement::Select(stmt))
             }
-            Token::Keyword(Keyword::Insert) => {
+            Token::Keyword { keyword: Keyword::Insert, .. } => {
                 let stmt = self.parse_insert_statement()?;
                 Ok(Statement::Insert(stmt.clone()))
             }
-            Token::Keyword(Keyword::Replace) => {
+            Token::Keyword { keyword: Keyword::Replace, .. } => {
                 let stmt = self.parse_replace_statement()?;
                 Ok(Statement::Insert(stmt.clone()))
             }
-            Token::Keyword(Keyword::Update) => {
+            Token::Keyword { keyword: Keyword::Update, .. } => {
                 let stmt = self.parse_update_statement()?;
                 Ok(Statement::Update(stmt.clone()))
             }
-            Token::Keyword(Keyword::Delete) => {
+            Token::Keyword { keyword: Keyword::Delete, .. } => {
                 let stmt = self.parse_delete_statement()?;
                 Ok(Statement::Delete(stmt.clone()))
             }
 
             // DDL statements
-            Token::Keyword(Keyword::Create) => self.parse_create_statement(),
-            Token::Keyword(Keyword::Drop) => self.parse_drop_statement(),
-            Token::Keyword(Keyword::Alter) => {
+            Token::Keyword { keyword: Keyword::Create, .. } => self.parse_create_statement(),
+            Token::Keyword { keyword: Keyword::Drop, .. } => self.parse_drop_statement(),
+            Token::Keyword { keyword: Keyword::Alter, .. } => {
                 let stmt = self.parse_alter_table_statement()?;
                 Ok(Statement::AlterTable(stmt.clone()))
             }
-            Token::Keyword(Keyword::Truncate) => {
+            Token::Keyword { keyword: Keyword::Truncate, .. } => {
                 let stmt = self.parse_truncate_table_statement()?;
                 Ok(Statement::TruncateTable(stmt))
             }
-            Token::Keyword(Keyword::Analyze) => {
+            Token::Keyword { keyword: Keyword::Analyze, .. } => {
                 let stmt = self.parse_analyze_statement()?;
                 Ok(Statement::Analyze(stmt))
             }
-            Token::Keyword(Keyword::Pragma) => {
+            Token::Keyword { keyword: Keyword::Pragma, .. } => {
                 let stmt = self.parse_pragma_statement()?;
                 Ok(Statement::Pragma(stmt))
             }
 
             // Transaction statements
-            Token::Keyword(Keyword::Begin) | Token::Keyword(Keyword::Start) => {
+            Token::Keyword { keyword: Keyword::Begin, .. } | Token::Keyword { keyword: Keyword::Start, .. } => {
                 let stmt = self.parse_begin_statement()?;
                 Ok(Statement::BeginTransaction(stmt))
             }
-            Token::Keyword(Keyword::Commit) => {
+            Token::Keyword { keyword: Keyword::Commit, .. } => {
                 let stmt = self.parse_commit_statement()?;
                 Ok(Statement::Commit(stmt))
             }
-            Token::Keyword(Keyword::Rollback) => {
+            Token::Keyword { keyword: Keyword::Rollback, .. } => {
                 // Check for ROLLBACK TO SAVEPOINT
                 if self.peek_next_keyword(Keyword::To) {
                     let stmt = self.parse_rollback_to_savepoint_statement()?;
@@ -223,11 +223,11 @@ impl<'arena> ArenaParser<'arena> {
                     Ok(Statement::Rollback(stmt))
                 }
             }
-            Token::Keyword(Keyword::Savepoint) => {
+            Token::Keyword { keyword: Keyword::Savepoint, .. } => {
                 let stmt = self.parse_savepoint_statement()?;
                 Ok(Statement::Savepoint(stmt))
             }
-            Token::Keyword(Keyword::Release) => {
+            Token::Keyword { keyword: Keyword::Release, .. } => {
                 let stmt = self.parse_release_savepoint_statement()?;
                 Ok(Statement::ReleaseSavepoint(stmt))
             }
@@ -242,16 +242,16 @@ impl<'arena> ArenaParser<'arena> {
         let mut offset = 1; // Skip CREATE
 
         // Skip optional OR REPLACE
-        if matches!(self.peek_at_offset(offset), Token::Keyword(Keyword::Or)) {
+        if matches!(self.peek_at_offset(offset), Token::Keyword { keyword: Keyword::Or, .. }) {
             offset += 2; // Skip OR REPLACE
         }
 
         // Skip optional UNIQUE, FULLTEXT, SPATIAL
         if matches!(
             self.peek_at_offset(offset),
-            Token::Keyword(Keyword::Unique)
-                | Token::Keyword(Keyword::Fulltext)
-                | Token::Keyword(Keyword::Spatial)
+            Token::Keyword { keyword: Keyword::Unique, .. }
+                | Token::Keyword { keyword: Keyword::Fulltext, .. }
+                | Token::Keyword { keyword: Keyword::Spatial, .. }
         ) {
             offset += 1;
         }
@@ -259,17 +259,17 @@ impl<'arena> ArenaParser<'arena> {
         // Skip optional TEMP/TEMPORARY
         if matches!(
             self.peek_at_offset(offset),
-            Token::Keyword(Keyword::Temp) | Token::Keyword(Keyword::Temporary)
+            Token::Keyword { keyword: Keyword::Temp, .. } | Token::Keyword { keyword: Keyword::Temporary, .. }
         ) {
             offset += 1;
         }
 
         match self.peek_at_offset(offset) {
-            Token::Keyword(Keyword::Index) => {
+            Token::Keyword { keyword: Keyword::Index, .. } => {
                 let stmt = self.parse_create_index_statement()?;
                 Ok(Statement::CreateIndex(stmt))
             }
-            Token::Keyword(Keyword::View) => {
+            Token::Keyword { keyword: Keyword::View, .. } => {
                 let stmt = self.parse_create_view_statement()?;
                 Ok(Statement::CreateView(stmt))
             }
@@ -286,15 +286,15 @@ impl<'arena> ArenaParser<'arena> {
     fn parse_drop_statement(&mut self) -> Result<Statement<'arena>, ParseError> {
         // Peek ahead to determine what we're dropping
         match self.peek_at_offset(1) {
-            Token::Keyword(Keyword::Table) => {
+            Token::Keyword { keyword: Keyword::Table, .. } => {
                 let stmt = self.parse_drop_table_statement()?;
                 Ok(Statement::DropTable(stmt))
             }
-            Token::Keyword(Keyword::Index) => {
+            Token::Keyword { keyword: Keyword::Index, .. } => {
                 let stmt = self.parse_drop_index_statement()?;
                 Ok(Statement::DropIndex(stmt))
             }
-            Token::Keyword(Keyword::View) => {
+            Token::Keyword { keyword: Keyword::View, .. } => {
                 let stmt = self.parse_drop_view_statement()?;
                 Ok(Statement::DropView(stmt))
             }
@@ -503,13 +503,13 @@ impl<'arena> ArenaParser<'arena> {
 
     /// Check if current token is a specific keyword.
     pub(crate) fn peek_keyword(&self, keyword: Keyword) -> bool {
-        matches!(self.peek(), Token::Keyword(kw) if *kw == keyword)
+        matches!(self.peek(), Token::Keyword { keyword: kw, .. } if *kw == keyword)
     }
 
     /// Check if next token (position + 1) is a specific keyword.
     #[allow(dead_code)]
     pub(crate) fn peek_next_keyword(&self, keyword: Keyword) -> bool {
-        matches!(self.peek_next(), Token::Keyword(kw) if *kw == keyword)
+        matches!(self.peek_next(), Token::Keyword { keyword: kw, .. } if *kw == keyword)
     }
 
     /// Consume a keyword, returning an error if it's not the expected keyword.
@@ -641,7 +641,7 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(self.intern(&name))
             }
-            Token::Keyword(kw) => {
+            Token::Keyword { keyword: kw, .. } => {
                 // Allow keywords as alias names
                 let name = kw.to_string();
                 self.advance();

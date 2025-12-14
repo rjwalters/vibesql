@@ -31,22 +31,22 @@ impl Parser {
             }
             // Allow LEFT, RIGHT, REPLACE, SCHEMA, GROUPING, and GROUPING_ID keywords as function
             // names These are reserved keywords but can also be functions
-            Token::Keyword(Keyword::Left)
-            | Token::Keyword(Keyword::Right)
-            | Token::Keyword(Keyword::Replace)
-            | Token::Keyword(Keyword::Schema)
-            | Token::Keyword(Keyword::Grouping)
-            | Token::Keyword(Keyword::GroupingId) => {
+            Token::Keyword { keyword: Keyword::Left, .. }
+            | Token::Keyword { keyword: Keyword::Right, .. }
+            | Token::Keyword { keyword: Keyword::Replace, .. }
+            | Token::Keyword { keyword: Keyword::Schema, .. }
+            | Token::Keyword { keyword: Keyword::Grouping, .. }
+            | Token::Keyword { keyword: Keyword::GroupingId, .. } => {
                 // Peek ahead to see if this is followed by '('
                 // Don't consume the keyword unless we're sure it's a function
                 // SQL:1999 normalizes unquoted identifiers (including function names) to lowercase
                 let keyword_name = match self.peek() {
-                    Token::Keyword(Keyword::Left) => "left",
-                    Token::Keyword(Keyword::Right) => "right",
-                    Token::Keyword(Keyword::Replace) => "replace",
-                    Token::Keyword(Keyword::Schema) => "schema",
-                    Token::Keyword(Keyword::Grouping) => "grouping",
-                    Token::Keyword(Keyword::GroupingId) => "grouping_id",
+                    Token::Keyword { keyword: Keyword::Left, .. } => "left",
+                    Token::Keyword { keyword: Keyword::Right, .. } => "right",
+                    Token::Keyword { keyword: Keyword::Replace, .. } => "replace",
+                    Token::Keyword { keyword: Keyword::Schema, .. } => "schema",
+                    Token::Keyword { keyword: Keyword::Grouping, .. } => "grouping",
+                    Token::Keyword { keyword: Keyword::GroupingId, .. } => "grouping_id",
                     _ => unreachable!(),
                 };
 
@@ -125,10 +125,10 @@ impl Parser {
 
         // Parse optional DISTINCT or ALL for potential aggregate functions
         let distinct = if might_be_aggregate {
-            if matches!(self.peek(), Token::Keyword(Keyword::Distinct)) {
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Distinct, .. }) {
                 self.advance(); // consume DISTINCT
                 true
-            } else if matches!(self.peek(), Token::Keyword(Keyword::All)) {
+            } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::All, .. }) {
                 self.advance(); // consume ALL
                 false
             } else {
@@ -167,7 +167,7 @@ impl Parser {
 
             // Parse optional USING clause for string functions BEFORE closing paren
             if matches!(function_name_upper.as_str(), "CHARACTER_LENGTH" | "CHAR_LENGTH")
-                && matches!(self.peek(), Token::Keyword(Keyword::Using))
+                && matches!(self.peek(), Token::Keyword { keyword: Keyword::Using, .. })
             {
                 self.advance(); // consume USING
                 character_unit = Some(self.parse_character_unit()?);
@@ -177,7 +177,7 @@ impl Parser {
         }
 
         // Check for OVER clause (window function)
-        if matches!(self.peek(), Token::Keyword(Keyword::Over)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Over, .. }) {
             self.advance(); // consume OVER
 
             // Parse window specification

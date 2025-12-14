@@ -374,7 +374,7 @@ impl<'arena> ArenaParser<'arena> {
 
             // Track if this was originally a comma-join (for legacy ON support)
             let was_comma_join = matches!(join_type, Some(JoinType::Cross))
-                && !matches!(self.peek(), Token::Keyword(Keyword::Natural));
+                && !matches!(self.peek(), Token::Keyword { keyword: Keyword::Natural, .. });
 
             if let Some(mut jt) = join_type {
                 let natural = self.try_consume_keyword(Keyword::Natural);
@@ -492,21 +492,21 @@ impl<'arena> ArenaParser<'arena> {
             // Make sure it's not a keyword that would start a new clause
             if !matches!(
                 self.peek(),
-                Token::Keyword(Keyword::Where)
-                    | Token::Keyword(Keyword::Join)
-                    | Token::Keyword(Keyword::Inner)
-                    | Token::Keyword(Keyword::Left)
-                    | Token::Keyword(Keyword::Right)
-                    | Token::Keyword(Keyword::Full)
-                    | Token::Keyword(Keyword::Cross)
-                    | Token::Keyword(Keyword::On)
-                    | Token::Keyword(Keyword::Group)
-                    | Token::Keyword(Keyword::Order)
-                    | Token::Keyword(Keyword::Having)
-                    | Token::Keyword(Keyword::Limit)
-                    | Token::Keyword(Keyword::Union)
-                    | Token::Keyword(Keyword::Intersect)
-                    | Token::Keyword(Keyword::Except)
+                Token::Keyword { keyword: Keyword::Where, .. }
+                    | Token::Keyword { keyword: Keyword::Join, .. }
+                    | Token::Keyword { keyword: Keyword::Inner, .. }
+                    | Token::Keyword { keyword: Keyword::Left, .. }
+                    | Token::Keyword { keyword: Keyword::Right, .. }
+                    | Token::Keyword { keyword: Keyword::Full, .. }
+                    | Token::Keyword { keyword: Keyword::Cross, .. }
+                    | Token::Keyword { keyword: Keyword::On, .. }
+                    | Token::Keyword { keyword: Keyword::Group, .. }
+                    | Token::Keyword { keyword: Keyword::Order, .. }
+                    | Token::Keyword { keyword: Keyword::Having, .. }
+                    | Token::Keyword { keyword: Keyword::Limit, .. }
+                    | Token::Keyword { keyword: Keyword::Union, .. }
+                    | Token::Keyword { keyword: Keyword::Intersect, .. }
+                    | Token::Keyword { keyword: Keyword::Except, .. }
             ) {
                 let alias = alias.clone();
                 self.advance();
