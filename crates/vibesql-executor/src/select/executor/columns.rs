@@ -83,9 +83,15 @@ impl SelectExecutor<'_> {
                         // Store (index, column_name, table_name_for_display)
                         let mut table_columns: Vec<(usize, String, String)> = Vec::new();
 
-                        for (_table_key, (start_index, table_schema)) in
+                        for (table_key, (start_index, table_schema)) in
                             &from_res.schema.table_schemas
                         {
+                            // Get the effective table name (alias if present, original name otherwise)
+                            let effective_table_name = from_res.schema.table_display_names
+                                .get(table_key)
+                                .cloned()
+                                .unwrap_or_else(|| table_schema.name.clone());
+
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                                 let abs_idx = start_index + col_idx;
                                 // Skip hidden columns (from NATURAL JOIN deduplication)
@@ -93,9 +99,7 @@ impl SelectExecutor<'_> {
                                     continue;
                                 }
                                 let col_name = col_schema.name.clone();
-                                // Use table_schema.name for display (preserves original case)
-                                let table_name = table_schema.name.clone();
-                                table_columns.push((abs_idx, col_name, table_name));
+                                table_columns.push((abs_idx, col_name, effective_table_name.clone()));
                             }
                         }
 
@@ -112,11 +116,18 @@ impl SelectExecutor<'_> {
                             }
                             column_names.extend(derived_cols.clone());
                         } else {
-                            // SELECT * always uses just the column name, never table-qualified
-                            // This matches SQLite behavior where full_column_names PRAGMA
-                            // does not affect wildcard expansion
-                            for (_, col_name, _table_name) in table_columns {
-                                column_names.push(col_name);
+                            // SELECT * uses table prefix when full_column_names=ON
+                            // BUT only when there's ambiguity (multiple tables or explicit alias)
+                            let has_multiple_tables = from_res.schema.table_schemas.len() > 1;
+
+                            for (_, col_name, effective_table_name) in table_columns {
+                                let display_name = match mode {
+                                    ColumnNamingMode::Full if has_multiple_tables => {
+                                        format!("{}.{}", effective_table_name, col_name)
+                                    }
+                                    _ => col_name,
+                                };
+                                column_names.push(display_name);
                             }
                         }
                     } else {

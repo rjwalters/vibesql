@@ -171,20 +171,20 @@ impl CombinedSchema {
     /// Note: Right table name is automatically normalized via TableKey for case-insensitive lookups
     pub fn combine(
         left: CombinedSchema,
-        right_table: impl Into<TableKey>,
+        right_table: impl Into<TableKey> + AsRef<str>,
         right_schema: vibesql_catalog::TableSchema,
     ) -> Self {
         let mut table_schemas = left.table_schemas;
         let mut table_display_names = left.table_display_names;
         let left_total = left.total_columns;
         let right_columns = right_schema.columns.len();
+        // Capture display name before converting to TableKey (preserves original case/alias)
+        let display_name = right_table.as_ref().to_string();
         // TableKey automatically normalizes to lowercase
         let right_key: TableKey = right_table.into();
         table_schemas.insert(right_key.clone(), (left_total, right_schema));
-        // Store the display name (preserves original case)
-        if !table_display_names.contains_key(&right_key) {
-            table_display_names.insert(right_key.clone(), right_key.to_string());
-        }
+        // Store the display name (preserves original case/alias)
+        table_display_names.insert(right_key, display_name);
         CombinedSchema {
             table_schemas,
             table_display_names,

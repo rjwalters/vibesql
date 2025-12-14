@@ -131,9 +131,17 @@ impl<L: RowIterator> HashJoinIterator<L> {
 
         let right_col_count = right_schema.columns.len();
 
+        // Get display name (alias or original table name) for the right table
+        let right_table_display_name = right
+            .schema
+            .table_display_names
+            .get(&right_table_name)
+            .cloned()
+            .unwrap_or_else(|| right_table_name.to_string());
+
         // Combine schemas (left schema from iterator + right schema)
         let combined_schema =
-            CombinedSchema::combine(left.schema().clone(), right_table_name, right_schema);
+            CombinedSchema::combine(left.schema().clone(), right_table_display_name, right_schema);
 
         // Use default timeout context (proper propagation from SelectExecutor is a future
         // improvement)
