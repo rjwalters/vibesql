@@ -246,7 +246,10 @@ fn test_insert_from_select_column_mismatch() {
 
     let result = InsertExecutor::execute(&mut db, &insert_select_stmt);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::UnsupportedExpression(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ExecutorError::InsertColumnCountMismatch { .. }
+    ));
 }
 
 #[test]
