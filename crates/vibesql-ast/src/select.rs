@@ -15,6 +15,9 @@ use crate::Expression;
 /// only for the duration of a single query.
 ///
 /// Example: `WITH regional_sales AS (SELECT region, SUM(amount) FROM orders GROUP BY region)`
+///
+/// Recursive CTEs use UNION ALL to reference themselves:
+/// Example: `WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10)`
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommonTableExpr {
     /// Name of the CTE
@@ -23,6 +26,9 @@ pub struct CommonTableExpr {
     pub columns: Option<Vec<String>>,
     /// The query defining the CTE
     pub query: Box<SelectStmt>,
+    /// Whether this is a RECURSIVE CTE (SQLite/SQL:1999)
+    /// Recursive CTEs must use UNION ALL and may reference themselves in the recursive term
+    pub recursive: bool,
 }
 
 // ============================================================================

@@ -30,7 +30,14 @@ impl Parser {
         // Parse optional WITH clause (CTEs)
         let with_clause = if self.peek_keyword(Keyword::With) {
             self.consume_keyword(Keyword::With)?;
-            Some(self.parse_cte_list()?)
+            // Check for optional RECURSIVE keyword (SQL:1999, SQLite)
+            let recursive = if self.peek_keyword(Keyword::Recursive) {
+                self.consume_keyword(Keyword::Recursive)?;
+                true
+            } else {
+                false
+            };
+            Some(self.parse_cte_list(recursive)?)
         } else {
             None
         };
@@ -310,14 +317,21 @@ impl Parser {
     /// Parse a comma-separated list of CTEs
     ///
     /// Syntax: cte_name [(col1, col2, ...)] AS (SELECT ...) [, ...]
-    fn parse_cte_list(&mut self) -> Result<Vec<vibesql_ast::CommonTableExpr>, ParseError> {
-        self.parse_comma_separated_list(|p| p.parse_cte())
+    ///
+    /// If `recursive` is true, all CTEs in this list are marked as recursive.
+    /// In SQL:1999/SQLite, the RECURSIVE keyword applies to all CTEs in the WITH clause.
+    fn parse_cte_list(&mut self, recursive: bool) -> Result<Vec<vibesql_ast::CommonTableExpr>, ParseError> {
+        self.parse_comma_separated_list(|p| p.parse_cte(recursive))
     }
 
     /// Parse a single CTE definition
     ///
     /// Syntax: cte_name [(col1, col2, ...)] AS (SELECT ...)
-    fn parse_cte(&mut self) -> Result<vibesql_ast::CommonTableExpr, ParseError> {
+    ///
+    /// The `recursive` parameter indicates whether this CTE was declared in a
+    /// WITH RECURSIVE clause. In SQL:1999/SQLite, RECURSIVE applies to all CTEs
+    /// in the WITH clause, even if they don't actually recurse.
+    fn parse_cte(&mut self, recursive: bool) -> Result<vibesql_ast::CommonTableExpr, ParseError> {
         // Parse CTE name
         let name = match self.peek() {
             Token::Identifier(id) => {
@@ -382,7 +396,7 @@ impl Parser {
         }
         self.advance(); // consume ')'
 
-        Ok(vibesql_ast::CommonTableExpr { name, columns, query })
+        Ok(vibesql_ast::CommonTableExpr { name, columns, query, recursive })
     }
 
     /// Parse a VALUES statement (standalone or in set operations)

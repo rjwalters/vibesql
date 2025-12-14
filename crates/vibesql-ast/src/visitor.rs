@@ -1057,6 +1057,7 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
                     name: cte.name,
                     columns: cte.columns,
                     query: Box::new(transform_select(visitor, *cte.query)),
+                    recursive: cte.recursive,
                 })
                 .collect()
         }),

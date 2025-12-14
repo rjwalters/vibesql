@@ -210,7 +210,8 @@ impl<'arena> ArenaParser<'arena> {
         let query = self.parse_select_statement()?;
         self.expect_token(Token::RParen)?;
 
-        Ok(CommonTableExpr { name, columns, query })
+        // TODO: Arena parser doesn't support WITH RECURSIVE yet - always non-recursive
+        Ok(CommonTableExpr { name, columns, query, recursive: false })
     }
 
     /// Parse select list.
