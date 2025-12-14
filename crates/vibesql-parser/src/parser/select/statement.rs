@@ -278,7 +278,7 @@ impl Parser {
                 // Nested in set operation: also allow ORDER/LIMIT/OFFSET for outer statement
                 match self.peek() {
                     Token::Semicolon | Token::Eof | Token::RParen => {}
-                    Token::Keyword(Keyword::Order) | Token::Keyword(Keyword::Limit) | Token::Keyword(Keyword::Offset) => {}
+                    Token::Keyword { keyword: Keyword::Order, .. } | Token::Keyword { keyword: Keyword::Limit, .. } | Token::Keyword { keyword: Keyword::Offset, .. } => {}
                     _ => return Err(ParseError { message: self.peek().syntax_error() }),
                 }
             }
@@ -538,7 +538,7 @@ impl Parser {
             let valid_end_token = match self.peek() {
                 Token::Semicolon | Token::Eof | Token::RParen => true,
                 // When nested, allow ORDER BY/LIMIT/OFFSET for outer statement
-                Token::Keyword(Keyword::Order) | Token::Keyword(Keyword::Limit) | Token::Keyword(Keyword::Offset)
+                Token::Keyword { keyword: Keyword::Order, .. } | Token::Keyword { keyword: Keyword::Limit, .. } | Token::Keyword { keyword: Keyword::Offset, .. }
                     if !allow_order_limit => true,
                 _ => false,
             };

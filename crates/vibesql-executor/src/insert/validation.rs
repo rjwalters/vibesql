@@ -42,14 +42,14 @@ pub fn resolve_target_columns(
 pub fn validate_row_column_counts(
     rows: &[Vec<vibesql_ast::Expression>],
     expected_count: usize,
+    table_name: &str,
 ) -> Result<(), ExecutorError> {
-    for (row_idx, value_exprs) in rows.iter().enumerate() {
+    for value_exprs in rows.iter() {
         if value_exprs.len() != expected_count {
+            // Match SQLite's error message format exactly
             return Err(ExecutorError::UnsupportedExpression(format!(
-                "INSERT row {} column count mismatch: expected {}, got {}",
-                row_idx + 1,
-                expected_count,
-                value_exprs.len()
+                "table {} has {} columns but {} values were supplied",
+                table_name, expected_count, value_exprs.len()
             )));
         }
     }

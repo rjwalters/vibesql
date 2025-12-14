@@ -52,7 +52,7 @@ impl Parser {
         }
 
         // Parse PARTITION BY clause
-        if matches!(self.peek(), Token::Keyword(Keyword::Partition)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Partition, .. }) {
             self.advance(); // consume PARTITION
             self.expect_keyword(Keyword::By)?;
 
@@ -67,7 +67,7 @@ impl Parser {
         }
 
         // Parse ORDER BY clause
-        if matches!(self.peek(), Token::Keyword(Keyword::Order)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. }) {
             self.advance(); // consume ORDER
             self.expect_keyword(Keyword::By)?;
 
@@ -76,10 +76,10 @@ impl Parser {
                 let expr = self.parse_expression()?;
 
                 // Check for optional ASC/DESC
-                let direction = if matches!(self.peek(), Token::Keyword(Keyword::Asc)) {
+                let direction = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
                     self.advance();
                     vibesql_ast::OrderDirection::Asc
-                } else if matches!(self.peek(), Token::Keyword(Keyword::Desc)) {
+                } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
                     self.advance();
                     vibesql_ast::OrderDirection::Desc
                 } else {
@@ -99,7 +99,7 @@ impl Parser {
         }
 
         // Parse frame clause (ROWS/RANGE)
-        if matches!(self.peek(), Token::Keyword(Keyword::Rows) | Token::Keyword(Keyword::Range)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Rows, .. } | Token::Keyword { keyword: Keyword::Range, .. }) {
             frame = Some(self.parse_frame_clause()?);
         }
 
@@ -112,11 +112,11 @@ impl Parser {
     pub(super) fn parse_frame_clause(&mut self) -> Result<vibesql_ast::WindowFrame, ParseError> {
         // Parse frame unit (ROWS or RANGE)
         let unit = match self.peek() {
-            Token::Keyword(Keyword::Rows) => {
+            Token::Keyword { keyword: Keyword::Rows, .. } => {
                 self.advance();
                 vibesql_ast::FrameUnit::Rows
             }
-            Token::Keyword(Keyword::Range) => {
+            Token::Keyword { keyword: Keyword::Range, .. } => {
                 self.advance();
                 vibesql_ast::FrameUnit::Range
             }
@@ -131,7 +131,7 @@ impl Parser {
         };
 
         // Parse BETWEEN ... AND ... or single bound
-        if matches!(self.peek(), Token::Keyword(Keyword::Between)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Between, .. }) {
             self.advance(); // consume BETWEEN
 
             let start = self.parse_frame_bound()?;
@@ -152,15 +152,15 @@ impl Parser {
     /// Parse a single frame boundary
     pub(super) fn parse_frame_bound(&mut self) -> Result<vibesql_ast::FrameBound, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::Unbounded) => {
+            Token::Keyword { keyword: Keyword::Unbounded, .. } => {
                 self.advance(); // consume UNBOUNDED
 
                 match self.peek() {
-                    Token::Keyword(Keyword::Preceding) => {
+                    Token::Keyword { keyword: Keyword::Preceding, .. } => {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::UnboundedPreceding)
                     }
-                    Token::Keyword(Keyword::Following) => {
+                    Token::Keyword { keyword: Keyword::Following, .. } => {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::UnboundedFollowing)
                     }
@@ -173,12 +173,12 @@ impl Parser {
                 }
             }
 
-            Token::Keyword(Keyword::Current) => {
+            Token::Keyword { keyword: Keyword::Current, .. } => {
                 self.advance(); // consume CURRENT
                                 // Expect ROW (note: not ROWS, this is "CURRENT ROW" singular)
                                 // Accept ROW as either keyword or identifier for compatibility
                 match self.peek() {
-                    Token::Keyword(Keyword::Row) => {
+                    Token::Keyword { keyword: Keyword::Row, .. } => {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::CurrentRow)
                     }
@@ -200,11 +200,11 @@ impl Parser {
                 let offset = self.parse_primary_expression()?;
 
                 match self.peek() {
-                    Token::Keyword(Keyword::Preceding) => {
+                    Token::Keyword { keyword: Keyword::Preceding, .. } => {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::Preceding(Box::new(offset)))
                     }
-                    Token::Keyword(Keyword::Following) => {
+                    Token::Keyword { keyword: Keyword::Following, .. } => {
                         self.advance();
                         Ok(vibesql_ast::FrameBound::Following(Box::new(offset)))
                     }

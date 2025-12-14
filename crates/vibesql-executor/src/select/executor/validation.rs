@@ -156,6 +156,10 @@ fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
             }
         }
 
+        Expression::Collate { expr, .. } => {
+            extract_column_refs(expr, refs);
+        }
+
         // Terminals with no column references
         Expression::Literal(_)
         | Expression::Wildcard

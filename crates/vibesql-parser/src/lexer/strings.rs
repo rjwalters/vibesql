@@ -28,9 +28,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        // For unterminated strings, SQLite shows the partial string
         Err(LexerError {
             message: "Unterminated string literal".to_string(),
             position: self.position(),
+            near_token: Some(format!("'{}", string_content)),
         })
     }
 }

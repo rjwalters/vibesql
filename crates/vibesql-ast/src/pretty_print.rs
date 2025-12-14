@@ -533,6 +533,10 @@ impl ToSql for Expression {
                 let values_sql: Vec<String> = values.iter().map(|v| v.to_sql()).collect();
                 format!("({})", values_sql.join(", "))
             }
+
+            Expression::Collate { expr, collation } => {
+                format!("{} COLLATE {}", expr.to_sql(), collation)
+            }
         }
     }
 }

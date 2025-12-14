@@ -151,19 +151,19 @@ impl Parser {
     /// This includes SELECT, INSERT, UPDATE, DELETE, and VALUES
     fn parse_preparable_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::Select) | Token::Keyword(Keyword::With) => {
+            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
                 let select_stmt = self.parse_select_statement()?;
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
             }
-            Token::Keyword(Keyword::Insert) => {
+            Token::Keyword { keyword: Keyword::Insert, .. } => {
                 let insert_stmt = self.parse_insert_statement()?;
                 Ok(vibesql_ast::Statement::Insert(insert_stmt))
             }
-            Token::Keyword(Keyword::Update) => {
+            Token::Keyword { keyword: Keyword::Update, .. } => {
                 let update_stmt = self.parse_update_statement()?;
                 Ok(vibesql_ast::Statement::Update(update_stmt))
             }
-            Token::Keyword(Keyword::Delete) => {
+            Token::Keyword { keyword: Keyword::Delete, .. } => {
                 let delete_stmt = self.parse_delete_statement()?;
                 Ok(vibesql_ast::Statement::Delete(delete_stmt))
             }
@@ -182,7 +182,7 @@ impl Parser {
         let mut type_name = self.parse_identifier()?;
 
         // Handle multi-word types like "CHARACTER VARYING"
-        while matches!(self.peek(), Token::Keyword(Keyword::Varying)) {
+        while matches!(self.peek(), Token::Keyword { keyword: Keyword::Varying, .. }) {
             self.advance();
             type_name.push_str(" VARYING");
         }

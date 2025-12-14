@@ -144,6 +144,10 @@ fn collect_window_functions_from_expression(
                 collect_window_functions_from_expression(child, window_functions);
             }
         }
+
+        Expression::Collate { expr, .. } => {
+            collect_window_functions_from_expression(expr, window_functions);
+        }
     }
 }
 

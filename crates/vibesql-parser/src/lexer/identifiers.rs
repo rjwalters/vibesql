@@ -44,7 +44,10 @@ impl<'a> Lexer<'a> {
 
             // Try keyword lookup first (case-insensitive)
             if let Some(keyword) = keywords::map_keyword(upper) {
-                return Ok(Token::Keyword(keyword));
+                return Ok(Token::Keyword {
+                    keyword,
+                    original: text.to_string(),
+                });
             }
 
             // Not a keyword - preserve original case from SQL text
@@ -53,7 +56,10 @@ impl<'a> Lexer<'a> {
             // Long identifier - fall back to heap allocation
             let upper_text = text.to_ascii_uppercase();
             match keywords::map_keyword(&upper_text) {
-                Some(keyword) => Ok(Token::Keyword(keyword)),
+                Some(keyword) => Ok(Token::Keyword {
+                    keyword,
+                    original: text.to_string(),
+                }),
                 // Not a keyword - preserve original case from SQL text
                 None => Ok(Token::Identifier(text.to_string())),
             }
@@ -83,6 +89,7 @@ impl<'a> Lexer<'a> {
                         return Err(LexerError {
                             message: "Empty delimited identifier is not allowed".to_string(),
                             position: self.position(),
+                            near_token: Some("\"\"".to_string()),
                         });
                     }
                     return Ok(Token::DelimitedIdentifier(identifier));
@@ -96,6 +103,7 @@ impl<'a> Lexer<'a> {
         Err(LexerError {
             message: "Unterminated delimited identifier".to_string(),
             position: self.position(),
+            near_token: Some(format!("\"{}", identifier)),
         })
     }
 
@@ -122,6 +130,7 @@ impl<'a> Lexer<'a> {
                         return Err(LexerError {
                             message: "Empty delimited identifier is not allowed".to_string(),
                             position: self.position(),
+                            near_token: Some("``".to_string()),
                         });
                     }
                     return Ok(Token::DelimitedIdentifier(identifier));
@@ -135,6 +144,7 @@ impl<'a> Lexer<'a> {
         Err(LexerError {
             message: "Unterminated delimited identifier".to_string(),
             position: self.position(),
+            near_token: Some(format!("`{}", identifier)),
         })
     }
 }

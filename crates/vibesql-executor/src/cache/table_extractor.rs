@@ -181,6 +181,10 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
             }
         }
 
+        vibesql_ast::Expression::Collate { expr, .. } => {
+            extract_from_expression(expr, tables);
+        }
+
         // Leaf expressions - no tables to extract
         vibesql_ast::Expression::Literal(_)
         | vibesql_ast::Expression::Placeholder(_)

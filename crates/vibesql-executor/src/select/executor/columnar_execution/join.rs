@@ -475,6 +475,7 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
         vibesql_ast::Expression::RowValueConstructor(exprs) => {
             exprs.iter().any(expression_has_rowid)
         }
+        vibesql_ast::Expression::Collate { expr, .. } => expression_has_rowid(expr),
         // These variants don't contain column references that could be ROWID
         vibesql_ast::Expression::Literal(_)
         | vibesql_ast::Expression::Placeholder(_)

@@ -57,7 +57,7 @@ impl Parser {
                 }
                 // Allow unreserved keywords (like TIMESTAMP, DATE, TIME, INTERVAL) as column names
                 // SQL:1999: normalize to lowercase when used as unquoted identifier
-                Token::Keyword(kw) if kw.can_be_identifier() => {
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
                     let col_name = format!("{}", kw).to_lowercase();
                     self.advance();
                     col_name
@@ -171,19 +171,19 @@ impl Parser {
             Token::Comma | Token::RParen => true,
 
             // Column constraint keywords
-            Token::Keyword(Keyword::Null) => true,
-            Token::Keyword(Keyword::Not) => true,
-            Token::Keyword(Keyword::Primary) => true,
-            Token::Keyword(Keyword::Unique) => true,
-            Token::Keyword(Keyword::Check) => true,
-            Token::Keyword(Keyword::References) => true,
-            Token::Keyword(Keyword::AutoIncrement) => true,
-            Token::Keyword(Keyword::Key) => true,
-            Token::Keyword(Keyword::Constraint) => true,
+            Token::Keyword { keyword: Keyword::Null, .. } => true,
+            Token::Keyword { keyword: Keyword::Not, .. } => true,
+            Token::Keyword { keyword: Keyword::Primary, .. } => true,
+            Token::Keyword { keyword: Keyword::Unique, .. } => true,
+            Token::Keyword { keyword: Keyword::Check, .. } => true,
+            Token::Keyword { keyword: Keyword::References, .. } => true,
+            Token::Keyword { keyword: Keyword::AutoIncrement, .. } => true,
+            Token::Keyword { keyword: Keyword::Key, .. } => true,
+            Token::Keyword { keyword: Keyword::Constraint, .. } => true,
 
             // Column modifiers (appear after data type normally)
-            Token::Keyword(Keyword::Default) => true,
-            Token::Keyword(Keyword::Comment) => true,
+            Token::Keyword { keyword: Keyword::Default, .. } => true,
+            Token::Keyword { keyword: Keyword::Comment, .. } => true,
 
             // Not a constraint/separator - likely a data type
             _ => false,

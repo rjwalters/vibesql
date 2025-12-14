@@ -188,7 +188,7 @@ fn test_keyword_display_in() {
 
 #[test]
 fn test_token_display_keyword() {
-    let token = Token::Keyword(Keyword::Select);
+    let token = Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() };
     assert_eq!(format!("{}", token), "Keyword(SELECT)");
 }
 
@@ -254,6 +254,16 @@ fn test_token_display_eof() {
 
 #[test]
 fn test_lexer_error_display() {
-    let error = LexerError { message: "Unexpected character".to_string(), position: 42 };
+    // Test error without near_token (legacy format)
+    let error =
+        LexerError { message: "Unexpected character".to_string(), position: 42, near_token: None };
     assert_eq!(format!("{}", error), "Lexer error at position 42: Unexpected character");
+
+    // Test error with near_token (SQLite-compatible format)
+    let error_with_token = LexerError {
+        message: "Unexpected character".to_string(),
+        position: 42,
+        near_token: Some("#1".to_string()),
+    };
+    assert_eq!(format!("{}", error_with_token), "near \"#1\": syntax error");
 }

@@ -26,31 +26,31 @@ pub fn parse_grant(parser: &mut crate::Parser) -> Result<GrantStmt, ParseError> 
     parser.expect_keyword(Keyword::On)?;
 
     // Parse object type (TABLE, SCHEMA, FUNCTION, PROCEDURE, etc.)
-    let object_type = if parser.peek() == &Token::Keyword(Keyword::Specific) {
+    let object_type = if parser.peek_keyword(Keyword::Specific) {
         parser.advance(); // consume SPECIFIC
                           // SPECIFIC FUNCTION | SPECIFIC PROCEDURE | SPECIFIC ROUTINE | SPECIFIC METHOD variants
-        if parser.peek() == &Token::Keyword(Keyword::Function) {
+        if parser.peek_keyword(Keyword::Function) {
             parser.advance();
             ObjectType::SpecificFunction
-        } else if parser.peek() == &Token::Keyword(Keyword::Procedure) {
+        } else if parser.peek_keyword(Keyword::Procedure) {
             parser.advance();
             ObjectType::SpecificProcedure
-        } else if parser.peek() == &Token::Keyword(Keyword::Routine) {
+        } else if parser.peek_keyword(Keyword::Routine) {
             parser.advance();
             ObjectType::SpecificRoutine
-        } else if parser.peek() == &Token::Keyword(Keyword::Constructor) {
+        } else if parser.peek_keyword(Keyword::Constructor) {
             parser.advance();
             parser.expect_keyword(Keyword::Method)?;
             ObjectType::SpecificConstructorMethod
-        } else if parser.peek() == &Token::Keyword(Keyword::Static) {
+        } else if parser.peek_keyword(Keyword::Static) {
             parser.advance();
             parser.expect_keyword(Keyword::Method)?;
             ObjectType::SpecificStaticMethod
-        } else if parser.peek() == &Token::Keyword(Keyword::Instance) {
+        } else if parser.peek_keyword(Keyword::Instance) {
             parser.advance();
             parser.expect_keyword(Keyword::Method)?;
             ObjectType::SpecificInstanceMethod
-        } else if parser.peek() == &Token::Keyword(Keyword::Method) {
+        } else if parser.peek_keyword(Keyword::Method) {
             parser.advance();
             ObjectType::SpecificMethod
         } else {
@@ -61,54 +61,54 @@ pub fn parse_grant(parser: &mut crate::Parser) -> Result<GrantStmt, ParseError> 
                 ),
             });
         }
-    } else if parser.peek() == &Token::Keyword(Keyword::Table) {
+    } else if parser.peek_keyword(Keyword::Table) {
         parser.advance();
         ObjectType::Table
-    } else if parser.peek() == &Token::Keyword(Keyword::Schema) {
+    } else if parser.peek_keyword(Keyword::Schema) {
         parser.advance();
         ObjectType::Schema
-    } else if parser.peek() == &Token::Keyword(Keyword::Domain) {
+    } else if parser.peek_keyword(Keyword::Domain) {
         parser.advance();
         ObjectType::Domain
-    } else if parser.peek() == &Token::Keyword(Keyword::Collation) {
+    } else if parser.peek_keyword(Keyword::Collation) {
         parser.advance();
         ObjectType::Collation
-    } else if parser.peek() == &Token::Keyword(Keyword::Character) {
+    } else if parser.peek_keyword(Keyword::Character) {
         parser.advance();
         // CHARACTER SET
         parser.expect_keyword(Keyword::Set)?;
         ObjectType::CharacterSet
-    } else if parser.peek() == &Token::Keyword(Keyword::Translation) {
+    } else if parser.peek_keyword(Keyword::Translation) {
         parser.advance();
         ObjectType::Translation
-    } else if parser.peek() == &Token::Keyword(Keyword::Type) {
+    } else if parser.peek_keyword(Keyword::Type) {
         parser.advance();
         ObjectType::Type
-    } else if parser.peek() == &Token::Keyword(Keyword::Sequence) {
+    } else if parser.peek_keyword(Keyword::Sequence) {
         parser.advance();
         ObjectType::Sequence
-    } else if parser.peek() == &Token::Keyword(Keyword::Function) {
+    } else if parser.peek_keyword(Keyword::Function) {
         parser.advance();
         ObjectType::Function
-    } else if parser.peek() == &Token::Keyword(Keyword::Procedure) {
+    } else if parser.peek_keyword(Keyword::Procedure) {
         parser.advance();
         ObjectType::Procedure
-    } else if parser.peek() == &Token::Keyword(Keyword::Routine) {
+    } else if parser.peek_keyword(Keyword::Routine) {
         parser.advance();
         ObjectType::Routine
-    } else if parser.peek() == &Token::Keyword(Keyword::Constructor) {
+    } else if parser.peek_keyword(Keyword::Constructor) {
         parser.advance();
         parser.expect_keyword(Keyword::Method)?;
         ObjectType::ConstructorMethod
-    } else if parser.peek() == &Token::Keyword(Keyword::Static) {
+    } else if parser.peek_keyword(Keyword::Static) {
         parser.advance();
         parser.expect_keyword(Keyword::Method)?;
         ObjectType::StaticMethod
-    } else if parser.peek() == &Token::Keyword(Keyword::Instance) {
+    } else if parser.peek_keyword(Keyword::Instance) {
         parser.advance();
         parser.expect_keyword(Keyword::Method)?;
         ObjectType::InstanceMethod
-    } else if parser.peek() == &Token::Keyword(Keyword::Method) {
+    } else if parser.peek_keyword(Keyword::Method) {
         parser.advance();
         ObjectType::Method
     } else {
@@ -132,7 +132,7 @@ pub fn parse_grant(parser: &mut crate::Parser) -> Result<GrantStmt, ParseError> 
     let object_name = parser.parse_qualified_identifier()?;
 
     // Parse optional FOR type_name (for methods and routines on user-defined types)
-    let for_type_name = if parser.peek() == &Token::Keyword(Keyword::For) {
+    let for_type_name = if parser.peek_keyword(Keyword::For) {
         parser.advance(); // consume FOR
         Some(parser.parse_qualified_identifier()?)
     } else {
@@ -145,7 +145,7 @@ pub fn parse_grant(parser: &mut crate::Parser) -> Result<GrantStmt, ParseError> 
     let grantees = parser.parse_identifier_list()?;
 
     // Parse optional WITH GRANT OPTION clause
-    let with_grant_option = if parser.peek() == &Token::Keyword(Keyword::With) {
+    let with_grant_option = if parser.peek_keyword(Keyword::With) {
         parser.advance(); // consume WITH
         parser.expect_keyword(Keyword::Grant)?;
         parser.expect_keyword(Keyword::Option)?;
@@ -170,11 +170,11 @@ pub fn parse_grant(parser: &mut crate::Parser) -> Result<GrantStmt, ParseError> 
 /// [PRIVILEGES]
 fn parse_privilege_list(parser: &mut crate::Parser) -> Result<Vec<PrivilegeType>, ParseError> {
     // Check for ALL [PRIVILEGES] syntax
-    if parser.peek() == &Token::Keyword(Keyword::All) {
+    if parser.peek_keyword(Keyword::All) {
         parser.advance(); // consume ALL
 
         // Optional PRIVILEGES keyword
-        if parser.peek() == &Token::Keyword(Keyword::Privileges) {
+        if parser.peek_keyword(Keyword::Privileges) {
             parser.advance(); // consume PRIVILEGES
         }
 
@@ -186,51 +186,51 @@ fn parse_privilege_list(parser: &mut crate::Parser) -> Result<Vec<PrivilegeType>
 
     loop {
         let priv_type = match parser.peek() {
-            Token::Keyword(Keyword::Select) => {
+            Token::Keyword { keyword: Keyword::Select, .. } => {
                 parser.advance();
                 // Check for optional column list (SQL:1999 Feature F031-03)
                 let columns = parse_optional_column_list(parser)?;
                 PrivilegeType::Select(columns)
             }
-            Token::Keyword(Keyword::Insert) => {
+            Token::Keyword { keyword: Keyword::Insert, .. } => {
                 parser.advance();
                 // Check for optional column list (SQL:1999 Feature F031-03)
                 let columns = parse_optional_column_list(parser)?;
                 PrivilegeType::Insert(columns)
             }
-            Token::Keyword(Keyword::Update) => {
+            Token::Keyword { keyword: Keyword::Update, .. } => {
                 parser.advance();
                 // Check for optional column list
                 let columns = parse_optional_column_list(parser)?;
                 PrivilegeType::Update(columns)
             }
-            Token::Keyword(Keyword::Delete) => {
+            Token::Keyword { keyword: Keyword::Delete, .. } => {
                 parser.advance();
                 PrivilegeType::Delete
             }
-            Token::Keyword(Keyword::References) => {
+            Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 // Check for optional column list
                 let columns = parse_optional_column_list(parser)?;
                 PrivilegeType::References(columns)
             }
-            Token::Keyword(Keyword::Usage) => {
+            Token::Keyword { keyword: Keyword::Usage, .. } => {
                 parser.advance();
                 PrivilegeType::Usage
             }
-            Token::Keyword(Keyword::Create) => {
+            Token::Keyword { keyword: Keyword::Create, .. } => {
                 parser.advance();
                 PrivilegeType::Create
             }
-            Token::Keyword(Keyword::Execute) => {
+            Token::Keyword { keyword: Keyword::Execute, .. } => {
                 parser.advance();
                 PrivilegeType::Execute
             }
-            Token::Keyword(Keyword::Trigger) => {
+            Token::Keyword { keyword: Keyword::Trigger, .. } => {
                 parser.advance();
                 PrivilegeType::Trigger
             }
-            Token::Keyword(Keyword::Under) => {
+            Token::Keyword { keyword: Keyword::Under, .. } => {
                 parser.advance();
                 PrivilegeType::Under
             }

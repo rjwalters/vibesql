@@ -143,6 +143,10 @@ impl SelectExecutor<'_> {
             | vibesql_ast::Expression::RowValueConstructor(_) => {
                 simple::evaluate(self, expr, group_rows, group_key, evaluator)
             }
+
+            vibesql_ast::Expression::Collate { .. } => {
+                simple::evaluate(self, expr, group_rows, group_key, evaluator)
+            }
         }
     }
 

@@ -22,25 +22,25 @@ impl Parser {
 
         // Determine which SHOW variant
         match self.peek() {
-            Token::Keyword(Keyword::Tables) => {
+            Token::Keyword { keyword: Keyword::Tables, .. } => {
                 Ok(vibesql_ast::Statement::ShowTables(self.parse_show_tables()?))
             }
-            Token::Keyword(Keyword::Databases) => {
+            Token::Keyword { keyword: Keyword::Databases, .. } => {
                 Ok(vibesql_ast::Statement::ShowDatabases(self.parse_show_databases()?))
             }
-            Token::Keyword(Keyword::Full) => {
+            Token::Keyword { keyword: Keyword::Full, .. } => {
                 // SHOW FULL COLUMNS - handle FULL modifier for SHOW COLUMNS
                 Ok(vibesql_ast::Statement::ShowColumns(self.parse_show_columns()?))
             }
-            Token::Keyword(Keyword::Columns) | Token::Keyword(Keyword::Fields) => {
+            Token::Keyword { keyword: Keyword::Columns, .. } | Token::Keyword { keyword: Keyword::Fields, .. } => {
                 Ok(vibesql_ast::Statement::ShowColumns(self.parse_show_columns()?))
             }
-            Token::Keyword(Keyword::Index)
-            | Token::Keyword(Keyword::Indexes)
-            | Token::Keyword(Keyword::Keys) => {
+            Token::Keyword { keyword: Keyword::Index, .. }
+            | Token::Keyword { keyword: Keyword::Indexes, .. }
+            | Token::Keyword { keyword: Keyword::Keys, .. } => {
                 Ok(vibesql_ast::Statement::ShowIndex(self.parse_show_index()?))
             }
-            Token::Keyword(Keyword::Create) => {
+            Token::Keyword { keyword: Keyword::Create, .. } => {
                 self.advance(); // consume CREATE
                 if self.peek_keyword(Keyword::Table) {
                     Ok(vibesql_ast::Statement::ShowCreateTable(self.parse_show_create_table()?))
@@ -212,7 +212,7 @@ impl Parser {
         self.expect_keyword(Keyword::Explain)?;
 
         // Check for QUERY PLAN option (SQLite-style)
-        let query_plan = if matches!(self.peek(), Token::Keyword(Keyword::Query)) {
+        let query_plan = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Query, .. }) {
             self.advance(); // consume QUERY
             self.expect_keyword(Keyword::Plan)?;
             true
@@ -221,7 +221,7 @@ impl Parser {
         };
 
         // Check for ANALYZE option (not valid with QUERY PLAN in SQLite, but we parse both)
-        let analyze = if !query_plan && matches!(self.peek(), Token::Keyword(Keyword::Analyze)) {
+        let analyze = if !query_plan && matches!(self.peek(), Token::Keyword { keyword: Keyword::Analyze, .. }) {
             self.advance();
             true
         } else {
@@ -256,19 +256,19 @@ impl Parser {
 
         // Parse the inner statement (SELECT, INSERT, UPDATE, DELETE)
         let statement = match self.peek() {
-            Token::Keyword(Keyword::Select) | Token::Keyword(Keyword::With) => {
+            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
                 let select_stmt = self.parse_select_statement()?;
                 vibesql_ast::Statement::Select(Box::new(select_stmt))
             }
-            Token::Keyword(Keyword::Insert) => {
+            Token::Keyword { keyword: Keyword::Insert, .. } => {
                 let insert_stmt = self.parse_insert_statement()?;
                 vibesql_ast::Statement::Insert(insert_stmt)
             }
-            Token::Keyword(Keyword::Update) => {
+            Token::Keyword { keyword: Keyword::Update, .. } => {
                 let update_stmt = self.parse_update_statement()?;
                 vibesql_ast::Statement::Update(update_stmt)
             }
-            Token::Keyword(Keyword::Delete) => {
+            Token::Keyword { keyword: Keyword::Delete, .. } => {
                 let delete_stmt = self.parse_delete_statement()?;
                 vibesql_ast::Statement::Delete(delete_stmt)
             }

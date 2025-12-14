@@ -30,21 +30,21 @@ impl Parser {
                     string_val,
                 ))))
             }
-            Token::Keyword(Keyword::True) => {
+            Token::Keyword { keyword: Keyword::True, .. } => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))))
             }
-            Token::Keyword(Keyword::False) => {
+            Token::Keyword { keyword: Keyword::False, .. } => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false))))
             }
-            Token::Keyword(Keyword::Null) => {
+            Token::Keyword { keyword: Keyword::Null, .. } => {
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)))
             }
             // Typed literals: DATE 'string', TIME 'string', TIMESTAMP 'string'
             // If not followed by a string literal, treat as column name (SQLite compatibility)
-            Token::Keyword(Keyword::Date) => {
+            Token::Keyword { keyword: Keyword::Date, .. } => {
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -70,7 +70,7 @@ impl Parser {
                     }
                 }
             }
-            Token::Keyword(Keyword::Time) => {
+            Token::Keyword { keyword: Keyword::Time, .. } => {
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -96,7 +96,7 @@ impl Parser {
                     }
                 }
             }
-            Token::Keyword(Keyword::Timestamp) => {
+            Token::Keyword { keyword: Keyword::Timestamp, .. } => {
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -122,7 +122,7 @@ impl Parser {
                     }
                 }
             }
-            Token::Keyword(Keyword::Interval) => {
+            Token::Keyword { keyword: Keyword::Interval, .. } => {
                 self.advance();
                 // Parse INTERVAL 'value' field [TO field]
                 match self.peek() {
@@ -133,12 +133,12 @@ impl Parser {
                         // Parse interval field (YEAR, MONTH, DAY, etc.)
                         let start_field = match self.peek() {
                             Token::Identifier(field) => field.to_uppercase(),
-                            Token::Keyword(Keyword::Year) => "YEAR".to_string(),
-                            Token::Keyword(Keyword::Month) => "MONTH".to_string(),
-                            Token::Keyword(Keyword::Day) => "DAY".to_string(),
-                            Token::Keyword(Keyword::Hour) => "HOUR".to_string(),
-                            Token::Keyword(Keyword::Minute) => "MINUTE".to_string(),
-                            Token::Keyword(Keyword::Second) => "SECOND".to_string(),
+                            Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
+                            Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
+                            Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
+                            Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
+                            Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
+                            Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
                             _ => {
                                 return Err(ParseError {
                                     message: "Expected interval field after INTERVAL value"
@@ -150,16 +150,16 @@ impl Parser {
 
                         // Check for TO (multi-field interval)
                         let interval_spec = match self.peek() {
-                            Token::Keyword(Keyword::To) => {
+                            Token::Keyword { keyword: Keyword::To, .. } => {
                                 self.advance(); // consume TO keyword
                                 let end_field = match self.peek() {
                                     Token::Identifier(field) => field.to_uppercase(),
-                                    Token::Keyword(Keyword::Year) => "YEAR".to_string(),
-                                    Token::Keyword(Keyword::Month) => "MONTH".to_string(),
-                                    Token::Keyword(Keyword::Day) => "DAY".to_string(),
-                                    Token::Keyword(Keyword::Hour) => "HOUR".to_string(),
-                                    Token::Keyword(Keyword::Minute) => "MINUTE".to_string(),
-                                    Token::Keyword(Keyword::Second) => "SECOND".to_string(),
+                                    Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
+                                    Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
+                                    Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
+                                    Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
+                                    Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
+                                    Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
                                     _ => {
                                         return Err(ParseError {
                                             message: "Expected interval field after TO".to_string(),
@@ -173,12 +173,12 @@ impl Parser {
                                 self.advance(); // consume TO identifier (backward compat)
                                 let end_field = match self.peek() {
                                     Token::Identifier(field) => field.to_uppercase(),
-                                    Token::Keyword(Keyword::Year) => "YEAR".to_string(),
-                                    Token::Keyword(Keyword::Month) => "MONTH".to_string(),
-                                    Token::Keyword(Keyword::Day) => "DAY".to_string(),
-                                    Token::Keyword(Keyword::Hour) => "HOUR".to_string(),
-                                    Token::Keyword(Keyword::Minute) => "MINUTE".to_string(),
-                                    Token::Keyword(Keyword::Second) => "SECOND".to_string(),
+                                    Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
+                                    Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
+                                    Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
+                                    Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
+                                    Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
+                                    Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
                                     _ => {
                                         return Err(ParseError {
                                             message: "Expected interval field after TO".to_string(),

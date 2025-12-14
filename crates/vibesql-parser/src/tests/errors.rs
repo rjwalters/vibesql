@@ -492,3 +492,49 @@ fn test_issue_4448_valid_order_by_before_limit_offset() {
         result.err()
     );
 }
+
+// Issue #4467: Error messages should preserve original token case
+// https://github.com/rjwalters/vibesql/issues/4467
+
+#[test]
+fn test_issue_4467_syntax_error_preserves_keyword_case() {
+    // SQLite preserves the original case in error messages
+    // e.g., "SeLeCt" produces: near "SeLeCt": syntax error
+    let result = Parser::parse_sql("SeLeCt FrOm users");
+    assert!(result.is_err(), "Should fail with syntax error");
+    let error_msg = result.unwrap_err().to_string();
+    // The error should contain the original case "FrOm", not "FROM"
+    assert!(
+        error_msg.contains("FrOm"),
+        "Error should preserve original case 'FrOm', got: {}",
+        error_msg
+    );
+}
+
+#[test]
+fn test_issue_4467_incomplete_input_lowercase() {
+    // Incomplete input with lowercase keywords should still be detected
+    let result = Parser::parse_sql("select * from users where");
+    assert!(result.is_err(), "Should fail with incomplete input");
+    let error_msg = result.unwrap_err().to_string();
+    // Should indicate incomplete input (EOF after WHERE)
+    assert!(
+        error_msg.contains("incomplete") || error_msg.contains("expected"),
+        "Error should indicate incomplete input, got: {}",
+        error_msg
+    );
+}
+
+#[test]
+fn test_issue_4467_mixed_case_keyword_error() {
+    // Mixed case keyword in error context
+    let result = Parser::parse_sql("SELECT * FROM users WhErE WhErE x = 1");
+    assert!(result.is_err(), "Should fail with duplicate WHERE");
+    let error_msg = result.unwrap_err().to_string();
+    // The error should contain the original case
+    assert!(
+        error_msg.contains("WhErE"),
+        "Error should preserve original case 'WhErE', got: {}",
+        error_msg
+    );
+}

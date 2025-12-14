@@ -109,7 +109,7 @@ impl Parser {
                 Token::Symbol('*') => vibesql_ast::BinaryOperator::Multiply,
                 Token::Symbol('/') => vibesql_ast::BinaryOperator::Divide,
                 Token::Symbol('%') => vibesql_ast::BinaryOperator::Modulo,
-                Token::Keyword(Keyword::Div) => vibesql_ast::BinaryOperator::IntegerDivide,
+                Token::Keyword { keyword: Keyword::Div, .. } => vibesql_ast::BinaryOperator::IntegerDivide,
                 _ => break,
             };
             self.advance();
@@ -445,8 +445,41 @@ impl Parser {
                     expr: Box::new(expr),
                 })
             }
-            _ => self.parse_primary_expression(),
+            _ => self.parse_postfix_expression(),
         }
+    }
+
+    /// Parse postfix expressions (COLLATE)
+    /// COLLATE has high precedence, binding tighter than most operators
+    pub(super) fn parse_postfix_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut expr = self.parse_primary_expression()?;
+
+        // Handle COLLATE postfix operator
+        while self.peek_keyword(Keyword::Collate) {
+            self.consume_keyword(Keyword::Collate)?;
+            // Parse collation name (identifier)
+            let collation = match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let name = name.clone();
+                    self.advance();
+                    name
+                }
+                Token::Keyword { keyword: kw, .. } => {
+                    // Allow keywords like BINARY, NOCASE, RTRIM as collation names
+                    let name = kw.to_string();
+                    self.advance();
+                    name
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected collation name after COLLATE".to_string(),
+                    })
+                }
+            };
+            expr = vibesql_ast::Expression::Collate { expr: Box::new(expr), collation };
+        }
+
+        Ok(expr)
     }
 
     /// Parse a comma-separated list of expressions

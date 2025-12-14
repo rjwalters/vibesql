@@ -46,7 +46,9 @@ impl fmt::Display for MultiCharOperator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     /// SQL keyword (SELECT, FROM, etc.)
-    Keyword(Keyword),
+    /// Stores both the keyword variant and original text for error messages.
+    /// The original text preserves user's input case (e.g., "SeLeCt").
+    Keyword { keyword: Keyword, original: String },
     /// Identifier (table name, column name, etc.)
     Identifier(String),
     /// Delimited identifier ("columnName" - case-sensitive, can use reserved words)
@@ -89,7 +91,7 @@ impl Token {
     /// This is the inverse of lexing - it produces SQL that can be re-parsed.
     pub fn to_sql(&self) -> String {
         match self {
-            Token::Keyword(kw) => kw.to_string(),
+            Token::Keyword { keyword, .. } => keyword.to_string(),
             Token::Identifier(id) => id.clone(),
             Token::DelimitedIdentifier(id) => format!("\"{}\"", id),
             Token::Number(n) => n.clone(),
@@ -115,22 +117,25 @@ impl Token {
     /// where TOKEN is the actual text that caused the error.
     ///
     /// Special cases:
-    /// - EOF (end of input) is reported as `;` (SQLite convention)
-    /// - Keywords are reported in uppercase
+    /// - EOF (end of input) returns "incomplete input" (SQLite convention for truncated statements)
+    /// - Keywords preserve original case from user input (e.g., "SeLeCt")
     pub fn syntax_error(&self) -> String {
-        let token_text = match self {
-            Token::Eof => ";".to_string(),
-            Token::Keyword(kw) => kw.to_string().to_uppercase(),
-            _ => self.to_sql(),
-        };
-        format!("near \"{}\": syntax error", token_text)
+        match self {
+            // For EOF/truncated input, SQLite returns "incomplete input"
+            Token::Eof => "incomplete input".to_string(),
+            // For keywords, use the original text to preserve user's input case
+            Token::Keyword { original, .. } => {
+                format!("near \"{}\": syntax error", original)
+            }
+            _ => format!("near \"{}\": syntax error", self.to_sql()),
+        }
     }
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Token::Keyword(kw) => write!(f, "Keyword({})", kw),
+            Token::Keyword { keyword, .. } => write!(f, "Keyword({})", keyword),
             Token::Identifier(id) => write!(f, "Identifier({})", id),
             Token::DelimitedIdentifier(id) => write!(f, "DelimitedIdentifier(\"{}\")", id),
             Token::Number(n) => write!(f, "Number({})", n),

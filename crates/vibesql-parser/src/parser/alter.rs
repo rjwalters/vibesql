@@ -14,21 +14,22 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
 
     // Dispatch based on operation
     match parser.peek() {
-        Token::Keyword(Keyword::Add) => {
+        Token::Keyword { keyword: Keyword::Add, .. } => {
             parser.advance();
             match parser.peek() {
-                Token::Keyword(Keyword::Column) => {
+                Token::Keyword { keyword: Keyword::Column, .. } => {
                     parser.advance();
                     parse_add_column(parser, table_name)
                 }
                 // SQL:1999 allows adding constraints with or without CONSTRAINT keyword
-                Token::Keyword(
-                    Keyword::Constraint
+                Token::Keyword {
+                    keyword: Keyword::Constraint
                     | Keyword::Check
                     | Keyword::Unique
                     | Keyword::Primary
                     | Keyword::Foreign,
-                ) => parse_add_constraint(parser, table_name),
+                    ..
+                } => parse_add_constraint(parser, table_name),
                 // SQL:1999 allows ADD COLUMN without the COLUMN keyword
                 // If we see an identifier, treat it as a bare column addition
                 Token::Identifier(_) => parse_add_column(parser, table_name),
@@ -38,14 +39,14 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
                 }),
             }
         }
-        Token::Keyword(Keyword::Drop) => {
+        Token::Keyword { keyword: Keyword::Drop, .. } => {
             parser.advance();
             match parser.peek() {
-                Token::Keyword(Keyword::Column) => {
+                Token::Keyword { keyword: Keyword::Column, .. } => {
                     parser.advance();
                     parse_drop_column(parser, table_name)
                 }
-                Token::Keyword(Keyword::Constraint) => {
+                Token::Keyword { keyword: Keyword::Constraint, .. } => {
                     parser.advance();
                     parse_drop_constraint(parser, table_name)
                 }
@@ -54,20 +55,20 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
                 }),
             }
         }
-        Token::Keyword(Keyword::Alter) => {
+        Token::Keyword { keyword: Keyword::Alter, .. } => {
             parser.advance();
             parser.expect_keyword(Keyword::Column)?;
             parse_alter_column(parser, table_name)
         }
-        Token::Keyword(Keyword::Rename) => {
+        Token::Keyword { keyword: Keyword::Rename, .. } => {
             parser.advance();
             parse_rename_table(parser, table_name)
         }
-        Token::Keyword(Keyword::Modify) => {
+        Token::Keyword { keyword: Keyword::Modify, .. } => {
             parser.advance();
             parse_modify_column(parser, table_name)
         }
-        Token::Keyword(Keyword::Change) => {
+        Token::Keyword { keyword: Keyword::Change, .. } => {
             parser.advance();
             parse_change_column(parser, table_name)
         }
@@ -100,23 +101,23 @@ fn parse_add_column(
 
     loop {
         match parser.peek() {
-            Token::Keyword(Keyword::Not) => {
+            Token::Keyword { keyword: Keyword::Not, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Null)?;
                 nullable = false;
             }
-            Token::Keyword(Keyword::Primary) => {
+            Token::Keyword { keyword: Keyword::Primary, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Key)?;
                 constraints
                     .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey });
             }
-            Token::Keyword(Keyword::Unique) => {
+            Token::Keyword { keyword: Keyword::Unique, .. } => {
                 parser.advance();
                 constraints
                     .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
             }
-            Token::Keyword(Keyword::References) => {
+            Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 let ref_table = parser.parse_identifier()?;
                 parser.expect_token(crate::token::Token::LParen)?;
@@ -169,10 +170,10 @@ fn parse_alter_column(
     let column_name = parser.parse_identifier()?;
 
     match parser.peek() {
-        Token::Keyword(Keyword::Set) => {
+        Token::Keyword { keyword: Keyword::Set, .. } => {
             parser.advance();
             match parser.peek() {
-                Token::Keyword(Keyword::Default) => {
+                Token::Keyword { keyword: Keyword::Default, .. } => {
                     parser.advance();
                     // Parse the default expression
                     let default = parser.parse_expression()?;
@@ -182,7 +183,7 @@ fn parse_alter_column(
                         default,
                     }))
                 }
-                Token::Keyword(Keyword::Not) => {
+                Token::Keyword { keyword: Keyword::Not, .. } => {
                     parser.advance();
                     parser.expect_keyword(Keyword::Null)?;
                     Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::SetNotNull {
@@ -195,17 +196,17 @@ fn parse_alter_column(
                 }),
             }
         }
-        Token::Keyword(Keyword::Drop) => {
+        Token::Keyword { keyword: Keyword::Drop, .. } => {
             parser.advance();
             match parser.peek() {
-                Token::Keyword(Keyword::Default) => {
+                Token::Keyword { keyword: Keyword::Default, .. } => {
                     parser.advance();
                     Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::DropDefault {
                         table_name,
                         column_name,
                     }))
                 }
-                Token::Keyword(Keyword::Not) => {
+                Token::Keyword { keyword: Keyword::Not, .. } => {
                     parser.advance();
                     parser.expect_keyword(Keyword::Null)?;
                     Ok(AlterTableStmt::AlterColumn(AlterColumnStmt::DropNotNull {
@@ -281,23 +282,23 @@ fn parse_modify_column(
 
     loop {
         match parser.peek() {
-            Token::Keyword(Keyword::Not) => {
+            Token::Keyword { keyword: Keyword::Not, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Null)?;
                 nullable = false;
             }
-            Token::Keyword(Keyword::Primary) => {
+            Token::Keyword { keyword: Keyword::Primary, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Key)?;
                 constraints
                     .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey });
             }
-            Token::Keyword(Keyword::Unique) => {
+            Token::Keyword { keyword: Keyword::Unique, .. } => {
                 parser.advance();
                 constraints
                     .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
             }
-            Token::Keyword(Keyword::References) => {
+            Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 let ref_table = parser.parse_identifier()?;
                 parser.expect_token(crate::token::Token::LParen)?;
@@ -357,23 +358,23 @@ fn parse_change_column(
 
     loop {
         match parser.peek() {
-            Token::Keyword(Keyword::Not) => {
+            Token::Keyword { keyword: Keyword::Not, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Null)?;
                 nullable = false;
             }
-            Token::Keyword(Keyword::Primary) => {
+            Token::Keyword { keyword: Keyword::Primary, .. } => {
                 parser.advance();
                 parser.expect_keyword(Keyword::Key)?;
                 constraints
                     .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::PrimaryKey });
             }
-            Token::Keyword(Keyword::Unique) => {
+            Token::Keyword { keyword: Keyword::Unique, .. } => {
                 parser.advance();
                 constraints
                     .push(ColumnConstraint { name: None, kind: ColumnConstraintKind::Unique });
             }
-            Token::Keyword(Keyword::References) => {
+            Token::Keyword { keyword: Keyword::References, .. } => {
                 parser.advance();
                 let ref_table = parser.parse_identifier()?;
                 parser.expect_token(crate::token::Token::LParen)?;

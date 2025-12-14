@@ -33,9 +33,9 @@ impl Parser {
             }
             // CURRENT_DATE, CURRENT_TIME, CURRENT_TIMESTAMP (multi-token form)
             // The lexer tokenizes CURRENT_DATE as two tokens when CURRENT is a keyword:
-            //   Token::Keyword(Current) + Token::Identifier("_DATE")
+            //   Token::Keyword { keyword: Current, .. } + Token::Identifier("_DATE")
             // This branch handles that tokenization pattern.
-            Token::Keyword(Keyword::Current) => {
+            Token::Keyword { keyword: Keyword::Current, .. } => {
                 self.advance(); // consume CURRENT
 
                 // Check for underscore followed by DATE/TIME/TIMESTAMP
@@ -79,7 +79,7 @@ impl Parser {
             }
             // CAST expression: CAST(expr AS data_type)
             // CASE expression: both simple and searched forms
-            Token::Keyword(Keyword::Case) => {
+            Token::Keyword { keyword: Keyword::Case, .. } => {
                 self.advance(); // consume CASE
 
                 // Try to parse operand for simple CASE
@@ -130,7 +130,7 @@ impl Parser {
 
                 Ok(Some(vibesql_ast::Expression::Case { operand, when_clauses, else_result }))
             }
-            Token::Keyword(Keyword::Cast) => {
+            Token::Keyword { keyword: Keyword::Cast, .. } => {
                 self.advance(); // consume CAST
 
                 // Expect opening parenthesis
@@ -151,7 +151,7 @@ impl Parser {
                 Ok(Some(vibesql_ast::Expression::Cast { expr: Box::new(expr), data_type }))
             }
             // EXISTS expression: EXISTS (SELECT ...)
-            Token::Keyword(Keyword::Exists) => {
+            Token::Keyword { keyword: Keyword::Exists, .. } => {
                 self.advance(); // consume EXISTS
 
                 // Expect opening parenthesis
@@ -169,12 +169,12 @@ impl Parser {
                 }))
             }
             // DEFAULT keyword: DEFAULT
-            Token::Keyword(Keyword::Default) => {
+            Token::Keyword { keyword: Keyword::Default, .. } => {
                 self.advance(); // consume DEFAULT
                 Ok(Some(vibesql_ast::Expression::Default))
             }
             // NOT keyword - could be NOT EXISTS or unary NOT
-            Token::Keyword(Keyword::Not) => {
+            Token::Keyword { keyword: Keyword::Not, .. } => {
                 self.advance(); // consume NOT
 
                 // Check if it's NOT EXISTS
@@ -206,7 +206,7 @@ impl Parser {
                 }
             }
             // INTERVAL expression: INTERVAL '5' DAY, INTERVAL '1-6' YEAR TO MONTH
-            Token::Keyword(Keyword::Interval) => {
+            Token::Keyword { keyword: Keyword::Interval, .. } => {
                 self.advance(); // consume INTERVAL
 
                 // Parse the value expression (typically a string literal)
@@ -232,11 +232,11 @@ impl Parser {
         &mut self,
     ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::CurrentDate) => {
+            Token::Keyword { keyword: Keyword::CurrentDate, .. } => {
                 self.advance(); // consume CURRENT_DATE
                 Ok(Some(vibesql_ast::Expression::CurrentDate))
             }
-            Token::Keyword(Keyword::CurrentTime) => {
+            Token::Keyword { keyword: Keyword::CurrentTime, .. } => {
                 self.advance(); // consume CURRENT_TIME
                 let precision = if self.try_consume(&Token::LParen) {
                     let prec_str = match self.peek() {
@@ -266,7 +266,7 @@ impl Parser {
                 };
                 Ok(Some(vibesql_ast::Expression::CurrentTime { precision }))
             }
-            Token::Keyword(Keyword::CurrentTimestamp) => {
+            Token::Keyword { keyword: Keyword::CurrentTimestamp, .. } => {
                 self.advance(); // consume CURRENT_TIMESTAMP
                 let precision = if self.try_consume(&Token::LParen) {
                     let prec_str = match self.peek() {
@@ -306,7 +306,7 @@ impl Parser {
     pub(super) fn parse_sequence_value_function(
         &mut self,
     ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
-        if matches!(self.peek(), Token::Keyword(Keyword::Next)) {
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Next, .. }) {
             self.advance(); // consume NEXT
 
             // Parse "VALUE" as identifier (not a reserved keyword)
@@ -386,39 +386,39 @@ impl Parser {
         use vibesql_ast::IntervalUnit;
 
         let first_unit = match self.peek() {
-            Token::Keyword(Keyword::Microsecond) => {
+            Token::Keyword { keyword: Keyword::Microsecond, .. } => {
                 self.advance();
                 IntervalUnit::Microsecond
             }
-            Token::Keyword(Keyword::Second) => {
+            Token::Keyword { keyword: Keyword::Second, .. } => {
                 self.advance();
                 IntervalUnit::Second
             }
-            Token::Keyword(Keyword::Minute) => {
+            Token::Keyword { keyword: Keyword::Minute, .. } => {
                 self.advance();
                 IntervalUnit::Minute
             }
-            Token::Keyword(Keyword::Hour) => {
+            Token::Keyword { keyword: Keyword::Hour, .. } => {
                 self.advance();
                 IntervalUnit::Hour
             }
-            Token::Keyword(Keyword::Day) => {
+            Token::Keyword { keyword: Keyword::Day, .. } => {
                 self.advance();
                 IntervalUnit::Day
             }
-            Token::Keyword(Keyword::Week) => {
+            Token::Keyword { keyword: Keyword::Week, .. } => {
                 self.advance();
                 IntervalUnit::Week
             }
-            Token::Keyword(Keyword::Month) => {
+            Token::Keyword { keyword: Keyword::Month, .. } => {
                 self.advance();
                 IntervalUnit::Month
             }
-            Token::Keyword(Keyword::Quarter) => {
+            Token::Keyword { keyword: Keyword::Quarter, .. } => {
                 self.advance();
                 IntervalUnit::Quarter
             }
-            Token::Keyword(Keyword::Year) => {
+            Token::Keyword { keyword: Keyword::Year, .. } => {
                 self.advance();
                 IntervalUnit::Year
             }
@@ -438,47 +438,47 @@ impl Parser {
             self.advance(); // consume TO
 
             let compound_unit = match (&first_unit, self.peek()) {
-                (IntervalUnit::Year, Token::Keyword(Keyword::Month)) => {
+                (IntervalUnit::Year, Token::Keyword { keyword: Keyword::Month, .. }) => {
                     self.advance();
                     IntervalUnit::YearMonth
                 }
-                (IntervalUnit::Day, Token::Keyword(Keyword::Hour)) => {
+                (IntervalUnit::Day, Token::Keyword { keyword: Keyword::Hour, .. }) => {
                     self.advance();
                     IntervalUnit::DayHour
                 }
-                (IntervalUnit::Day, Token::Keyword(Keyword::Minute)) => {
+                (IntervalUnit::Day, Token::Keyword { keyword: Keyword::Minute, .. }) => {
                     self.advance();
                     IntervalUnit::DayMinute
                 }
-                (IntervalUnit::Day, Token::Keyword(Keyword::Second)) => {
+                (IntervalUnit::Day, Token::Keyword { keyword: Keyword::Second, .. }) => {
                     self.advance();
                     IntervalUnit::DaySecond
                 }
-                (IntervalUnit::Day, Token::Keyword(Keyword::Microsecond)) => {
+                (IntervalUnit::Day, Token::Keyword { keyword: Keyword::Microsecond, .. }) => {
                     self.advance();
                     IntervalUnit::DayMicrosecond
                 }
-                (IntervalUnit::Hour, Token::Keyword(Keyword::Minute)) => {
+                (IntervalUnit::Hour, Token::Keyword { keyword: Keyword::Minute, .. }) => {
                     self.advance();
                     IntervalUnit::HourMinute
                 }
-                (IntervalUnit::Hour, Token::Keyword(Keyword::Second)) => {
+                (IntervalUnit::Hour, Token::Keyword { keyword: Keyword::Second, .. }) => {
                     self.advance();
                     IntervalUnit::HourSecond
                 }
-                (IntervalUnit::Hour, Token::Keyword(Keyword::Microsecond)) => {
+                (IntervalUnit::Hour, Token::Keyword { keyword: Keyword::Microsecond, .. }) => {
                     self.advance();
                     IntervalUnit::HourMicrosecond
                 }
-                (IntervalUnit::Minute, Token::Keyword(Keyword::Second)) => {
+                (IntervalUnit::Minute, Token::Keyword { keyword: Keyword::Second, .. }) => {
                     self.advance();
                     IntervalUnit::MinuteSecond
                 }
-                (IntervalUnit::Minute, Token::Keyword(Keyword::Microsecond)) => {
+                (IntervalUnit::Minute, Token::Keyword { keyword: Keyword::Microsecond, .. }) => {
                     self.advance();
                     IntervalUnit::MinuteMicrosecond
                 }
-                (IntervalUnit::Second, Token::Keyword(Keyword::Microsecond)) => {
+                (IntervalUnit::Second, Token::Keyword { keyword: Keyword::Microsecond, .. }) => {
                     self.advance();
                     IntervalUnit::SecondMicrosecond
                 }

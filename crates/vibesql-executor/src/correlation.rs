@@ -393,6 +393,10 @@ fn is_expression_correlated(
             .iter()
             .any(|child| is_expression_correlated(child, outer_schema, subquery_tables)),
 
+        Expression::Collate { expr, .. } => {
+            is_expression_correlated(expr, outer_schema, subquery_tables)
+        }
+
         Expression::PseudoVariable { .. }
         | Expression::SessionVariable { .. }
         | Expression::DuplicateKeyValue { .. }

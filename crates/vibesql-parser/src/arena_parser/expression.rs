@@ -367,7 +367,7 @@ impl<'arena> ArenaParser<'arena> {
                 Token::Symbol('*') => BinaryOperator::Multiply,
                 Token::Symbol('/') => BinaryOperator::Divide,
                 Token::Symbol('%') => BinaryOperator::Modulo,
-                Token::Keyword(Keyword::Div) => BinaryOperator::IntegerDivide,
+                Token::Keyword { keyword: Keyword::Div, .. } => BinaryOperator::IntegerDivide,
                 _ => break,
             };
             self.advance();
@@ -554,25 +554,25 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Some(Expression::Literal(SqlValue::Varchar(s)))
             }
-            Token::Keyword(Keyword::True) => {
+            Token::Keyword { keyword: Keyword::True, .. } => {
                 self.advance();
                 Some(Expression::Literal(SqlValue::Boolean(true)))
             }
-            Token::Keyword(Keyword::False) => {
+            Token::Keyword { keyword: Keyword::False, .. } => {
                 self.advance();
                 Some(Expression::Literal(SqlValue::Boolean(false)))
             }
-            Token::Keyword(Keyword::Null) => {
+            Token::Keyword { keyword: Keyword::Null, .. } => {
                 self.advance();
                 Some(Expression::Literal(SqlValue::Null))
             }
-            Token::Keyword(Keyword::Default) => {
+            Token::Keyword { keyword: Keyword::Default, .. } => {
                 self.advance();
                 Some(Expression::Default)
             }
             // Typed literals: DATE 'string', TIME 'string', TIMESTAMP 'string'
             // If not followed by a string literal, treat as column name (SQLite compatibility)
-            Token::Keyword(Keyword::Date) => {
+            Token::Keyword { keyword: Keyword::Date, .. } => {
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -596,7 +596,7 @@ impl<'arena> ArenaParser<'arena> {
                     }
                 }
             }
-            Token::Keyword(Keyword::Time) => {
+            Token::Keyword { keyword: Keyword::Time, .. } => {
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -620,7 +620,7 @@ impl<'arena> ArenaParser<'arena> {
                     }
                 }
             }
-            Token::Keyword(Keyword::Timestamp) => {
+            Token::Keyword { keyword: Keyword::Timestamp, .. } => {
                 self.advance();
                 match self.peek() {
                     Token::String(s) => {
@@ -646,7 +646,7 @@ impl<'arena> ArenaParser<'arena> {
                     }
                 }
             }
-            Token::Keyword(Keyword::Interval) => {
+            Token::Keyword { keyword: Keyword::Interval, .. } => {
                 return self.parse_interval_literal();
             }
             _ => None,
@@ -691,12 +691,12 @@ impl<'arena> ArenaParser<'arena> {
     fn parse_interval_field(&mut self) -> Result<String, ParseError> {
         let field = match self.peek() {
             Token::Identifier(field) => field.to_uppercase(),
-            Token::Keyword(Keyword::Year) => "YEAR".to_string(),
-            Token::Keyword(Keyword::Month) => "MONTH".to_string(),
-            Token::Keyword(Keyword::Day) => "DAY".to_string(),
-            Token::Keyword(Keyword::Hour) => "HOUR".to_string(),
-            Token::Keyword(Keyword::Minute) => "MINUTE".to_string(),
-            Token::Keyword(Keyword::Second) => "SECOND".to_string(),
+            Token::Keyword { keyword: Keyword::Year, .. } => "YEAR".to_string(),
+            Token::Keyword { keyword: Keyword::Month, .. } => "MONTH".to_string(),
+            Token::Keyword { keyword: Keyword::Day, .. } => "DAY".to_string(),
+            Token::Keyword { keyword: Keyword::Hour, .. } => "HOUR".to_string(),
+            Token::Keyword { keyword: Keyword::Minute, .. } => "MINUTE".to_string(),
+            Token::Keyword { keyword: Keyword::Second, .. } => "SECOND".to_string(),
             _ => {
                 return Err(ParseError {
                     message: "Expected interval field (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)"
@@ -1001,12 +1001,12 @@ impl<'arena> ArenaParser<'arena> {
         // Get type name as uppercase string
         let type_upper = match self.peek() {
             Token::Identifier(type_name) => type_name.to_uppercase(),
-            Token::Keyword(Keyword::Date) => "DATE".to_string(),
-            Token::Keyword(Keyword::Time) => "TIME".to_string(),
-            Token::Keyword(Keyword::Timestamp) => "TIMESTAMP".to_string(),
-            Token::Keyword(Keyword::Interval) => "INTERVAL".to_string(),
-            Token::Keyword(Keyword::Character) => "CHARACTER".to_string(),
-            Token::Keyword(Keyword::Boolean) => "BOOLEAN".to_string(),
+            Token::Keyword { keyword: Keyword::Date, .. } => "DATE".to_string(),
+            Token::Keyword { keyword: Keyword::Time, .. } => "TIME".to_string(),
+            Token::Keyword { keyword: Keyword::Timestamp, .. } => "TIMESTAMP".to_string(),
+            Token::Keyword { keyword: Keyword::Interval, .. } => "INTERVAL".to_string(),
+            Token::Keyword { keyword: Keyword::Character, .. } => "CHARACTER".to_string(),
+            Token::Keyword { keyword: Keyword::Boolean, .. } => "BOOLEAN".to_string(),
             _ => return Err(ParseError { message: self.peek().syntax_error() })
         };
         self.advance();

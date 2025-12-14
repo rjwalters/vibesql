@@ -106,39 +106,39 @@ impl Parser {
     /// Parse a statement
     pub fn parse_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::Select) | Token::Keyword(Keyword::With) => {
+            Token::Keyword { keyword: Keyword::Select, .. } | Token::Keyword { keyword: Keyword::With, .. } => {
                 let select_stmt = self.parse_select_statement()?;
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
             }
-            Token::Keyword(Keyword::Values) => {
+            Token::Keyword { keyword: Keyword::Values, .. } => {
                 let select_stmt = self.parse_values_statement()?;
                 Ok(vibesql_ast::Statement::Select(Box::new(select_stmt)))
             }
-            Token::Keyword(Keyword::Insert) => {
+            Token::Keyword { keyword: Keyword::Insert, .. } => {
                 let insert_stmt = self.parse_insert_statement()?;
                 Ok(vibesql_ast::Statement::Insert(insert_stmt))
             }
-            Token::Keyword(Keyword::Replace) => {
+            Token::Keyword { keyword: Keyword::Replace, .. } => {
                 let insert_stmt = self.parse_replace_statement()?;
                 Ok(vibesql_ast::Statement::Insert(insert_stmt))
             }
-            Token::Keyword(Keyword::Update) => {
+            Token::Keyword { keyword: Keyword::Update, .. } => {
                 let update_stmt = self.parse_update_statement()?;
                 Ok(vibesql_ast::Statement::Update(update_stmt))
             }
-            Token::Keyword(Keyword::Delete) => {
+            Token::Keyword { keyword: Keyword::Delete, .. } => {
                 let delete_stmt = self.parse_delete_statement()?;
                 Ok(vibesql_ast::Statement::Delete(delete_stmt))
             }
-            Token::Keyword(Keyword::Create) => {
+            Token::Keyword { keyword: Keyword::Create, .. } => {
                 // Check for CREATE OR REPLACE VIEW and CREATE OR REPLACE TEMP/TEMPORARY VIEW
                 if self.peek_next_keyword(Keyword::Or)
-                    && matches!(self.peek_at_offset(2), Token::Keyword(Keyword::Replace))
+                    && matches!(self.peek_at_offset(2), Token::Keyword { keyword: Keyword::Replace, .. })
                 {
                     // Could be CREATE OR REPLACE VIEW or CREATE OR REPLACE TEMP/TEMPORARY VIEW
-                    if matches!(self.peek_at_offset(3), Token::Keyword(Keyword::View))
-                        || matches!(self.peek_at_offset(3), Token::Keyword(Keyword::Temp))
-                        || matches!(self.peek_at_offset(3), Token::Keyword(Keyword::Temporary))
+                    if matches!(self.peek_at_offset(3), Token::Keyword { keyword: Keyword::View, .. })
+                        || matches!(self.peek_at_offset(3), Token::Keyword { keyword: Keyword::Temp, .. })
+                        || matches!(self.peek_at_offset(3), Token::Keyword { keyword: Keyword::Temporary, .. })
                     {
                         return Ok(vibesql_ast::Statement::CreateView(
                             self.parse_create_view_statement()?,
@@ -208,7 +208,7 @@ impl Parser {
                     })
                 }
             }
-            Token::Keyword(Keyword::Drop) => {
+            Token::Keyword { keyword: Keyword::Drop, .. } => {
                 if self.peek_next_keyword(Keyword::Table) {
                     Ok(vibesql_ast::Statement::DropTable(self.parse_drop_table_statement()?))
                 } else if self.peek_next_keyword(Keyword::Schema) {
@@ -257,11 +257,11 @@ impl Parser {
                     })
                 }
             }
-            Token::Keyword(Keyword::Truncate) => {
+            Token::Keyword { keyword: Keyword::Truncate, .. } => {
                 let truncate_stmt = self.parse_truncate_table_statement()?;
                 Ok(vibesql_ast::Statement::TruncateTable(truncate_stmt))
             }
-            Token::Keyword(Keyword::Alter) => {
+            Token::Keyword { keyword: Keyword::Alter, .. } => {
                 if self.peek_next_keyword(Keyword::Table) {
                     let alter_stmt = self.parse_alter_table_statement()?;
                     Ok(vibesql_ast::Statement::AlterTable(alter_stmt))
@@ -277,27 +277,27 @@ impl Parser {
                     })
                 }
             }
-            Token::Keyword(Keyword::Reindex) => {
+            Token::Keyword { keyword: Keyword::Reindex, .. } => {
                 let reindex_stmt = self.parse_reindex_statement()?;
                 Ok(vibesql_ast::Statement::Reindex(reindex_stmt))
             }
-            Token::Keyword(Keyword::Analyze) => {
+            Token::Keyword { keyword: Keyword::Analyze, .. } => {
                 let analyze_stmt = self.parse_analyze_statement()?;
                 Ok(vibesql_ast::Statement::Analyze(analyze_stmt))
             }
-            Token::Keyword(Keyword::Explain) => {
+            Token::Keyword { keyword: Keyword::Explain, .. } => {
                 let explain_stmt = self.parse_explain_statement()?;
                 Ok(vibesql_ast::Statement::Explain(explain_stmt))
             }
-            Token::Keyword(Keyword::Begin) | Token::Keyword(Keyword::Start) => {
+            Token::Keyword { keyword: Keyword::Begin, .. } | Token::Keyword { keyword: Keyword::Start, .. } => {
                 let begin_stmt = self.parse_begin_statement()?;
                 Ok(vibesql_ast::Statement::BeginTransaction(begin_stmt))
             }
-            Token::Keyword(Keyword::Commit) => {
+            Token::Keyword { keyword: Keyword::Commit, .. } => {
                 let commit_stmt = self.parse_commit_statement()?;
                 Ok(vibesql_ast::Statement::Commit(commit_stmt))
             }
-            Token::Keyword(Keyword::Rollback) => {
+            Token::Keyword { keyword: Keyword::Rollback, .. } => {
                 // Check if this is ROLLBACK TO SAVEPOINT by looking ahead
                 let saved_position = self.position;
                 self.advance(); // consume ROLLBACK
@@ -313,15 +313,15 @@ impl Parser {
                     Ok(vibesql_ast::Statement::Rollback(rollback_stmt))
                 }
             }
-            Token::Keyword(Keyword::Savepoint) => {
+            Token::Keyword { keyword: Keyword::Savepoint, .. } => {
                 let savepoint_stmt = self.parse_savepoint_statement()?;
                 Ok(vibesql_ast::Statement::Savepoint(savepoint_stmt))
             }
-            Token::Keyword(Keyword::Release) => {
+            Token::Keyword { keyword: Keyword::Release, .. } => {
                 let release_stmt = self.parse_release_savepoint_statement()?;
                 Ok(vibesql_ast::Statement::ReleaseSavepoint(release_stmt))
             }
-            Token::Keyword(Keyword::Set) => {
+            Token::Keyword { keyword: Keyword::Set, .. } => {
                 // Look ahead to determine which SET statement this is
                 if self.peek_next_keyword(Keyword::Schema) {
                     let set_stmt = self.parse_set_schema_statement()?;
@@ -348,52 +348,52 @@ impl Parser {
                     Ok(vibesql_ast::Statement::SetVariable(set_stmt))
                 }
             }
-            Token::Keyword(Keyword::Grant) => {
+            Token::Keyword { keyword: Keyword::Grant, .. } => {
                 let grant_stmt = self.parse_grant_statement()?;
                 Ok(vibesql_ast::Statement::Grant(grant_stmt))
             }
-            Token::Keyword(Keyword::Revoke) => {
+            Token::Keyword { keyword: Keyword::Revoke, .. } => {
                 let revoke_stmt = self.parse_revoke_statement()?;
                 Ok(vibesql_ast::Statement::Revoke(revoke_stmt))
             }
-            Token::Keyword(Keyword::Declare) => {
+            Token::Keyword { keyword: Keyword::Declare, .. } => {
                 let declare_cursor_stmt = self.parse_declare_cursor_statement()?;
                 Ok(vibesql_ast::Statement::DeclareCursor(declare_cursor_stmt))
             }
-            Token::Keyword(Keyword::Open) => {
+            Token::Keyword { keyword: Keyword::Open, .. } => {
                 let open_cursor_stmt = self.parse_open_cursor_statement()?;
                 Ok(vibesql_ast::Statement::OpenCursor(open_cursor_stmt))
             }
-            Token::Keyword(Keyword::Fetch) => {
+            Token::Keyword { keyword: Keyword::Fetch, .. } => {
                 let fetch_stmt = self.parse_fetch_statement()?;
                 Ok(vibesql_ast::Statement::Fetch(fetch_stmt))
             }
-            Token::Keyword(Keyword::Close) => {
+            Token::Keyword { keyword: Keyword::Close, .. } => {
                 let close_cursor_stmt = self.parse_close_cursor_statement()?;
                 Ok(vibesql_ast::Statement::CloseCursor(close_cursor_stmt))
             }
-            Token::Keyword(Keyword::Call) => {
+            Token::Keyword { keyword: Keyword::Call, .. } => {
                 let call_stmt = self.parse_call_statement()?;
                 Ok(vibesql_ast::Statement::Call(call_stmt))
             }
-            Token::Keyword(Keyword::Show) => self.parse_show_statement(),
-            Token::Keyword(Keyword::Describe) => {
+            Token::Keyword { keyword: Keyword::Show, .. } => self.parse_show_statement(),
+            Token::Keyword { keyword: Keyword::Describe, .. } => {
                 let describe_stmt = self.parse_describe_statement()?;
                 Ok(vibesql_ast::Statement::Describe(describe_stmt))
             }
-            Token::Keyword(Keyword::Prepare) => {
+            Token::Keyword { keyword: Keyword::Prepare, .. } => {
                 let prepare_stmt = self.parse_prepare_statement()?;
                 Ok(vibesql_ast::Statement::Prepare(prepare_stmt))
             }
-            Token::Keyword(Keyword::Execute) => {
+            Token::Keyword { keyword: Keyword::Execute, .. } => {
                 let execute_stmt = self.parse_execute_statement()?;
                 Ok(vibesql_ast::Statement::Execute(execute_stmt))
             }
-            Token::Keyword(Keyword::Deallocate) => {
+            Token::Keyword { keyword: Keyword::Deallocate, .. } => {
                 let deallocate_stmt = self.parse_deallocate_statement()?;
                 Ok(vibesql_ast::Statement::Deallocate(deallocate_stmt))
             }
-            Token::Keyword(Keyword::Pragma) => {
+            Token::Keyword { keyword: Keyword::Pragma, .. } => {
                 let pragma_stmt = self.parse_pragma_statement()?;
                 Ok(vibesql_ast::Statement::Pragma(pragma_stmt))
             }

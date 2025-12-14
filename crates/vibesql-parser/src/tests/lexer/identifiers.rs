@@ -100,13 +100,13 @@ fn test_tokenize_unterminated_delimited_identifier_error() {
 fn test_tokenize_mixed_identifiers() {
     let mut lexer = Lexer::new(r#"SELECT "columnName", regularColumn FROM table"#);
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
+    assert_eq!(tokens[0], Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() });
     assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
     assert_eq!(tokens[2], Token::Comma);
     // Regular identifiers preserve original case
     assert_eq!(tokens[3], Token::Identifier("regularColumn".to_string()));
-    assert_eq!(tokens[4], Token::Keyword(Keyword::From));
-    assert_eq!(tokens[5], Token::Keyword(Keyword::Table)); // "table" is a reserved keyword
+    assert_eq!(tokens[4], Token::Keyword { keyword: Keyword::From, original: "FROM".to_string() });
+    assert_eq!(tokens[5], Token::Keyword { keyword: Keyword::Table, original: "table".to_string() }); // "table" is a reserved keyword
 }
 
 // ============================================================================
@@ -185,12 +185,12 @@ fn test_tokenize_unterminated_backtick_identifier_error() {
 fn test_tokenize_mixed_backtick_and_regular_identifiers() {
     let mut lexer = Lexer::new("SELECT `columnName`, regularColumn FROM `table_name`");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
+    assert_eq!(tokens[0], Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() });
     assert_eq!(tokens[1], Token::DelimitedIdentifier("columnName".to_string()));
     assert_eq!(tokens[2], Token::Comma);
     // Regular identifiers preserve original case
     assert_eq!(tokens[3], Token::Identifier("regularColumn".to_string()));
-    assert_eq!(tokens[4], Token::Keyword(Keyword::From));
+    assert_eq!(tokens[4], Token::Keyword { keyword: Keyword::From, original: "FROM".to_string() });
     assert_eq!(tokens[5], Token::DelimitedIdentifier("table_name".to_string()));
 }
 
@@ -198,12 +198,12 @@ fn test_tokenize_mixed_backtick_and_regular_identifiers() {
 fn test_tokenize_backtick_vs_doublequote_identifiers() {
     let mut lexer = Lexer::new("SELECT `backtick`, \"doublequote\" FROM table");
     let tokens = lexer.tokenize().unwrap();
-    assert_eq!(tokens[0], Token::Keyword(Keyword::Select));
+    assert_eq!(tokens[0], Token::Keyword { keyword: Keyword::Select, original: "SELECT".to_string() });
     assert_eq!(tokens[1], Token::DelimitedIdentifier("backtick".to_string()));
     assert_eq!(tokens[2], Token::Comma);
     assert_eq!(tokens[3], Token::DelimitedIdentifier("doublequote".to_string()));
-    assert_eq!(tokens[4], Token::Keyword(Keyword::From));
-    assert_eq!(tokens[5], Token::Keyword(Keyword::Table));
+    assert_eq!(tokens[4], Token::Keyword { keyword: Keyword::From, original: "FROM".to_string() });
+    assert_eq!(tokens[5], Token::Keyword { keyword: Keyword::Table, original: "table".to_string() });
 }
 
 // ============================================================================
