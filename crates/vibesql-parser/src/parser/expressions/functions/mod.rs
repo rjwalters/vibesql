@@ -169,7 +169,7 @@ impl Parser {
             // Parse optional ORDER BY clause for aggregate functions
             // SQL:2003 syntax: aggregate(expr ORDER BY order_list)
             // Example: GROUP_CONCAT(name ORDER BY name ASC)
-            if might_be_aggregate && matches!(self.peek(), Token::Keyword(Keyword::Order)) {
+            if might_be_aggregate && matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. }) {
                 self.advance(); // consume ORDER
                 self.expect_keyword(Keyword::By)?;
 
@@ -178,10 +178,10 @@ impl Parser {
                     let expr = self.parse_expression()?;
 
                     // Check for optional ASC/DESC
-                    let direction = if matches!(self.peek(), Token::Keyword(Keyword::Asc)) {
+                    let direction = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
                         self.advance();
                         vibesql_ast::OrderDirection::Asc
-                    } else if matches!(self.peek(), Token::Keyword(Keyword::Desc)) {
+                    } else if matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. }) {
                         self.advance();
                         vibesql_ast::OrderDirection::Desc
                     } else {
