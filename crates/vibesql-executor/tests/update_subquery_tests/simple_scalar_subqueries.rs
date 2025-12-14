@@ -17,16 +17,13 @@ fn create_employees_table(db: &mut Database) {
     db.create_table(schema).unwrap();
 }
 
-fn create_employees_table_numeric_salary(db: &mut Database) {
+fn create_employees_table_double_salary(db: &mut Database) {
+    // Use Double for salary since AVG() returns Double (SQLite's REAL type)
     let schema = TableSchema::new(
         "employees".to_string(),
         vec![
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
-            ColumnSchema::new(
-                "salary".to_string(),
-                DataType::Numeric { precision: 15, scale: 2 },
-                true,
-            ),
+            ColumnSchema::new("salary".to_string(), DataType::DoublePrecision, true),
         ],
     );
     db.create_table(schema).unwrap();
@@ -225,10 +222,10 @@ fn test_update_with_scalar_subquery_min_aggregate() {
 #[test]
 fn test_update_with_scalar_subquery_avg_aggregate() {
     let mut db = Database::new();
-    create_employees_table_numeric_salary(&mut db);
+    create_employees_table_double_salary(&mut db);
     create_data_table(&mut db, "salaries", "amount", false);
 
-    insert_employee(&mut db, 1, SqlValue::Numeric(10000.0));
+    insert_employee(&mut db, 1, SqlValue::Double(10000.0));
     insert_data_row(&mut db, "salaries", SqlValue::Integer(60000));
     insert_data_row(&mut db, "salaries", SqlValue::Integer(70000));
     insert_data_row(&mut db, "salaries", SqlValue::Integer(50000));
@@ -239,7 +236,8 @@ fn test_update_with_scalar_subquery_avg_aggregate() {
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
     assert_eq!(count, 1);
-    verify_single_row_update(&db, "employees", 1, SqlValue::Numeric(60000.0));
+    // AVG returns Double (SQLite's REAL type)
+    verify_single_row_update(&db, "employees", 1, SqlValue::Double(60000.0));
 }
 
 #[test]

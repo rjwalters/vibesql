@@ -314,30 +314,25 @@ impl AggregateAccumulator {
                 if *count == 0 {
                     vibesql_types::SqlValue::Null
                 } else {
-                    // SQLite's SUM() always returns REAL (float) for numeric values
-                    // This differs from TOTAL() which also returns 0.0 for empty sets
+                    // SQLite's SUM() preserves integer type for integer inputs.
+                    // Only TOTAL() always returns REAL (and 0.0 for empty sets).
+                    // Integer types are preserved, float types normalize to Double.
                     match sum {
-                        vibesql_types::SqlValue::Integer(v) => {
-                            vibesql_types::SqlValue::Numeric(*v as f64)
-                        }
-                        vibesql_types::SqlValue::Bigint(v) => {
-                            vibesql_types::SqlValue::Numeric(*v as f64)
-                        }
-                        vibesql_types::SqlValue::Smallint(v) => {
-                            vibesql_types::SqlValue::Numeric(*v as f64)
-                        }
-                        // Already float types - return as-is but normalize to Numeric
+                        // Integer types: preserve as-is
+                        vibesql_types::SqlValue::Integer(_)
+                        | vibesql_types::SqlValue::Bigint(_)
+                        | vibesql_types::SqlValue::Smallint(_) => sum.clone(),
+                        // Float types: normalize to Double for consistency
                         vibesql_types::SqlValue::Float(v) => {
-                            vibesql_types::SqlValue::Numeric(*v as f64)
+                            vibesql_types::SqlValue::Double(*v as f64)
                         }
-                        vibesql_types::SqlValue::Double(v) => {
-                            vibesql_types::SqlValue::Numeric(*v)
-                        }
+                        vibesql_types::SqlValue::Double(_) => sum.clone(),
                         vibesql_types::SqlValue::Real(v) => {
-                            vibesql_types::SqlValue::Numeric(*v as f64)
+                            vibesql_types::SqlValue::Double(*v as f64)
                         }
-                        // Already Numeric
-                        vibesql_types::SqlValue::Numeric(_) => sum.clone(),
+                        vibesql_types::SqlValue::Numeric(v) => {
+                            vibesql_types::SqlValue::Double(*v)
+                        }
                         // Fallback for unexpected types
                         _ => sum.clone(),
                     }
@@ -722,7 +717,8 @@ fn sql_value_to_string(value: &vibesql_types::SqlValue) -> String {
 /// See add_sql_values() documentation for rationale.
 fn divide_sql_value(value: &vibesql_types::SqlValue, count: i64) -> vibesql_types::SqlValue {
     if let Some(sum_f64) = sql_value_to_f64(value) {
-        vibesql_types::SqlValue::Numeric(sum_f64 / count as f64)
+        // AVG always returns Double (SQLite's REAL type)
+        vibesql_types::SqlValue::Double(sum_f64 / count as f64)
     } else {
         vibesql_types::SqlValue::Null
     }
@@ -1035,12 +1031,13 @@ mod tests {
         acc.accumulate(&SqlValue::Integer(5));
         acc.accumulate(&SqlValue::Integer(-5));
 
-        // Finalize should return 0.0 (as Numeric/REAL), not NULL
-        // SQLite's SUM() always returns REAL (float) for numeric values
+        // Finalize should return 0 (as Integer when using type-preserving addition), not NULL
+        // SQLite's SUM() preserves integer type for integer inputs
         let result = acc.finalize();
-        match result {
-            SqlValue::Numeric(0.0) => {} // OK - SUM returns REAL
-            _ => panic!("SUM of values that sum to 0 should return 0.0, got {:?}", result),
+        match &result {
+            SqlValue::Integer(0) => {} // OK - SUM of integers returns Integer
+            SqlValue::Double(n) if *n == 0.0 => {} // Also OK - some paths return Double
+            _ => panic!("SUM of values that sum to 0 should return 0, got {:?}", result),
         }
     }
 

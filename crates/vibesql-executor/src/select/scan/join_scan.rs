@@ -257,12 +257,19 @@ where
     };
 
     // Perform nested loop join with equijoin predicates from WHERE clause
+    // Save schemas for USING clause deduplication before join consumes them
+    let (left_schema_for_using, right_schema_for_using) = if using_columns.is_some() {
+        (Some(left_result.schema.clone()), Some(right_result.schema.clone()))
+    } else {
+        (None, None)
+    };
+
     use crate::select::join::nested_loop_join;
     // Note: Using default timeout context - proper timeout propagation from SelectExecutor
     // is a future improvement (see issue #2631 for context)
     let timeout_ctx = TimeoutContext::new_default();
     // Issue #3562: Pass CTE context so post-join filters with IN subqueries can resolve CTEs
-    let result = nested_loop_join(
+    let mut result = nested_loop_join(
         left_result,
         right_result,
         join_type,
@@ -274,7 +281,97 @@ where
         &timeout_ctx,
         cte_results,
     )?;
+
+    // For USING clause joins, remove duplicate columns from the result
+    // (USING clause should only include join columns once, from the left side)
+    if let (Some(using_cols), Some(left_schema), Some(right_schema)) =
+        (using_columns.as_ref(), left_schema_for_using, right_schema_for_using)
+    {
+        result =
+            remove_duplicate_columns_for_using_join(result, &left_schema, &right_schema, using_cols)?;
+    }
+
     Ok(result)
+}
+
+/// Remove duplicate columns from a USING clause join result
+///
+/// USING clause should only include join columns once (from the left side).
+/// This function identifies USING columns in the right side and removes them.
+fn remove_duplicate_columns_for_using_join(
+    result: super::FromResult,
+    left_schema: &CombinedSchema,
+    right_schema: &CombinedSchema,
+    using_columns: &[String],
+) -> Result<super::FromResult, crate::errors::ExecutorError> {
+    // Create a set of USING column names (lowercase for case-insensitive comparison)
+    let using_cols_lower: HashSet<String> =
+        using_columns.iter().map(|c| c.to_lowercase()).collect();
+
+    // Count columns in left schema
+    let left_col_count = left_schema.total_columns;
+
+    // Identify which columns from the right side are USING columns to remove
+    let mut right_duplicate_indices: HashSet<usize> = HashSet::new();
+    let mut col_idx = 0;
+    for (_table_idx, table_schema) in right_schema.table_schemas.values() {
+        for col in &table_schema.columns {
+            let lowercase = col.name.to_lowercase();
+            if using_cols_lower.contains(&lowercase) {
+                // This is a USING column, mark it as a duplicate to remove
+                right_duplicate_indices.insert(left_col_count + col_idx);
+            }
+            col_idx += 1;
+        }
+    }
+
+    // If no duplicates, return as-is
+    if right_duplicate_indices.is_empty() {
+        return Ok(result);
+    }
+
+    // Project out the duplicate columns from the result
+    let total_cols = left_col_count + col_idx;
+    let keep_indices: Vec<usize> =
+        (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
+
+    // Build new schema without duplicate columns
+    let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
+    for (table_name, (table_start_idx, table_schema)) in &result.schema.table_schemas {
+        let mut new_cols = Vec::new();
+
+        for (idx, col) in table_schema.columns.iter().enumerate() {
+            // Calculate absolute column index
+            let abs_col_idx = table_start_idx + idx;
+
+            if keep_indices.contains(&abs_col_idx) {
+                new_cols.push(col.clone());
+            }
+        }
+
+        if !new_cols.is_empty() {
+            let new_table_schema =
+                vibesql_catalog::TableSchema::new(table_schema.name.clone(), new_cols);
+            new_schema
+                .table_schemas
+                .insert(table_name.clone(), (new_schema.total_columns, new_table_schema.clone()));
+            new_schema.total_columns += new_table_schema.columns.len();
+        }
+    }
+
+    // Project the rows
+    let new_rows: Vec<vibesql_storage::Row> = result
+        .data
+        .as_slice()
+        .iter()
+        .map(|row| {
+            let new_values: Vec<vibesql_types::SqlValue> =
+                keep_indices.iter().filter_map(|&i| row.values.get(i).cloned()).collect();
+            vibesql_storage::Row::new(new_values)
+        })
+        .collect();
+
+    Ok(super::FromResult::from_rows(new_schema, new_rows))
 }
 
 /// Generate the implicit join condition for a NATURAL JOIN

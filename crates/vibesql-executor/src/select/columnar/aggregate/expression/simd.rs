@@ -77,8 +77,8 @@ fn aggregate_sum(result_array: &arrow::array::ArrayRef) -> Result<SqlValue, Exec
                 operation: "SUM".to_string(),
                 reason: "returned None".to_string(),
             })?;
-            // SQLite's SUM() always returns REAL (float)
-            Ok(SqlValue::Numeric(sum_val as f64))
+            // SQLite's SUM() preserves integer type for integer inputs
+            Ok(SqlValue::Integer(sum_val))
         }
         arrow::datatypes::DataType::Float64 => {
             let arr = result_array.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {

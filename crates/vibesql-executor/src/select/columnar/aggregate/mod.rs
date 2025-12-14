@@ -240,10 +240,10 @@ mod tests {
         let scan = ColumnarScan::new(&rows);
 
         let result = functions::compute_sum(&scan, 0, None).unwrap();
-        assert_eq!(result, SqlValue::Numeric(60.0));
+        assert_eq!(result, SqlValue::Integer(60));
 
         let result = functions::compute_sum(&scan, 1, None).unwrap();
-        assert!(matches!(result, SqlValue::Numeric(sum) if (sum - 7.5).abs() < 0.001));
+        assert!(matches!(result, SqlValue::Double(sum) if (sum - 7.5).abs() < 0.001));
     }
 
     #[test]
@@ -262,7 +262,7 @@ mod tests {
         let filter = vec![true, false, true]; // Include rows 0 and 2
 
         let result = functions::compute_sum(&scan, 0, Some(&filter)).unwrap();
-        assert_eq!(result, SqlValue::Numeric(40.0));
+        assert_eq!(result, SqlValue::Integer(40));
     }
 
     #[test]
@@ -275,7 +275,7 @@ mod tests {
 
         let results = compute_multiple_aggregates(&rows, &aggregates, None, None).unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0], SqlValue::Numeric(60.0));
+        assert_eq!(results[0], SqlValue::Integer(60));
         assert!(matches!(results[1], SqlValue::Double(avg) if (avg - 2.5).abs() < 0.001));
     }
 
@@ -477,13 +477,13 @@ mod tests {
         // Check group A: SUM = 250.0
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("A"))));
         assert!(
-            matches!(sorted[0].get(1), Some(&SqlValue::Numeric(sum)) if (sum - 250.0).abs() < 0.001)
+            matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
 
         // Check group B: SUM = 250.0
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("B"))));
         assert!(
-            matches!(sorted[1].get(1), Some(&SqlValue::Numeric(sum)) if (sum - 250.0).abs() < 0.001)
+            matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
     }
 
@@ -564,7 +564,7 @@ mod tests {
         // Group 1: SUM=250, AVG=12.5, COUNT=2
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Integer(1)));
         assert!(
-            matches!(sorted[0].get(1), Some(&SqlValue::Numeric(sum)) if (sum - 250.0).abs() < 0.001)
+            matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
         assert!(
             matches!(sorted[0].get(2), Some(&SqlValue::Double(avg)) if (avg - 12.5).abs() < 0.001)
@@ -574,7 +574,7 @@ mod tests {
         // Group 2: SUM=200, AVG=20.0, COUNT=1
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Integer(2)));
         assert!(
-            matches!(sorted[1].get(1), Some(&SqlValue::Numeric(sum)) if (sum - 200.0).abs() < 0.001)
+            matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001)
         );
         assert!(
             matches!(sorted[1].get(2), Some(&SqlValue::Double(avg)) if (avg - 20.0).abs() < 0.001)
@@ -615,13 +615,13 @@ mod tests {
         // Check group A: only row 2 (150.0) passes filter
         assert_eq!(sorted[0].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("A"))));
         assert!(
-            matches!(sorted[0].get(1), Some(&SqlValue::Numeric(sum)) if (sum - 150.0).abs() < 0.001)
+            matches!(sorted[0].get(1), Some(&SqlValue::Double(sum)) if (sum - 150.0).abs() < 0.001)
         );
 
         // Check group B: only row 1 (200.0) passes filter
         assert_eq!(sorted[1].get(0), Some(&SqlValue::Varchar(arcstr::ArcStr::from("B"))));
         assert!(
-            matches!(sorted[1].get(1), Some(&SqlValue::Numeric(sum)) if (sum - 200.0).abs() < 0.001)
+            matches!(sorted[1].get(1), Some(&SqlValue::Double(sum)) if (sum - 200.0).abs() < 0.001)
         );
     }
 
@@ -666,12 +666,12 @@ mod tests {
 
         // Check "A" group: 100 + 150 = 250
         assert!(
-            matches!(a_group.unwrap().get(1), Some(&SqlValue::Numeric(sum)) if (sum - 250.0).abs() < 0.001)
+            matches!(a_group.unwrap().get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
 
         // Check NULL group: 200 + 50 = 250
         assert!(
-            matches!(null_group.unwrap().get(1), Some(&SqlValue::Numeric(sum)) if (sum - 250.0).abs() < 0.001)
+            matches!(null_group.unwrap().get(1), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
     }
 }

@@ -21,8 +21,8 @@ fn test_query_select() {
             let select_executor = vibesql_executor::SelectExecutor::new(&db);
             let result = select_executor.execute_with_columns(&select_stmt).expect("Query failed");
 
-            // Column names are normalized to uppercase
-            assert_eq!(result.columns, vec!["ID", "NAME"]);
+            // Column names are normalized to lowercase per SQL:1999 (unquoted identifiers)
+            assert_eq!(result.columns, vec!["id", "name"]);
             assert_eq!(result.rows.len(), 2);
         }
         _ => panic!("Expected Select statement"),

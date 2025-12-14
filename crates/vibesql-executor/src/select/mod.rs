@@ -11,7 +11,7 @@ pub mod join;
 pub mod late_materialization;
 #[cfg(feature = "parallel")]
 pub mod morsel;
-mod order;
+pub(crate) mod order;
 #[cfg(feature = "parallel")]
 mod parallel;
 pub(crate) mod projection;

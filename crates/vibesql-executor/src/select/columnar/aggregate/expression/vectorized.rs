@@ -276,12 +276,12 @@ fn compute_scalar_aggregate(
                 }
             }
 
-            // SQLite's SUM() always returns REAL (float)
+            // SQLite's SUM() preserves integer type for integer inputs
             Ok(if count > 0 {
                 if has_float {
-                    SqlValue::Numeric(float_sum)
+                    SqlValue::Double(float_sum)
                 } else {
-                    SqlValue::Numeric(int_sum as f64)
+                    SqlValue::Integer(int_sum)
                 }
             } else {
                 SqlValue::Null

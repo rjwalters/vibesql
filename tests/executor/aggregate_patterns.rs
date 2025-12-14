@@ -178,6 +178,7 @@ fn test_aggregate_distinct_with_arithmetic() {
         execute_query(&db, "SELECT DISTINCT + - SUM( DISTINCT - col1 ) FROM tab1").unwrap();
     assert_eq!(result.len(), 1);
     // sum(distinct -14, -5, -47) = -66, then + - (-66) = 66
-    // Note: SUM() returns REAL (Numeric) for SQLite compatibility
-    assert_eq!(result[0].values[0], SqlValue::Numeric(66.0));
+    // Note: SQLite's SUM() preserves integer type for integer inputs.
+    // Only TOTAL() always returns REAL.
+    assert_eq!(result[0].values[0], SqlValue::Integer(66));
 }

@@ -183,8 +183,8 @@ pub fn compute_multiply_aggregate(
 
             return match op {
                 AggregateOp::Sum => {
-                    // SQLite's SUM() always returns REAL (float)
-                    Ok(SqlValue::Numeric(sum as f64))
+                    // SQLite's SUM() preserves integer type for integer inputs
+                    Ok(SqlValue::Integer(sum))
                 }
                 AggregateOp::Count => Ok(SqlValue::Integer(len as i64)),
                 AggregateOp::Avg => Ok(if len > 0 {
@@ -215,8 +215,8 @@ pub fn compute_multiply_aggregate(
 
         return match op {
             AggregateOp::Sum => {
-                // SQLite's SUM() always returns REAL (float)
-                Ok(if count > 0 { SqlValue::Numeric(sum as f64) } else { SqlValue::Null })
+                // SQLite's SUM() preserves integer type for integer inputs
+                Ok(if count > 0 { SqlValue::Integer(sum) } else { SqlValue::Null })
             }
             AggregateOp::Count => Ok(SqlValue::Integer(count)),
             AggregateOp::Avg => Ok(if count > 0 {

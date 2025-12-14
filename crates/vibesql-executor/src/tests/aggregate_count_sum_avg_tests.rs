@@ -162,8 +162,8 @@ fn test_sum_no_group_by() {
 
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
-    // SQLite's SUM() always returns REAL (float)
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(450.0));
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(450));
 }
 
 #[test]
@@ -326,8 +326,8 @@ fn test_sum_with_nulls() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // SUM ignores NULL values, so 100 + 200 = 300
-    // SQLite's SUM() always returns REAL (float)
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(300.0));
+    // SQLite's SUM() preserves integer type for integer inputs
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(300));
 }
 
 #[test]
@@ -410,7 +410,7 @@ fn test_avg_function() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // AVG(80, 90, 70) = 240 / 3 = 80
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(80.0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Double(80.0));
 }
 
 #[test]
@@ -493,7 +493,7 @@ fn test_avg_with_nulls() {
     let result = executor.execute(&stmt).unwrap();
     assert_eq!(result.len(), 1);
     // AVG ignores NULL, so (5 + 3) / 2 = 4
-    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Numeric(4.0));
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Double(4.0));
 }
 
 #[test]

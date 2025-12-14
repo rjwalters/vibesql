@@ -336,13 +336,13 @@ pub fn fast_aggregate_on_rows(
         .map(|(spec, acc)| match spec.op {
             AggregateOp::Count => SqlValue::Integer(acc.count),
             AggregateOp::Sum => {
-                // SQLite's SUM() always returns REAL (float)
+                // SQLite's SUM() preserves integer type for integer inputs
                 if acc.count == 0 {
                     SqlValue::Null
                 } else if acc.is_integer {
-                    SqlValue::Numeric(acc.sum_i64 as f64)
+                    SqlValue::Integer(acc.sum_i64)
                 } else {
-                    SqlValue::Numeric(acc.sum_f64)
+                    SqlValue::Double(acc.sum_f64)
                 }
             }
             AggregateOp::Avg => {
@@ -688,7 +688,7 @@ mod tests {
         // Only rows 0 and 2 pass the filter (quantity < 24 AND discount in range)
         // SUM(extendedprice) = 100.0 + 150.0 = 250.0
         assert!(
-            matches!(result_row.get(0), Some(&SqlValue::Numeric(sum)) if (sum - 250.0).abs() < 0.001)
+            matches!(result_row.get(0), Some(&SqlValue::Double(sum)) if (sum - 250.0).abs() < 0.001)
         );
         // COUNT(*) = 2
         assert_eq!(result_row.get(1), Some(&SqlValue::Integer(2)));
@@ -716,7 +716,7 @@ mod tests {
         let result_row = &result[0];
 
         // SUM(col0) = 60 (SQLite's SUM() returns REAL)
-        assert_eq!(result_row.get(0), Some(&SqlValue::Numeric(60.0)));
+        assert_eq!(result_row.get(0), Some(&SqlValue::Integer(60)));
         // AVG(col1) = 2.5
         assert!(
             matches!(result_row.get(1), Some(&SqlValue::Double(avg)) if (avg - 2.5).abs() < 0.001)
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(result_rows[0].len(), 1);
 
         // Sum should be 1.5 + 2.5 + 3.5 + 4.5 = 12.0
-        if let Some(SqlValue::Numeric(sum)) = result_rows[0].get(0) {
+        if let Some(SqlValue::Double(sum)) = result_rows[0].get(0) {
             assert!((sum - 12.0).abs() < 0.001);
         } else {
             panic!("Expected Numeric value for SUM");
@@ -838,7 +838,7 @@ mod tests {
         assert_eq!(result_rows[0].len(), 1);
 
         // Sum of rows where quantity < 25: 1.5 + 2.5 = 4.0
-        if let Some(SqlValue::Numeric(sum)) = result_rows[0].get(0) {
+        if let Some(SqlValue::Double(sum)) = result_rows[0].get(0) {
             assert!((sum - 4.0).abs() < 0.001);
         } else {
             panic!("Expected Numeric value for SUM");
@@ -880,7 +880,7 @@ mod tests {
         assert_eq!(result_rows[0].len(), 3);
 
         // Check SUM(price) = 12.0
-        if let Some(SqlValue::Numeric(sum)) = result_rows[0].get(0) {
+        if let Some(SqlValue::Double(sum)) = result_rows[0].get(0) {
             assert!((sum - 12.0).abs() < 0.001);
         } else {
             panic!("Expected Numeric value for SUM");
