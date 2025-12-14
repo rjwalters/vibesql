@@ -1,6 +1,6 @@
 {
-  "generated_at": "2025-12-13T11:10:36.566563",
-  "git_commit": "c0472d1b",
+  "generated_at": "2025-12-13T19:54:08.097154",
+  "git_commit": "bf7507d0",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -84,6 +84,28 @@
           "geomean_ms": 16.82,
           "queries_passed": 22,
           "total_queries": 22
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T15:18:12.499123",
+          "commit": "110fe69f",
+          "avg_ms": 36.3,
+          "min_ms": 1.36,
+          "max_ms": 215.33,
+          "geomean_ms": 16.94,
+          "queries_passed": 22,
+          "total_queries": 22
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T17:54:20.693629",
+          "commit": "419bbbd3",
+          "avg_ms": 35.87,
+          "min_ms": 1.24,
+          "max_ms": 214.14,
+          "geomean_ms": 17.38,
+          "queries_passed": 22,
+          "total_queries": 22
         }
       ]
     },
@@ -146,6 +168,39 @@
           "geomean_ms": 9.15,
           "queries_passed": 408,
           "total_queries": 408
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T11:14:03.212979",
+          "commit": "810f19ab",
+          "avg_ms": 33.68,
+          "min_ms": 0.03,
+          "max_ms": 463.65,
+          "geomean_ms": 9.49,
+          "queries_passed": 408,
+          "total_queries": 408
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T15:33:00.428436",
+          "commit": "7086397f",
+          "avg_ms": 37.11,
+          "min_ms": 0.03,
+          "max_ms": 705.05,
+          "geomean_ms": 10.21,
+          "queries_passed": 408,
+          "total_queries": 408
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T18:06:33.186482",
+          "commit": "419bbbd3",
+          "avg_ms": 30.74,
+          "min_ms": 0.03,
+          "max_ms": 446.44,
+          "geomean_ms": 8.31,
+          "queries_passed": 408,
+          "total_queries": 408
         }
       ]
     },
@@ -197,6 +252,20 @@
           "commit": "c0472d1b",
           "tps": 13642.0,
           "latency_us": 96.92
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T15:25:27.725178",
+          "commit": "110fe69f",
+          "tps": 11510.43,
+          "latency_us": 119.0
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T18:00:18.626925",
+          "commit": "419bbbd3",
+          "tps": 14394.8,
+          "latency_us": 82.91
         }
       ]
     },
@@ -251,6 +320,54 @@
             "update_non_index": 0.0021,
             "delete": 0.0036,
             "range_queries": 0.0232
+          }
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T11:23:27.595296",
+          "commit": "810f19ab",
+          "avg_ms": 0.0061,
+          "min_ms": 0.0015,
+          "max_ms": 0.021,
+          "workloads": {
+            "point_select": 0.0015,
+            "insert": 0.0051,
+            "update_index": 0.0042,
+            "update_non_index": 0.0018,
+            "delete": 0.0027,
+            "range_queries": 0.021
+          }
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T15:42:51.876918",
+          "commit": "7086397f",
+          "avg_ms": 0.0067,
+          "min_ms": 0.0017,
+          "max_ms": 0.0226,
+          "workloads": {
+            "point_select": 0.0017,
+            "insert": 0.0056,
+            "update_index": 0.0052,
+            "update_non_index": 0.0021,
+            "delete": 0.0031,
+            "range_queries": 0.0226
+          }
+        },
+        {
+          "date": "2025-12-13",
+          "timestamp": "2025-12-13T18:15:41.063214",
+          "commit": "419bbbd3",
+          "avg_ms": 0.0061,
+          "min_ms": 0.0014,
+          "max_ms": 0.0212,
+          "workloads": {
+            "point_select": 0.0014,
+            "insert": 0.0051,
+            "update_index": 0.0041,
+            "update_non_index": 0.0018,
+            "delete": 0.0029,
+            "range_queries": 0.0212
           }
         }
       ]
