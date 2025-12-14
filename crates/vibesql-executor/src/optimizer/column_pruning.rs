@@ -181,9 +181,21 @@ fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<ColumnRef>
             collect_columns_from_expr(expr, columns);
         }
 
-        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+        Expression::Function { args, .. } => {
             for arg in args {
                 collect_columns_from_expr(arg, columns);
+            }
+        }
+
+        Expression::AggregateFunction { args, order_by, .. } => {
+            for arg in args {
+                collect_columns_from_expr(arg, columns);
+            }
+            // Also collect columns from ORDER BY expressions within the aggregate
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    collect_columns_from_expr(&item.expr, columns);
+                }
             }
         }
 
@@ -560,6 +572,7 @@ mod tests {
                 }),
             }],
             distinct: false,
+            order_by: None,
         };
 
         let mut columns = HashSet::new();

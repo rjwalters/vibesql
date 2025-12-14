@@ -16,6 +16,12 @@ pub fn read_u8<R: Read>(reader: &mut R) -> Result<u8, StorageError> {
     Ok(buf[0])
 }
 
+pub fn write_u8<W: Write>(writer: &mut W, value: u8) -> Result<(), StorageError> {
+    writer
+        .write_all(&[value])
+        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))
+}
+
 pub fn write_u32<W: Write>(writer: &mut W, value: u32) -> Result<(), StorageError> {
     writer
         .write_all(&value.to_le_bytes())

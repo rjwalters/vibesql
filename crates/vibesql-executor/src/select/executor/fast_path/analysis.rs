@@ -157,7 +157,7 @@ pub(crate) fn has_simple_aggregate_select_list(select_list: &[SelectItem]) -> bo
 /// Check if an expression is a simple aggregate function call
 pub(crate) fn is_simple_aggregate_expression(expr: &Expression) -> bool {
     match expr {
-        Expression::AggregateFunction { name, args, distinct } => {
+        Expression::AggregateFunction { name, args, distinct, .. } => {
             // Only support non-DISTINCT aggregates for streaming
             if *distinct {
                 return false;
@@ -188,7 +188,7 @@ pub(crate) fn extract_simple_aggregate(
     table_schema: &vibesql_catalog::TableSchema,
 ) -> Option<(String, usize)> {
     match expr {
-        Expression::AggregateFunction { name, args, distinct } => {
+        Expression::AggregateFunction { name, args, distinct, .. } => {
             if *distinct {
                 return None;
             }

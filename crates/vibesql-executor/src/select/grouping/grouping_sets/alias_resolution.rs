@@ -103,6 +103,7 @@ mod tests {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![Expression::Wildcard],
+                    order_by: None,
                 },
                 None,
             ),

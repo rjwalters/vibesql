@@ -789,6 +789,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            order_by: None,
         }];
 
         let result = execute_columnar(&rows, None, &aggregates, &schema);
@@ -825,6 +826,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            order_by: None,
         }];
 
         let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);
@@ -856,16 +858,19 @@ mod tests {
                 name: "SUM".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+                order_by: None,
             },
             Expression::AggregateFunction {
                 name: "COUNT".to_string(),
                 distinct: false,
                 args: vec![Expression::Wildcard],
+                order_by: None,
             },
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
                 args: vec![Expression::ColumnRef { table: None, column: "quantity".to_string() }],
+                order_by: None,
             },
         ];
 
@@ -907,6 +912,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: true,
             args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            order_by: None,
         }];
 
         let result = execute_columnar(&rows, None, &aggregates, &schema);
@@ -940,6 +946,7 @@ mod tests {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            order_by: None,
         }];
 
         let result = execute_columnar(&rows, Some(&filter), &aggregates, &schema);

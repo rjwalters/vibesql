@@ -97,7 +97,7 @@ fn evaluate_expr_on_result_row(
 ) -> Result<SqlValue, ExecutorError> {
     match expr {
         // Aggregate function - look up pre-computed value in result row
-        Expression::AggregateFunction { name, args, distinct } => {
+        Expression::AggregateFunction { name, args, distinct, .. } => {
             if *distinct {
                 return Err(ExecutorError::UnsupportedFeature(
                     "DISTINCT aggregates in HAVING not supported in columnar path".to_string(),

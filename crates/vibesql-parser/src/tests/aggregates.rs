@@ -15,7 +15,7 @@ fn test_parse_count_star() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+                    vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
                         assert_eq!(name, "count");
                         assert!(!(*distinct));
                         assert_eq!(args.len(), 1);
@@ -39,7 +39,7 @@ fn test_parse_count_column() {
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+                vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
                     assert_eq!(name, "count");
                     assert!(!(*distinct));
                     assert_eq!(args.len(), 1);
@@ -65,7 +65,7 @@ fn test_parse_sum_function() {
     match stmt {
         vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+                vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
                     assert_eq!(name, "sum");
                     assert!(!(*distinct));
                     assert_eq!(args.len(), 1);

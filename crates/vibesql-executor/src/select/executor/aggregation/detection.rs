@@ -126,7 +126,7 @@ impl SelectExecutor<'_> {
         let is_count_star = match &stmt.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => {
                 match expr {
-                    vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
+                    vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
                         // Must be COUNT, not DISTINCT, with single wildcard argument
                         if name.to_uppercase() != "COUNT" || *distinct || args.len() != 1 {
                             return None;

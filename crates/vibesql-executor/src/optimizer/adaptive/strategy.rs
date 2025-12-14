@@ -374,6 +374,7 @@ mod tests {
                             column: "quantity".to_string(),
                         }),
                     }],
+                    order_by: None,
                 },
                 alias: None, source_text: None }],
             into_table: None,

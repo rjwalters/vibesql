@@ -91,6 +91,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
                     table: Some("J".to_string()),          // UPPERCASE alias
                     column: "I_CURRENT_PRICE".to_string(), // UPPERCASE column - this was failing
                 }],
+                order_by: None,
             },
             alias: None,
             source_text: None,

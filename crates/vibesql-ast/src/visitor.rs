@@ -243,11 +243,30 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::UnaryOp { expr: inner, .. } => walk_expression(visitor, inner),
 
-        Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
+        Expression::Function { args, .. } => {
             for arg in args {
                 let result = walk_expression(visitor, arg);
                 if result.should_stop() {
                     return VisitResult::Stop;
+                }
+            }
+            VisitResult::Continue
+        }
+
+        Expression::AggregateFunction { args, order_by, .. } => {
+            for arg in args {
+                let result = walk_expression(visitor, arg);
+                if result.should_stop() {
+                    return VisitResult::Stop;
+                }
+            }
+            // Also visit ORDER BY expressions within the aggregate
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    let result = walk_expression(visitor, &item.expr);
+                    if result.should_stop() {
+                        return VisitResult::Stop;
+                    }
                 }
             }
             VisitResult::Continue
@@ -568,11 +587,22 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
             character_unit,
         },
 
-        Expression::AggregateFunction { name, distinct, args } => Expression::AggregateFunction {
-            name,
-            distinct,
-            args: args.into_iter().map(|a| transform_expression(visitor, a)).collect(),
-        },
+        Expression::AggregateFunction { name, distinct, args, order_by } => {
+            Expression::AggregateFunction {
+                name,
+                distinct,
+                args: args.into_iter().map(|a| transform_expression(visitor, a)).collect(),
+                order_by: order_by.map(|items| {
+                    items
+                        .into_iter()
+                        .map(|item| crate::OrderByItem {
+                            expr: transform_expression(visitor, item.expr),
+                            direction: item.direction,
+                        })
+                        .collect()
+                }),
+            }
+        }
 
         Expression::IsNull { expr: inner, negated } => {
             Expression::IsNull { expr: Box::new(transform_expression(visitor, *inner)), negated }

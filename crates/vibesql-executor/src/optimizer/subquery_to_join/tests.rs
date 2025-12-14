@@ -117,6 +117,7 @@ fn test_aggregate_subquery_transforms_to_derived_table() {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![column_ref("l_quantity")],
+            order_by: None,
         }),
         right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(300))),
     });

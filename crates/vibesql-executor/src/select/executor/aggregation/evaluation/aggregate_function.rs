@@ -4,7 +4,7 @@ use super::super::super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::{compiled_case::CompiledCaseExpression, CombinedExpressionEvaluator},
-    select::grouping::AggregateAccumulator,
+    select::grouping::{compare_sql_values, AggregateAccumulator},
 };
 
 /// Validate aggregate function argument count
@@ -81,10 +81,10 @@ pub(super) fn evaluate(
     group_rows: &[vibesql_storage::Row],
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
-    // Extract name, distinct, and args from AggregateFunction
-    let (name, distinct, args) = match expr {
-        vibesql_ast::Expression::AggregateFunction { name, distinct, args } => {
-            (name, *distinct, args)
+    // Extract name, distinct, args, and order_by from AggregateFunction
+    let (name, distinct, args, order_by) = match expr {
+        vibesql_ast::Expression::AggregateFunction { name, distinct, args, order_by } => {
+            (name, *distinct, args, order_by)
         }
         _ => unreachable!("evaluate called with non-aggregate expression"),
     };
@@ -156,6 +156,7 @@ pub(super) fn evaluate(
     // Handle GROUP_CONCAT with optional separator (2nd argument)
     // GROUP_CONCAT(expr) - uses comma separator
     // GROUP_CONCAT(expr, separator) - uses custom separator
+    // GROUP_CONCAT(expr ORDER BY ...) - sorted concatenation
     if name.to_uppercase() == "GROUP_CONCAT" {
         let separator = if args.len() == 2 {
             // Evaluate separator (second argument) - it should be a constant string
@@ -182,6 +183,55 @@ pub(super) fn evaluate(
             )));
         };
 
+        // Handle ORDER BY clause within the aggregate
+        if let Some(order_items) = order_by {
+            // Collect (value, sort_keys) pairs for each row
+            let mut value_sort_pairs: Vec<(vibesql_types::SqlValue, Vec<(vibesql_types::SqlValue, bool)>)> =
+                Vec::with_capacity(group_rows.len());
+
+            for row in group_rows {
+                evaluator.clear_cse_cache();
+                let value = evaluator.eval(&args[0], row)?;
+
+                // Skip NULL values
+                if matches!(value, vibesql_types::SqlValue::Null) {
+                    continue;
+                }
+
+                // Evaluate sort keys
+                let mut sort_keys = Vec::with_capacity(order_items.len());
+                for item in order_items {
+                    let sort_value = evaluator.eval(&item.expr, row)?;
+                    let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
+                    sort_keys.push((sort_value, is_desc));
+                }
+
+                value_sort_pairs.push((value, sort_keys));
+            }
+
+            // Sort by the sort keys
+            value_sort_pairs.sort_by(|a, b| {
+                for ((val_a, desc_a), (val_b, _desc_b)) in a.1.iter().zip(b.1.iter()) {
+                    let cmp = compare_sql_values(val_a, val_b);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return if *desc_a { cmp.reverse() } else { cmp };
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
+
+            // Now accumulate in sorted order
+            let mut acc = AggregateAccumulator::new_with_separator(name, distinct, &separator)?;
+            for (value, _) in value_sort_pairs {
+                acc.accumulate(&value);
+            }
+
+            let result = acc.finalize();
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+            return Ok(result);
+        }
+
+        // No ORDER BY - use the original path
         let mut acc = AggregateAccumulator::new_with_separator(name, distinct, &separator)?;
 
         for row in group_rows {

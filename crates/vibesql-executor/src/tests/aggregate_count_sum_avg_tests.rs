@@ -653,6 +653,7 @@ fn test_count_star_in_simple_case_expression() {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
+                    order_by: None,
                 })),
                 when_clauses: vec![vibesql_ast::CaseWhen {
                     conditions: vec![vibesql_ast::Expression::Literal(
@@ -727,6 +728,7 @@ fn test_count_star_in_searched_case_expression() {
                             name: "COUNT".to_string(),
                             distinct: false,
                             args: vec![vibesql_ast::Expression::Wildcard],
+                            order_by: None,
                         }),
                         op: vibesql_ast::BinaryOperator::GreaterThan,
                         right: Box::new(vibesql_ast::Expression::Literal(
@@ -800,6 +802,7 @@ fn test_count_star_in_arithmetic_expression() {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
+                    order_by: None,
                 }),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(vibesql_ast::Expression::Literal(
@@ -870,6 +873,7 @@ fn test_count_star_in_case_then_clause() {
                         name: "COUNT".to_string(),
                         distinct: false,
                         args: vec![vibesql_ast::Expression::Wildcard],
+                        order_by: None,
                     },
                 }],
                 else_result: Some(Box::new(vibesql_ast::Expression::Literal(
@@ -929,6 +933,7 @@ fn test_count_star_in_nested_case_expression() {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
+                    order_by: None,
                 })),
                 when_clauses: vec![vibesql_ast::CaseWhen {
                     conditions: vec![vibesql_ast::Expression::Literal(
