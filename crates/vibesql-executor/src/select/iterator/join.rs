@@ -108,6 +108,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
 
         // Manually combine two CombinedSchema instances
         let mut table_schemas = left_schema.table_schemas.clone();
+        let mut table_display_names = left_schema.table_display_names.clone();
         let left_total = left_schema.total_columns;
         let mut right_total = 0;
 
@@ -119,6 +120,13 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             right_total += schema.columns.len();
         }
 
+        // Merge display names from right schema
+        for (table_key, display_name) in right_schema.table_display_names.iter() {
+            if !table_display_names.contains_key(table_key) {
+                table_display_names.insert(table_key.clone(), display_name.clone());
+            }
+        }
+
         // Merge hidden columns, adjusting right side indices
         let mut hidden_columns = left_schema.hidden_columns.clone();
         for idx in right_schema.hidden_columns.iter() {
@@ -126,7 +134,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
         }
 
         let combined_schema =
-            CombinedSchema { table_schemas, total_columns: left_total + right_total, hidden_columns };
+            CombinedSchema { table_schemas, table_display_names, total_columns: left_total + right_total, hidden_columns };
 
         let right_count = right_rows.len();
 

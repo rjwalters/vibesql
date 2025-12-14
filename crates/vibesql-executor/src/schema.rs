@@ -106,6 +106,10 @@ pub struct CombinedSchema {
     /// start_index is where this table's columns begin in the combined row
     /// Keys are always lowercase for case-insensitive lookups
     pub table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
+    /// Map from table key to display name (preserves original case for aliases)
+    /// Used for SELECT * wildcard expansion with full_column_names PRAGMA
+    /// Maps TableKey (lowercase) → original-case alias/table name for display
+    pub table_display_names: HashMap<TableKey, String>,
     /// Total number of columns across all tables
     pub total_columns: usize,
     /// Columns that are hidden from `SELECT *` expansion due to NATURAL JOIN deduplication.
@@ -122,9 +126,12 @@ impl CombinedSchema {
     pub fn from_table(table_name: String, schema: vibesql_catalog::TableSchema) -> Self {
         let total_columns = schema.columns.len();
         let mut table_schemas = HashMap::new();
-        // TableKey automatically normalizes to lowercase
-        table_schemas.insert(TableKey::new(table_name), (0, schema));
-        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
+        let mut table_display_names = HashMap::new();
+        let key = TableKey::new(&table_name);
+        // Store both the schema and the display name (preserves original case)
+        table_schemas.insert(key.clone(), (0, schema));
+        table_display_names.insert(key, table_name);
+        CombinedSchema { table_schemas, table_display_names, total_columns, hidden_columns: HashSet::new() }
     }
 
     /// Create a new combined schema from a derived table (subquery result)
@@ -151,9 +158,12 @@ impl CombinedSchema {
 
         let schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
         let mut table_schemas = HashMap::new();
+        let mut table_display_names = HashMap::new();
         // TableKey automatically normalizes to lowercase
-        table_schemas.insert(TableKey::new(alias), (0, schema));
-        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
+        let key = TableKey::new(alias.clone());
+        table_schemas.insert(key.clone(), (0, schema));
+        table_display_names.insert(key, alias);
+        CombinedSchema { table_schemas, table_display_names, total_columns, hidden_columns: HashSet::new() }
     }
 
     /// Combine two schemas (for JOIN operations)
@@ -165,12 +175,19 @@ impl CombinedSchema {
         right_schema: vibesql_catalog::TableSchema,
     ) -> Self {
         let mut table_schemas = left.table_schemas;
+        let mut table_display_names = left.table_display_names;
         let left_total = left.total_columns;
         let right_columns = right_schema.columns.len();
         // TableKey automatically normalizes to lowercase
-        table_schemas.insert(right_table.into(), (left_total, right_schema));
+        let right_key: TableKey = right_table.into();
+        table_schemas.insert(right_key.clone(), (left_total, right_schema));
+        // Store the display name (preserves original case)
+        if !table_display_names.contains_key(&right_key) {
+            table_display_names.insert(right_key.clone(), right_key.to_string());
+        }
         CombinedSchema {
             table_schemas,
+            table_display_names,
             total_columns: left_total + right_columns,
             hidden_columns: left.hidden_columns,
         }
@@ -187,6 +204,7 @@ impl CombinedSchema {
     /// for the left schema's total column count.
     pub fn merge(left: CombinedSchema, right: CombinedSchema) -> Self {
         let mut table_schemas = left.table_schemas;
+        let mut table_display_names = left.table_display_names;
         let left_total = left.total_columns;
 
         // Add all tables from right schema with adjusted start indices
@@ -195,13 +213,20 @@ impl CombinedSchema {
             table_schemas.insert(table_key, (adjusted_start, schema));
         }
 
+        // Merge display names from right schema
+        for (table_key, display_name) in right.table_display_names {
+            if !table_display_names.contains_key(&table_key) {
+                table_display_names.insert(table_key, display_name);
+            }
+        }
+
         // Merge hidden columns, adjusting right side indices
         let mut hidden_columns = left.hidden_columns;
         for idx in right.hidden_columns {
             hidden_columns.insert(left_total + idx);
         }
 
-        CombinedSchema { table_schemas, total_columns: left_total + right.total_columns, hidden_columns }
+        CombinedSchema { table_schemas, table_display_names, total_columns: left_total + right.total_columns, hidden_columns }
     }
 
     /// Look up a column by name (optionally qualified with table name)
@@ -445,7 +470,7 @@ impl SchemaBuilder {
     ///
     /// This consumes the builder and produces the schema in O(1) time
     pub fn build(self) -> CombinedSchema {
-        CombinedSchema { table_schemas: self.table_schemas, total_columns: self.column_offset, hidden_columns: self.hidden_columns }
+        CombinedSchema { table_schemas: self.table_schemas, table_display_names: HashMap::new(), total_columns: self.column_offset, hidden_columns: self.hidden_columns }
     }
 }
 

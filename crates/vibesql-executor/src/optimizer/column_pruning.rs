@@ -499,6 +499,7 @@ pub fn remap_schema(
 
     crate::schema::CombinedSchema {
         table_schemas: new_table_schemas,
+        table_display_names: std::collections::HashMap::new(),
         total_columns: projection_indices.len(),
         hidden_columns: std::collections::HashSet::new(),
     }
