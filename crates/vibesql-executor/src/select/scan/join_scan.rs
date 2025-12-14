@@ -268,6 +268,7 @@ where
         join_type,
         &effective_condition,
         natural,
+        using_columns.as_ref().map(|v| v.as_slice()),
         database,
         &equijoin_predicates,
         &timeout_ctx,

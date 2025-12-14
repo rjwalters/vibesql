@@ -445,6 +445,7 @@ pub(super) fn nested_loop_join(
     join_type: &vibesql_ast::JoinType,
     condition: &Option<vibesql_ast::Expression>,
     natural: bool,
+    using_columns: Option<&[String]>,
     database: &vibesql_storage::Database,
     additional_equijoins: &[vibesql_ast::Expression],
     timeout_ctx: &TimeoutContext,
@@ -470,7 +471,7 @@ pub(super) fn nested_loop_join(
                 // Use multi-column hash join if there are 2+ join columns
                 if multi_result.equi_joins.left_col_indices.len() >= 2 {
                     // Save schemas for NATURAL JOIN processing before moving left/right
-                    let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                    let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                         (Some(left.schema.clone()), Some(right.schema.clone()))
                     } else {
                         (None, None)
@@ -497,17 +498,28 @@ pub(super) fn nested_loop_join(
                         }
                     }
 
-                    // For NATURAL JOIN, remove duplicate columns from the result
+                    // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                     if natural {
-                        if let (Some(left_schema), Some(right_schema_orig)) =
-                            (left_schema_for_natural, right_schema_for_natural)
+                        if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                            (left_schema_for_dedup, right_schema_for_dedup)
                         {
                             // Use the original right schema directly to handle nested joins
                             // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                             result = remove_duplicate_columns_for_natural_join(
                                 result,
-                                &left_schema,
-                                &right_schema_orig,
+                                left_schema,
+                                right_schema_orig,
+                            )?;
+                        }
+                    } else if let Some(using_cols) = using_columns {
+                        if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                            (left_schema_for_dedup, right_schema_for_dedup)
+                        {
+                            result = remove_duplicate_columns_for_using_join(
+                                result,
+                                left_schema,
+                                right_schema_orig,
+                                using_cols,
                             )?;
                         }
                     }
@@ -517,7 +529,7 @@ pub(super) fn nested_loop_join(
 
                 // Single-column equi-join: use standard hash join (more efficient for single key)
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -538,17 +550,28 @@ pub(super) fn nested_loop_join(
                     }
                 }
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -565,7 +588,7 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_or_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -586,17 +609,28 @@ pub(super) fn nested_loop_join(
                     }
                 }
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -612,7 +646,7 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_arithmetic_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -626,17 +660,28 @@ pub(super) fn nested_loop_join(
                     arith_info.offset,
                 )?;
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -669,7 +714,7 @@ pub(super) fn nested_loop_join(
             // If we found 2+ equi-join conditions, use multi-column hash join
             if left_col_indices.len() >= 2 {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -693,17 +738,28 @@ pub(super) fn nested_loop_join(
                     }
                 }
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -719,7 +775,7 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_equi_join(equijoin, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -748,17 +804,28 @@ pub(super) fn nested_loop_join(
                     }
                 }
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -775,7 +842,7 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_arithmetic_equi_join(equijoin, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -805,17 +872,28 @@ pub(super) fn nested_loop_join(
                     }
                 }
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -843,7 +921,7 @@ pub(super) fn nested_loop_join(
                 join_analyzer::analyze_multi_column_equi_join(cond, &temp_schema, left_col_count)
             {
                 // Save schemas for NATURAL JOIN processing before moving left/right
-                let (left_schema_for_natural, right_schema_for_natural) = if natural {
+                let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
                     (Some(left.schema.clone()), Some(right.schema.clone()))
                 } else {
                     (None, None)
@@ -880,17 +958,28 @@ pub(super) fn nested_loop_join(
                     }
                 }
 
-                // For NATURAL JOIN, remove duplicate columns from the result
+                // For NATURAL JOIN or USING clause, remove duplicate columns from the result
                 if natural {
-                    if let (Some(left_schema), Some(right_schema_orig)) =
-                        (left_schema_for_natural, right_schema_for_natural)
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
                     {
                         // Use the original right schema directly to handle nested joins
                         // with multiple tables (e.g., t1 NATURAL JOIN (t2 JOIN t3))
                         result = remove_duplicate_columns_for_natural_join(
                             result,
-                            &left_schema,
-                            &right_schema_orig,
+                            left_schema,
+                            right_schema_orig,
+                        )?;
+                    }
+                } else if let Some(using_cols) = using_columns {
+                    if let (Some(ref left_schema), Some(ref right_schema_orig)) =
+                        (left_schema_for_dedup, right_schema_for_dedup)
+                    {
+                        result = remove_duplicate_columns_for_using_join(
+                            result,
+                            left_schema,
+                            right_schema_orig,
+                            using_cols,
                         )?;
                     }
                 }
@@ -1073,7 +1162,7 @@ pub(super) fn nested_loop_join(
 
     // Fall back to nested loop join for all other cases
     // For NATURAL JOIN, we need to preserve the original schemas for duplicate removal
-    let (left_schema_for_natural, right_schema_for_natural) = if natural {
+    let (left_schema_for_dedup, right_schema_for_dedup) = if natural || using_columns.is_some() {
         (Some(left.schema.clone()), Some(right.schema.clone()))
     } else {
         (None, None)
@@ -1103,13 +1192,20 @@ pub(super) fn nested_loop_join(
         }
     }?;
 
-    // For NATURAL JOIN, remove duplicate columns from the result
+    // For NATURAL JOIN or USING clause, remove duplicate columns from the result
     if natural {
-        if let (Some(left_schema), Some(right_schema)) =
-            (left_schema_for_natural, right_schema_for_natural)
+        if let (Some(ref left_schema), Some(ref right_schema)) =
+            (left_schema_for_dedup, right_schema_for_dedup)
         {
             result =
-                remove_duplicate_columns_for_natural_join(result, &left_schema, &right_schema)?;
+                remove_duplicate_columns_for_natural_join(result, left_schema, right_schema)?;
+        }
+    } else if let Some(using_cols) = using_columns {
+        if let (Some(ref left_schema), Some(ref right_schema)) =
+            (left_schema_for_dedup, right_schema_for_dedup)
+        {
+            result =
+                remove_duplicate_columns_for_using_join(result, left_schema, right_schema, using_cols)?;
         }
     }
 
@@ -1192,6 +1288,88 @@ fn remove_duplicate_columns_for_natural_join(
     }
 
     // Project the rows - get mutable reference to rows to work with FromResult API
+    let rows = result.rows();
+    let new_rows: Vec<vibesql_storage::Row> = rows
+        .iter()
+        .map(|row| {
+            let new_values: Vec<vibesql_types::SqlValue> =
+                keep_indices.iter().filter_map(|&i| row.values.get(i).cloned()).collect();
+            vibesql_storage::Row::new(new_values)
+        })
+        .collect();
+
+    Ok(FromResult::from_rows(new_schema, new_rows))
+}
+
+/// Remove duplicate columns for USING clause JOIN
+///
+/// USING clause should only include the specified columns once (from the left side).
+/// This function removes the USING columns from the right side of the join result.
+fn remove_duplicate_columns_for_using_join(
+    mut result: FromResult,
+    left_schema: &CombinedSchema,
+    right_schema: &CombinedSchema,
+    using_cols: &[String],
+) -> Result<FromResult, ExecutorError> {
+    use std::collections::HashSet;
+
+    // Create a set of USING column names (lowercase for case-insensitive comparison)
+    let using_cols_lower: HashSet<String> =
+        using_cols.iter().map(|c| c.to_lowercase()).collect();
+
+    // Count columns in left schema
+    let left_col_count = left_schema.total_columns;
+
+    // Identify which columns from the right side are USING columns to remove
+    let mut right_duplicate_indices: HashSet<usize> = HashSet::new();
+    let mut col_idx = 0;
+    for (_table_idx, table_schema) in right_schema.table_schemas.values() {
+        for col in &table_schema.columns {
+            let lowercase = col.name.to_lowercase();
+            if using_cols_lower.contains(&lowercase) {
+                // This is a USING column, mark it as a duplicate to remove
+                right_duplicate_indices.insert(left_col_count + col_idx);
+            }
+            col_idx += 1;
+        }
+    }
+
+    // If no duplicates, return as-is
+    if right_duplicate_indices.is_empty() {
+        return Ok(result);
+    }
+
+    // Project out the duplicate columns from the result
+    let total_cols = left_col_count + col_idx;
+    let keep_indices: Vec<usize> =
+        (0..total_cols).filter(|i| !right_duplicate_indices.contains(i)).collect();
+
+    // Build new schema without duplicate columns
+    use std::collections::HashMap;
+    let mut new_schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
+    for (table_name, (table_start_idx, table_schema)) in &result.schema.table_schemas {
+        let mut new_cols = Vec::new();
+
+        for (idx, col) in table_schema.columns.iter().enumerate() {
+            // Calculate absolute column index manually
+            let abs_col_idx = table_start_idx + idx;
+
+            if keep_indices.contains(&abs_col_idx) {
+                new_cols.push(col.clone());
+            }
+        }
+
+        if !new_cols.is_empty() {
+            let new_table_schema =
+                vibesql_catalog::TableSchema::new(table_schema.name.clone(), new_cols);
+            new_schema
+                .table_schemas
+                .insert(table_name.clone(), (new_schema.total_columns, new_table_schema.clone()));
+            new_schema.total_columns += new_table_schema.columns.len();
+        }
+    }
+
+    // Project the rows
     let rows = result.rows();
     let new_rows: Vec<vibesql_storage::Row> = rows
         .iter()

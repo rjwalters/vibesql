@@ -864,28 +864,64 @@ pub(crate) fn resolve_where_aliases(
     where_expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],
 ) -> vibesql_ast::Expression {
-    // Use the same resolution logic as ORDER BY, but for all expression types
-    resolve_where_expression(where_expr, select_list)
+    // Use empty schema - no table columns to protect from alias resolution
+    resolve_where_expression_with_schema(where_expr, select_list, &std::collections::HashSet::new())
+}
+
+/// Resolve SELECT aliases in WHERE clause with schema column awareness.
+///
+/// Same as `resolve_where_aliases`, but also takes a schema to extract table column names.
+/// Column names that exist in the table schema will NOT be resolved as aliases.
+///
+/// **IMPORTANT**: Table column names take precedence over SELECT aliases.
+/// If a column name exists in the table schema, it will NOT be resolved as an alias,
+/// even if a SELECT alias with the same name exists.
+///
+/// Example:
+/// ```sql
+/// SELECT COUNT(*) AS col1 FROM tab0 WHERE col1 > 0
+/// -- col1 in WHERE refers to the TABLE COLUMN (tab0.col1), not the alias
+/// ```
+pub(crate) fn resolve_where_aliases_with_schema(
+    where_expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+    schema: &crate::schema::CombinedSchema,
+) -> vibesql_ast::Expression {
+    // Build set of all column names in the schema (lowercase for case-insensitive matching)
+    let table_columns: std::collections::HashSet<String> = schema
+        .table_schemas
+        .values()
+        .flat_map(|(_, table_schema)| table_schema.columns.iter().map(|c| c.name.to_lowercase()))
+        .collect();
+    resolve_where_expression_with_schema(where_expr, select_list, &table_columns)
 }
 
 /// Recursively resolve alias references in a WHERE clause expression.
-fn resolve_where_expression(
+fn resolve_where_expression_with_schema(
     expr: &vibesql_ast::Expression,
     select_list: &[vibesql_ast::SelectItem],
+    table_columns: &std::collections::HashSet<String>,
 ) -> vibesql_ast::Expression {
     use vibesql_ast::Expression;
 
     match expr {
         // Column reference: check if it's an alias
         Expression::ColumnRef { table: None, column } => {
-            // SQLite behavior: column references take precedence over aliases
-            // Only resolve to alias if the name is NOT a simple column reference in the SELECT list
+            // SQLite behavior: table column names ALWAYS take precedence over aliases
+            // If the column name exists in the table schema, it refers to the table column,
+            // not to any SELECT alias with the same name.
             //
-            // Example: SELECT a, b AS a FROM t1 WHERE a > 15
-            // Here 'a' appears as both a column (SELECT a) and an alias (b AS a)
-            // SQLite resolves WHERE a to the column, not the alias
+            // Example: SELECT COUNT(*) AS col1 FROM tab0 WHERE col1 > 0
+            // Here 'col1' in WHERE refers to the TABLE COLUMN (tab0.col1), not the alias
             //
-            // Check if any SELECT item is a direct column reference with this name
+            // Check if this column exists in the table schema
+            if table_columns.contains(&column.to_lowercase()) {
+                // Column exists in table - don't resolve to alias
+                return expr.clone();
+            }
+
+            // Fallback: check if any SELECT item is a direct column reference with this name
+            // (this is for backward compatibility when no schema is provided)
             for item in select_list {
                 if let vibesql_ast::SelectItem::Expression {
                     expr: Expression::ColumnRef { table: None, column: col_name },
@@ -933,21 +969,21 @@ fn resolve_where_expression(
 
         // BinaryOp: resolve both sides
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
-            left: Box::new(resolve_where_expression(left, select_list)),
+            left: Box::new(resolve_where_expression_with_schema(left, select_list, table_columns)),
             op: *op,
-            right: Box::new(resolve_where_expression(right, select_list)),
+            right: Box::new(resolve_where_expression_with_schema(right, select_list, table_columns)),
         },
 
         // UnaryOp: resolve inner expression
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op: *op,
-            expr: Box::new(resolve_where_expression(inner, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
         },
 
         // Function call: resolve all arguments
         Expression::Function { name, args, character_unit } => Expression::Function {
             name: name.clone(),
-            args: args.iter().map(|arg| resolve_where_expression(arg, select_list)).collect(),
+            args: args.iter().map(|arg| resolve_where_expression_with_schema(arg, select_list, table_columns)).collect(),
             character_unit: character_unit.clone(),
         },
 
@@ -955,97 +991,97 @@ fn resolve_where_expression(
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
             operand: operand
                 .as_ref()
-                .map(|op| Box::new(resolve_where_expression(op, select_list))),
+                .map(|op| Box::new(resolve_where_expression_with_schema(op, select_list, table_columns))),
             when_clauses: when_clauses
                 .iter()
                 .map(|clause| vibesql_ast::CaseWhen {
                     conditions: clause
                         .conditions
                         .iter()
-                        .map(|cond| resolve_where_expression(cond, select_list))
+                        .map(|cond| resolve_where_expression_with_schema(cond, select_list, table_columns))
                         .collect(),
-                    result: resolve_where_expression(&clause.result, select_list),
+                    result: resolve_where_expression_with_schema(&clause.result, select_list, table_columns),
                 })
                 .collect(),
             else_result: else_result
                 .as_ref()
-                .map(|e| Box::new(resolve_where_expression(e, select_list))),
+                .map(|e| Box::new(resolve_where_expression_with_schema(e, select_list, table_columns))),
         },
 
         // IS NULL / IS NOT NULL
         Expression::IsNull { expr: inner, negated } => Expression::IsNull {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
             negated: *negated,
         },
 
         // IS DISTINCT FROM / IS NOT DISTINCT FROM
         Expression::IsDistinctFrom { left, right, negated } => Expression::IsDistinctFrom {
-            left: Box::new(resolve_where_expression(left, select_list)),
-            right: Box::new(resolve_where_expression(right, select_list)),
+            left: Box::new(resolve_where_expression_with_schema(left, select_list, table_columns)),
+            right: Box::new(resolve_where_expression_with_schema(right, select_list, table_columns)),
             negated: *negated,
         },
 
         // IS TRUE / IS FALSE / IS UNKNOWN
         Expression::IsTruthValue { expr: inner, truth_value, negated } => Expression::IsTruthValue {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
             truth_value: *truth_value,
             negated: *negated,
         },
 
         // IN list
         Expression::InList { expr: inner, values, negated } => Expression::InList {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
-            values: values.iter().map(|v| resolve_where_expression(v, select_list)).collect(),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
+            values: values.iter().map(|v| resolve_where_expression_with_schema(v, select_list, table_columns)).collect(),
             negated: *negated,
         },
 
         // IN subquery: resolve the left expression, leave subquery unchanged
         Expression::In { expr: inner, subquery, negated } => Expression::In {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
             subquery: subquery.clone(),
             negated: *negated,
         },
 
         // BETWEEN
         Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
-            low: Box::new(resolve_where_expression(low, select_list)),
-            high: Box::new(resolve_where_expression(high, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
+            low: Box::new(resolve_where_expression_with_schema(low, select_list, table_columns)),
+            high: Box::new(resolve_where_expression_with_schema(high, select_list, table_columns)),
             negated: *negated,
             symmetric: *symmetric,
         },
 
         // LIKE
         Expression::Like { expr: inner, pattern, negated } => Expression::Like {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
-            pattern: Box::new(resolve_where_expression(pattern, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
+            pattern: Box::new(resolve_where_expression_with_schema(pattern, select_list, table_columns)),
             negated: *negated,
         },
 
         // CAST
         Expression::Cast { expr: inner, data_type } => Expression::Cast {
-            expr: Box::new(resolve_where_expression(inner, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
             data_type: data_type.clone(),
         },
 
         // Conjunction / Disjunction
         Expression::Conjunction(children) => Expression::Conjunction(
-            children.iter().map(|c| resolve_where_expression(c, select_list)).collect(),
+            children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
         ),
         Expression::Disjunction(children) => Expression::Disjunction(
-            children.iter().map(|c| resolve_where_expression(c, select_list)).collect(),
+            children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
         ),
 
         // Aggregate functions (resolve arguments)
         Expression::AggregateFunction { name, args, distinct } => Expression::AggregateFunction {
             name: name.clone(),
-            args: args.iter().map(|arg| resolve_where_expression(arg, select_list)).collect(),
+            args: args.iter().map(|arg| resolve_where_expression_with_schema(arg, select_list, table_columns)).collect(),
             distinct: *distinct,
         },
 
         // RowValueConstructor
         Expression::RowValueConstructor(children) => Expression::RowValueConstructor(
-            children.iter().map(|c| resolve_where_expression(c, select_list)).collect(),
+            children.iter().map(|c| resolve_where_expression_with_schema(c, select_list, table_columns)).collect(),
         ),
 
         // TRIM
@@ -1053,27 +1089,27 @@ fn resolve_where_expression(
             position: position.clone(),
             removal_char: removal_char
                 .as_ref()
-                .map(|c| Box::new(resolve_where_expression(c, select_list))),
-            string: Box::new(resolve_where_expression(string, select_list)),
+                .map(|c| Box::new(resolve_where_expression_with_schema(c, select_list, table_columns))),
+            string: Box::new(resolve_where_expression_with_schema(string, select_list, table_columns)),
         },
 
         // POSITION
         Expression::Position { substring, string, character_unit } => Expression::Position {
-            substring: Box::new(resolve_where_expression(substring, select_list)),
-            string: Box::new(resolve_where_expression(string, select_list)),
+            substring: Box::new(resolve_where_expression_with_schema(substring, select_list, table_columns)),
+            string: Box::new(resolve_where_expression_with_schema(string, select_list, table_columns)),
             character_unit: character_unit.clone(),
         },
 
         // EXTRACT
         Expression::Extract { field, expr: inner } => Expression::Extract {
             field: field.clone(),
-            expr: Box::new(resolve_where_expression(inner, select_list)),
+            expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
         },
 
         // INTERVAL
         Expression::Interval { value, unit, leading_precision, fractional_precision } => {
             Expression::Interval {
-                value: Box::new(resolve_where_expression(value, select_list)),
+                value: Box::new(resolve_where_expression_with_schema(value, select_list, table_columns)),
                 unit: unit.clone(),
                 leading_precision: *leading_precision,
                 fractional_precision: *fractional_precision,
@@ -1083,7 +1119,7 @@ fn resolve_where_expression(
         // Quantified comparison
         Expression::QuantifiedComparison { expr: inner, op, quantifier, subquery } => {
             Expression::QuantifiedComparison {
-                expr: Box::new(resolve_where_expression(inner, select_list)),
+                expr: Box::new(resolve_where_expression_with_schema(inner, select_list, table_columns)),
                 op: *op,
                 quantifier: quantifier.clone(),
                 subquery: subquery.clone(),
