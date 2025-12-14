@@ -1,6 +1,6 @@
 //! Common Table Expression (CTE) handling for SELECT queries
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use crate::errors::ExecutorError;
 
@@ -165,22 +165,22 @@ pub(super) fn derive_cte_schema(
 
 /// Execute a recursive CTE using iterative evaluation
 ///
-/// Recursive CTEs in SQL:1999/SQLite are defined with UNION ALL:
+/// Recursive CTEs in SQL:1999/SQLite are defined with UNION or UNION ALL:
 /// ```sql
 /// WITH RECURSIVE cte AS (
 ///   base_query          -- Executed once to get initial rows
-///   UNION ALL
+///   UNION [ALL]
 ///   recursive_query     -- References 'cte', executed iteratively
 /// )
 /// ```
 ///
 /// Algorithm:
-/// 1. Split query into base and recursive terms (before/after UNION ALL)
+/// 1. Split query into base and recursive terms (before/after UNION [ALL])
 /// 2. Execute base term to get initial working table
 /// 3. Repeat until no new rows or max depth reached:
 ///    - Make working table available as CTE
 ///    - Execute recursive term
-///    - Add new rows to result
+///    - Add new rows to result (with deduplication for UNION)
 ///    - Update working table to new rows
 fn execute_recursive_cte<F, M>(
     cte: &vibesql_ast::CommonTableExpr,
@@ -206,16 +206,16 @@ where
         ))
     })?;
 
-    if set_op.op != vibesql_ast::SetOperator::Union || !set_op.all {
+    if set_op.op != vibesql_ast::SetOperator::Union {
         return Err(ExecutorError::UnsupportedFeature(format!(
-            "Recursive CTE '{}' must use UNION ALL (not UNION, INTERSECT, or EXCEPT)",
+            "Recursive CTE '{}' must use UNION or UNION ALL (not INTERSECT or EXCEPT)",
             cte.name
         )));
     }
 
     // Extract base and recursive terms
-    // Base term: the main SELECT (before UNION ALL)
-    // Recursive term: the right side of UNION ALL
+    // Base term: the main SELECT (before UNION [ALL])
+    // Recursive term: the right side of UNION [ALL]
 
     // Create base-only query without the UNION ALL set operation
     // This prevents the base term from trying to reference the CTE before it exists
@@ -244,6 +244,18 @@ where
     // Derive schema from base term result
     let schema = derive_cte_schema(cte, &all_rows)?;
 
+    // Track seen rows for UNION (deduplication)
+    // For UNION ALL, we skip tracking to preserve all rows
+    let mut seen_rows: Option<HashSet<vibesql_storage::RowValues>> = if !set_op.all {
+        let mut seen = HashSet::with_capacity(all_rows.len());
+        for row in &all_rows {
+            seen.insert(row.values.clone());
+        }
+        Some(seen)
+    } else {
+        None
+    };
+
     // Step 2: Iterative evaluation
     let mut depth = 0;
     while !working_table.is_empty() && depth < MAX_RECURSION_DEPTH {
@@ -268,11 +280,25 @@ where
         let estimated_size = super::helpers::estimate_result_size(&new_rows);
         memory_check(estimated_size)?;
 
+        // Filter out duplicates for UNION (keep all for UNION ALL)
+        let rows_to_add: Vec<vibesql_storage::Row> = if let Some(ref mut seen) = seen_rows {
+            // UNION: only add rows we haven't seen before
+            new_rows.into_iter().filter(|row| seen.insert(row.values.clone())).collect()
+        } else {
+            // UNION ALL: keep all rows
+            new_rows
+        };
+
+        // If no new unique rows (for UNION), we're done
+        if rows_to_add.is_empty() {
+            break;
+        }
+
         // Add new rows to result
-        all_rows.extend(new_rows.clone());
+        all_rows.extend(rows_to_add.clone());
 
         // Update working table to be the new rows for next iteration
-        working_table = new_rows;
+        working_table = rows_to_add;
     }
 
     // Check if we hit max recursion depth
