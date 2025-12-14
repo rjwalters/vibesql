@@ -82,15 +82,11 @@ fn test_column_names_star_expansion() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // Column names include table prefix (full_column_names format)
+        // SQLite quirk: SELECT * always uses short column names, even with full_column_names=ON
+        // This matches SQLite behavior where wildcards ignore the PRAGMA setting
         assert_eq!(
             result.columns,
-            vec![
-                "employees.id",
-                "employees.name",
-                "employees.department",
-                "employees.salary"
-            ]
+            vec!["id", "name", "department", "salary"]
         );
         assert_eq!(result.rows.len(), 3);
     } else {
@@ -285,8 +281,8 @@ fn test_pragma_wildcard_full_column_names() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // full_column_names=ON: wildcards use table.column format
-        assert_eq!(result.columns, vec!["employees.id", "employees.name"]);
+        // SQLite quirk: SELECT * ignores full_column_names PRAGMA (always uses short names)
+        assert_eq!(result.columns, vec!["id", "name"]);
     } else {
         panic!("Expected SELECT statement");
     }
