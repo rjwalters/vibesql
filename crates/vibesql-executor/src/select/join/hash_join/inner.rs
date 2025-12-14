@@ -282,7 +282,7 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     let right_table_names = right.schema.table_names();
 
     // Extract right table name and schema for combining
-    let right_table_name = right
+    let right_table_id = right
         .schema
         .table_schemas
         .keys()
@@ -293,18 +293,13 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     let right_schema = right
         .schema
         .table_schemas
-        .get(&right_table_name)
+        .get(&right_table_id)
         .ok_or_else(|| ExecutorError::UnsupportedFeature("Complex JOIN".to_string()))?
         .1
         .clone();
 
-    // Get display name (alias or original table name) for the right table
-    let right_table_display_name = right
-        .schema
-        .table_display_names
-        .get(&right_table_name)
-        .cloned()
-        .unwrap_or_else(|| right_table_name.to_string());
+    // Get display name from the TableIdentifier
+    let right_table_display_name = right_table_id.display().to_string();
 
     // Combine schemas
     let combined_schema =

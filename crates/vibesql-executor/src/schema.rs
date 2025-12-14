@@ -5,6 +5,7 @@ use std::{
     hash::{Hash, Hasher},
     ops::Deref,
 };
+use vibesql_catalog::TableIdentifier;
 
 /// A normalized table/alias key for case-insensitive lookups.
 /// Always stored as lowercase, making case-insensitive handling impossible to get wrong.
@@ -102,14 +103,10 @@ impl From<&String> for TableKey {
 /// Represents the combined schema from multiple tables (for JOINs)
 #[derive(Debug, Clone)]
 pub struct CombinedSchema {
-    /// Map from table name (normalized via TableKey) to (start_index, TableSchema)
+    /// Map from table identifier to (start_index, TableSchema)
     /// start_index is where this table's columns begin in the combined row
-    /// Keys are always lowercase for case-insensitive lookups
-    pub table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
-    /// Map from table key to display name (preserves original case for aliases)
-    /// Used for SELECT * wildcard expansion with full_column_names PRAGMA
-    /// Maps TableKey (lowercase) → original-case alias/table name for display
-    pub table_display_names: HashMap<TableKey, String>,
+    /// TableIdentifier provides both canonical form for lookups and display form for output
+    pub table_schemas: HashMap<TableIdentifier, (usize, vibesql_catalog::TableSchema)>,
     /// Total number of columns across all tables
     pub total_columns: usize,
     /// Columns that are hidden from `SELECT *` expansion due to NATURAL JOIN deduplication.
@@ -122,21 +119,18 @@ pub struct CombinedSchema {
 impl CombinedSchema {
     /// Create a new combined schema from a single table
     ///
-    /// Note: Table name is automatically normalized via TableKey for case-insensitive lookups
+    /// Note: Table name is automatically normalized via TableIdentifier for case-insensitive lookups
     pub fn from_table(table_name: String, schema: vibesql_catalog::TableSchema) -> Self {
         let total_columns = schema.columns.len();
         let mut table_schemas = HashMap::new();
-        let mut table_display_names = HashMap::new();
-        let key = TableKey::new(&table_name);
-        // Store both the schema and the display name (preserves original case)
-        table_schemas.insert(key.clone(), (0, schema));
-        table_display_names.insert(key, table_name);
-        CombinedSchema { table_schemas, table_display_names, total_columns, hidden_columns: HashSet::new() }
+        let table_id = TableIdentifier::unquoted(&table_name);
+        table_schemas.insert(table_id, (0, schema));
+        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
     }
 
     /// Create a new combined schema from a derived table (subquery result)
     ///
-    /// Note: Alias is automatically normalized via TableKey for case-insensitive lookups
+    /// Note: Alias is automatically normalized via TableIdentifier for case-insensitive lookups
     pub fn from_derived_table(
         alias: String,
         column_names: Vec<String>,
@@ -158,36 +152,26 @@ impl CombinedSchema {
 
         let schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
         let mut table_schemas = HashMap::new();
-        let mut table_display_names = HashMap::new();
-        // TableKey automatically normalizes to lowercase
-        let key = TableKey::new(alias.clone());
-        table_schemas.insert(key.clone(), (0, schema));
-        table_display_names.insert(key, alias);
-        CombinedSchema { table_schemas, table_display_names, total_columns, hidden_columns: HashSet::new() }
+        let table_id = TableIdentifier::unquoted(&alias);
+        table_schemas.insert(table_id, (0, schema));
+        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
     }
 
     /// Combine two schemas (for JOIN operations)
     ///
-    /// Note: Right table name is automatically normalized via TableKey for case-insensitive lookups
+    /// Note: Right table name is automatically normalized via TableIdentifier for case-insensitive lookups
     pub fn combine(
         left: CombinedSchema,
-        right_table: impl Into<TableKey> + AsRef<str>,
+        right_table_name: String,
         right_schema: vibesql_catalog::TableSchema,
     ) -> Self {
         let mut table_schemas = left.table_schemas;
-        let mut table_display_names = left.table_display_names;
         let left_total = left.total_columns;
         let right_columns = right_schema.columns.len();
-        // Capture display name before converting to TableKey (preserves original case/alias)
-        let display_name = right_table.as_ref().to_string();
-        // TableKey automatically normalizes to lowercase
-        let right_key: TableKey = right_table.into();
-        table_schemas.insert(right_key.clone(), (left_total, right_schema));
-        // Store the display name (preserves original case/alias)
-        table_display_names.insert(right_key, display_name);
+        let right_id = TableIdentifier::unquoted(&right_table_name);
+        table_schemas.insert(right_id, (left_total, right_schema));
         CombinedSchema {
             table_schemas,
-            table_display_names,
             total_columns: left_total + right_columns,
             hidden_columns: left.hidden_columns,
         }
@@ -204,20 +188,12 @@ impl CombinedSchema {
     /// for the left schema's total column count.
     pub fn merge(left: CombinedSchema, right: CombinedSchema) -> Self {
         let mut table_schemas = left.table_schemas;
-        let mut table_display_names = left.table_display_names;
         let left_total = left.total_columns;
 
         // Add all tables from right schema with adjusted start indices
-        for (table_key, (start_index, schema)) in right.table_schemas {
+        for (table_id, (start_index, schema)) in right.table_schemas {
             let adjusted_start = left_total + start_index;
-            table_schemas.insert(table_key, (adjusted_start, schema));
-        }
-
-        // Merge display names from right schema
-        for (table_key, display_name) in right.table_display_names {
-            if !table_display_names.contains_key(&table_key) {
-                table_display_names.insert(table_key, display_name);
-            }
+            table_schemas.insert(table_id, (adjusted_start, schema));
         }
 
         // Merge hidden columns, adjusting right side indices
@@ -226,7 +202,7 @@ impl CombinedSchema {
             hidden_columns.insert(left_total + idx);
         }
 
-        CombinedSchema { table_schemas, table_display_names, total_columns: left_total + right.total_columns, hidden_columns }
+        CombinedSchema { table_schemas, total_columns: left_total + right.total_columns, hidden_columns }
     }
 
     /// Look up a column by name (optionally qualified with table name)
@@ -234,9 +210,9 @@ impl CombinedSchema {
     pub fn get_column_index(&self, table: Option<&str>, column: &str) -> Option<usize> {
         if let Some(table_name) = table {
             // Qualified column reference (table.column)
-            // TableKey normalizes to lowercase, so lookup is case-insensitive
-            let key = TableKey::new(table_name);
-            if let Some((start_index, schema)) = self.table_schemas.get(&key) {
+            // TableIdentifier normalizes to lowercase, so lookup is case-insensitive
+            let table_id = TableIdentifier::unquoted(table_name);
+            if let Some((start_index, schema)) = self.table_schemas.get(&table_id) {
                 return schema.get_column_index(column).map(|idx| start_index + idx);
             }
             None
@@ -283,27 +259,28 @@ impl CombinedSchema {
 
     /// Get a table schema by name (case-insensitive lookup)
     pub fn get_table(&self, table_name: &str) -> Option<&(usize, vibesql_catalog::TableSchema)> {
-        self.table_schemas.get(&TableKey::new(table_name))
+        self.table_schemas.get(&TableIdentifier::unquoted(table_name))
     }
 
     /// Check if a table exists (case-insensitive lookup)
     pub fn contains_table(&self, table_name: &str) -> bool {
-        self.table_schemas.contains_key(&TableKey::new(table_name))
+        self.table_schemas.contains_key(&TableIdentifier::unquoted(table_name))
     }
 
-    /// Get all table names as strings
+    /// Get all table names as strings (using display form)
     pub fn table_names(&self) -> Vec<String> {
-        self.table_schemas.keys().map(|k| k.to_string()).collect()
+        self.table_schemas.keys().map(|table_id| table_id.display().to_string()).collect()
     }
 
     /// Insert or update a table in the schema
     pub fn insert_table(
         &mut self,
-        name: impl Into<TableKey>,
+        name: String,
         start_index: usize,
         schema: vibesql_catalog::TableSchema,
     ) {
-        self.table_schemas.insert(name.into(), (start_index, schema));
+        let table_id = TableIdentifier::unquoted(&name);
+        self.table_schemas.insert(table_id, (start_index, schema));
     }
 
     /// Get the original column name from the schema for a column reference.
@@ -321,8 +298,8 @@ impl CombinedSchema {
     pub fn get_original_column_name(&self, table: Option<&str>, column: &str) -> String {
         if let Some(table_name) = table {
             // Qualified column reference (table.column)
-            let key = TableKey::new(table_name);
-            if let Some((_start_index, schema)) = self.table_schemas.get(&key) {
+            let table_id = TableIdentifier::unquoted(table_name);
+            if let Some((_start_index, schema)) = self.table_schemas.get(&table_id) {
                 if let Some(idx) = schema.get_column_index(column) {
                     return schema.columns[idx].name.clone();
                 }
@@ -370,8 +347,8 @@ impl CombinedSchema {
     pub fn get_full_column_name(&self, table: Option<&str>, column: &str) -> String {
         if let Some(table_name) = table {
             // Qualified column reference (table.column)
-            let key = TableKey::new(table_name);
-            if let Some((_start_index, schema)) = self.table_schemas.get(&key) {
+            let table_id = TableIdentifier::unquoted(table_name);
+            if let Some((_start_index, schema)) = self.table_schemas.get(&table_id) {
                 if let Some(idx) = schema.get_column_index(column) {
                     // Use the original table name from the schema
                     return format!("{}.{}", schema.name, schema.columns[idx].name);
@@ -430,7 +407,7 @@ impl CombinedSchema {
 /// the column offset as tables are added.
 #[derive(Debug)]
 pub struct SchemaBuilder {
-    table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
+    table_schemas: HashMap<TableIdentifier, (usize, vibesql_catalog::TableSchema)>,
     column_offset: usize,
     hidden_columns: HashSet<usize>,
 }
@@ -443,25 +420,24 @@ impl SchemaBuilder {
 
     /// Create a schema builder initialized with an existing CombinedSchema
     ///
-    /// Note: Table names are already normalized via TableKey
+    /// Note: Table names are already normalized via TableIdentifier
     pub fn from_schema(schema: CombinedSchema) -> Self {
         let column_offset = schema.total_columns;
-        // TableKeys are already normalized, just pass them through
         SchemaBuilder { table_schemas: schema.table_schemas, column_offset, hidden_columns: schema.hidden_columns }
     }
 
     /// Add a table to the schema
     ///
     /// This is an O(1) operation - columns are not copied, just indexed
-    /// Note: Table names are automatically normalized via TableKey for case-insensitive lookups
+    /// Note: Table names are automatically normalized via TableIdentifier for case-insensitive lookups
     pub fn add_table(
         &mut self,
-        name: impl Into<TableKey>,
+        name: String,
         schema: vibesql_catalog::TableSchema,
     ) -> &mut Self {
         let num_columns = schema.columns.len();
-        // TableKey automatically normalizes to lowercase
-        self.table_schemas.insert(name.into(), (self.column_offset, schema));
+        let table_id = TableIdentifier::unquoted(&name);
+        self.table_schemas.insert(table_id, (self.column_offset, schema));
         self.column_offset += num_columns;
         self
     }
@@ -470,7 +446,7 @@ impl SchemaBuilder {
     ///
     /// This consumes the builder and produces the schema in O(1) time
     pub fn build(self) -> CombinedSchema {
-        CombinedSchema { table_schemas: self.table_schemas, table_display_names: HashMap::new(), total_columns: self.column_offset, hidden_columns: self.hidden_columns }
+        CombinedSchema { table_schemas: self.table_schemas, total_columns: self.column_offset, hidden_columns: self.hidden_columns }
     }
 }
 

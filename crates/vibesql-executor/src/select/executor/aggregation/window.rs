@@ -18,7 +18,7 @@ use crate::{
         },
         CombinedExpressionEvaluator,
     },
-    schema::{CombinedSchema, TableKey},
+    schema::CombinedSchema,
 };
 
 /// Information about a window function that needs post-aggregation evaluation
@@ -208,9 +208,10 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
     let table_schema = vibesql_catalog::TableSchema::new("result".to_string(), columns);
 
     let mut table_schemas = std::collections::HashMap::new();
-    table_schemas.insert(TableKey::new("result"), (0, table_schema.clone()));
+    let table_id = vibesql_catalog::TableIdentifier::unquoted("result");
+    table_schemas.insert(table_id, (0, table_schema.clone()));
 
-    CombinedSchema { table_schemas, table_display_names: std::collections::HashMap::new(), total_columns: table_schema.columns.len(), hidden_columns: std::collections::HashSet::new() }
+    CombinedSchema { table_schemas, total_columns: table_schema.columns.len(), hidden_columns: std::collections::HashSet::new() }
 }
 
 /// Map an expression to a column reference in the result schema

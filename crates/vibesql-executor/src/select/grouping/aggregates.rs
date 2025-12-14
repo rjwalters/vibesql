@@ -29,6 +29,7 @@ pub enum AggregateAccumulator {
     Sum {
         sum: vibesql_types::SqlValue,
         count: i64,
+        has_non_integer: bool,
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
@@ -85,6 +86,7 @@ impl AggregateAccumulator {
             "SUM" => Ok(AggregateAccumulator::Sum {
                 sum: vibesql_types::SqlValue::Integer(0),
                 count: 0,
+                has_non_integer: false,
                 distinct,
                 seen,
             }),
@@ -132,7 +134,25 @@ impl AggregateAccumulator {
             }
 
             // SUM - sums numeric values (all numeric types), ignores NULLs
-            AggregateAccumulator::Sum { ref mut sum, ref mut count, distinct, seen } => {
+            AggregateAccumulator::Sum {
+                ref mut sum,
+                ref mut count,
+                ref mut has_non_integer,
+                distinct,
+                seen,
+            } => {
+                // Track non-integer values for type determination
+                // SQLite: If ANY non-integer value is encountered (NULL, TEXT, REAL, etc.),
+                // the result should be REAL, even if that value is skipped
+                if !matches!(
+                    value,
+                    vibesql_types::SqlValue::Integer(_)
+                        | vibesql_types::SqlValue::Bigint(_)
+                        | vibesql_types::SqlValue::Smallint(_)
+                ) {
+                    *has_non_integer = true;
+                }
+
                 // Fast path: Skip non-numeric values early
                 if value.is_null() || !is_numeric_value(value) {
                     return;
@@ -310,13 +330,24 @@ impl AggregateAccumulator {
     pub fn finalize(&self) -> vibesql_types::SqlValue {
         match self {
             AggregateAccumulator::Count { count, .. } => vibesql_types::SqlValue::Integer(*count),
-            AggregateAccumulator::Sum { sum, count, .. } => {
+            AggregateAccumulator::Sum { sum, count, has_non_integer, .. } => {
                 if *count == 0 {
                     vibesql_types::SqlValue::Null
+                } else if *has_non_integer {
+                    // Mixed types (saw NULL, TEXT, REAL, etc.) → return REAL
+                    // Convert integer sum to REAL with .0 suffix
+                    match sum {
+                        vibesql_types::SqlValue::Integer(v) => {
+                            vibesql_types::SqlValue::Double(*v as f64)
+                        }
+                        vibesql_types::SqlValue::Bigint(v) => vibesql_types::SqlValue::Double(*v as f64),
+                        vibesql_types::SqlValue::Smallint(v) => {
+                            vibesql_types::SqlValue::Double(*v as f64)
+                        }
+                        _ => sum.clone(), // Already a floating-point type
+                    }
                 } else {
-                    // SQLite's SUM() preserves integer type for integer inputs
-                    // Only TOTAL() always returns REAL (float)
-                    // Return the sum as-is, preserving type from accumulation
+                    // Pure integer inputs → preserve INTEGER type
                     sum.clone()
                 }
             }
@@ -390,14 +421,29 @@ impl AggregateAccumulator {
 
             // SUM: Add the sums
             (
-                AggregateAccumulator::Sum { sum: s1, count: c1, distinct: d1, seen: seen1 },
-                AggregateAccumulator::Sum { sum: s2, count: c2, distinct: d2, seen: seen2 },
+                AggregateAccumulator::Sum {
+                    sum: s1,
+                    count: c1,
+                    has_non_integer: h1,
+                    distinct: d1,
+                    seen: seen1,
+                },
+                AggregateAccumulator::Sum {
+                    sum: s2,
+                    count: c2,
+                    has_non_integer: h2,
+                    distinct: d2,
+                    seen: seen2,
+                },
             ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
                         "Cannot combine SUM with different DISTINCT flags".into(),
                     ));
                 }
+
+                // Combine has_non_integer flags (if either saw non-integer, result has non-integer)
+                *h1 = *h1 || h2;
 
                 if *d1 {
                     // DISTINCT: Merge seen sets, recalculate sum
@@ -846,12 +892,14 @@ mod tests {
         let mut acc1 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(10),
             count: 3,
+            has_non_integer: false,
             distinct: false,
             seen: None,
         };
         let acc2 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(5),
             count: 2,
+            has_non_integer: false,
             distinct: false,
             seen: None,
         };
@@ -954,6 +1002,7 @@ mod tests {
         let acc2 = AggregateAccumulator::Sum {
             sum: SqlValue::Integer(10),
             count: 3,
+            has_non_integer: false,
             distinct: false,
             seen: None,
         };

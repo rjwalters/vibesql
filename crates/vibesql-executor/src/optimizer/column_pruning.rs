@@ -389,9 +389,9 @@ pub fn compute_projection_indices(
             None => {
                 // Unqualified reference: try to resolve against all tables
                 let mut found = false;
-                for (tbl_name, (_start, tbl_schema)) in &schema.table_schemas {
+                for (tbl_id, (_start, tbl_schema)) in &schema.table_schemas {
                     if tbl_schema.columns.iter().any(|c| c.name.to_lowercase() == col_ref.column) {
-                        if let Some(idx) = schema.get_column_index(Some(tbl_name.as_str()), &col_ref.column) {
+                        if let Some(idx) = schema.get_column_index(Some(tbl_id.canonical()), &col_ref.column) {
                             indices.insert(idx);
                             found = true;
                             break;
@@ -447,7 +447,6 @@ pub fn remap_schema(
     original_schema: &crate::schema::CombinedSchema,
     projection_indices: &[usize],
 ) -> crate::schema::CombinedSchema {
-    use crate::schema::TableKey;
     use std::collections::HashMap;
 
     // Build a map from original index -> new projected index
@@ -458,11 +457,11 @@ pub fn remap_schema(
         .collect();
 
     // For each table in the original schema, build a new TableSchema with only the kept columns
-    let mut new_table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)> =
+    let mut new_table_schemas: HashMap<vibesql_catalog::TableIdentifier, (usize, vibesql_catalog::TableSchema)> =
         HashMap::new();
 
     // Track new column offset for each table
-    for (table_key, (original_start, original_table_schema)) in &original_schema.table_schemas {
+    for (table_id, (original_start, original_table_schema)) in &original_schema.table_schemas {
         // Find which columns from this table are in the projection
         let mut kept_columns: Vec<(usize, vibesql_catalog::ColumnSchema)> = Vec::new();
 
@@ -494,12 +493,11 @@ pub fn remap_schema(
             new_columns,
         );
 
-        new_table_schemas.insert(table_key.clone(), (new_start, new_table_schema));
+        new_table_schemas.insert(table_id.clone(), (new_start, new_table_schema));
     }
 
     crate::schema::CombinedSchema {
         table_schemas: new_table_schemas,
-        table_display_names: std::collections::HashMap::new(),
         total_columns: projection_indices.len(),
         hidden_columns: std::collections::HashSet::new(),
     }

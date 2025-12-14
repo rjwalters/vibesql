@@ -335,9 +335,9 @@ fn validate_expression_column_refs(
                 if let Some(ref qualifier) = table {
                     let qualifier_lower = qualifier.to_lowercase();
                     let table_exists =
-                        schema.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower);
+                        schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower);
                     let table_in_outer = outer_schema.is_some_and(|outer| {
-                        outer.table_schemas.keys().any(|k| k.to_lowercase() == qualifier_lower)
+                        outer.table_schemas.keys().any(|k| k.canonical() == qualifier_lower)
                     });
                     if table_exists || table_in_outer {
                         return Ok(());

@@ -133,14 +133,14 @@ pub(super) fn build_reordered_schema(
     // Walk through original order and rebuild schema with correct positions
     for table_name in original_order {
         // Find this table's schema in the current (optimally ordered) schema
-        // get_table handles case-insensitive lookups via TableKey
+        // get_table handles case-insensitive lookups via TableIdentifier
         let table_schema = current_schema.get_table(table_name).map(|(_, schema)| schema.clone());
 
         if let Some(schema) = table_schema {
             let col_count = schema.columns.len();
-            // TableKey handles case normalization automatically
-            new_table_schemas
-                .insert(crate::schema::TableKey::new(table_name), (current_position, schema));
+            // TableIdentifier handles case normalization automatically
+            let table_id = vibesql_catalog::TableIdentifier::unquoted(table_name);
+            new_table_schemas.insert(table_id, (current_position, schema));
             current_position += col_count;
         }
     }
@@ -148,7 +148,7 @@ pub(super) fn build_reordered_schema(
     // For reordered schemas, hidden_columns would need to be remapped to new positions
     // However, reordering happens before NATURAL JOIN deduplication, so hidden_columns
     // should be empty at this point
-    CombinedSchema { table_schemas: new_table_schemas, table_display_names: std::collections::HashMap::new(), total_columns: current_position, hidden_columns: std::collections::HashSet::new() }
+    CombinedSchema { table_schemas: new_table_schemas, total_columns: current_position, hidden_columns: std::collections::HashSet::new() }
 }
 
 /// Build a column permutation to restore original table ordering

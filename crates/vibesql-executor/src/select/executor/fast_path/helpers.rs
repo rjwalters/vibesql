@@ -128,7 +128,7 @@ impl SelectExecutor<'_> {
                             let table_exists = schema
                                 .table_schemas
                                 .keys()
-                                .any(|k| k.to_lowercase() == qualifier_lower);
+                                .any(|k| k.canonical() == qualifier_lower);
                             if table_exists {
                                 return Ok(());
                             }

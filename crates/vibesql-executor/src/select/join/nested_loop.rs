@@ -911,13 +911,8 @@ pub(super) fn nested_loop_cross_join(
         .1
         .clone();
 
-    // Get display name (alias or original table name) for the right table
-    let right_table_display_name = right
-        .schema
-        .table_display_names
-        .get(&right_table_name)
-        .cloned()
-        .unwrap_or_else(|| right_table_name.to_string());
+    // Get display name from the TableIdentifier
+    let right_table_display_name = right_table_name.display().to_string();
 
     // Combine schemas
     let combined_schema =
@@ -980,13 +975,8 @@ pub(super) fn nested_loop_semi_join(
         .1
         .clone();
 
-    // Get display name (alias or original table name) for the right table
-    let right_table_display_name = right
-        .schema
-        .table_display_names
-        .get(&right_table_name)
-        .cloned()
-        .unwrap_or_else(|| right_table_name.to_string());
+    // Get display name from the TableIdentifier
+    let right_table_display_name = right_table_name.display().to_string();
 
     // Create combined schema for condition evaluation
     let combined_schema =
@@ -1078,13 +1068,8 @@ pub(super) fn nested_loop_anti_join(
         .1
         .clone();
 
-    // Get display name (alias or original table name) for the right table
-    let right_table_display_name = right
-        .schema
-        .table_display_names
-        .get(&right_table_name)
-        .cloned()
-        .unwrap_or_else(|| right_table_name.to_string());
+    // Get display name from the TableIdentifier
+    let right_table_display_name = right_table_name.display().to_string();
 
     // Create combined schema for condition evaluation
     let combined_schema =

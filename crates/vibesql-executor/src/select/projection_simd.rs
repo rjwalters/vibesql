@@ -95,16 +95,17 @@ fn resolve_column_index(
 ) -> Option<usize> {
     // If table is specified, do qualified lookup
     if let Some(table_name) = table {
-        if let Some((start_idx, table_schema)) = schema.table_schemas.get(table_name) {
+        let table_id = vibesql_catalog::TableIdentifier::unquoted(table_name);
+        if let Some((start_idx, table_schema)) = schema.table_schemas.get(&table_id) {
             for (col_idx, col) in table_schema.columns.iter().enumerate() {
                 if col.name.eq_ignore_ascii_case(column) {
                     return Some(start_idx + col_idx);
                 }
             }
         }
-        // Try case-insensitive table name match
-        for (tbl_name, (start_idx, table_schema)) in &schema.table_schemas {
-            if tbl_name.eq_ignore_ascii_case(table_name) {
+        // Try case-insensitive table name match (already handled by TableIdentifier)
+        for (tbl_id, (start_idx, table_schema)) in &schema.table_schemas {
+            if tbl_id.canonical() == table_name.to_ascii_lowercase() {
                 for (col_idx, col) in table_schema.columns.iter().enumerate() {
                     if col.name.eq_ignore_ascii_case(column) {
                         return Some(start_idx + col_idx);
