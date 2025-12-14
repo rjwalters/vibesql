@@ -284,6 +284,14 @@ impl SelectExecutor<'_> {
         window_mapping: &Option<HashMap<WindowFunctionKey, usize>>,
         cte_ctx: Option<&HashMap<String, CteResult>>,
     ) -> Result<(), ExecutorError> {
+        // Skip ORDER BY processing if this statement has a set operation (UNION, INTERSECT, EXCEPT)
+        // The ORDER BY will be applied to the combined result in execute_with_columns after
+        // the set operations are processed. Applying ORDER BY here would incorrectly sort
+        // individual SELECT results instead of the final combined result.
+        if stmt.set_operation.is_some() {
+            return Ok(());
+        }
+
         if let Some(order_by) = &stmt.order_by {
             // Check if results are already sorted by the index scan
             let already_sorted = self.check_if_already_sorted(sorted_by, order_by);
