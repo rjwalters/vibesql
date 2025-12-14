@@ -25,8 +25,8 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use crate::select::morsel::{morsel_parallel_filter, MorselConfig};
+//! ```text
+//! use vibesql_executor::select::morsel::{morsel_parallel_filter, MorselConfig};
 //!
 //! let config = MorselConfig::default();
 //! let results = morsel_parallel_filter(&rows, &config, |row| predicate(row));

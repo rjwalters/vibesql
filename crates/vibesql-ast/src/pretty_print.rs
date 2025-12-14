@@ -4,13 +4,18 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use vibesql_ast::pretty_print::ToSql;
-//! use vibesql_ast::SelectStmt;
+//! use vibesql_ast::{BinaryOperator, Expression};
+//! use vibesql_types::SqlValue;
 //!
-//! let stmt: SelectStmt = /* ... */;
-//! let sql = stmt.to_sql();
-//! println!("{}", sql); // SELECT id, name FROM users WHERE active = 1
+//! // Convert operators to SQL
+//! assert_eq!(BinaryOperator::Equal.to_sql(), "=");
+//! assert_eq!(BinaryOperator::GreaterThan.to_sql(), ">");
+//!
+//! // Convert expressions to SQL
+//! let expr = Expression::Literal(SqlValue::Integer(42));
+//! assert_eq!(expr.to_sql(), "42");
 //! ```
 
 use vibesql_types::{DataType, SqlValue};

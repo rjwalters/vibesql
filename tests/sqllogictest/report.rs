@@ -6,7 +6,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use vibesql::tests::sqllogictest::{metrics::BenchmarkMetrics, report::ComparisonReport};
 //! use std::time::Duration;
 //!

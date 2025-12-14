@@ -32,9 +32,8 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```
 //! use vibesql_bench_common::tpcc::{TPCCData, TPCCWorkload};
-//! use vibesql_bench_common::tpcc::{NewOrderInput, PaymentInput};
 //!
 //! // Generate TPC-C data for scale factor 0.01 (micro mode)
 //! let mut data = TPCCData::new(0.01);

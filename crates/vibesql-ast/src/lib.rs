@@ -26,9 +26,12 @@
 //! The [`pretty_print`] module provides the [`pretty_print::ToSql`] trait for converting
 //! AST nodes back to valid SQL strings:
 //!
-//! ```ignore
+//! ```
 //! use vibesql_ast::pretty_print::ToSql;
-//! let sql = select_stmt.to_sql();
+//! use vibesql_ast::BinaryOperator;
+//!
+//! let op = BinaryOperator::Plus;
+//! assert_eq!(op.to_sql(), "+");
 //! ```
 
 pub mod arena;

@@ -42,7 +42,7 @@ use super::{
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// let sorted = morsel_parallel_sort(&rows, &config, |a, b| {
 ///     a.values[0].partial_cmp(&b.values[0]).unwrap_or(CmpOrdering::Equal)
 /// });

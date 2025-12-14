@@ -71,7 +71,7 @@ impl BloomFilter {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// // Create filter for 10,000 elements with 1% false positive rate
     /// let filter = BloomFilter::new(10_000, 0.01);
     /// ```

@@ -151,14 +151,17 @@ impl MorselConfig {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use vibesql_executor::select::morsel::MorselConfig;
+    ///
     /// // For wide rows (~500 bytes each), use smaller morsels
-    /// let config = MorselConfig::for_row_width(500);
-    /// assert!(config.morsel_size < 50_000);
+    /// let wide_config = MorselConfig::for_row_width(500);
     ///
     /// // For narrow rows (~20 bytes each), use larger morsels
-    /// let config = MorselConfig::for_row_width(20);
-    /// assert!(config.morsel_size > 50_000);
+    /// let narrow_config = MorselConfig::for_row_width(20);
+    ///
+    /// // Narrow rows get larger morsels than wide rows
+    /// assert!(narrow_config.morsel_size > wide_config.morsel_size);
     /// ```
     pub fn for_row_width(avg_row_bytes: usize) -> Self {
         // Avoid division by zero, use minimum of 1 byte per row
@@ -189,7 +192,8 @@ impl MorselConfig {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use vibesql_executor::select::morsel::MorselConfig;
     /// use vibesql_types::DataType;
     ///
     /// let schema = [
@@ -198,6 +202,7 @@ impl MorselConfig {
     ///     DataType::Date,
     /// ];
     /// let config = MorselConfig::for_schema(&schema);
+    /// assert!(config.morsel_size > 0);
     /// ```
     pub fn for_schema(schema: &[DataType]) -> Self {
         if schema.is_empty() {
@@ -224,14 +229,17 @@ impl MorselConfig {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // For a highly selective filter (1% pass rate), use larger morsels
-    /// let config = MorselConfig::for_selectivity(0.01);
-    /// assert!(config.morsel_size > 50_000);
+    /// ```
+    /// use vibesql_executor::select::morsel::MorselConfig;
     ///
-    /// // For a low selectivity filter (90% pass rate), use default sizing
-    /// let config = MorselConfig::for_selectivity(0.90);
-    /// assert!(config.morsel_size <= 50_000);
+    /// // For a highly selective filter (1% pass rate), use larger morsels
+    /// let selective = MorselConfig::for_selectivity(0.01);
+    ///
+    /// // For a low selectivity filter (90% pass rate), use smaller morsels
+    /// let unselective = MorselConfig::for_selectivity(0.90);
+    ///
+    /// // More selective filters get larger morsels
+    /// assert!(selective.morsel_size > unselective.morsel_size);
     /// ```
     pub fn for_selectivity(selectivity: f64) -> Self {
         // Clamp selectivity to valid range
@@ -273,11 +281,13 @@ impl MorselConfig {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use vibesql_executor::select::morsel::MorselConfig;
     /// use vibesql_types::DataType;
     ///
     /// let schema = [DataType::Integer, DataType::Bigint];
     /// let config = MorselConfig::adaptive(&schema, Some(0.05));
+    /// assert!(config.morsel_size > 0);
     /// ```
     pub fn adaptive(schema: &[DataType], selectivity: Option<f64>) -> Self {
         // Start with schema-based sizing

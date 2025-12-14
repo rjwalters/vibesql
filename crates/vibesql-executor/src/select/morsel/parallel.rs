@@ -373,7 +373,7 @@ where
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// let groups = morsel_parallel_group(
 ///     &rows,
 ///     &config,

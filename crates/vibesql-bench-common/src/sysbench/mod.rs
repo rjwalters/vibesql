@@ -26,7 +26,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```
 //! use vibesql_bench_common::sysbench::SysbenchData;
 //!
 //! // Generate sysbench data for 10,000 rows

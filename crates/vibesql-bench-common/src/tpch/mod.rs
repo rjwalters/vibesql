@@ -21,9 +21,9 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```
 //! use vibesql_bench_common::tpch::{TPCHData, NATIONS, REGIONS};
-//! use vibesql_bench_common::tpch::queries::*;
+//! use vibesql_bench_common::tpch::{TPCH_Q1, TPCH_Q7_SQLITE};
 //!
 //! // Create data generator for scale factor 0.01
 //! let data = TPCHData::new(0.01);

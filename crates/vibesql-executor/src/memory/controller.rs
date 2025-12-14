@@ -224,7 +224,7 @@ fn parse_memory_size(s: &str) -> Option<usize> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```
 /// use std::sync::Arc;
 /// use vibesql_executor::memory::{MemoryController, MemoryConfig};
 ///
@@ -234,11 +234,8 @@ fn parse_memory_size(s: &str) -> Option<usize> {
 /// let mut reservation = controller.create_reservation();
 ///
 /// // Try to reserve memory for sorted runs
-/// if reservation.try_grow(1024 * 1024) {
-///     // Memory reserved, proceed
-/// } else {
-///     // Need to spill to disk
-/// }
+/// assert!(reservation.try_grow(1024 * 1024)); // Should succeed with 1GB budget
+/// assert_eq!(reservation.reserved(), 1024 * 1024);
 /// ```
 pub struct MemoryController {
     /// Configuration
@@ -435,7 +432,7 @@ impl MemoryController {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let controller = Arc::new(MemoryController::with_budget(1024 * 1024 * 1024));
 /// let mut reservation = controller.create_reservation();
 ///

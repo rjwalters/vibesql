@@ -41,7 +41,7 @@
 //!
 //! # Memory-Bounded Execution
 //!
-//! ```rust,ignore
+//! ```text
 //! use std::sync::Arc;
 //! use vibesql_executor::memory::{MemoryController, MemoryConfig};
 //!
@@ -70,7 +70,7 @@
 //! 1. **Run generation**: Sort in-memory chunks, spill as sorted runs
 //! 2. **K-way merge**: Merge runs using a tournament tree
 //!
-//! ```rust,ignore
+//! ```text
 //! let mut sort = ExternalSort::new(controller, config, sort_keys);
 //! for row in input {
 //!     sort.add_row(&row)?;  // Automatically spills when needed
@@ -87,7 +87,7 @@
 //! 2. Spill partitions when memory exhausted
 //! 3. Process each partition's groups
 //!
-//! ```rust,ignore
+//! ```text
 //! let specs = vec![AggregateSpec { function_name: "SUM".into(), .. }];
 //! let mut agg = ExternalAggregate::new(controller, config, specs, 2);
 //! for row in input {
@@ -105,7 +105,7 @@
 //! 2. Spill partitions when memory exhausted
 //! 3. Process matching partitions together
 //!
-//! ```rust,ignore
+//! ```text
 //! let mut join = ExternalHashJoin::new(
 //!     controller, config,
 //!     vec![0],  // build key columns

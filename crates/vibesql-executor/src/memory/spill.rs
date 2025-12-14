@@ -27,7 +27,7 @@ static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use vibesql_executor::memory::SpillFile;
 /// use std::path::Path;
 ///
