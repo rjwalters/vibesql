@@ -234,6 +234,7 @@ EOF
 # Test command: run a single file
 cmd_test() {
     local native_tcl=true  # Default to native TCL mode
+    local verbose=false
     local test_file=""
 
     # Parse arguments
@@ -252,9 +253,11 @@ Arguments:
 Options:
   --native-tcl       Use native tclsh (default, handles TCL loops)
   --no-native-tcl    Use static parsing instead of native tclsh
+  --verbose          Show detailed output including expected vs actual
 
 Examples:
   ./scripts/tcltest test select1.test
+  ./scripts/tcltest test select1.test --verbose
   ./scripts/tcltest test select1.test --no-native-tcl
 EOF
                 exit 0
@@ -265,6 +268,10 @@ EOF
                 ;;
             --no-native-tcl)
                 native_tcl=false
+                shift
+                ;;
+            --verbose)
+                verbose=true
                 shift
                 ;;
             *)
@@ -313,6 +320,10 @@ EOF
 
     if $native_tcl; then
         py_args+=("--native-tcl")
+    fi
+
+    if $verbose; then
+        py_args+=("--verbose")
     fi
 
     python3 "${py_args[@]}"

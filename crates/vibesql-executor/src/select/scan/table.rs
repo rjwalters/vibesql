@@ -157,7 +157,9 @@ pub(crate) fn execute_table_scan(
         // Use CTE result
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         // SQL:1999 E051-09: Apply column aliases if provided
-        let cte_table_schema = apply_column_aliases(cte_schema.clone(), column_aliases)?;
+        let mut cte_table_schema = apply_column_aliases(cte_schema.clone(), column_aliases)?;
+        // Update schema name to use the effective name (alias if present, CTE name otherwise)
+        cte_table_schema.name = effective_name.clone();
         let schema = CombinedSchema::from_table(effective_name.clone(), cte_table_schema);
 
         // Apply table-local predicates from WHERE clause using pre-computed plan
@@ -200,7 +202,9 @@ pub(crate) fn execute_table_scan(
 
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         // SQL:1999 E051-09: Apply column aliases if provided
-        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        let mut table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        // Update schema name to use the effective name
+        table_schema.name = effective_name.clone();
         let schema = CombinedSchema::from_table(effective_name, table_schema);
 
         return Ok(super::FromResult::from_rows(schema, result.rows));
@@ -218,7 +222,9 @@ pub(crate) fn execute_table_scan(
 
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         // SQL:1999 E051-09: Apply column aliases if provided
-        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        let mut table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        // Update schema name to use the effective name
+        table_schema.name = effective_name.clone();
         let schema = CombinedSchema::from_table(effective_name, table_schema);
 
         return Ok(super::FromResult::from_rows(schema, result.rows));
@@ -280,7 +286,9 @@ pub(crate) fn execute_table_scan(
         let view_schema = vibesql_catalog::TableSchema::new(table_name.to_string(), columns);
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         // SQL:1999 E051-09: Apply column aliases if provided
-        let view_schema = apply_column_aliases(view_schema, column_aliases)?;
+        let mut view_schema = apply_column_aliases(view_schema, column_aliases)?;
+        // Update schema name to use the effective name
+        view_schema.name = effective_name.clone();
         let schema = CombinedSchema::from_table(effective_name.clone(), view_schema);
         let mut rows = select_result.rows;
 
@@ -396,7 +404,10 @@ pub(crate) fn execute_table_scan(
 
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
     // SQL:1999 E051-09: Apply column aliases if provided (e.g., FROM t AS a (x, y))
-    let table_schema = apply_column_aliases(table.schema.clone(), column_aliases)?;
+    let mut table_schema = apply_column_aliases(table.schema.clone(), column_aliases)?;
+    // Update schema name to use the effective name (alias if present, table name otherwise)
+    // This ensures column names use the correct table prefix (e.g., "a.f1" not "test1.f1")
+    table_schema.name = effective_name.clone();
     let schema = CombinedSchema::from_table(effective_name.clone(), table_schema);
 
     // Check if we need to apply table-local predicates (Phase 1 optimization)

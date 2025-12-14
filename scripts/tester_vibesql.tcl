@@ -446,7 +446,7 @@ proc execsql {sql {db ""}} {
 
 proc parse_raw_result {output} {
     # Parse VibeSQL raw format output into TCL list
-    # Raw format is space-separated values, one row per line
+    # Raw format is pipe-separated values, one row per line (like SQLite list mode)
     # NULL values are already empty strings, string 'NULL' stays as "NULL"
     # This matches SQLite TCL interface behavior for NULL representation
     set data {}
@@ -469,9 +469,9 @@ proc parse_raw_result {output} {
             continue
         }
 
-        # Split by whitespace and add each value to the result
-        # In raw format, values are space-separated on each line
-        foreach val [split $line] {
+        # Split by pipe and add each value to the result
+        # In raw format, values are pipe-separated on each line
+        foreach val [split $line "|"] {
             lappend data $val
         }
     }
@@ -556,14 +556,22 @@ proc parse_result_with_headers {output} {
         if {[regexp {^\|(.+)\|$} $line -> content]} {
             set vals {}
             foreach v [split $content "|"] {
-                set trimmed [string trim $v]
-                # SQLite TCL interface represents NULL as empty string
-                # VibeSQL displays NULL as "NULL" text, convert for compatibility
-                # (Don't convert in header row)
-                if {$separator_count >= 2 && $trimmed eq "NULL"} {
-                    lappend vals ""
-                } else {
+                # For header rows, preserve exact spacing (including trailing spaces in aliases)
+                # For data rows, trim padding spaces but preserve actual data spaces
+                if {$separator_count < 2} {
+                    # Header row - trim only padding, preserve column name exactly
+                    set trimmed [string trim $v]
                     lappend vals $trimmed
+                } else {
+                    # Data row - trim and handle NULL
+                    set trimmed [string trim $v]
+                    # SQLite TCL interface represents NULL as empty string
+                    # VibeSQL displays NULL as "NULL" text, convert for compatibility
+                    if {$trimmed eq "NULL"} {
+                        lappend vals ""
+                    } else {
+                        lappend vals $trimmed
+                    }
                 }
             }
 
@@ -574,6 +582,44 @@ proc parse_result_with_headers {output} {
                 # This is a data row
                 lappend rows $vals
             }
+        }
+    }
+
+    return [list $headers $rows]
+}
+
+proc parse_csv_result {output} {
+    # Parse VibeSQL CSV output, returning {headers rows} where rows is list of lists
+    # CSV format preserves exact column names including trailing spaces
+    # Format: col1,col2,col3 (header) followed by val1,val2,val3 (data rows)
+
+    set headers {}
+    set rows {}
+    set is_first_line 1
+
+    # Skip metadata lines, process CSV data
+    foreach line [split $output "\n"] {
+        set trimmed_line [string trim $line]
+
+        # Skip empty lines and metadata
+        if {$trimmed_line eq ""} continue
+        if {[regexp {^\d+ rows?$} $trimmed_line]} continue
+
+        # Check for errors
+        if {[regexp {^Error} $trimmed_line]} {
+            error [translate_error_to_sqlite $trimmed_line]
+        }
+
+        # Parse CSV line (simple parsing - assumes no quoted commas for now)
+        set values [split $line ","]
+
+        if {$is_first_line} {
+            # First line is the header
+            set headers $values
+            set is_first_line 0
+        } else {
+            # Data row
+            lappend rows $values
         }
     }
 
@@ -629,8 +675,9 @@ proc execsql2 {sql {db ""}} {
     }
 
     # Build PRAGMA prefix to maintain session state across process invocations
+    # Use CSV mode to preserve exact column names (including trailing spaces)
     set pragma_prefix [build_pragma_prefix]
-    set prefixed_sql "${pragma_prefix}$sql"
+    set prefixed_sql ".mode csv\n${pragma_prefix}$sql"
 
     # Use catch to handle process errors and translate them to SQLite format
     if {$::db_file eq ""} {
@@ -644,8 +691,8 @@ proc execsql2 {sql {db ""}} {
         error [translate_error_to_sqlite $result]
     }
 
-    # Parse with headers
-    set parsed [parse_result_with_headers $result]
+    # Parse CSV output to extract headers and rows
+    set parsed [parse_csv_result $result]
     set headers [lindex $parsed 0]
     set rows [lindex $parsed 1]
 

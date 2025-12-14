@@ -196,7 +196,7 @@ impl ResultFormatter {
     }
 
     /// Print results in raw format for SQLite TCL test compatibility.
-    /// - Space-separated values within each row
+    /// - Pipe-separated values within each row (like SQLite's list mode)
     /// - One row per line
     /// - NULL values output as empty strings
     /// - No headers, no borders, no row count
@@ -210,7 +210,7 @@ impl ResultFormatter {
                     val.as_ref().map(|s| s.as_str()).unwrap_or("")
                 })
                 .collect();
-            println!("{}", values.join(" "));
+            println!("{}", values.join("|"));
         }
     }
 }

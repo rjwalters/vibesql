@@ -77,14 +77,14 @@ impl SelectExecutor<'_> {
                 vibesql_ast::SelectItem::Wildcard { alias } => {
                     // SELECT * [AS (col1, col2, ...)] - expand to all column names from schema
                     // Skip hidden columns (from NATURAL JOIN deduplication)
-                    // IMPORTANT: SELECT * always uses short names (just column name),
-                    // regardless of full_column_names PRAGMA. This matches SQLite behavior.
+                    // Respects full_column_names PRAGMA when there are multiple tables with duplicate columns
                     if let Some(from_res) = from_result {
                         // Get all column names in order from the combined schema
-                        let mut table_columns: Vec<(usize, String)> = Vec::new();
+                        // Store (index, column_name, table_name_for_display)
+                        let mut table_columns: Vec<(usize, String, String)> = Vec::new();
 
-                        for (start_index, table_schema) in
-                            from_res.schema.table_schemas.values()
+                        for (_table_key, (start_index, table_schema)) in
+                            &from_res.schema.table_schemas
                         {
                             for (col_idx, col_schema) in table_schema.columns.iter().enumerate() {
                                 let abs_idx = start_index + col_idx;
@@ -92,14 +92,15 @@ impl SelectExecutor<'_> {
                                 if from_res.schema.is_column_hidden(abs_idx) {
                                     continue;
                                 }
-                                // SELECT * always uses short column names (SQLite quirk)
                                 let col_name = col_schema.name.clone();
-                                table_columns.push((abs_idx, col_name));
+                                // Use table_schema.name for display (preserves original case)
+                                let table_name = table_schema.name.clone();
+                                table_columns.push((abs_idx, col_name, table_name));
                             }
                         }
 
                         // Sort by index to maintain column order
-                        table_columns.sort_by_key(|(idx, _)| *idx);
+                        table_columns.sort_by_key(|(idx, _, _)| *idx);
 
                         // Apply derived column list if present
                         if let Some(derived_cols) = alias {
@@ -111,8 +112,11 @@ impl SelectExecutor<'_> {
                             }
                             column_names.extend(derived_cols.clone());
                         } else {
-                            for (_, name) in table_columns {
-                                column_names.push(name);
+                            // SELECT * always uses just the column name, never table-qualified
+                            // This matches SQLite behavior where full_column_names PRAGMA
+                            // does not affect wildcard expansion
+                            for (_, col_name, _table_name) in table_columns {
+                                column_names.push(col_name);
                             }
                         }
                     } else {
@@ -123,8 +127,7 @@ impl SelectExecutor<'_> {
                 }
                 vibesql_ast::SelectItem::QualifiedWildcard { qualifier, alias } => {
                     // SELECT table.* [AS (col1, col2, ...)] or SELECT alias.* [AS (col1, col2, ...)]
-                    // IMPORTANT: SELECT table.* always uses short names (just column name),
-                    // regardless of full_column_names PRAGMA. This matches SQLite behavior.
+                    // Respects full_column_names PRAGMA
                     if let Some(from_res) = from_result {
                         // Find the table/alias in the schema
                         // TableKey lookup is case-insensitive
@@ -141,8 +144,9 @@ impl SelectExecutor<'_> {
                                 }
                                 column_names.extend(derived_cols.clone());
                             } else {
-                                // Add all column names from this table in order
-                                // SELECT table.* always uses short column names (SQLite quirk)
+                                // SELECT table.* always uses just the column name, never table-qualified
+                                // This matches SQLite behavior where full_column_names PRAGMA
+                                // does not affect wildcard expansion
                                 for col_schema in &table_schema.columns {
                                     column_names.push(col_schema.name.clone());
                                 }
