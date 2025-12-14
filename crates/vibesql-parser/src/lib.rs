@@ -77,7 +77,7 @@ pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
     // Tokenize to detect statement type
     let mut lexer = Lexer::new(sql);
     let tokens =
-        lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        lexer.tokenize().map_err(|e| ParseError { message: e.to_string() })?;
 
     // Check first token to determine statement type
     if let Some(first_token) = tokens.first() {

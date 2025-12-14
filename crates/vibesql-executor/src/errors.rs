@@ -82,6 +82,11 @@ pub enum ExecutorError {
         expected: usize,
         provided: usize,
     },
+    InsertColumnCountMismatch {
+        table_name: String,
+        expected: usize,
+        provided: usize,
+    },
     CastError {
         from_type: String,
         to_type: String,
@@ -550,6 +555,13 @@ impl std::fmt::Display for ExecutorError {
                         expected = *expected as i64,
                         provided = *provided as i64
                     )
+                )
+            }
+            ExecutorError::InsertColumnCountMismatch { table_name, expected, provided } => {
+                write!(
+                    f,
+                    "table {} has {} columns but {} values were supplied",
+                    table_name, expected, provided
                 )
             }
             ExecutorError::CastError { from_type, to_type } => {

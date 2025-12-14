@@ -47,10 +47,11 @@ pub fn validate_row_column_counts(
     for value_exprs in rows.iter() {
         if value_exprs.len() != expected_count {
             // Match SQLite's error message format exactly
-            return Err(ExecutorError::UnsupportedExpression(format!(
-                "table {} has {} columns but {} values were supplied",
-                table_name, expected_count, value_exprs.len()
-            )));
+            return Err(ExecutorError::InsertColumnCountMismatch {
+                table_name: table_name.to_string(),
+                expected: expected_count,
+                provided: value_exprs.len(),
+            });
         }
     }
     Ok(())

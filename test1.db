@@ -1,5 +1,5 @@
 -- VibeSQL Database Dump
--- Generated: 2025-12-14 08:05:07.147329 UTC
+-- Generated: 2025-12-14 08:38:18.378451 UTC
 --
 
 -- Schemas
@@ -7,7 +7,13 @@
 -- Roles
 
 -- Tables and Data
-CREATE TABLE test1 (f1 INTEGER);
+CREATE TABLE t2 (a BLOB, b BLOB);
+
+INSERT INTO t2 VALUES (111, 'x2');
+
+CREATE TABLE t1 (a BLOB, b BLOB);
+
+INSERT INTO t1 VALUES (111, 'x1');
 
 -- Indexes
 

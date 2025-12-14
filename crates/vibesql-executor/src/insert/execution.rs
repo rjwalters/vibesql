@@ -86,12 +86,11 @@ fn execute_insert_internal(
             // Validate column count
             if select_result.columns.len() != target_column_info.len() {
                 // Match SQLite's error message format exactly
-                return Err(ExecutorError::UnsupportedExpression(format!(
-                    "table {} has {} columns but {} values were supplied",
-                    table_name,
-                    target_column_info.len(),
-                    select_result.columns.len()
-                )));
+                return Err(ExecutorError::InsertColumnCountMismatch {
+                    table_name: table_name.to_string(),
+                    expected: target_column_info.len(),
+                    provided: select_result.columns.len(),
+                });
             }
 
             // Convert SelectResult to Vec<Vec<Expression>> format

@@ -447,6 +447,10 @@ impl CombinedExpressionEvaluator<'_> {
                 }
             }
 
+            // COLLATE expression - evaluate inner expression (collation affects string comparison)
+            // TODO: Full collation support - for now just evaluate the inner expression
+            vibesql_ast::Expression::Collate { expr, .. } => self.eval(expr, row),
+
             // Unsupported expressions
             _ => Err(ExecutorError::UnsupportedExpression(format!("{:?}", expr))),
         }
