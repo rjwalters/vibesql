@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
     ops::Deref,
@@ -108,6 +108,11 @@ pub struct CombinedSchema {
     pub table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
     /// Total number of columns across all tables
     pub total_columns: usize,
+    /// Columns that are hidden from `SELECT *` expansion due to NATURAL JOIN deduplication.
+    /// These columns are still accessible via qualified references like `table.*`.
+    /// This allows `SELECT t1.*` to return all columns from t1, while `SELECT *`
+    /// correctly deduplicates columns for NATURAL JOIN.
+    pub hidden_columns: HashSet<usize>,
 }
 
 impl CombinedSchema {
@@ -119,7 +124,7 @@ impl CombinedSchema {
         let mut table_schemas = HashMap::new();
         // TableKey automatically normalizes to lowercase
         table_schemas.insert(TableKey::new(table_name), (0, schema));
-        CombinedSchema { table_schemas, total_columns }
+        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
     }
 
     /// Create a new combined schema from a derived table (subquery result)
@@ -148,7 +153,7 @@ impl CombinedSchema {
         let mut table_schemas = HashMap::new();
         // TableKey automatically normalizes to lowercase
         table_schemas.insert(TableKey::new(alias), (0, schema));
-        CombinedSchema { table_schemas, total_columns }
+        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
     }
 
     /// Combine two schemas (for JOIN operations)
@@ -164,7 +169,11 @@ impl CombinedSchema {
         let right_columns = right_schema.columns.len();
         // TableKey automatically normalizes to lowercase
         table_schemas.insert(right_table.into(), (left_total, right_schema));
-        CombinedSchema { table_schemas, total_columns: left_total + right_columns }
+        CombinedSchema {
+            table_schemas,
+            total_columns: left_total + right_columns,
+            hidden_columns: left.hidden_columns,
+        }
     }
 
     /// Merge two CombinedSchemas (for JOIN operations with nested joins)
@@ -186,7 +195,13 @@ impl CombinedSchema {
             table_schemas.insert(table_key, (adjusted_start, schema));
         }
 
-        CombinedSchema { table_schemas, total_columns: left_total + right.total_columns }
+        // Merge hidden columns, adjusting right side indices
+        let mut hidden_columns = left.hidden_columns;
+        for idx in right.hidden_columns {
+            hidden_columns.insert(left_total + idx);
+        }
+
+        CombinedSchema { table_schemas, total_columns: left_total + right.total_columns, hidden_columns }
     }
 
     /// Look up a column by name (optionally qualified with table name)
@@ -361,6 +376,27 @@ impl CombinedSchema {
         // Fallback: return the input column name if not found in schema
         column.to_string()
     }
+
+    /// Check if a column index is hidden from `SELECT *` expansion.
+    ///
+    /// Columns are hidden when they are duplicates in a NATURAL JOIN.
+    /// For example, in `SELECT * FROM t1 NATURAL JOIN t2` where both tables
+    /// have column `a`, the `t2.a` column is hidden so `SELECT *` only shows
+    /// one copy of `a` (from t1).
+    ///
+    /// However, `SELECT t2.*` should still include `t2.a` because qualified
+    /// wildcards expand all columns from that specific table.
+    #[inline]
+    pub fn is_column_hidden(&self, idx: usize) -> bool {
+        self.hidden_columns.contains(&idx)
+    }
+
+    /// Mark a column as hidden from `SELECT *` expansion.
+    ///
+    /// This is used by NATURAL JOIN to hide duplicate columns from the right side.
+    pub fn hide_column(&mut self, idx: usize) {
+        self.hidden_columns.insert(idx);
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema
@@ -371,12 +407,13 @@ impl CombinedSchema {
 pub struct SchemaBuilder {
     table_schemas: HashMap<TableKey, (usize, vibesql_catalog::TableSchema)>,
     column_offset: usize,
+    hidden_columns: HashSet<usize>,
 }
 
 impl SchemaBuilder {
     /// Create a new empty schema builder
     pub fn new() -> Self {
-        SchemaBuilder { table_schemas: HashMap::new(), column_offset: 0 }
+        SchemaBuilder { table_schemas: HashMap::new(), column_offset: 0, hidden_columns: HashSet::new() }
     }
 
     /// Create a schema builder initialized with an existing CombinedSchema
@@ -385,7 +422,7 @@ impl SchemaBuilder {
     pub fn from_schema(schema: CombinedSchema) -> Self {
         let column_offset = schema.total_columns;
         // TableKeys are already normalized, just pass them through
-        SchemaBuilder { table_schemas: schema.table_schemas, column_offset }
+        SchemaBuilder { table_schemas: schema.table_schemas, column_offset, hidden_columns: schema.hidden_columns }
     }
 
     /// Add a table to the schema
@@ -408,7 +445,7 @@ impl SchemaBuilder {
     ///
     /// This consumes the builder and produces the schema in O(1) time
     pub fn build(self) -> CombinedSchema {
-        CombinedSchema { table_schemas: self.table_schemas, total_columns: self.column_offset }
+        CombinedSchema { table_schemas: self.table_schemas, total_columns: self.column_offset, hidden_columns: self.hidden_columns }
     }
 }
 

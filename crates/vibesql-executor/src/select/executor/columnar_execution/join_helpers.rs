@@ -3,7 +3,7 @@
 //! This module contains free functions that support the JOIN execution path,
 //! including join tree flattening, condition extraction, and schema building.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType};
 
@@ -176,7 +176,7 @@ fn extract_non_join_predicates_recursive(
 pub(super) fn build_combined_schema(
     batches: &[(String, Option<String>, columnar::ColumnarBatch, vibesql_catalog::TableSchema)],
 ) -> CombinedSchema {
-    let mut combined = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0 };
+    let mut combined = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new() };
 
     for (table_name, alias, _batch, schema) in batches {
         let name = alias.as_ref().unwrap_or(table_name);

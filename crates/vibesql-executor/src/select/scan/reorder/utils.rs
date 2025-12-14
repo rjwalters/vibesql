@@ -145,7 +145,10 @@ pub(super) fn build_reordered_schema(
         }
     }
 
-    CombinedSchema { table_schemas: new_table_schemas, total_columns: current_position }
+    // For reordered schemas, hidden_columns would need to be remapped to new positions
+    // However, reordering happens before NATURAL JOIN deduplication, so hidden_columns
+    // should be empty at this point
+    CombinedSchema { table_schemas: new_table_schemas, total_columns: current_position, hidden_columns: std::collections::HashSet::new() }
 }
 
 /// Build a column permutation to restore original table ordering

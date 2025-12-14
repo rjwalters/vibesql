@@ -17,20 +17,29 @@ pub(crate) fn project_row_combined(
     for item in columns {
         match item {
             vibesql_ast::SelectItem::Wildcard { .. } => {
-                // SELECT * - include all columns
+                // SELECT * - include all columns except hidden ones (from NATURAL JOIN deduplication)
                 // When window functions are present, only include base columns (not appended window
                 // values)
-                if let Some(mapping) = window_mapping {
+                let max_col = if let Some(mapping) = window_mapping {
                     if !mapping.is_empty() {
                         // Find the minimum window column index to know where base columns end
-                        let min_window_col =
-                            mapping.values().min().copied().unwrap_or(row.values.len());
-                        values.extend(row.values[..min_window_col].iter().cloned());
+                        mapping.values().min().copied().unwrap_or(row.values.len())
                     } else {
-                        values.extend(row.values.iter().cloned());
+                        row.values.len()
                     }
                 } else {
-                    values.extend(row.values.iter().cloned());
+                    row.values.len()
+                };
+
+                // Iterate through columns, skipping hidden ones
+                for (idx, value) in row.values.iter().enumerate() {
+                    if idx >= max_col {
+                        break;
+                    }
+                    // Skip hidden columns (from NATURAL JOIN deduplication)
+                    if !schema.is_column_hidden(idx) {
+                        values.push(value.clone());
+                    }
                 }
             }
             vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
