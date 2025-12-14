@@ -118,12 +118,19 @@ pub(super) fn compute_sum(
                     }
                     float_sum += v;
                 }
-                SqlValue::Null => {} // NULL values don't contribute to sum
+                SqlValue::Null => {
+                    // NULL values don't contribute to sum (count is not incremented)
+                    // They don't affect return type by themselves
+                }
                 _ => {
-                    return Err(ExecutorError::UnsupportedExpression(format!(
-                        "Cannot compute SUM on non-numeric value: {:?}",
-                        value
-                    )))
+                    // Non-numeric values (TEXT, etc.) are skipped but affect type
+                    // SQLite: mixed-type columns (with TEXT, etc.) return REAL
+                    if !has_float {
+                        float_sum = int_sum as f64;
+                        has_float = true;
+                    }
+                    // Skip this value (don't increment count, don't add to sum)
+                    continue;
                 }
             }
             count += 1;
@@ -724,12 +731,18 @@ fn compute_mixed_sum(values: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 float_sum += v;
                 count += 1;
             }
-            SqlValue::Null => {}
+            SqlValue::Null => {
+                // NULL values don't contribute to sum
+                // They don't affect return type by themselves
+            }
             _ => {
-                return Err(ExecutorError::UnsupportedExpression(format!(
-                    "Cannot compute SUM on value: {:?}",
-                    value
-                )))
+                // Non-numeric values (TEXT, etc.) are skipped but affect type
+                // SQLite: mixed-type columns (with TEXT, etc.) return REAL
+                if !has_float {
+                    float_sum = int_sum as f64;
+                    has_float = true;
+                }
+                // Skip this value (don't increment count)
             }
         }
     }
