@@ -6,7 +6,7 @@ use crate::sql_value::SqlValue;
 
 /// Format a f64 value like SQLite does:
 /// - Use minimal representation (shortest round-trip safe string)
-/// - Always show at least one decimal place for whole numbers (1.0 not 1)
+/// - Omit ".0" for whole numbers (SQLite TCL interface behavior: 45.0 → "45")
 /// - Use scientific notation for very small or very large values
 fn format_f64(n: f64) -> String {
     if n.is_nan() {
@@ -20,9 +20,9 @@ fn format_f64(n: f64) -> String {
         };
     }
 
-    // Handle zero specially
+    // Handle zero specially - format as integer "0" not "0.0"
     if n == 0.0 {
-        return "0.0".to_string();
+        return "0".to_string();
     }
 
     let abs_n = n.abs();
@@ -37,9 +37,11 @@ fn format_f64(n: f64) -> String {
     let mut buffer = ryu::Buffer::new();
     let s = buffer.format(n);
 
-    // If there's no decimal point, add ".0" for consistency
-    if !s.contains('.') && !s.contains('e') {
-        format!("{}.0", s)
+    // SQLite behavior: format whole numbers without decimal point
+    // This matches SQLite's TCL interface which returns "45" not "45.0"
+    // Strip ".0" suffix for whole numbers
+    if s.ends_with(".0") {
+        s[..s.len() - 2].to_string()
     } else {
         s.to_string()
     }
@@ -60,9 +62,9 @@ fn format_f32(n: f32) -> String {
         };
     }
 
-    // Handle zero specially
+    // Handle zero specially - format as integer "0" not "0.0"
     if n == 0.0 {
-        return "0.0".to_string();
+        return "0".to_string();
     }
 
     let abs_n = n.abs();
@@ -77,9 +79,10 @@ fn format_f32(n: f32) -> String {
     let mut buffer = ryu::Buffer::new();
     let s = buffer.format(n);
 
-    // If there's no decimal point, add ".0" for consistency
-    if !s.contains('.') && !s.contains('e') {
-        format!("{}.0", s)
+    // SQLite behavior: format whole numbers without decimal point
+    // Strip ".0" suffix for whole numbers
+    if s.ends_with(".0") {
+        s[..s.len() - 2].to_string()
     } else {
         s.to_string()
     }
@@ -213,5 +216,15 @@ mod tests {
         assert_eq!(format!("{}", SqlValue::Double(f64::INFINITY)), "Infinity");
         assert_eq!(format!("{}", SqlValue::Double(f64::NEG_INFINITY)), "-Infinity");
         assert_eq!(format!("{}", SqlValue::Double(123.45)), "123.45");
+    }
+
+    #[test]
+    fn test_format_f64_whole_numbers() {
+        // SQLite TCL interface behavior: whole numbers formatted without ".0"
+        assert_eq!(format_f64(45.0), "45");
+        assert_eq!(format_f64(100.0), "100");
+        assert_eq!(format_f64(0.0), "0");
+        assert_eq!(format_f64(45.5), "45.5");
+        assert_eq!(format_f64(3.14159), "3.14159");
     }
 }
