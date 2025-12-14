@@ -118,11 +118,13 @@ impl super::Catalog {
         false
     }
 
-    /// Create a table schema in the current schema with SQL:1999 identifier semantics.
+    /// Create a table schema with SQL:1999 identifier semantics.
     ///
-    /// The `identifier` parameter determines case-sensitivity:
+    /// The `identifier` parameter determines case-sensitivity and schema:
     /// - Quoted identifiers: stored with exact case
     /// - Unquoted identifiers: stored with lowercase canonical form
+    /// - Qualified identifiers: table created in specified schema
+    /// - Unqualified identifiers: table created in current schema
     pub fn create_table_with_identifier(
         &mut self,
         schema: TableSchema,
@@ -131,12 +133,26 @@ impl super::Catalog {
         // Check for circular foreign key dependencies
         self.check_circular_foreign_keys(&schema)?;
 
-        let current_schema = self
-            .schemas
-            .get_mut(&self.current_schema)
-            .ok_or_else(|| CatalogError::SchemaNotFound(self.current_schema.clone()))?;
+        // Determine target schema and table identifier
+        let (target_schema_name, table_identifier) = if identifier.is_qualified() {
+            // Qualified identifier: use specified schema, extract table part
+            let schema_name = identifier.schema_canonical().unwrap().to_string();
+            let table_id = TableIdentifier::new(
+                identifier.table_display(),
+                identifier.is_table_quoted(),
+            );
+            (schema_name, table_id)
+        } else {
+            // Unqualified identifier: use current schema
+            (self.current_schema.clone(), identifier)
+        };
 
-        current_schema.create_table_with_identifier(schema, identifier)
+        let target_schema = self
+            .schemas
+            .get_mut(&target_schema_name)
+            .ok_or_else(|| CatalogError::SchemaNotFound(target_schema_name.clone()))?;
+
+        target_schema.create_table_with_identifier(schema, table_identifier)
     }
 
     /// Create a table schema in the current schema.

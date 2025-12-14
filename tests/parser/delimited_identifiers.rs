@@ -392,7 +392,6 @@ fn test_quoted_schema_and_table_names() {
 }
 
 #[test]
-#[ignore] // TODO: Schema-qualified quoted identifiers need more work in Phase 7/8
 fn test_mixed_quoted_unquoted_schema_table() {
     let mut db = Database::new();
 

@@ -22,6 +22,7 @@ impl Database {
     /// The `identifier` parameter determines how the table name is stored:
     /// - Quoted identifiers: stored with exact case
     /// - Unquoted identifiers: stored with lowercase canonical form
+    /// - Qualified identifiers: schema and table have independent case handling
     pub fn create_table_with_identifier(
         &mut self,
         schema: vibesql_catalog::TableSchema,
@@ -30,8 +31,15 @@ impl Database {
         self.catalog.create_table_with_identifier(schema.clone(), identifier.clone())
             .map_err(|e| StorageError::CatalogError(e.to_string()))?;
 
-        let current_schema = &self.catalog.get_current_schema();
-        let qualified_name = format!("{}.{}", current_schema, identifier.canonical());
+        // Build qualified name from identifier
+        let qualified_name = if identifier.is_qualified() {
+            // Identifier already includes schema qualification
+            identifier.canonical().to_string()
+        } else {
+            // Add current schema to unqualified identifier
+            let current_schema = &self.catalog.get_current_schema();
+            format!("{}.{}", current_schema, identifier.canonical())
+        };
 
         // Assign table ID and emit WAL entry for persistence
         let table_id = self.next_table_id();
@@ -92,9 +100,16 @@ impl Database {
     /// Get a table by identifier using SQL:1999 case semantics.
     ///
     /// Uses the canonical form of the identifier for direct lookup without fallbacks.
+    /// Supports both simple and schema-qualified identifiers.
     pub fn get_table_by_identifier(&self, identifier: &TableIdentifier) -> Option<&Table> {
-        let current_schema = &self.catalog.get_current_schema();
-        let qualified_name = format!("{}.{}", current_schema, identifier.canonical());
+        let qualified_name = if identifier.is_qualified() {
+            // Identifier already includes schema qualification
+            identifier.canonical().to_string()
+        } else {
+            // Add current schema to unqualified identifier
+            let current_schema = &self.catalog.get_current_schema();
+            format!("{}.{}", current_schema, identifier.canonical())
+        };
         self.tables.get(&qualified_name)
     }
 

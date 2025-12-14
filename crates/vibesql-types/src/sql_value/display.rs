@@ -6,7 +6,7 @@ use crate::sql_value::SqlValue;
 
 /// Format a f64 value like SQLite does:
 /// - Use minimal representation (shortest round-trip safe string)
-/// - Omit ".0" for whole numbers (SQLite TCL interface behavior: 45.0 → "45")
+/// - KEEP ".0" for whole numbers to distinguish REAL from INTEGER (SQLite behavior)
 /// - Use scientific notation for very small or very large values
 fn format_f64(n: f64) -> String {
     if n.is_nan() {
@@ -18,11 +18,6 @@ fn format_f64(n: f64) -> String {
         } else {
             "-Infinity".to_string()
         };
-    }
-
-    // Handle zero specially - format as integer "0" not "0.0"
-    if n == 0.0 {
-        return "0".to_string();
     }
 
     let abs_n = n.abs();
@@ -37,14 +32,9 @@ fn format_f64(n: f64) -> String {
     let mut buffer = ryu::Buffer::new();
     let s = buffer.format(n);
 
-    // SQLite behavior: format whole numbers without decimal point
-    // This matches SQLite's TCL interface which returns "45" not "45.0"
-    // Strip ".0" suffix for whole numbers
-    if let Some(stripped) = s.strip_suffix(".0") {
-        stripped.to_string()
-    } else {
-        s.to_string()
-    }
+    // SQLite behavior: KEEP ".0" suffix for whole numbers to distinguish REAL from INTEGER
+    // Example: SUM on mixed-type column returns 44.0 (REAL), not 44 (INTEGER)
+    s.to_string()
 }
 
 /// Format a f32 value like SQLite does.
@@ -62,11 +52,6 @@ fn format_f32(n: f32) -> String {
         };
     }
 
-    // Handle zero specially - format as integer "0" not "0.0"
-    if n == 0.0 {
-        return "0".to_string();
-    }
-
     let abs_n = n.abs();
 
     // Use scientific notation for very large or very small numbers (like SQLite)
@@ -79,13 +64,8 @@ fn format_f32(n: f32) -> String {
     let mut buffer = ryu::Buffer::new();
     let s = buffer.format(n);
 
-    // SQLite behavior: format whole numbers without decimal point
-    // Strip ".0" suffix for whole numbers
-    if let Some(stripped) = s.strip_suffix(".0") {
-        stripped.to_string()
-    } else {
-        s.to_string()
-    }
+    // SQLite behavior: KEEP ".0" suffix for whole numbers to distinguish REAL from INTEGER
+    s.to_string()
 }
 
 /// Display implementation for SqlValue (how values are shown to users)
@@ -220,10 +200,10 @@ mod tests {
 
     #[test]
     fn test_format_f64_whole_numbers() {
-        // SQLite TCL interface behavior: whole numbers formatted without ".0"
-        assert_eq!(format_f64(45.0), "45");
-        assert_eq!(format_f64(100.0), "100");
-        assert_eq!(format_f64(0.0), "0");
+        // SQLite behavior: whole numbers formatted WITH ".0" to distinguish from INTEGER
+        assert_eq!(format_f64(45.0), "45.0");
+        assert_eq!(format_f64(100.0), "100.0");
+        assert_eq!(format_f64(0.0), "0.0");
         assert_eq!(format_f64(45.5), "45.5");
         assert_eq!(format_f64(123.456), "123.456");
     }
