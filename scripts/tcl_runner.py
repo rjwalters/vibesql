@@ -922,6 +922,27 @@ def main():
             if len(all_failed_tests) > 20:
                 print(f"  ... and {len(all_failed_tests) - 20} more")
 
+        # Save to database if specified (native TCL mode)
+        if args.results_db:
+            # Create a RunSummary for native TCL mode
+            from datetime import datetime
+            summary = RunSummary(
+                started_at=datetime.now().isoformat(),
+                completed_at=datetime.now().isoformat(),
+                git_commit=subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()[:8],
+                total_files=len(file_paths),
+                total_tests=total_tests,
+                passed=total_passed,
+                failed=total_failed,
+                skipped=total_skipped,
+                skipped_setup_failed=0,
+                parse_errors=0,
+                setup_failures=0,
+                results=[]  # Native TCL mode doesn't have individual test results yet
+            )
+            save_to_database(summary, args.results_db, args.vibesql)
+            print(f"\nResults saved to: {args.results_db}")
+
         if total_failed > 0:
             sys.exit(1)
         sys.exit(0)
