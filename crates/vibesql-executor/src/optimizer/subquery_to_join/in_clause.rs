@@ -82,39 +82,43 @@ pub(super) fn try_convert_in_to_join(
         _ => return None, // Complex FROM clause for non-aggregate, skip
     };
 
+    // Detect self-join: check if subquery table name conflicts with outer query tables
+    let needs_alias = is_self_join(from, &table_name, &table_alias);
+
     // FIX for issue #4493: Skip transformation if SELECT list contains unqualified columns
-    // that might be correlated references.
+    // that might be correlated references IN SELF-JOINS.
     //
-    // Example that should NOT be transformed:
+    // This check is ONLY needed for self-joins because:
+    // - For non-self-joins (orders vs lineitem): unqualified columns in the subquery
+    //   can ONLY refer to the subquery's table. No ambiguity possible.
+    // - For self-joins (tab0 vs tab0): unqualified columns could refer to either
+    //   the outer tab0 or inner tab0, creating ambiguity.
+    //
+    // Example that should NOT be transformed (self-join with multiple outer tables):
     //   SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
     //   If the inner `SELECT x` has `x` as a correlated reference (from t2, not t1),
     //   rewriting it to `__subquery_t1.x` will fail because that column doesn't exist in t1.
     //
-    // We can only safely optimize unqualified columns when the outer query has a SINGLE
-    // table that matches the subquery's table (pure self-join). If the outer query has
-    // multiple tables, an unqualified column could reference any of them.
-    //
-    // Safe to optimize:
+    // Safe to optimize (simple self-join):
     //   SELECT col0 FROM tab0 WHERE col0 IN (SELECT col3 FROM tab0 WHERE ...)
     //   Single table 'tab0' in outer query, unqualified 'col3' must be from tab0.
     //
-    // Must skip optimization:
-    //   SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
-    //   Multiple tables in outer query, unqualified 'x' could be from t2 (correlated).
-    if let Expression::ColumnRef { table: None, .. } = &subquery_column {
-        // Check if outer query has exactly one table and it matches the subquery's table
-        let is_simple_self_join = is_simple_single_table_self_join(from, &table_name, &table_alias);
+    // Safe to optimize (non-self-join):
+    //   SELECT o_orderkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem)
+    //   Different tables, no ambiguity - l_orderkey can only be from lineitem.
+    if needs_alias {
+        if let Expression::ColumnRef { table: None, .. } = &subquery_column {
+            // Check if outer query has exactly one table and it matches the subquery's table
+            let is_simple_self_join = is_simple_single_table_self_join(from, &table_name, &table_alias);
 
-        if !is_simple_self_join {
-            // Either not a self-join, or outer query has multiple tables.
-            // Unqualified column might be correlated, skip optimization to be safe.
-            return None;
+            if !is_simple_self_join {
+                // Self-join with multiple outer tables - unqualified column might be correlated.
+                // Skip optimization to be safe.
+                return None;
+            }
+            // else: Simple self-join with single table - safe to optimize
         }
-        // else: Simple self-join with single table - safe to optimize
     }
-
-    // Detect self-join: check if subquery table name conflicts with outer query tables
-    let needs_alias = is_self_join(from, &table_name, &table_alias);
 
     // Generate a unique alias for self-joins to avoid schema conflicts
     let (
@@ -161,17 +165,24 @@ pub(super) fn try_convert_in_to_join(
         let rewritten_col =
             rewrite_column_refs_with_alias(&subquery_column, old_table_ref, &new_alias);
 
-        // FIX for issue #4493: Don't rewrite the WHERE clause!
-        // The WHERE clause can contain correlated references to outer query tables.
-        // Rewriting ALL unqualified columns breaks correlation for deeply nested subqueries.
-        // Only the SELECT list column (return value) needs rewriting for the join.
+        // Rewrite column references in the WHERE clause to use the new alias.
+        // We need to qualify columns that reference the subquery's own table to avoid
+        // ambiguity with the outer query's table in self-joins.
         //
-        // Example: WHERE x = c
-        //   - 'c' exists in subquery's t1, would be rewritten to __subquery_t1.c
-        //   - 'x' is correlated to outer t2.x, should NOT be rewritten
+        // Example: SELECT * FROM tab0 WHERE col0 IN (SELECT col3 FROM tab0 WHERE col3 > 259)
+        //   - Subquery WHERE: col3 > 259
+        //   - After rewrite: __subquery_tab0.col3 > 259
+        //   - This prevents col3 from incorrectly resolving to the outer tab0.col3
         //
-        // The original code blindly rewrote both, breaking nested correlation.
-        let rewritten_where = subquery.where_clause.clone();
+        // Note: This is safe because:
+        // 1. For self-joins with a single outer table, unqualified columns in the subquery
+        //    must belong to the subquery's table (verified by is_simple_single_table_self_join check above)
+        // 2. For deeply nested subqueries with correlation, the earlier check at line 109-121
+        //    skips this optimization path entirely, so we won't break correlation
+        let rewritten_where = subquery
+            .where_clause
+            .as_ref()
+            .map(|w| rewrite_column_refs_with_alias(w, old_table_ref, &new_alias));
 
         if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
             eprintln!("[SUBQUERY_TRANSFORM] qualified_expr={:?}", qualified_expr);
