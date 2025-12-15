@@ -86,9 +86,31 @@ pub(crate) fn create_subquery_cache() -> LruCache<u64, Vec<vibesql_storage::Row>
 ///
 /// See: https://github.com/rjwalters/vibesql/issues/2137#hash-improvement
 pub(crate) fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    format!("{:?}", subquery).hash(&mut hasher);
-    hasher.finish()
+    use std::cell::RefCell;
+
+    // Cache subquery hashes by AST pointer to avoid repeated expensive format!() calls
+    // The AST is immutable during query execution, so pointer-based caching is safe
+    thread_local! {
+        static HASH_CACHE: RefCell<lru::LruCache<usize, u64>> =
+            RefCell::new(lru::LruCache::new(NonZeroUsize::new(1000).unwrap()));
+    }
+
+    let ptr = subquery as *const _ as usize;
+
+    HASH_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(&cached_hash) = cache.get(&ptr) {
+            return cached_hash;
+        }
+
+        // Cache miss - compute the hash
+        let mut hasher = DefaultHasher::new();
+        format!("{:?}", subquery).hash(&mut hasher);
+        let hash = hasher.finish();
+
+        cache.put(ptr, hash);
+        hash
+    })
 }
 
 /// Compute a composite cache key for a correlated subquery
