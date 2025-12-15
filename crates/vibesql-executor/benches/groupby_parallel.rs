@@ -93,18 +93,21 @@ fn create_groupby_database(row_count: usize, num_groups: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "GROUP_KEY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );

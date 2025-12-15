@@ -256,24 +256,28 @@ fn create_skewed_database(row_count: usize, skew_ratio: f64) -> VibeDB {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "PADDING".to_string(),
                 data_type: DataType::Varchar { max_length: Some(100) },
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );

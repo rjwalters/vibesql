@@ -124,24 +124,28 @@ fn create_filter_database(row_count: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "CATEGORY".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "FLAG".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );

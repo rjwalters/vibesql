@@ -32,6 +32,7 @@ fn create_test_table(db: &mut Database, table_name: &str) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -40,6 +41,7 @@ fn create_test_table(db: &mut Database, table_name: &str) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -503,6 +505,7 @@ fn test_truncate_preserves_table_structure() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -511,6 +514,7 @@ fn test_truncate_preserves_table_structure() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "age".to_string(),
@@ -519,6 +523,7 @@ fn test_truncate_preserves_table_structure() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],

@@ -228,6 +228,7 @@ mod tests {
                 .collect(),
             default_value: None,
             comment: None,
+        generated_expr: None,
         }
     }
 

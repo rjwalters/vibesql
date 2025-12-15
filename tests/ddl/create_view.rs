@@ -89,6 +89,7 @@ fn test_drop_view_simple() {
             data_type: DataType::Integer,
             nullable: false,
             default_value: None,
+            generated_expr: None,
         }],
     );
     db.create_table(users_schema).expect("Failed to create table");
@@ -133,6 +134,7 @@ fn test_create_view_duplicate_error() {
             data_type: DataType::Integer,
             nullable: false,
             default_value: None,
+            generated_expr: None,
         }],
     );
     db.create_table(users_schema).expect("Failed to create users table");
@@ -144,6 +146,7 @@ fn test_create_view_duplicate_error() {
             data_type: DataType::Integer,
             nullable: false,
             default_value: None,
+            generated_expr: None,
         }],
     );
     db.create_table(employees_schema).expect("Failed to create employees table");
@@ -225,18 +228,21 @@ fn test_view_preserves_column_names_with_select_star() {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "col0".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+                generated_expr: None,
             },
             ColumnSchema {
                 name: "col1".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+                generated_expr: None,
             },
         ],
     );

@@ -97,12 +97,14 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "VALUE".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );
@@ -125,18 +127,21 @@ fn create_join_database(probe_count: usize, build_size: usize) -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "BUILD_ID".to_string(),
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "DATA".to_string(),
                 data_type: DataType::Bigint,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );

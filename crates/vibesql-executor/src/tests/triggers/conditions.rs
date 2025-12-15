@@ -24,6 +24,7 @@ fn test_when_clause_filters_firing() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             vibesql_ast::ColumnDef {
                 name: "amount".to_string(),
@@ -32,6 +33,7 @@ fn test_when_clause_filters_firing() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],

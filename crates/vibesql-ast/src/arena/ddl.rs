@@ -101,6 +101,7 @@ pub struct ColumnDef<'arena> {
     pub constraints: BumpVec<'arena, ColumnConstraint<'arena>>,
     pub default_value: Option<&'arena Expression<'arena>>,
     pub comment: Option<Symbol>,
+    pub generated_expr: Option<&'arena Expression<'arena>>,
 }
 
 /// Column-level constraint

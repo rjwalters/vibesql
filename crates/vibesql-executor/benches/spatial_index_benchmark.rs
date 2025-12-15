@@ -47,12 +47,14 @@ fn create_test_db_with_10k_polygons() -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "BOUNDARY".to_string(),
                 data_type: DataType::Varchar { max_length: Some(2000) },
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );
@@ -97,12 +99,14 @@ fn create_test_db_with_100k_polygons() -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "BOUNDARY".to_string(),
                 data_type: DataType::Varchar { max_length: Some(2000) },
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );
@@ -147,12 +151,14 @@ fn create_test_db_with_10k_points() -> Database {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "LOCATION".to_string(),
                 data_type: DataType::Varchar { max_length: Some(500) },
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ],
     );

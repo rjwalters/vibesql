@@ -1234,7 +1234,7 @@ mod tests {
                 expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                 direction: OrderDirection::Asc,
             }]),
-            limit: Some(10),
+            limit: Some(Expression::Literal(SqlValue::Integer(10))),
             offset: None,
             set_operation: None,
             values: None,

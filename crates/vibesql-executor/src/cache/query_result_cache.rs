@@ -152,12 +152,14 @@ mod tests {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "name".to_string(),
                 data_type: DataType::Varchar { max_length: Some(255) },
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ];
 

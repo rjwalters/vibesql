@@ -485,6 +485,7 @@ impl<'arena> ArenaParser<'arena> {
             constraints,
             default_value,
             comment: None,
+        generated_expr: None,
         };
 
         Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
@@ -624,6 +625,7 @@ impl<'arena> ArenaParser<'arena> {
             constraints,
             default_value,
             comment: None,
+        generated_expr: None,
         };
 
         Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt {
@@ -667,6 +669,7 @@ impl<'arena> ArenaParser<'arena> {
             constraints,
             default_value,
             comment: None,
+        generated_expr: None,
         };
 
         Ok(AlterTableStmt::ChangeColumn(ChangeColumnStmt {

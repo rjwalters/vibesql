@@ -17,6 +17,7 @@ fn test_create_table_statement() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -25,6 +26,7 @@ fn test_create_table_statement() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -47,6 +49,7 @@ fn test_column_def() {
         constraints: vec![],
         default_value: None,
         comment: None,
+    generated_expr: None,
     };
     assert_eq!(col.name, "email");
     assert!(!col.nullable);

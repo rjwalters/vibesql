@@ -306,10 +306,10 @@ fn test_select_with_limit() {
         group_by: None,
         having: None,
         order_by: None,
-        limit: Some(10),
+        limit: Some(Expression::Literal(SqlValue::Integer(10))),
         offset: None,
     };
-    assert_eq!(select.limit, Some(10));
+    assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(10))));
 }
 
 #[test]
@@ -331,10 +331,10 @@ fn test_select_with_offset() {
         group_by: None,
         having: None,
         order_by: None,
-        limit: Some(20),
-        offset: Some(100),
+        limit: Some(Expression::Literal(SqlValue::Integer(20))),
+        offset: Some(Expression::Literal(SqlValue::Integer(100))),
     };
-    assert_eq!(select.offset, Some(100));
+    assert_eq!(select.offset, Some(Expression::Literal(SqlValue::Integer(100))));
 }
 
 #[test]

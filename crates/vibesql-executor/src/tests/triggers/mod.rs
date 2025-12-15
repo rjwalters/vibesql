@@ -38,6 +38,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
             constraints: vec![],
             default_value: None,
             comment: None,
+        generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -59,6 +60,7 @@ pub(super) fn create_users_table(db: &mut Database) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             vibesql_ast::ColumnDef {
                 name: "username".to_string(),
@@ -67,6 +69,7 @@ pub(super) fn create_users_table(db: &mut Database) {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],

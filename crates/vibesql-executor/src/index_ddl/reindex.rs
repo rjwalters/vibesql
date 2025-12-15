@@ -85,6 +85,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
+                generated_expr: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -93,6 +94,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
+                generated_expr: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -101,6 +103,7 @@ mod tests {
                     constraints: vec![],
                     default_value: None,
                     comment: None,
+                generated_expr: None,
                 },
             ],
             table_constraints: vec![],

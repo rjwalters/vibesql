@@ -120,6 +120,7 @@ fn test_before_trigger_executes_first() {
             constraints: vec![],
             default_value: None,
             comment: None,
+        generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],

@@ -707,18 +707,21 @@ mod tests {
                     data_type: DataType::Integer,
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
                 ColumnSchema {
                     name: "l_discount".to_string(),
                     data_type: DataType::DoublePrecision,
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
                 ColumnSchema {
                     name: "l_shipdate".to_string(),
                     data_type: DataType::Varchar { max_length: None },
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
             ],
         );
@@ -1017,12 +1020,14 @@ mod tests {
                     data_type: DataType::Integer,
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
                 ColumnSchema {
                     name: "l_quantity".to_string(),
                     data_type: DataType::Integer,
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
             ],
         );
@@ -1034,12 +1039,14 @@ mod tests {
                     data_type: DataType::Integer,
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
                 ColumnSchema {
                     name: "p_brand".to_string(),
                     data_type: DataType::Varchar { max_length: None },
                     nullable: false,
                     default_value: None,
+                generated_expr: None,
                 },
             ],
         );

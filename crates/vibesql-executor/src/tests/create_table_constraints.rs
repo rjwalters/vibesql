@@ -24,6 +24,7 @@ fn test_create_table_with_column_primary_key() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -32,6 +33,7 @@ fn test_create_table_with_column_primary_key() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -61,6 +63,7 @@ fn test_create_table_with_table_primary_key() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "tenant_id".to_string(),
@@ -69,6 +72,7 @@ fn test_create_table_with_table_primary_key() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -117,6 +121,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
             }],
             default_value: None,
             comment: None,
+        generated_expr: None,
         }],
         table_constraints: vec![TableConstraint {
             name: None,
@@ -150,6 +155,7 @@ fn test_create_table_with_column_unique_constraint() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -161,6 +167,7 @@ fn test_create_table_with_column_unique_constraint() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -190,6 +197,7 @@ fn test_create_table_with_table_unique_constraint() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "last_name".to_string(),
@@ -198,6 +206,7 @@ fn test_create_table_with_table_unique_constraint() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -254,6 +263,7 @@ fn test_create_table_with_check_constraint() {
             }],
             default_value: None,
             comment: None,
+        generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -289,6 +299,7 @@ fn test_auto_index_for_single_column_primary_key() {
             }],
             default_value: None,
             comment: None,
+        generated_expr: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -325,6 +336,7 @@ fn test_auto_index_for_composite_primary_key() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "b".to_string(),
@@ -333,6 +345,7 @@ fn test_auto_index_for_composite_primary_key() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -383,6 +396,7 @@ fn test_auto_index_for_single_unique_constraint() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -394,6 +408,7 @@ fn test_auto_index_for_single_unique_constraint() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -429,6 +444,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -440,6 +456,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "phone".to_string(),
@@ -451,6 +468,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -480,6 +498,7 @@ fn test_auto_index_for_composite_unique_constraint() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "b".to_string(),
@@ -488,6 +507,7 @@ fn test_auto_index_for_composite_unique_constraint() {
                 constraints: vec![],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -541,6 +561,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -552,6 +573,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],
@@ -584,6 +606,7 @@ fn test_auto_index_visible_in_catalog() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -595,6 +618,7 @@ fn test_auto_index_visible_in_catalog() {
                 }],
                 default_value: None,
                 comment: None,
+            generated_expr: None,
             },
         ],
         table_constraints: vec![],

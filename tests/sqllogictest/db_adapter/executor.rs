@@ -96,6 +96,7 @@ pub fn execute_sql(
                             data_type: val.get_type(),
                             nullable: val.is_null(),
                             default_value: None,
+                            generated_expr: None,
                         })
                         .collect();
                     let table_schema = TableSchema::new("result".to_string(), columns);

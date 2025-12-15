@@ -1259,12 +1259,14 @@ mod tests {
                 data_type: DataType::Integer,
                 nullable: false,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "NAME".to_string(),
                 data_type: DataType::Varchar { max_length: Some(50) },
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ];
         let table_schema = TableSchema::new("PRODUCTS".to_string(), columns);
@@ -1439,12 +1441,14 @@ mod tests {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "f2".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ];
         let table_schema = TableSchema::new("test1".to_string(), columns);
@@ -1640,18 +1644,21 @@ mod tests {
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "col1".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
             ColumnSchema {
                 name: "col2".to_string(),
                 data_type: DataType::Integer,
                 nullable: true,
                 default_value: None,
+            generated_expr: None,
             },
         ];
         let table_schema = TableSchema::new("tab0".to_string(), columns);
