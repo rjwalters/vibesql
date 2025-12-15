@@ -257,11 +257,15 @@ pub(super) fn validate_select_column_references_with_context(
     }
 
     // Validate ORDER BY column references (allowing aliases and procedure variables)
+    // Skip validation for compound queries (UNION, INTERSECT, EXCEPT) because ORDER BY
+    // applies to the compound result, not the individual SELECT
     if let Some(order_by) = &stmt.order_by {
-        let combined: std::collections::HashSet<String> =
-            select_aliases.union(&proc_vars).cloned().collect();
-        for order_item in order_by {
-            validate_expression_column_refs(&order_item.expr, schema, outer_schema, &combined)?;
+        if stmt.set_operation.is_none() {
+            let combined: std::collections::HashSet<String> =
+                select_aliases.union(&proc_vars).cloned().collect();
+            for order_item in order_by {
+                validate_expression_column_refs(&order_item.expr, schema, outer_schema, &combined)?;
+            }
         }
     }
 
