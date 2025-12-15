@@ -1,4 +1,6 @@
 use super::*;
+use vibesql_ast::Expression;
+use vibesql_types::SqlValue;
 
 // ========================================================================
 // LIMIT and OFFSET Tests
@@ -12,7 +14,7 @@ fn test_parse_limit() {
 
     match stmt {
         vibesql_ast::Statement::Select(select) => {
-            assert_eq!(select.limit, Some(10));
+            assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(10))));
             assert_eq!(select.offset, None);
         }
         _ => panic!("Expected SELECT"),
@@ -28,7 +30,7 @@ fn test_parse_offset() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             assert_eq!(select.limit, None);
-            assert_eq!(select.offset, Some(5));
+            assert_eq!(select.offset, Some(Expression::Literal(SqlValue::Integer(5))));
         }
         _ => panic!("Expected SELECT"),
     }
@@ -42,8 +44,8 @@ fn test_parse_limit_and_offset() {
 
     match stmt {
         vibesql_ast::Statement::Select(select) => {
-            assert_eq!(select.limit, Some(10));
-            assert_eq!(select.offset, Some(5));
+            assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(10))));
+            assert_eq!(select.offset, Some(Expression::Literal(SqlValue::Integer(5))));
         }
         _ => panic!("Expected SELECT"),
     }
@@ -58,7 +60,7 @@ fn test_parse_limit_with_where() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             assert!(select.where_clause.is_some());
-            assert_eq!(select.limit, Some(5));
+            assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(5))));
         }
         _ => panic!("Expected SELECT"),
     }
@@ -73,7 +75,7 @@ fn test_parse_limit_with_order_by() {
     match stmt {
         vibesql_ast::Statement::Select(select) => {
             assert!(select.order_by.is_some());
-            assert_eq!(select.limit, Some(10));
+            assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(10))));
         }
         _ => panic!("Expected SELECT"),
     }
@@ -91,8 +93,8 @@ fn test_parse_full_query_with_limit_offset() {
         vibesql_ast::Statement::Select(select) => {
             assert!(select.where_clause.is_some());
             assert!(select.order_by.is_some());
-            assert_eq!(select.limit, Some(10));
-            assert_eq!(select.offset, Some(5));
+            assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(10))));
+            assert_eq!(select.offset, Some(Expression::Literal(SqlValue::Integer(5))));
         }
         _ => panic!("Expected SELECT"),
     }
