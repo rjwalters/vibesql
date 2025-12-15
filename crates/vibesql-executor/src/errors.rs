@@ -267,6 +267,12 @@ pub enum ExecutorError {
         column_number: i64,   // The column number that was specified
         select_list_len: usize,
     },
+    /// ORDER BY term doesn't match any column in the result set
+    /// Used for compound queries (UNION, INTERSECT, EXCEPT) where ORDER BY
+    /// must reference result columns by position or alias
+    OrderByTermNotInResultSet {
+        term_position: usize, // 1-indexed position of the ORDER BY term
+    },
     Other(String),
 }
 
@@ -1056,6 +1062,16 @@ impl std::fmt::Display for ExecutorError {
                         ordinal, select_list_len
                     )
                 }
+            }
+            ExecutorError::OrderByTermNotInResultSet { term_position } => {
+                // SQLite-compatible error format: "1st ORDER BY term does not match any column in the result set"
+                let ordinal = match term_position {
+                    1 => "1st".to_string(),
+                    2 => "2nd".to_string(),
+                    3 => "3rd".to_string(),
+                    n => format!("{}th", n),
+                };
+                write!(f, "{} ORDER BY term does not match any column in the result set", ordinal)
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

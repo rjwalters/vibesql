@@ -584,7 +584,9 @@ impl SelectExecutor<'_> {
             // Apply ORDER BY after set operations (if specified)
             // The UNION's default sort is overridden by explicit ORDER BY
             if let Some(order_by) = &stmt.order_by {
-                results = self.sort_set_operation_results(results, order_by, &stmt.select_list)?;
+                // Collect aliases from all UNION branches for ORDER BY resolution
+                let all_aliases = collect_union_aliases(stmt);
+                results = self.sort_set_operation_results(results, order_by, &stmt.select_list, &all_aliases)?;
             }
 
             // Apply LIMIT/OFFSET to the final result (after all set operations and ORDER BY)
@@ -1026,6 +1028,43 @@ impl SelectExecutor<'_> {
         Ok(left_results)
     }
 
+}
+
+/// Collect aliases from all SELECT statements in a UNION chain
+/// Returns a vec where each element is a vec of aliases for that SELECT's columns
+fn collect_union_aliases(stmt: &vibesql_ast::SelectStmt) -> Vec<Vec<Option<String>>> {
+    let mut all_aliases = Vec::new();
+
+    // Collect from the main SELECT
+    let mut main_aliases = Vec::new();
+    for item in &stmt.select_list {
+        if let vibesql_ast::SelectItem::Expression { alias, .. } = item {
+            main_aliases.push(alias.clone());
+        } else {
+            main_aliases.push(None);
+        }
+    }
+    all_aliases.push(main_aliases);
+
+    // Recursively collect from set operations
+    let mut current_set_op = stmt.set_operation.as_ref();
+    while let Some(set_op) = current_set_op {
+        let mut right_aliases = Vec::new();
+        for item in &set_op.right.select_list {
+            if let vibesql_ast::SelectItem::Expression { alias, .. } = item {
+                right_aliases.push(alias.clone());
+            } else {
+                right_aliases.push(None);
+            }
+        }
+        all_aliases.push(right_aliases);
+        current_set_op = set_op.right.set_operation.as_ref();
+    }
+
+    all_aliases
+}
+
+impl SelectExecutor<'_> {
     /// Sort set operation results by ORDER BY clause
     ///
     /// ORDER BY on a UNION/INTERSECT/EXCEPT can use:
@@ -1039,6 +1078,7 @@ impl SelectExecutor<'_> {
         mut rows: Vec<vibesql_storage::Row>,
         order_by: &[vibesql_ast::OrderByItem],
         select_list: &[vibesql_ast::SelectItem],
+        all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         use crate::select::grouping::compare_sql_values;
         use std::cmp::Ordering;
@@ -1084,7 +1124,7 @@ impl SelectExecutor<'_> {
 
         // Parse order_by items and resolve to column indices
         let mut sort_columns: Vec<(usize, bool)> = Vec::new(); // (column_index, is_desc)
-        for item in order_by {
+        for (term_index, item) in order_by.iter().enumerate() {
             let col_idx_opt = match &item.expr {
                 // Numeric literal: ORDER BY 1
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
@@ -1097,20 +1137,50 @@ impl SelectExecutor<'_> {
                         Some(n.saturating_sub(1))
                     } else {
                         // Try to match by alias name first, then by original expression name
-                        column_info.iter().position(|(alias, orig)| {
-                            alias == column || orig.as_ref() == Some(column)
+                        // Use case-insensitive matching for SQLite compatibility
+                        let col_idx = column_info.iter().position(|(alias, orig)| {
+                            alias.eq_ignore_ascii_case(column)
+                                || orig.as_ref().map_or(false, |o| o.eq_ignore_ascii_case(column))
+                        });
+
+                        // If not found, check if any branch has this alias (SQLite compatibility)
+                        // SQLite allows ORDER BY to reference aliases from any UNION branch
+                        col_idx.or_else(|| {
+                            // Check all positions in all branches
+                            for branch_aliases in all_union_aliases {
+                                for (idx, alias_opt) in branch_aliases.iter().enumerate() {
+                                    if let Some(alias) = alias_opt {
+                                        if alias.eq_ignore_ascii_case(column) {
+                                            return Some(idx);
+                                        }
+                                    }
+                                }
+                            }
+                            None
                         })
                     }
                 }
-                // Complex expressions not supported
+                // Complex expressions not supported in compound query ORDER BY
                 _ => None,
             };
 
             if let Some(col_idx) = col_idx_opt {
+                // Validate column index is within bounds
+                if col_idx >= column_info.len() {
+                    return Err(ExecutorError::OrderByOutOfRange {
+                        term_position: term_index + 1,
+                        column_number: (col_idx + 1) as i64,
+                        select_list_len: column_info.len(),
+                    });
+                }
                 let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
                 sort_columns.push((col_idx, is_desc));
+            } else {
+                // ORDER BY term doesn't match any column in the result set
+                return Err(ExecutorError::OrderByTermNotInResultSet {
+                    term_position: term_index + 1,
+                });
             }
-            // Skip columns that can't be resolved
         }
 
         if sort_columns.is_empty() {
