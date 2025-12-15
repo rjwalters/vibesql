@@ -18,6 +18,8 @@
 //! - `aggregate_caching`: Aggregate result caching tests (Phase 2 of issue #1038)
 //! - `cte_scalar_subquery_tests`: CTE references in scalar subqueries (issue #2602, TPC-H Q15
 //!   pattern)
+//! - `recursive_cte_tests`: Recursive CTE tests with UNION and UNION ALL (issue #4480, #4483,
+//!   #4485)
 //! - `select_joins`: JOIN operation tests
 //! - `scalar_subquery_basic_tests`: Basic scalar subquery execution tests
 //! - `scalar_subquery_error_tests`: Scalar subquery error handling tests
@@ -91,6 +93,7 @@ mod phase3_join_optimization;
 mod predicate_pushdown;
 mod predicate_tests;
 mod prefix_index_tests;
+mod recursive_cte_tests;
 mod privilege_checker_tests;
 mod procedures;
 mod quantified_comparison_tests;
