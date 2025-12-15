@@ -28,8 +28,10 @@ impl Parser {
         // Parse table name with optional schema qualifier and quoted flag
         // Supports: tablename, "TableName", schema.table, "schema"."table"
         let table_ref = self.parse_table_ref()?;
+        let schema_name = table_ref.schema_name;
+        let schema_quoted = table_ref.schema_quoted;
         let table_name = table_ref.name;
-        let quoted = table_ref.quoted;
+        let table_quoted = table_ref.quoted;
 
         // Parse column list (optional in SQL, but we'll require it for now)
         let columns = if matches!(self.peek(), Token::LParen) {
@@ -123,8 +125,10 @@ impl Parser {
         }
 
         Ok(vibesql_ast::InsertStmt {
+            schema_name,
+            schema_quoted,
             table_name,
-            quoted,
+            table_quoted,
             columns,
             source,
             conflict_clause,
@@ -142,8 +146,10 @@ impl Parser {
         // Parse table name with optional schema qualifier and quoted flag
         // Supports: tablename, "TableName", schema.table, "schema"."table"
         let table_ref = self.parse_table_ref()?;
+        let schema_name = table_ref.schema_name;
+        let schema_quoted = table_ref.schema_quoted;
         let table_name = table_ref.name;
-        let quoted = table_ref.quoted;
+        let table_quoted = table_ref.quoted;
 
         // Parse column list (optional)
         let columns = if matches!(self.peek(), Token::LParen) {
@@ -243,8 +249,10 @@ impl Parser {
         }
 
         Ok(vibesql_ast::InsertStmt {
+            schema_name,
+            schema_quoted,
             table_name,
-            quoted,
+            table_quoted,
             columns,
             source,
             conflict_clause: Some(vibesql_ast::ConflictClause::Replace),

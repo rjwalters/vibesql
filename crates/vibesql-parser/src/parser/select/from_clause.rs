@@ -302,10 +302,10 @@ impl Parser {
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
 
                 Ok(vibesql_ast::FromClause::Table {
-                    name: table.name,
+                    name: table.full_name(),
                     alias,
                     column_aliases,
-                    quoted: table.quoted,
+                    quoted: table.is_any_quoted(),
                 })
             }
             _ => Err(ParseError {

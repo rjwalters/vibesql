@@ -29,7 +29,7 @@ fn test_trigger_failure_causes_rollback() {
         .expect("Failed to create trigger");
 
     // Try to insert - should fail due to trigger error
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -95,7 +95,7 @@ fn test_recursion_prevention() {
         .expect("Failed to create trigger");
 
     // Try to insert - should fail with recursion depth error
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "users".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![

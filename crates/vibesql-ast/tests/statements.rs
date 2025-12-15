@@ -33,8 +33,10 @@ fn test_create_select_statement() {
 #[test]
 fn test_create_insert_statement() {
     let stmt = Statement::Insert(InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
         table_name: "users".to_string(),
-        quoted: false,
+        table_quoted: false,
         columns: vec!["name".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Varchar(
             StringValue::from("Alice"),

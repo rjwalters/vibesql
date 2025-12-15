@@ -69,19 +69,21 @@ impl CreateTableExecutor {
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
         // Parse qualified table name (schema.table or just table)
-        let (schema_name, table_name) =
+        let (schema_name, table_name, identifier) =
             if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
-                (schema_part.to_string(), table_part.to_string())
+                // Schema-qualified table name - use qualified identifier
+                // Note: We use stmt.quoted for both parts since the parser combined them
+                // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
+                let id = TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
+                (schema_part.to_string(), table_part.to_string(), id)
             } else {
-                (database.catalog.get_current_schema().to_string(), stmt.table_name.clone())
+                // Simple table name - use current schema
+                let id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
+                (database.catalog.get_current_schema().to_string(), stmt.table_name.clone(), id)
             };
 
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
-
-        // Create TableIdentifier with proper case semantics based on quoted flag
-        // This identifier is used for both existence check and table creation
-        let identifier = TableIdentifier::new(&table_name, stmt.quoted);
 
         // Check if table already exists using identifier (respects quoted semantics)
         if database.catalog.table_exists_by_identifier(&identifier) {

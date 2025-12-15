@@ -45,7 +45,7 @@ fn test_multiple_triggers_fire_in_order() {
         .expect("Failed to create trigger 2");
 
     // Insert a row - should fire both triggers
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -86,7 +86,7 @@ fn test_trigger_with_multiple_statements() {
         .expect("Failed to create trigger");
 
     // Insert a row - should fire trigger with both statements
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -129,7 +129,7 @@ fn test_before_trigger_executes_first() {
     CreateTableExecutor::execute(&counter_stmt, &mut db).expect("Failed to create counter table");
 
     // Initialize counter to 0
-    let init_insert = vibesql_ast::InsertStmt { quoted: false,
+    let init_insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "COUNTER".to_string(),
         columns: vec!["value".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![vibesql_ast::Expression::Literal(
@@ -154,7 +154,7 @@ fn test_before_trigger_executes_first() {
         .expect("Failed to create before trigger");
 
     // Insert a row
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
