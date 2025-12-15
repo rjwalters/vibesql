@@ -234,13 +234,22 @@ test-unit:
 	@$(MAKE) strip-quarantine
 	cargo test --release --workspace --lib
 
-# Run all workspace tests (unit + integration)
+# Run all workspace tests (unit + integration, then compliance last)
 test-workspace:
-	@echo "Running workspace tests (unit + integration)..."
-	@echo "This includes 2,991 unit tests + 739 sqltest conformance tests"
-	cargo test --release --workspace --no-run
+	@echo "Running workspace tests..."
+	@echo "Phase 1: Unit tests (lib)"
+	cargo test --release --workspace --lib --no-run
 	@$(MAKE) strip-quarantine
-	cargo test --release --workspace
+	cargo test --release --workspace --lib
+	@echo ""
+	@echo "Phase 2: Doc tests"
+	cargo test --release --workspace --doc
+	@echo ""
+	@echo "Phase 3: Integration tests (excluding compliance)"
+	@./scripts/run-integration-tests.sh
+	@echo ""
+	@echo "Phase 4: Compliance tests (sqllogictest)"
+	cargo test --release --workspace --test sqllogictest_suite --test sqllogictest_basic --test sqllogictest_benchmark --test sqllogictest_runner --test sqllogictest_sqlite --test sqltest_conformance --test pgsql_regress
 	@# Process SQLLogicTest results into database for analysis
 	@if [ -f target/sqllogictest_results.json ]; then \
 		echo "Processing SQLLogicTest results into database..."; \
