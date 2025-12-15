@@ -192,9 +192,19 @@ impl CombinedSchema {
         let right_columns = right_schema.columns.len();
         let right_id = TableIdentifier::unquoted(&right_table_name);
 
-        // Track duplicate table alias/name
-        if table_schemas.contains_key(&right_id) {
-            duplicate_aliases.insert(right_id.clone());
+        // Track duplicate table alias/name - but NOT for self-joins
+        // A self-join is when the same table (identical schema) is joined to itself.
+        // In SQLite, self-joins like `FROM t1 JOIN t1 USING(a,b)` allow unambiguous
+        // references to `t1.column` because it's the same underlying table.
+        // Only mark as duplicate if it's a different table with the same alias.
+        if let Some((_, existing_schema)) = table_schemas.get(&right_id) {
+            // Check if it's a true self-join (same table) or alias conflict (different tables)
+            // For self-joins, the schemas are identical (same table name, same columns)
+            if existing_schema != &right_schema {
+                // Different tables with same alias - this is ambiguous
+                duplicate_aliases.insert(right_id.clone());
+            }
+            // If same schema, it's a self-join - don't mark as duplicate
         }
 
         // Always insert/overwrite the table
@@ -224,9 +234,13 @@ impl CombinedSchema {
 
         // Add all tables from right schema with adjusted start indices
         for (table_id, (start_index, schema)) in right.table_schemas {
-            // Track duplicate table alias/name
-            if table_schemas.contains_key(&table_id) {
-                duplicate_aliases.insert(table_id.clone());
+            // Track duplicate table alias/name - but NOT for self-joins
+            // (same logic as combine())
+            if let Some((_, existing_schema)) = table_schemas.get(&table_id) {
+                // Only mark as duplicate if it's a different table with the same alias
+                if existing_schema != &schema {
+                    duplicate_aliases.insert(table_id.clone());
+                }
             }
 
             let adjusted_start = left_total + start_index;
@@ -544,9 +558,13 @@ impl SchemaBuilder {
         let num_columns = schema.columns.len();
         let table_id = TableIdentifier::unquoted(&name);
 
-        // Track duplicate table alias/name
-        if self.table_schemas.contains_key(&table_id) {
-            self.duplicate_aliases.insert(table_id.clone());
+        // Track duplicate table alias/name - but NOT for self-joins
+        // (same logic as CombinedSchema::combine())
+        if let Some((_, existing_schema)) = self.table_schemas.get(&table_id) {
+            // Only mark as duplicate if it's a different table with the same alias
+            if existing_schema != &schema {
+                self.duplicate_aliases.insert(table_id.clone());
+            }
         }
 
         self.table_schemas.insert(table_id, (self.column_offset, schema));
