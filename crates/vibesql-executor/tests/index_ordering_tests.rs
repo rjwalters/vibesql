@@ -39,7 +39,7 @@ fn test_index_ordering() {
     vibesql_executor::CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
 
     // Insert data
-    let insert_stmt = vibesql_ast::InsertStmt { quoted: false,
+    let insert_stmt = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "users".to_string(),
         columns: vec![],
         source: vibesql_ast::InsertSource::Values(vec![

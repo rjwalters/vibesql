@@ -160,11 +160,11 @@ impl Parser {
 
         Ok(vibesql_ast::CreateTableStmt {
             if_not_exists,
-            table_name: table.name,
+            table_name: table.full_name(),
             columns,
             table_constraints,
             table_options,
-            quoted: table.quoted,
+            quoted: table.is_any_quoted(),
         })
     }
 

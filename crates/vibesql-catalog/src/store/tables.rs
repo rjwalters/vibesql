@@ -192,10 +192,24 @@ impl super::Catalog {
     ///
     /// The `identifier` parameter determines case-sensitivity based on whether
     /// the identifier was quoted in the original SQL.
+    ///
+    /// For qualified identifiers (schema.table), looks up in the specified schema.
+    /// For unqualified identifiers, looks up in the current schema.
     pub fn get_table_by_identifier(&self, identifier: &TableIdentifier) -> Option<&TableSchema> {
-        self.schemas.get(&self.current_schema).and_then(|schema| {
-            schema.get_table_by_identifier(identifier)
-        })
+        if identifier.is_qualified() {
+            // For qualified identifiers, look up in the specified schema
+            let schema_canonical = identifier.schema_canonical().unwrap_or(&self.current_schema);
+            self.schemas.get(schema_canonical).and_then(|schema| {
+                // Create a simple identifier with just the table part for lookup
+                let table_id = TableIdentifier::new(identifier.table_canonical(), identifier.is_table_quoted());
+                schema.get_table_by_identifier(&table_id)
+            })
+        } else {
+            // For unqualified identifiers, use current schema
+            self.schemas.get(&self.current_schema).and_then(|schema| {
+                schema.get_table_by_identifier(identifier)
+            })
+        }
     }
 
     /// Get a table schema by name (supports qualified names like "schema.table").

@@ -163,7 +163,7 @@ impl Parser {
     /// Parse a qualified identifier (schema.table or just table)
     pub(super) fn parse_qualified_identifier(&mut self) -> Result<String, ParseError> {
         let table_ref = self.parse_table_ref()?;
-        Ok(table_ref.name)
+        Ok(table_ref.full_name())
     }
 
     /// Parse a table reference with quoted flag (schema.table or just table)
@@ -172,6 +172,9 @@ impl Parser {
     /// This is important for SQL:1999 case-sensitivity semantics:
     /// - Unquoted identifiers are case-insensitive
     /// - Quoted identifiers are case-sensitive
+    ///
+    /// For schema-qualified names, the schema and table parts are stored separately
+    /// with their individual quoted flags preserved.
     pub(super) fn parse_table_ref(&mut self) -> Result<vibesql_ast::TableRef, ParseError> {
         // Parse first identifier and track if it was quoted
         let (first_part, first_quoted) = match self.peek() {
@@ -216,11 +219,13 @@ impl Parser {
                     return Err(ParseError { message: "Expected identifier after '.'".to_string() })
                 }
             };
-            // For qualified names, the table part's quoted status matters most
-            // If either part is quoted, we consider the whole reference quoted
-            Ok(vibesql_ast::TableRef::new(
-                format!("{}.{}", first_part, second_part),
-                first_quoted || second_quoted,
+            // For qualified names, store schema and table parts separately
+            // This preserves the individual quoted status for proper case handling
+            Ok(vibesql_ast::TableRef::qualified(
+                first_part,
+                first_quoted,
+                second_part,
+                second_quoted,
             ))
         } else {
             Ok(vibesql_ast::TableRef::new(first_part, first_quoted))

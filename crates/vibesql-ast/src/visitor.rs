@@ -1218,8 +1218,10 @@ fn transform_mixed_grouping_item<V: ExpressionMutVisitor>(
 /// Transform an INSERT statement
 pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertStmt) -> InsertStmt {
     InsertStmt {
+        schema_name: stmt.schema_name,
+        schema_quoted: stmt.schema_quoted,
         table_name: stmt.table_name,
-        quoted: stmt.quoted,
+        table_quoted: stmt.table_quoted,
         columns: stmt.columns,
         source: match stmt.source {
             InsertSource::Values(rows) => InsertSource::Values(

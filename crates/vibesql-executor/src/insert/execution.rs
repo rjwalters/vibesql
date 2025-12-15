@@ -40,20 +40,43 @@ fn execute_insert_internal(
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
 ) -> Result<usize, ExecutorError> {
+    // Build full table name for error messages and privilege checks
+    let full_table_name = match &stmt.schema_name {
+        Some(schema) => format!("{}.{}", schema, stmt.table_name),
+        None => stmt.table_name.clone(),
+    };
+
     // Check INSERT privilege on the table
-    PrivilegeChecker::check_insert(db, &stmt.table_name)?;
+    PrivilegeChecker::check_insert(db, &full_table_name)?;
 
     // Get table schema from catalog (clone to avoid borrow issues)
     // Use TableIdentifier for SQL:1999 case-sensitive lookups when quoted
-    let table_id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
+    // For schema-qualified names, use TableIdentifier::qualified to preserve
+    // the individual quoted status of schema and table parts
+    let table_id = match &stmt.schema_name {
+        Some(schema_name) => TableIdentifier::qualified(
+            schema_name,
+            stmt.schema_quoted,
+            &stmt.table_name,
+            stmt.table_quoted,
+        ),
+        None => TableIdentifier::new(&stmt.table_name, stmt.table_quoted),
+    };
     let schema = db
         .catalog
         .get_table_by_identifier(&table_id)
-        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
+        .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?
         .clone();
 
-    // Use canonical table name from schema for all storage operations
-    // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
+    // Use canonical table name from identifier for storage layer operations
+    // For schema-qualified inserts (e.g., INSERT INTO "mySchema"."users"), this produces
+    // the full qualified name so storage looks up in the correct schema.
+    // For unqualified inserts (e.g., INSERT INTO tab1), this produces just the table name -
+    // the storage layer's fallback logic will find it and this matches how indexes
+    // are registered (with unqualified table names).
+    let storage_table_name = table_id.canonical().to_string();
+
+    // Use the schema's table name for catalog operations (matches how table was created)
     let table_name = &schema.name;
 
     // Determine target column indices and types
@@ -113,10 +136,10 @@ fn execute_insert_internal(
     // Estimate DML cost for query analysis and optimization decisions
     // This helps with profiling and can inform future batch size decisions
     if std::env::var("DML_COST_DEBUG").is_ok() {
-        if let Some(index_info) = db.get_table_index_info(table_name) {
+        if let Some(index_info) = db.get_table_index_info(&storage_table_name) {
             // Get table statistics for cost estimation (use cached if available, or fallback to
             // estimate)
-            if let Some(table) = db.get_table(table_name) {
+            if let Some(table) = db.get_table(&storage_table_name) {
                 let table_stats = table.get_statistics().cloned().unwrap_or_else(|| {
                     vibesql_storage::TableStatistics::estimate_from_row_count(table.row_count())
                 });
@@ -195,7 +218,7 @@ fn execute_insert_internal(
         let validator = super::row_validator::RowValidator::new(
             db,
             &schema,
-            table_name,
+            &storage_table_name,
             &primary_key_values,
             &unique_constraint_values,
             skip_duplicate_checks,
@@ -246,7 +269,7 @@ fn execute_insert_internal(
     // Track row count before inserts for assertion rollback
     let row_count_before_all = if has_assertions {
         Some(
-            db.get_table(table_name)
+            db.get_table(&storage_table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
                 .row_count(),
         )
@@ -271,7 +294,7 @@ fn execute_insert_internal(
                 let rows: Vec<vibesql_storage::Row> =
                     chunk.iter().map(|v| vibesql_storage::Row::new(v.clone())).collect();
 
-                rows_inserted += db.insert_rows_batch(table_name, rows).map_err(|e| {
+                rows_inserted += db.insert_rows_batch(&storage_table_name, rows).map_err(|e| {
                     ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
                 })?;
             }
@@ -280,7 +303,7 @@ fn execute_insert_internal(
             let rows: Vec<vibesql_storage::Row> =
                 validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
 
-            rows_inserted = db.insert_rows_batch(table_name, rows).map_err(|e| {
+            rows_inserted = db.insert_rows_batch(&storage_table_name, rows).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
         }
@@ -328,13 +351,13 @@ fn execute_insert_internal(
 
             // Get row count before insert to enable rollback
             let row_count_before = db
-                .get_table(table_name)
-                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?
+                .get_table(&storage_table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?
                 .row_count();
 
             // Insert the row
             let row = vibesql_storage::Row::new(full_row_values);
-            db.insert_row(table_name, row.clone()).map_err(|e| {
+            db.insert_row(&storage_table_name, row.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;
 
@@ -354,8 +377,8 @@ fn execute_insert_internal(
                     // Note: This is a simple rollback mechanism for Phase 3
                     // Full transaction support will come in a later phase
                     let table = db
-                        .get_table_mut(table_name)
-                        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+                        .get_table_mut(&storage_table_name)
+                        .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?;
 
                     // Delete the last row (the one we just inserted)
                     // Row was inserted at index row_count_before
@@ -370,7 +393,7 @@ fn execute_insert_internal(
                     });
 
                     // Rebuild indexes since we modified the table (handles compaction)
-                    db.rebuild_indexes(table_name);
+                    db.rebuild_indexes(&storage_table_name);
 
                     // Re-throw the trigger error
                     return Err(trigger_error);
@@ -402,7 +425,7 @@ fn execute_insert_internal(
     // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
     // - Database-level cache: used by Database::get_columnar() for cached access
     if rows_inserted > 0 {
-        db.invalidate_columnar_cache(table_name);
+        db.invalidate_columnar_cache(&storage_table_name);
     }
 
     // Check all assertions after INSERT completes (SQL:1999 Feature F671/F672)
@@ -414,7 +437,7 @@ fn execute_insert_internal(
         if let Some(start_index) = row_count_before_all {
             if rows_inserted > 0 {
                 // Delete rows starting from start_index (the rows we inserted)
-                if let Some(table_mut) = db.get_table_mut(table_name) {
+                if let Some(table_mut) = db.get_table_mut(&storage_table_name) {
                     use std::cell::Cell;
                     let current_index = Cell::new(0);
                     // Delete all rows from start_index onwards (the newly inserted rows)
@@ -426,8 +449,8 @@ fn execute_insert_internal(
                 }
 
                 // Rebuild indexes since we modified the table (handles compaction)
-                db.rebuild_indexes(table_name);
-                db.invalidate_columnar_cache(table_name);
+                db.rebuild_indexes(&storage_table_name);
+                db.invalidate_columnar_cache(&storage_table_name);
             }
         }
         return Err(assertion_error);

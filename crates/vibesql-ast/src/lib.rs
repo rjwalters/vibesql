@@ -63,6 +63,10 @@ pub mod visitor;
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableRef {
+    /// Optional schema name for qualified references (e.g., schema.table)
+    pub schema_name: Option<String>,
+    /// Whether the schema name was quoted (delimited) in the original SQL.
+    pub schema_quoted: bool,
     /// The table name as written in the SQL
     pub name: String,
     /// Whether the identifier was quoted (delimited) in the original SQL.
@@ -74,17 +78,50 @@ pub struct TableRef {
 impl TableRef {
     /// Create a new table reference.
     pub fn new(name: String, quoted: bool) -> Self {
-        Self { name, quoted }
+        Self {
+            schema_name: None,
+            schema_quoted: false,
+            name,
+            quoted,
+        }
+    }
+
+    /// Create a qualified table reference with schema.
+    pub fn qualified(
+        schema_name: String,
+        schema_quoted: bool,
+        table_name: String,
+        table_quoted: bool,
+    ) -> Self {
+        Self {
+            schema_name: Some(schema_name),
+            schema_quoted,
+            name: table_name,
+            quoted: table_quoted,
+        }
     }
 
     /// Create an unquoted (case-insensitive) table reference.
     pub fn unquoted(name: String) -> Self {
-        Self { name, quoted: false }
+        Self::new(name, false)
     }
 
     /// Create a quoted (case-sensitive) table reference.
-    pub fn quoted(name: String) -> Self {
-        Self { name, quoted: true }
+    pub fn quoted_ref(name: String) -> Self {
+        Self::new(name, true)
+    }
+
+    /// Get the full name (schema.table or just table)
+    pub fn full_name(&self) -> String {
+        match &self.schema_name {
+            Some(schema) => format!("{}.{}", schema, self.name),
+            None => self.name.clone(),
+        }
+    }
+
+    /// Check if any part is quoted
+    pub fn is_any_quoted(&self) -> bool {
+        self.quoted || self.schema_quoted
     }
 }
 

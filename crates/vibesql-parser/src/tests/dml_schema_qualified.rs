@@ -9,8 +9,10 @@ fn test_insert_schema_qualified_quoted() {
     let stmt = Parser::parse_sql(sql).unwrap();
     match stmt {
         Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "mySchema.users");
-            assert!(insert.quoted);
+            assert_eq!(insert.schema_name, Some("mySchema".to_string()));
+            assert!(insert.schema_quoted);
+            assert_eq!(insert.table_name, "users");
+            assert!(insert.table_quoted);
         }
         _ => panic!("Expected INSERT statement"),
     }
@@ -22,8 +24,10 @@ fn test_insert_schema_qualified_unquoted() {
     let stmt = Parser::parse_sql(sql).unwrap();
     match stmt {
         Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "myschema.users");
-            assert!(!insert.quoted);
+            assert_eq!(insert.schema_name, Some("myschema".to_string()));
+            assert!(!insert.schema_quoted);
+            assert_eq!(insert.table_name, "users");
+            assert!(!insert.table_quoted);
         }
         _ => panic!("Expected INSERT statement"),
     }
@@ -62,8 +66,10 @@ fn test_insert_mixed_quoted_unquoted() {
     let stmt = Parser::parse_sql(sql).unwrap();
     match stmt {
         Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "mySchema.users");
-            assert!(insert.quoted); // quoted if any part is quoted
+            assert_eq!(insert.schema_name, Some("mySchema".to_string()));
+            assert!(insert.schema_quoted);
+            assert_eq!(insert.table_name, "users");
+            assert!(!insert.table_quoted);
         }
         _ => panic!("Expected INSERT statement"),
     }
@@ -75,8 +81,10 @@ fn test_replace_schema_qualified() {
     let stmt = Parser::parse_sql(sql).unwrap();
     match stmt {
         Statement::Insert(insert) => {
-            assert_eq!(insert.table_name, "mySchema.users");
-            assert!(insert.quoted);
+            assert_eq!(insert.schema_name, Some("mySchema".to_string()));
+            assert!(insert.schema_quoted);
+            assert_eq!(insert.table_name, "users");
+            assert!(insert.table_quoted);
         }
         _ => panic!("Expected INSERT statement"),
     }
