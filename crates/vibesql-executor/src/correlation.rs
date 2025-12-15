@@ -219,14 +219,15 @@ fn is_expression_correlated(
                     // This references the subquery's own table, not outer query
                     return false;
                 }
-            } else {
-                // Unqualified column reference
-                // If the subquery has its own FROM clause (has tables), assume the column
-                // belongs to the subquery per SQL scoping rules (inner scope shadows outer)
-                if !subquery_tables.is_empty() {
-                    return false;
-                }
             }
+            // Note: For unqualified column references, we DON'T immediately assume they
+            // belong to the subquery's tables. We need to check if the column actually
+            // exists in outer schema to determine correlation.
+            //
+            // Fix for issue #4493: The previous logic incorrectly assumed that if the
+            // subquery has ANY tables, then ALL unqualified columns belong to those tables.
+            // But a column like `x` might not exist in the subquery's table `t1`, and
+            // instead belong to the outer query's table `t2`.
 
             // Check if this column exists in outer schema
             outer_schema.get_column_index(table.as_deref(), column).is_some()
@@ -533,7 +534,7 @@ mod tests {
     #[test]
     fn test_empty_outer_schema() {
         let outer_schema =
-            CombinedSchema { table_schemas: std::collections::HashMap::new(), total_columns: 0, hidden_columns: std::collections::HashSet::new() };
+            CombinedSchema { table_schemas: std::collections::HashMap::new(), total_columns: 0, hidden_columns: std::collections::HashSet::new(), outer_schema: None };
 
         let subquery = SelectStmt {
             with_clause: None,

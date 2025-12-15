@@ -126,7 +126,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
         }
 
         let combined_schema =
-            CombinedSchema { table_schemas, total_columns: left_total + right_total, hidden_columns };
+            CombinedSchema { table_schemas, total_columns: left_total + right_total, hidden_columns, outer_schema: None };
 
         let right_count = right_rows.len();
 

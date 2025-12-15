@@ -82,6 +82,21 @@ pub(super) fn try_convert_in_to_join(
         _ => return None, // Complex FROM clause for non-aggregate, skip
     };
 
+    // FIX for issue #4493: Skip transformation if SELECT list contains unqualified columns
+    // that might be correlated references.
+    //
+    // Example that should NOT be transformed:
+    //   SELECT x FROM t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
+    //   If the inner `SELECT x` has `x` as a correlated reference (not from t1),
+    //   rewriting it to `__subquery_t1.x` will fail because that column doesn't exist.
+    //
+    // Conservative check: if SELECT column is unqualified, it might be correlated,
+    // so skip the optimization and let runtime evaluation handle it safely.
+    if let Expression::ColumnRef { table: None, .. } = &subquery_column {
+        // Unqualified column in SELECT list - could be correlated, skip optimization
+        return None;
+    }
+
     // Detect self-join: check if subquery table name conflicts with outer query tables
     let needs_alias = is_self_join(from, &table_name, &table_alias);
 
@@ -102,17 +117,24 @@ pub(super) fn try_convert_in_to_join(
             );
         }
 
-        // For a self-join, we need to qualify the outer expression columns with the
-        // original table name (not the leftmost table in the FROM clause).
-        // Example: `i_item_id IN (SELECT i_item_id FROM item WHERE ...)`
-        // The outer `i_item_id` refers to the outer `item` table, so we qualify it
-        // as `item.i_item_id`, and the subquery columns get rewritten to
-        // `__subquery_item.i_item_id`
-        let outer_table_name = table_alias.as_ref().unwrap_or(&table_name);
-
-        // Qualify outer expression columns with the outer table name
-        // This prevents ambiguity when both tables have the same column names
-        let qualified_expr = qualify_outer_column_refs(expr, outer_table_name);
+        // FIX for issue #4493: Don't qualify the outer expression!
+        //
+        // The original code tried to qualify the outer expression (left side of IN)
+        // with the subquery's table name to handle self-joins. But this breaks when:
+        // 1. The outer query has multiple tables (FROM t2, t1)
+        // 2. The column belongs to a different table than the subquery references
+        //
+        // Example that FAILS with qualification:
+        //   SELECT x FROM t2, t1 WHERE x IN (SELECT c FROM t1 WHERE ...)
+        //   - Outer 'x' is from t2, not t1
+        //   - Qualifying as 't1.x' causes "column not found" error
+        //
+        // Let SQL's normal resolution handle it. The join condition will be:
+        //   t2.x = __subquery_t1.c  (resolved at runtime based on available columns)
+        //
+        // For true self-joins like `SELECT * FROM t1 WHERE id IN (SELECT id FROM t1)`,
+        // the runtime resolution will correctly pick up t1.id for the outer reference.
+        let qualified_expr = expr.clone();
 
         // Use the table alias (if present) for matching column references, not just the table name
         // This is critical for Q21 where the subquery uses an alias like "l2" or "l3"
@@ -123,14 +145,19 @@ pub(super) fn try_convert_in_to_join(
         let rewritten_col =
             rewrite_column_refs_with_alias(&subquery_column, old_table_ref, &new_alias);
 
-        // Rewrite column references in the subquery WHERE clause
-        let rewritten_where = subquery
-            .where_clause
-            .as_ref()
-            .map(|w| rewrite_column_refs_with_alias(w, old_table_ref, &new_alias));
+        // FIX for issue #4493: Don't rewrite the WHERE clause!
+        // The WHERE clause can contain correlated references to outer query tables.
+        // Rewriting ALL unqualified columns breaks correlation for deeply nested subqueries.
+        // Only the SELECT list column (return value) needs rewriting for the join.
+        //
+        // Example: WHERE x = c
+        //   - 'c' exists in subquery's t1, would be rewritten to __subquery_t1.c
+        //   - 'x' is correlated to outer t2.x, should NOT be rewritten
+        //
+        // The original code blindly rewrote both, breaking nested correlation.
+        let rewritten_where = subquery.where_clause.clone();
 
         if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
-            eprintln!("[SUBQUERY_TRANSFORM] outer_table_name={}", outer_table_name);
             eprintln!("[SUBQUERY_TRANSFORM] qualified_expr={:?}", qualified_expr);
             eprintln!("[SUBQUERY_TRANSFORM] rewritten_col={:?}", rewritten_col);
             eprintln!("[SUBQUERY_TRANSFORM] rewritten_where={:?}", rewritten_where);

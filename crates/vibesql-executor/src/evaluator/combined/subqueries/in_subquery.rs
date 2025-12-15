@@ -218,7 +218,9 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // Correlated subquery - execute with outer context (can't cache, use linear search)
-        let merged_schema = if !self.schema.table_schemas.is_empty() {
+        // Fix for issue #4493: Build merged schema if EITHER current level has tables OR outer level exists
+        // Without this check, deeply nested subqueries lose access to outer-level tables
+        let merged_schema = if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some() {
             Some(build_merged_outer_schema(self.schema, self.outer_schema))
         } else {
             None
