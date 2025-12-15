@@ -273,6 +273,12 @@ pub enum ExecutorError {
     OrderByTermNotInResultSet {
         term_position: usize, // 1-indexed position of the ORDER BY term
     },
+    /// Invalid LIMIT or OFFSET value (SQLite-compatible error)
+    InvalidLimitOffset {
+        clause: String,  // "LIMIT" or "OFFSET"
+        value: String,   // The value that was provided
+        reason: String,  // Why it's invalid
+    },
     Other(String),
 }
 
@@ -1072,6 +1078,9 @@ impl std::fmt::Display for ExecutorError {
                     n => format!("{}th", n),
                 };
                 write!(f, "{} ORDER BY term does not match any column in the result set", ordinal)
+            }
+            ExecutorError::InvalidLimitOffset { clause, value, reason } => {
+                write!(f, "{} value {} {}", clause, value, reason)
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

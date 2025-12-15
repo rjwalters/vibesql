@@ -11,6 +11,7 @@
 use std::fmt::Write;
 
 use vibesql_ast::{ExplainFormat, ExplainStmt, SelectStmt, Statement};
+use vibesql_ast::pretty_print::ToSql;
 use vibesql_storage::Database;
 
 use crate::{
@@ -198,8 +199,8 @@ impl ExplainExecutor {
         }
 
         // Add LIMIT info
-        if let Some(limit) = stmt.limit {
-            root.details.push(format!("Limit: {}", limit));
+        if let Some(ref limit) = stmt.limit {
+            root.details.push(format!("Limit: {}", limit.to_sql()));
         }
 
         Ok(root)

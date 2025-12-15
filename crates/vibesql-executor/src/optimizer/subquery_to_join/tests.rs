@@ -1,6 +1,7 @@
 //! Tests for subquery-to-join transformations
 
 use vibesql_ast::{BinaryOperator, GroupByClause, JoinType, SelectItem};
+use vibesql_types::SqlValue;
 
 use super::*;
 
@@ -83,7 +84,7 @@ fn test_complex_subquery_unchanged() {
     let mut stmt = simple_select("orders", "o_orderkey");
     let mut subquery = simple_select("lineitem", "l_orderkey");
     // Add LIMIT to make it complex (LIMIT subqueries can't be safely transformed)
-    subquery.limit = Some(10);
+    subquery.limit = Some(Expression::Literal(SqlValue::Integer(10)));
 
     stmt.where_clause = Some(Expression::In {
         expr: Box::new(column_ref("o_orderkey")),

@@ -498,7 +498,9 @@ impl SelectExecutor<'_> {
         if stmt.set_operation.is_some() {
             Ok(projected_rows)
         } else {
-            Ok(apply_limit_offset(projected_rows, stmt.limit, stmt.offset))
+            let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+            let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+            Ok(apply_limit_offset(projected_rows, limit, offset))
         }
     }
 
@@ -515,7 +517,9 @@ impl SelectExecutor<'_> {
         let rows: Vec<vibesql_storage::Row> = result_rows.into_iter().map(|(row, _)| row).collect();
 
         // Apply LIMIT/OFFSET to reduce rows before projection
-        let limited_rows = apply_limit_offset(rows, stmt.limit, stmt.offset);
+        let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+        let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+        let limited_rows = apply_limit_offset(rows, limit, offset);
 
         // Create iterator for lazy projection
         let projection_iter = SelectProjectionIterator::new(

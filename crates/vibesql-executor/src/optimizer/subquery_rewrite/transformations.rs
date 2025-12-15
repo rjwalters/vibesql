@@ -37,7 +37,7 @@ pub(super) fn rewrite_in_to_exists(
 
     // Add LIMIT 1 for early termination after first match
     // EXISTS only cares if ANY row matches, not all rows
-    exists_subquery.limit = Some(1);
+    exists_subquery.limit = Some(Expression::Literal(vibesql_types::SqlValue::Integer(1)));
 
     // Add correlation predicate: subquery_col = outer_expr
     // We need to extract the subquery column from the original SELECT list
