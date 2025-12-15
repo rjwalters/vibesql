@@ -119,7 +119,7 @@ impl SelectExecutor<'_> {
         interner: &'arena ArenaInterner<'arena>,
     ) -> Result<Vec<Row>, ExecutorError> {
         // Create an empty schema and row for expression evaluation
-        let schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new(), outer_schema: None };
+        let schema = CombinedSchema { table_schemas: HashMap::new(), total_columns: 0, hidden_columns: HashSet::new(), outer_schema: None, duplicate_aliases: HashSet::new() };
         let empty_row = Row::new(vec![]);
         let evaluator = ArenaExpressionEvaluator::new(&schema, params, interner);
 

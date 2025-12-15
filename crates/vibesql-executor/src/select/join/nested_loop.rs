@@ -916,7 +916,7 @@ pub(super) fn nested_loop_cross_join(
 
     // Combine schemas
     let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name, right_schema);
+        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema);
 
     // Get table names for ROWID tracking (issue #4370)
     let left_table_names = left.schema.table_names();
@@ -980,7 +980,7 @@ pub(super) fn nested_loop_semi_join(
 
     // Create combined schema for condition evaluation
     let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name, right_schema_def);
+        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema_def);
 
     // Create evaluator for condition
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
@@ -1073,7 +1073,7 @@ pub(super) fn nested_loop_anti_join(
 
     // Create combined schema for condition evaluation
     let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name, right_schema_def);
+        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema_def);
 
     // Create evaluator for condition
     let evaluator = CombinedExpressionEvaluator::with_database(&combined_schema, database);
