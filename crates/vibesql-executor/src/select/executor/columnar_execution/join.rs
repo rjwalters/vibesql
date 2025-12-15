@@ -234,6 +234,17 @@ impl SelectExecutor<'_> {
             None
         };
 
+        // Check if WHERE clause contains expressions that can't be handled by SIMD filtering
+        // (e.g., scalar subqueries). If so, fall back to row-oriented execution (#4501).
+        if let Some(ref where_expr) = folded_where {
+            if contains_unsupported_predicates(where_expr) {
+                log::debug!(
+                    "Columnar join: WHERE clause contains unsupported predicates (e.g., scalar subquery), falling back"
+                );
+                return Ok(None);
+            }
+        }
+
         let predicates = folded_where
             .as_ref()
             .and_then(|where_expr| extract_non_join_predicates(where_expr, &combined_schema))
@@ -506,5 +517,60 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
         | vibesql_ast::Expression::MatchAgainst { .. }
         | vibesql_ast::Expression::PseudoVariable { .. }
         | vibesql_ast::Expression::SessionVariable { .. } => false,
+    }
+}
+
+/// Check if a WHERE expression contains predicates that can't be handled by SIMD filtering
+///
+/// Returns true if the expression contains:
+/// - Scalar subqueries (SELECT ... WHERE col = (SELECT ...))
+/// - IN subqueries (SELECT ... WHERE col IN (SELECT ...))
+/// - EXISTS predicates
+/// - Quantified comparisons (ALL/ANY/SOME)
+///
+/// These require row-by-row evaluation and can't be optimized by columnar SIMD filtering.
+/// When detected, the caller should fall back to row-oriented execution.
+fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
+    match expr {
+        // Subquery expressions can't be handled by SIMD filtering
+        vibesql_ast::Expression::ScalarSubquery(_) => true,
+        vibesql_ast::Expression::In { .. } => true, // IN with subquery
+        vibesql_ast::Expression::Exists { .. } => true,
+        vibesql_ast::Expression::QuantifiedComparison { .. } => true,
+
+        // Binary operations need recursive checking
+        vibesql_ast::Expression::BinaryOp { left, op, right } => {
+            // For AND/OR, check both sides
+            if matches!(
+                op,
+                vibesql_ast::BinaryOperator::And | vibesql_ast::BinaryOperator::Or
+            ) {
+                return contains_unsupported_predicates(left)
+                    || contains_unsupported_predicates(right);
+            }
+
+            // For equality comparisons, check if either side is a subquery
+            // Skip join conditions (col1 = col2) as they're handled separately
+            let is_join_condition = matches!(
+                (left.as_ref(), right.as_ref()),
+                (
+                    vibesql_ast::Expression::ColumnRef { .. },
+                    vibesql_ast::Expression::ColumnRef { .. }
+                )
+            );
+
+            if is_join_condition {
+                return false;
+            }
+
+            // Check if either side contains unsupported predicates
+            contains_unsupported_predicates(left) || contains_unsupported_predicates(right)
+        }
+
+        // Unary operations need recursive checking
+        vibesql_ast::Expression::UnaryOp { expr, .. } => contains_unsupported_predicates(expr),
+
+        // Other expressions don't contain subqueries
+        _ => false,
     }
 }
