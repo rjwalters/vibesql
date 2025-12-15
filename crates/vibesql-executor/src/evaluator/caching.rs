@@ -59,6 +59,13 @@ pub(crate) fn create_subquery_cache() -> LruCache<u64, Vec<vibesql_storage::Row>
     LruCache::new(NonZeroUsize::new(get_subquery_cache_size()).unwrap())
 }
 
+// Thread-local cache for subquery hashes by AST pointer
+// Defined at module level so both compute and clear functions can access it
+thread_local! {
+    static SUBQUERY_HASH_CACHE: std::cell::RefCell<lru::LruCache<usize, u64>> =
+        std::cell::RefCell::new(lru::LruCache::new(NonZeroUsize::new(1000).unwrap()));
+}
+
 /// Compute a hash for a subquery to use as a cache key
 ///
 /// # Implementation Note
@@ -85,19 +92,13 @@ pub(crate) fn create_subquery_cache() -> LruCache<u64, Vec<vibesql_storage::Row>
 /// done in a dedicated refactoring PR to minimize risk.
 ///
 /// See: https://github.com/rjwalters/vibesql/issues/2137#hash-improvement
+///
+/// Cache subquery hashes by AST pointer to avoid repeated expensive format!() calls.
+/// The AST is immutable during query execution, so pointer-based caching is safe.
 pub(crate) fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
-    use std::cell::RefCell;
-
-    // Cache subquery hashes by AST pointer to avoid repeated expensive format!() calls
-    // The AST is immutable during query execution, so pointer-based caching is safe
-    thread_local! {
-        static HASH_CACHE: RefCell<lru::LruCache<usize, u64>> =
-            RefCell::new(lru::LruCache::new(NonZeroUsize::new(1000).unwrap()));
-    }
-
     let ptr = subquery as *const _ as usize;
 
-    HASH_CACHE.with(|cache| {
+    SUBQUERY_HASH_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(&cached_hash) = cache.get(&ptr) {
             return cached_hash;
@@ -111,6 +112,17 @@ pub(crate) fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
         cache.put(ptr, hash);
         hash
     })
+}
+
+/// Clear the subquery hash cache
+///
+/// This must be called between query executions to invalidate pointer-based
+/// cache keys. The cache uses AST pointers as keys, which become invalid when
+/// ASTs are dropped and memory is reused.
+pub(crate) fn clear_subquery_hash_cache() {
+    SUBQUERY_HASH_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
 }
 
 /// Compute a composite cache key for a correlated subquery
