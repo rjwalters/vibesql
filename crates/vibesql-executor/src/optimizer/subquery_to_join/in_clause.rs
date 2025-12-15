@@ -82,6 +82,21 @@ pub(super) fn try_convert_in_to_join(
         _ => return None, // Complex FROM clause for non-aggregate, skip
     };
 
+    // FIX for issue #4493: Skip transformation if SELECT list contains unqualified columns
+    // that might be correlated references.
+    //
+    // Example that should NOT be transformed:
+    //   SELECT x FROM t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
+    //   If the inner `SELECT x` has `x` as a correlated reference (not from t1),
+    //   rewriting it to `__subquery_t1.x` will fail because that column doesn't exist.
+    //
+    // Conservative check: if SELECT column is unqualified, it might be correlated,
+    // so skip the optimization and let runtime evaluation handle it safely.
+    if let Expression::ColumnRef { table: None, .. } = &subquery_column {
+        // Unqualified column in SELECT list - could be correlated, skip optimization
+        return None;
+    }
+
     // Detect self-join: check if subquery table name conflicts with outer query tables
     let needs_alias = is_self_join(from, &table_name, &table_alias);
 
