@@ -82,7 +82,7 @@ jobs:
           maturin build --release --target ${{ matrix.target }} --out dist
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.target }}
           path: crates/vibesql-python-bindings/dist/*.whl
@@ -116,7 +116,7 @@ jobs:
         run: maturin sdist --out dist
 
       - name: Upload sdist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sdist
           path: crates/vibesql-python-bindings/dist/*.tar.gz
