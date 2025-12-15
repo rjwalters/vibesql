@@ -226,11 +226,16 @@ pub fn apply_default_values(
 pub fn apply_generated_columns(
     schema: &vibesql_catalog::TableSchema,
     row_values: &mut [vibesql_types::SqlValue],
+    _database: &vibesql_storage::Database,
 ) -> Result<(), ExecutorError> {
+    // Create a temporary row to evaluate generated expressions
+    let temp_row = vibesql_storage::Row::new(row_values.to_vec());
+    let evaluator = crate::ExpressionEvaluator::new(schema);
+
     for (col_idx, col) in schema.columns.iter().enumerate() {
         // If column has a generated expression, compute and apply it
         if let Some(generated_expr) = &col.generated_expr {
-            let generated_value = evaluate_default_expression(generated_expr)?;
+            let generated_value = evaluator.eval(generated_expr, &temp_row)?;
             let coerced_value = super::validation::coerce_value(generated_value, &col.data_type)?;
             row_values[col_idx] = coerced_value;
         }
