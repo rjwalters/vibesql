@@ -209,25 +209,12 @@ impl CombinedSchema {
     /// Look up a column by name (optionally qualified with table name)
     /// Uses case-insensitive matching for table/alias and column names
     pub fn get_column_index(&self, table: Option<&str>, column: &str) -> Option<usize> {
-        if std::env::var("DEBUG_COLUMN_RESOLUTION").is_ok() {
-            eprintln!("[COL_RESOLVE] Looking for column '{}' (table: {:?})", column, table);
-            eprintln!("[COL_RESOLVE]   Available tables: {:?}",
-                self.table_schemas.keys().map(|k| k.display().to_string()).collect::<Vec<_>>());
-        }
-
         if let Some(table_name) = table {
             // Qualified column reference (table.column)
             // TableIdentifier normalizes to lowercase, so lookup is case-insensitive
             let table_id = TableIdentifier::unquoted(table_name);
             if let Some((start_index, schema)) = self.table_schemas.get(&table_id) {
-                let result = schema.get_column_index(column).map(|idx| start_index + idx);
-                if std::env::var("DEBUG_COLUMN_RESOLUTION").is_ok() {
-                    eprintln!("[COL_RESOLVE]   Qualified lookup in '{}': {:?}", table_name, result);
-                }
-                return result;
-            }
-            if std::env::var("DEBUG_COLUMN_RESOLUTION").is_ok() {
-                eprintln!("[COL_RESOLVE]   Table '{}' not found!", table_name);
+                return schema.get_column_index(column).map(|idx| start_index + idx);
             }
             None
         } else {
@@ -239,9 +226,6 @@ impl CombinedSchema {
             for (start_index, schema) in self.table_schemas.values() {
                 if let Some(idx) = schema.get_column_index(column) {
                     let absolute_idx = start_index + idx;
-                    if std::env::var("DEBUG_COLUMN_RESOLUTION").is_ok() {
-                        eprintln!("[COL_RESOLVE]     Found in table at offset {} (absolute_idx={})", start_index, absolute_idx);
-                    }
                     match best_match {
                         None => best_match = Some(absolute_idx),
                         Some(current_best) if absolute_idx < current_best => {
@@ -250,9 +234,6 @@ impl CombinedSchema {
                         _ => {}
                     }
                 }
-            }
-            if std::env::var("DEBUG_COLUMN_RESOLUTION").is_ok() {
-                eprintln!("[COL_RESOLVE]   Unqualified lookup result: {:?}", best_match);
             }
             best_match
         }
