@@ -1075,16 +1075,31 @@ impl SelectExecutor<'_> {
 
 }
 
-/// Collect aliases from all SELECT statements in a UNION chain
-/// Returns a vec where each element is a vec of aliases for that SELECT's columns
+/// Collect aliases and column names from all SELECT statements in a UNION chain
+/// Returns a vec where each element is a vec of aliases/column names for that SELECT's columns
+///
+/// For each SELECT item, this returns:
+/// - The explicit alias if present (e.g., "x" in SELECT col AS x)
+/// - The column name if it's a ColumnRef without an alias (e.g., "col" in SELECT col)
+/// - None for complex expressions without aliases
 fn collect_union_aliases(stmt: &vibesql_ast::SelectStmt) -> Vec<Vec<Option<String>>> {
     let mut all_aliases = Vec::new();
 
     // Collect from the main SELECT
     let mut main_aliases = Vec::new();
     for item in &stmt.select_list {
-        if let vibesql_ast::SelectItem::Expression { alias, .. } = item {
-            main_aliases.push(alias.clone());
+        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
+            // Use explicit alias if present, otherwise derive from expression
+            let name = if let Some(a) = alias {
+                Some(a.clone())
+            } else {
+                // Derive from expression - use column name for ColumnRef
+                match expr {
+                    vibesql_ast::Expression::ColumnRef { column, .. } => Some(column.clone()),
+                    _ => None,
+                }
+            };
+            main_aliases.push(name);
         } else {
             main_aliases.push(None);
         }
@@ -1096,8 +1111,18 @@ fn collect_union_aliases(stmt: &vibesql_ast::SelectStmt) -> Vec<Vec<Option<Strin
     while let Some(set_op) = current_set_op {
         let mut right_aliases = Vec::new();
         for item in &set_op.right.select_list {
-            if let vibesql_ast::SelectItem::Expression { alias, .. } = item {
-                right_aliases.push(alias.clone());
+            if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
+                // Use explicit alias if present, otherwise derive from expression
+                let name = if let Some(a) = alias {
+                    Some(a.clone())
+                } else {
+                    // Derive from expression - use column name for ColumnRef
+                    match expr {
+                        vibesql_ast::Expression::ColumnRef { column, .. } => Some(column.clone()),
+                        _ => None,
+                    }
+                };
+                right_aliases.push(name);
             } else {
                 right_aliases.push(None);
             }
