@@ -501,6 +501,7 @@ pub fn remap_schema(
         total_columns: projection_indices.len(),
         hidden_columns: std::collections::HashSet::new(),
         outer_schema: None,
+        duplicate_aliases: std::collections::HashSet::new(),
     }
 }
 

@@ -118,6 +118,10 @@ pub struct CombinedSchema {
     /// Forms a linked-list chain similar to SQLite's NameContext.pNext
     /// Enables resolution of columns from multiple nesting levels
     pub outer_schema: Option<Box<CombinedSchema>>,
+    /// Table aliases/names that appear more than once in the FROM clause (issue #4507)
+    /// Used to detect ambiguous qualified column references like "A.f1" when table "A" appears twice
+    /// Stores normalized (lowercase) table identifiers for case-insensitive matching
+    pub duplicate_aliases: HashSet<TableIdentifier>,
 }
 
 impl CombinedSchema {
@@ -134,6 +138,7 @@ impl CombinedSchema {
             total_columns,
             hidden_columns: HashSet::new(),
             outer_schema: None,
+            duplicate_aliases: HashSet::new(),
         }
     }
 
@@ -169,6 +174,7 @@ impl CombinedSchema {
             total_columns,
             hidden_columns: HashSet::new(),
             outer_schema: None,
+            duplicate_aliases: HashSet::new(),
         }
     }
 
@@ -181,15 +187,24 @@ impl CombinedSchema {
         right_schema: vibesql_catalog::TableSchema,
     ) -> Self {
         let mut table_schemas = left.table_schemas;
+        let mut duplicate_aliases = left.duplicate_aliases;
         let left_total = left.total_columns;
         let right_columns = right_schema.columns.len();
         let right_id = TableIdentifier::unquoted(&right_table_name);
+
+        // Track duplicate table alias/name
+        if table_schemas.contains_key(&right_id) {
+            duplicate_aliases.insert(right_id.clone());
+        }
+
+        // Always insert/overwrite the table
         table_schemas.insert(right_id, (left_total, right_schema));
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right_columns,
             hidden_columns: left.hidden_columns,
             outer_schema: left.outer_schema,
+            duplicate_aliases,
         }
     }
 
@@ -204,10 +219,16 @@ impl CombinedSchema {
     /// for the left schema's total column count.
     pub fn merge(left: CombinedSchema, right: CombinedSchema) -> Self {
         let mut table_schemas = left.table_schemas;
+        let mut duplicate_aliases = left.duplicate_aliases;
         let left_total = left.total_columns;
 
         // Add all tables from right schema with adjusted start indices
         for (table_id, (start_index, schema)) in right.table_schemas {
+            // Track duplicate table alias/name
+            if table_schemas.contains_key(&table_id) {
+                duplicate_aliases.insert(table_id.clone());
+            }
+
             let adjusted_start = left_total + start_index;
             table_schemas.insert(table_id, (adjusted_start, schema));
         }
@@ -218,11 +239,15 @@ impl CombinedSchema {
             hidden_columns.insert(left_total + idx);
         }
 
+        // Merge duplicate aliases from both sides
+        duplicate_aliases.extend(right.duplicate_aliases);
+
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
             hidden_columns,
             outer_schema: left.outer_schema,
+            duplicate_aliases,
         }
     }
 
@@ -297,6 +322,34 @@ impl CombinedSchema {
             }
         }
         false
+    }
+
+    /// Validate that a qualified column reference is not ambiguous.
+    ///
+    /// This checks if the table identifier appears more than once in the FROM clause,
+    /// which would make qualified references like "A.f1" ambiguous (issue #4507).
+    ///
+    /// # Arguments
+    /// * `table` - The table name/alias from the qualified reference
+    /// * `column` - The column name (used for error message only)
+    ///
+    /// # Returns
+    /// * `Ok(())` if the reference is unambiguous
+    /// * `Err(ExecutorError::AmbiguousColumnName)` if the table appears multiple times
+    ///
+    /// # Example
+    /// ```sql
+    /// -- This should fail validation:
+    /// SELECT A.f1 FROM test1 A, test2 A;  -- "A" appears twice
+    /// ```
+    pub fn validate_qualified_reference(&self, table: &str, column: &str) -> Result<(), crate::errors::ExecutorError> {
+        let table_id = TableIdentifier::unquoted(table);
+        if self.duplicate_aliases.contains(&table_id) {
+            return Err(crate::errors::ExecutorError::AmbiguousColumnName {
+                column_name: format!("{}.{}", table, column),
+            });
+        }
+        Ok(())
     }
 
     /// Get a table schema by name (case-insensitive lookup)
@@ -452,12 +505,18 @@ pub struct SchemaBuilder {
     table_schemas: HashMap<TableIdentifier, (usize, vibesql_catalog::TableSchema)>,
     column_offset: usize,
     hidden_columns: HashSet<usize>,
+    duplicate_aliases: HashSet<TableIdentifier>,
 }
 
 impl SchemaBuilder {
     /// Create a new empty schema builder
     pub fn new() -> Self {
-        SchemaBuilder { table_schemas: HashMap::new(), column_offset: 0, hidden_columns: HashSet::new() }
+        SchemaBuilder {
+            table_schemas: HashMap::new(),
+            column_offset: 0,
+            hidden_columns: HashSet::new(),
+            duplicate_aliases: HashSet::new(),
+        }
     }
 
     /// Create a schema builder initialized with an existing CombinedSchema
@@ -465,7 +524,12 @@ impl SchemaBuilder {
     /// Note: Table names are already normalized via TableIdentifier
     pub fn from_schema(schema: CombinedSchema) -> Self {
         let column_offset = schema.total_columns;
-        SchemaBuilder { table_schemas: schema.table_schemas, column_offset, hidden_columns: schema.hidden_columns }
+        SchemaBuilder {
+            table_schemas: schema.table_schemas,
+            column_offset,
+            hidden_columns: schema.hidden_columns,
+            duplicate_aliases: schema.duplicate_aliases,
+        }
     }
 
     /// Add a table to the schema
@@ -479,6 +543,12 @@ impl SchemaBuilder {
     ) -> &mut Self {
         let num_columns = schema.columns.len();
         let table_id = TableIdentifier::unquoted(&name);
+
+        // Track duplicate table alias/name
+        if self.table_schemas.contains_key(&table_id) {
+            self.duplicate_aliases.insert(table_id.clone());
+        }
+
         self.table_schemas.insert(table_id, (self.column_offset, schema));
         self.column_offset += num_columns;
         self
@@ -493,6 +563,7 @@ impl SchemaBuilder {
             total_columns: self.column_offset,
             hidden_columns: self.hidden_columns,
             outer_schema: None,
+            duplicate_aliases: self.duplicate_aliases,
         }
     }
 }

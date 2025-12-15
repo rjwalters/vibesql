@@ -67,6 +67,22 @@ where
     let table_names: Vec<String> =
         table_refs.iter().map(|t| t.alias.clone().unwrap_or_else(|| t.name.clone())).collect();
 
+    // Step 3.1: Track duplicate table aliases for later error reporting (SQLite compatibility - issue #4507)
+    // This must be done BEFORE building table_map (which uses HashMap and would silently drop duplicates)
+    // We'll track duplicates here and propagate them to the schema so that column resolution
+    // can report the correct error message format: "ambiguous column name: A.f1"
+    let mut duplicate_table_aliases = std::collections::HashSet::new();
+    {
+        let mut seen_names = std::collections::HashSet::new();
+        for name in &table_names {
+            let normalized = vibesql_catalog::TableIdentifier::unquoted(name);
+            if seen_names.contains(&normalized) {
+                duplicate_table_aliases.insert(normalized.clone());
+            }
+            seen_names.insert(normalized);
+        }
+    }
+
     // Step 3.5: Build schema-based column-to-table mapping
     // This uses actual database schema to resolve unqualified column references
     let column_to_table =
@@ -608,7 +624,11 @@ where
     }
 
     // Build a new combined schema with tables in original order
-    let new_schema = utils::build_reordered_schema(&result.schema, &table_names, &optimal_order);
+    let mut new_schema = utils::build_reordered_schema(&result.schema, &table_names, &optimal_order);
+
+    // Add duplicate table aliases to the schema (issue #4507)
+    // This enables proper error reporting during column resolution
+    new_schema.duplicate_aliases.extend(duplicate_table_aliases);
 
     // Return result with reordered data and schema
     Ok(FromResult::from_rows(new_schema, reordered_rows))

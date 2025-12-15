@@ -303,7 +303,7 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
 
     // Combine schemas
     let combined_schema =
-        CombinedSchema::combine(left.schema.clone(), right_table_display_name, right_schema);
+        CombinedSchema::combine(left.schema.clone(), right_table_display_name.clone(), right_schema);
 
     let left_slice = left.as_slice();
     let right_slice = right.as_slice();

@@ -65,6 +65,14 @@ impl CombinedExpressionEvaluator<'_> {
                     return Ok(vibesql_types::SqlValue::Null);
                 }
 
+                // Check for ambiguous qualified column references (SQLite compatibility - issue #4507)
+                // This must be checked BEFORE resolving the column, as SQLite requires
+                // an error when a table alias appears multiple times in the FROM clause.
+                // Example: SELECT A.f1 FROM test1 AS A, test1 AS A => "ambiguous column name: A.f1"
+                if let Some(table_name) = table {
+                    self.schema.validate_qualified_reference(table_name, column)?;
+                }
+
                 // SQLite compatibility: Handle ROWID pseudo-column
                 // ROWID, _rowid_, and oid are aliases that return the row's unique identifier
                 let column_lower = column.to_lowercase();

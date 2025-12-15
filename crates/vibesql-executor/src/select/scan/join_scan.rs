@@ -221,7 +221,9 @@ where
         let mut schema_builder =
             crate::schema::SchemaBuilder::from_schema(left_result.schema.clone());
         for (table_id, (_start_idx, table_schema)) in &right_result.schema.table_schemas {
-            schema_builder.add_table(table_id.display().to_string(), table_schema.clone());
+            // If adding table fails due to duplicate, the combined_schema might be incorrect
+            // but this is an edge case and we'll let subsequent operations handle it
+            let _ = schema_builder.add_table(table_id.display().to_string(), table_schema.clone());
         }
         let combined_schema = schema_builder.build();
 
@@ -446,6 +448,7 @@ fn extract_right_only_predicates(
         // Normalize table name for lookup
         let normalized = table_name.to_lowercase();
         if let Some(table) = database.get_table(&normalized) {
+            // Add table to schema builder (duplicates are tracked, not rejected)
             schema_builder.add_table(table_name.clone(), table.schema.clone());
             right_table_set.insert(table_name.clone());
             // Also add normalized version
@@ -525,6 +528,7 @@ fn filter_out_nullable_side_predicates(
         // Normalize table name for lookup
         let normalized = table_name.to_lowercase();
         if let Some(table) = database.get_table(&normalized) {
+            // Add table to schema builder (duplicates are tracked, not rejected)
             schema_builder.add_table(table_name.clone(), table.schema.clone());
             nullable_table_set.insert(table_name.clone());
             // Also add normalized version for case-insensitive matching
