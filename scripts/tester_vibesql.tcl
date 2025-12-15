@@ -334,8 +334,25 @@ proc flush_batch {} {
     # Uses a temp file to avoid "argument list too long" errors for large batches
     if {[llength $::sql_batch] == 0} return
 
-    set combined [join $::sql_batch ";\n"]
+    # Strip trailing semicolons from each statement to avoid double semicolons
+    # when joining (VibeSQL rejects ";;" with "Parse error: near ";": syntax error")
+    set cleaned_statements {}
+    foreach stmt $::sql_batch {
+        set stmt [string trimright $stmt]
+        set stmt [string trimright $stmt ";"]
+        lappend cleaned_statements $stmt
+    }
+
+    set combined [join $cleaned_statements ";\n"]
     set ::sql_batch {}
+
+    # Debug: Print combined SQL to temp file for inspection
+    if {[info exists ::env(DEBUG_FLUSH_BATCH)]} {
+        puts stderr "\n=== FLUSH_BATCH DEBUG ==="
+        puts stderr "Number of statements: [llength $cleaned_statements]"
+        puts stderr "Combined SQL:\n$combined"
+        puts stderr "=== END DEBUG ==="
+    }
 
     # Write SQL to temp file to avoid command line length limits
     set tmpfile "/tmp/vibesql_batch_[pid].sql"
@@ -349,8 +366,12 @@ proc flush_batch {} {
         set exec_code [catch {exec $::vibesql_path $::db_file < $tmpfile 2>@1} result]
     }
 
-    # Clean up temp file
-    file delete -force $tmpfile
+    # Clean up temp file (unless debugging)
+    if {![info exists ::env(DEBUG_FLUSH_BATCH)]} {
+        file delete -force $tmpfile
+    } else {
+        puts stderr "DEBUG: Temp file saved at: $tmpfile"
+    }
 
     if {$exec_code != 0} {
         error $result
