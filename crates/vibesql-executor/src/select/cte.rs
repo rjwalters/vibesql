@@ -237,6 +237,21 @@ where
     };
     let recursive_query = &set_op.right;
 
+    // Try static validation first (works for explicit column lists)
+    // This provides better SQLite compatibility by catching errors at prepare time
+    // rather than waiting until runtime
+    if let (Some(base_count), Some(recursive_count)) = (
+        count_explicit_columns(&cte.query.select_list),
+        count_explicit_columns(&recursive_query.select_list),
+    ) {
+        if base_count != recursive_count {
+            return Err(ExecutorError::UnsupportedFeature(
+                "SELECTs to the left and right of UNION ALL do not have the same number of result columns".to_string()
+            ));
+        }
+    }
+    // Fall back to runtime validation for wildcards (existing code below at line 279-289)
+
     // Step 1: Execute base term to get initial rows
     let mut all_rows = executor(&base_query, cte_results)?;
     let mut working_table = all_rows.clone();
@@ -322,6 +337,25 @@ where
     }
 
     Ok(all_rows)
+}
+
+/// Count columns if select list has only explicit expressions (no wildcards)
+///
+/// Returns Some(count) if all select items are explicit expressions.
+/// Returns None if any wildcards are present (requires schema info to count).
+fn count_explicit_columns(select_list: &[vibesql_ast::SelectItem]) -> Option<usize> {
+    let mut count = 0;
+    for item in select_list {
+        match item {
+            vibesql_ast::SelectItem::Expression { .. } => count += 1,
+            // Can't count wildcards statically - need schema info
+            vibesql_ast::SelectItem::Wildcard { .. }
+            | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
+                return None;
+            }
+        }
+    }
+    Some(count)
 }
 
 /// Infer data type from a SQL value
