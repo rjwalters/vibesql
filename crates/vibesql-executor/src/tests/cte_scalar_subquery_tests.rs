@@ -588,3 +588,60 @@ fn test_recursive_cte_matching_columns() {
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
     assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(3));
 }
+
+/// Test static column count validation for recursive CTEs (issue #4486)
+///
+/// This tests the edge case where the recursive term returns 0 rows (never executes),
+/// so runtime validation would be bypassed. Static validation should catch the error
+/// at prepare time, matching SQLite behavior.
+#[test]
+fn test_recursive_cte_static_column_validation_edge_case() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Edge case: recursive term never executes (x=1 is not > 1000)
+    // SQLite fails at prepare time with column count error
+    // VibeSQL should also fail before execution (static validation)
+    let query = "
+        WITH RECURSIVE edge AS (
+            SELECT 1 AS x
+            UNION ALL
+            SELECT x+1, x+2 FROM edge WHERE x > 1000
+        )
+        SELECT * FROM edge
+    ";
+
+    let result = execute_sql(&mut db, query);
+
+    // Should get error even though recursive term never executes
+    assert!(result.is_err(), "Expected error for mismatched column counts (static validation)");
+    let err = result.unwrap_err();
+    let err_msg = format!("{:?}", err);
+    assert!(
+        err_msg.contains("SELECTs to the left and right of UNION ALL do not have the same number of result columns"),
+        "Expected specific SQLite error message, got: {}",
+        err_msg
+    );
+}
+
+/// Test that static validation doesn't trigger for matching column counts (issue #4486)
+#[test]
+fn test_recursive_cte_static_validation_success() {
+    let mut db = vibesql_storage::Database::new();
+
+    // This should work: both base and recursive term return 1 column (explicit)
+    // Even though recursive term never executes
+    let query = "
+        WITH RECURSIVE edge AS (
+            SELECT 1 AS x
+            UNION ALL
+            SELECT x+1 FROM edge WHERE x > 1000
+        )
+        SELECT * FROM edge
+    ";
+
+    let result = execute_sql(&mut db, query).unwrap();
+
+    // Should return just the base row since x=1 is not > 1000
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+}
