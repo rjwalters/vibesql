@@ -220,9 +220,17 @@ impl CombinedExpressionEvaluator<'_> {
         // Correlated subquery - execute with outer context (can't cache, use linear search)
         // Fix for issue #4493: Build merged schema if EITHER current level has tables OR outer level exists
         // Without this check, deeply nested subqueries lose access to outer-level tables
+        if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+            eprintln!("[IN_SUBQUERY] Checking if we should build merged schema:");
+            eprintln!("[IN_SUBQUERY]   self.schema.table_schemas.is_empty() = {}", self.schema.table_schemas.is_empty());
+            eprintln!("[IN_SUBQUERY]   self.outer_schema.is_some() = {}", self.outer_schema.is_some());
+        }
         let merged_schema = if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some() {
             Some(build_merged_outer_schema(self.schema, self.outer_schema))
         } else {
+            if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+                eprintln!("[IN_SUBQUERY]   NOT building merged schema!");
+            }
             None
         };
 
@@ -232,9 +240,18 @@ impl CombinedExpressionEvaluator<'_> {
             None
         };
 
+        if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+            eprintln!("[IN_SUBQUERY] About to create SelectExecutor:");
+            eprintln!("[IN_SUBQUERY]   merged_schema.is_some() = {}", merged_schema.is_some());
+            eprintln!("[IN_SUBQUERY]   merged_row.is_some() = {}", merged_row.is_some());
+        }
+
         // Pass CTE context for queries referencing CTEs from outer scope (#3044)
         let select_executor =
             if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
+                if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+                    eprintln!("[IN_SUBQUERY]   Creating SelectExecutor WITH outer context");
+                }
                 if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
                         database, outer_row, schema, cte_ctx, self.depth,
@@ -245,8 +262,14 @@ impl CombinedExpressionEvaluator<'_> {
                     )
                 }
             } else if let Some(cte_ctx) = self.cte_context {
+                if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+                    eprintln!("[IN_SUBQUERY]   Creating SelectExecutor with CTE only (no outer context)");
+                }
                 crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
             } else {
+                if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+                    eprintln!("[IN_SUBQUERY]   Creating SelectExecutor with NO outer context or CTE!");
+                }
                 crate::select::SelectExecutor::new(database)
             };
         let rows = select_executor.execute(subquery)?;

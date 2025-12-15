@@ -34,6 +34,14 @@ pub(super) fn build_merged_outer_schema<'a>(
     outer_schema: Option<&'a crate::schema::CombinedSchema>,
 ) -> std::borrow::Cow<'a, crate::schema::CombinedSchema> {
     if let Some(outer) = outer_schema {
+        if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+            eprintln!("[SCHEMA_MERGE] Building merged schema:");
+            eprintln!("[SCHEMA_MERGE]   Outer schema tables: {:?}",
+                outer.table_schemas.keys().map(|k| k.display().to_string()).collect::<Vec<_>>());
+            eprintln!("[SCHEMA_MERGE]   Current schema tables: {:?}",
+                current_schema.table_schemas.keys().map(|k| k.display().to_string()).collect::<Vec<_>>());
+        }
+
         // Build merged schema: outer schema + current schema
         // Use SchemaBuilder for efficient O(n) construction
         let mut builder = crate::schema::SchemaBuilder::from_schema(outer.clone());
@@ -47,10 +55,20 @@ pub(super) fn build_merged_outer_schema<'a>(
         // 2. Column resolution searches current schema first, then outer schema
         // 3. If a column exists in multiple levels, the nearest one takes precedence (SQL scoping rules)
         for (table_id, (_offset, table_schema)) in &current_schema.table_schemas {
+            if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+                eprintln!("[SCHEMA_MERGE]     Adding table: {}", table_id.display());
+            }
             builder.add_table(table_id.display().to_string(), table_schema.clone());
         }
 
-        std::borrow::Cow::Owned(builder.build())
+        let result = builder.build();
+
+        if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+            eprintln!("[SCHEMA_MERGE]   Merged schema tables: {:?}",
+                result.table_schemas.keys().map(|k| k.display().to_string()).collect::<Vec<_>>());
+        }
+
+        std::borrow::Cow::Owned(result)
     } else {
         // No outer schema to merge, just use current schema
         std::borrow::Cow::Borrowed(current_schema)

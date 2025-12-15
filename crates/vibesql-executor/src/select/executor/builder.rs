@@ -143,6 +143,12 @@ impl<'a> SelectExecutor<'a> {
         outer_schema: &'a crate::schema::CombinedSchema,
         parent_depth: usize,
     ) -> Self {
+        if std::env::var("DEBUG_SCHEMA_MERGE").is_ok() {
+            eprintln!("[SELECT_EXEC] Creating SelectExecutor with outer context:");
+            eprintln!("[SELECT_EXEC]   depth: {}", parent_depth + 1);
+            eprintln!("[SELECT_EXEC]   outer_schema tables: {:?}",
+                outer_schema.table_schemas.keys().map(|k| k.display().to_string()).collect::<Vec<_>>());
+        }
         SelectExecutor {
             database,
             outer_row: Some(outer_row),
