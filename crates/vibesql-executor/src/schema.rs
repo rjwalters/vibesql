@@ -114,6 +114,10 @@ pub struct CombinedSchema {
     /// This allows `SELECT t1.*` to return all columns from t1, while `SELECT *`
     /// correctly deduplicates columns for NATURAL JOIN.
     pub hidden_columns: HashSet<usize>,
+    /// Reference to outer scope schema for nested subquery column resolution (issue #4493)
+    /// Forms a linked-list chain similar to SQLite's NameContext.pNext
+    /// Enables resolution of columns from multiple nesting levels
+    pub outer_schema: Option<Box<CombinedSchema>>,
 }
 
 impl CombinedSchema {
@@ -125,7 +129,12 @@ impl CombinedSchema {
         let mut table_schemas = HashMap::new();
         let table_id = TableIdentifier::unquoted(&table_name);
         table_schemas.insert(table_id, (0, schema));
-        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
+        CombinedSchema {
+            table_schemas,
+            total_columns,
+            hidden_columns: HashSet::new(),
+            outer_schema: None,
+        }
     }
 
     /// Create a new combined schema from a derived table (subquery result)
@@ -155,7 +164,12 @@ impl CombinedSchema {
         let mut table_schemas = HashMap::new();
         let table_id = TableIdentifier::unquoted(&alias);
         table_schemas.insert(table_id, (0, schema));
-        CombinedSchema { table_schemas, total_columns, hidden_columns: HashSet::new() }
+        CombinedSchema {
+            table_schemas,
+            total_columns,
+            hidden_columns: HashSet::new(),
+            outer_schema: None,
+        }
     }
 
     /// Combine two schemas (for JOIN operations)
@@ -175,6 +189,7 @@ impl CombinedSchema {
             table_schemas,
             total_columns: left_total + right_columns,
             hidden_columns: left.hidden_columns,
+            outer_schema: left.outer_schema,
         }
     }
 
@@ -203,20 +218,31 @@ impl CombinedSchema {
             hidden_columns.insert(left_total + idx);
         }
 
-        CombinedSchema { table_schemas, total_columns: left_total + right.total_columns, hidden_columns }
+        CombinedSchema {
+            table_schemas,
+            total_columns: left_total + right.total_columns,
+            hidden_columns,
+            outer_schema: left.outer_schema,
+        }
     }
 
     /// Look up a column by name (optionally qualified with table name)
     /// Uses case-insensitive matching for table/alias and column names
+    ///
+    /// Searches the current schema level first, then follows the outer_schema
+    /// chain to search enclosing scopes (similar to SQLite's NameContext.pNext).
+    /// This enables correlated subqueries to reference columns from outer queries.
     pub fn get_column_index(&self, table: Option<&str>, column: &str) -> Option<usize> {
-        if let Some(table_name) = table {
+        // Try current level first
+        let current_result = if let Some(table_name) = table {
             // Qualified column reference (table.column)
             // TableIdentifier normalizes to lowercase, so lookup is case-insensitive
             let table_id = TableIdentifier::unquoted(table_name);
             if let Some((start_index, schema)) = self.table_schemas.get(&table_id) {
-                return schema.get_column_index(column).map(|idx| start_index + idx);
+                schema.get_column_index(column).map(|idx| start_index + idx)
+            } else {
+                None
             }
-            None
         } else {
             // Unqualified column reference - search all tables
             // IMPORTANT: For LEFT JOINs, we must resolve to the LEFTMOST table
@@ -236,7 +262,22 @@ impl CombinedSchema {
                 }
             }
             best_match
+        };
+
+        // If found at current level, return it
+        if current_result.is_some() {
+            return current_result;
         }
+
+        // Not found at current level - search outer scopes via chain
+        // This enables nested correlated subqueries to reference columns
+        // from multiple enclosing scopes (issue #4493)
+        if let Some(outer) = &self.outer_schema {
+            return outer.get_column_index(table, column);
+        }
+
+        // Not found anywhere in the chain
+        None
     }
 
     /// Check if an unqualified column reference is ambiguous
@@ -447,7 +488,12 @@ impl SchemaBuilder {
     ///
     /// This consumes the builder and produces the schema in O(1) time
     pub fn build(self) -> CombinedSchema {
-        CombinedSchema { table_schemas: self.table_schemas, total_columns: self.column_offset, hidden_columns: self.hidden_columns }
+        CombinedSchema {
+            table_schemas: self.table_schemas,
+            total_columns: self.column_offset,
+            hidden_columns: self.hidden_columns,
+            outer_schema: None,
+        }
     }
 }
 

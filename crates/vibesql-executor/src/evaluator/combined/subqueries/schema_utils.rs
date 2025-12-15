@@ -7,52 +7,48 @@ use std::collections::HashMap;
 
 use crate::{errors::ExecutorError, select::cte::CteResult};
 
-/// Build a merged outer schema that includes all parent scopes
+/// Build a linked outer schema chain for nested subquery column resolution
 ///
-/// For nested correlated subqueries, we need to pass a schema that includes:
-/// 1. The current level's schema (self.schema)
-/// 2. Any outer schemas from parent levels (self.outer_schema)
+/// **NEW APPROACH (Issue #4493)**: Instead of flattening all outer scopes into a single
+/// HashMap (which causes collisions when the same table exists at multiple levels),
+/// we now preserve the outer schema chain using `outer_schema` links, similar to
+/// SQLite's NameContext.pNext approach.
 ///
-/// This ensures that deeply nested subqueries can resolve columns from
-/// any ancestor scope, not just the immediate parent.
+/// This enables proper column resolution in deeply nested subqueries where the same
+/// table appears at multiple nesting levels.
 ///
-/// # Example: TPC-H Q20
+/// # Example: Issue #4493 Test Case
 ///
 /// ```sql
-/// SELECT ... FROM supplier WHERE s_suppkey IN (
-///     SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (...) AND ps_availqty > (
-///         SELECT 0.5 * SUM(l_quantity) FROM lineitem
-///         WHERE l_partkey = ps_partkey  -- Needs to resolve ps_partkey from partsupp (2 levels up)
+/// SELECT x FROM t2, t1 WHERE x IN (           -- Level 0: t2, t1
+///     SELECT x FROM t2, t1 WHERE x IN (       -- Level 1: t2, t1
+///         SELECT x FROM t1 WHERE x = c        -- Level 2: t1 only, but can see outer t2.x
 ///     )
 /// )
 /// ```
 ///
-/// Without merging, the lineitem subquery only sees its immediate parent scope,
-/// causing ps_partkey to not be found.
+/// With chaining:
+/// - Level 2: schema=[t1], outer_schema -> Level 1's schema
+/// - Level 1: schema=[t2, t1], outer_schema -> Level 0's schema
+/// - Level 0: schema=[t2, t1], outer_schema -> None
+///
+/// When Level 2 resolves `x`, it searches:
+/// 1. Current level [t1] - not found
+/// 2. Follow outer_schema chain to Level 1 [t2, t1] - FOUND in t2!
+///
+/// No HashMap collision because each level keeps its own tables!
 pub(super) fn build_merged_outer_schema<'a>(
     current_schema: &'a crate::schema::CombinedSchema,
     outer_schema: Option<&'a crate::schema::CombinedSchema>,
 ) -> std::borrow::Cow<'a, crate::schema::CombinedSchema> {
     if let Some(outer) = outer_schema {
-        // Build merged schema: outer schema + current schema
-        // Use SchemaBuilder for efficient O(n) construction
-        let mut builder = crate::schema::SchemaBuilder::from_schema(outer.clone());
-
-        // Add all tables from current schema
-        // Note (issue #4493): When a table name exists in both current and outer schemas,
-        // the table from current_schema will overwrite the one from outer_schema in the HashMap.
-        // This is intentional - we want the MOST RECENT (nearest) definition of each table
-        // because:
-        // 1. Subqueries should see the nearest enclosing scope's version of a table
-        // 2. Column resolution searches current schema first, then outer schema
-        // 3. If a column exists in multiple levels, the nearest one takes precedence (SQL scoping rules)
-        for (table_id, (_offset, table_schema)) in &current_schema.table_schemas {
-            builder.add_table(table_id.display().to_string(), table_schema.clone());
-        }
-
-        std::borrow::Cow::Owned(builder.build())
+        // Create a new schema with current_schema's tables but linked to outer_schema
+        // This preserves the chain instead of flattening
+        let mut new_schema = current_schema.clone();
+        new_schema.outer_schema = Some(Box::new(outer.clone()));
+        std::borrow::Cow::Owned(new_schema)
     } else {
-        // No outer schema to merge, just use current schema
+        // No outer schema to link to
         std::borrow::Cow::Borrowed(current_schema)
     }
 }

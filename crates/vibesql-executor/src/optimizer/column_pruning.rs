@@ -500,6 +500,7 @@ pub fn remap_schema(
         table_schemas: new_table_schemas,
         total_columns: projection_indices.len(),
         hidden_columns: std::collections::HashSet::new(),
+        outer_schema: None,
     }
 }
 
