@@ -605,7 +605,8 @@ impl SelectExecutor<'_> {
             // The UNION's default sort is overridden by explicit ORDER BY
             if let Some(order_by) = &stmt.order_by {
                 // Collect aliases from all UNION branches for ORDER BY resolution
-                let all_aliases = collect_union_aliases(stmt);
+                // Pass database to enable wildcard expansion using table schemas
+                let all_aliases = collect_union_aliases(self.database, stmt);
                 results = self.sort_set_operation_results(results, order_by, &stmt.select_list, &all_aliases)?;
             }
 
@@ -1075,43 +1076,63 @@ impl SelectExecutor<'_> {
 
 }
 
-/// Collect aliases and column names from all SELECT statements in a UNION chain
-/// Returns a vec where each element is a vec of aliases/column names for that SELECT's columns
-///
-/// For each SELECT item, this returns:
-/// - The explicit alias if present (e.g., "x" in SELECT col AS x)
-/// - The column name if it's a ColumnRef without an alias (e.g., "col" in SELECT col)
-/// - None for complex expressions without aliases
-fn collect_union_aliases(stmt: &vibesql_ast::SelectStmt) -> Vec<Vec<Option<String>>> {
-    let mut all_aliases = Vec::new();
-
-    // Collect from the main SELECT
-    let mut main_aliases = Vec::new();
-    for item in &stmt.select_list {
-        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
-            // Use explicit alias if present, otherwise derive from expression
-            let name = if let Some(a) = alias {
-                Some(a.clone())
-            } else {
-                // Derive from expression - use column name for ColumnRef
-                match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => Some(column.clone()),
-                    _ => None,
+/// Extract column names from a FROM clause for wildcard expansion
+/// Returns column names from all tables in the FROM clause in order
+fn extract_column_names_from_from(
+    database: &vibesql_storage::Database,
+    from_clause: Option<&vibesql_ast::FromClause>,
+) -> Vec<String> {
+    fn extract_from_clause(
+        database: &vibesql_storage::Database,
+        from: &vibesql_ast::FromClause,
+        columns: &mut Vec<String>,
+    ) {
+        match from {
+            vibesql_ast::FromClause::Table { name, .. } => {
+                // Look up the table in the database and get its column names
+                if let Some(table) = database.get_table(name) {
+                    for col in &table.schema.columns {
+                        columns.push(col.name.clone());
+                    }
                 }
-            };
-            main_aliases.push(name);
-        } else {
-            main_aliases.push(None);
+            }
+            vibesql_ast::FromClause::Join { left, right, .. } => {
+                // For joins, collect columns from both sides
+                extract_from_clause(database, left, columns);
+                extract_from_clause(database, right, columns);
+            }
+            vibesql_ast::FromClause::Subquery { .. } => {
+                // Subqueries are complex - we'd need to analyze the subquery
+                // For now, leave as unknown
+            }
+            vibesql_ast::FromClause::Values { .. } => {
+                // VALUES clause doesn't have named columns
+            }
         }
     }
-    all_aliases.push(main_aliases);
 
-    // Recursively collect from set operations
-    let mut current_set_op = stmt.set_operation.as_ref();
-    while let Some(set_op) = current_set_op {
-        let mut right_aliases = Vec::new();
-        for item in &set_op.right.select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
+    let mut columns = Vec::new();
+    if let Some(from) = from_clause {
+        extract_from_clause(database, from, &mut columns);
+    }
+    columns
+}
+
+/// Collect aliases and column names from a SELECT's select_list
+/// Expands wildcards using the database schema when possible
+fn collect_select_aliases(
+    database: &vibesql_storage::Database,
+    stmt: &vibesql_ast::SelectStmt,
+) -> Vec<Option<String>> {
+    let mut aliases = Vec::new();
+
+    // Pre-compute column names from FROM clause for wildcard expansion
+    let from_columns = extract_column_names_from_from(database, stmt.from.as_ref());
+    let mut from_col_idx = 0;
+
+    for item in &stmt.select_list {
+        match item {
+            vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                 // Use explicit alias if present, otherwise derive from expression
                 let name = if let Some(a) = alias {
                     Some(a.clone())
@@ -1122,12 +1143,59 @@ fn collect_union_aliases(stmt: &vibesql_ast::SelectStmt) -> Vec<Vec<Option<Strin
                         _ => None,
                     }
                 };
-                right_aliases.push(name);
-            } else {
-                right_aliases.push(None);
+                aliases.push(name);
+            }
+            vibesql_ast::SelectItem::Wildcard { .. } => {
+                // Expand wildcard to actual column names from FROM clause
+                if from_col_idx < from_columns.len() {
+                    // Push all remaining columns from FROM clause
+                    for col_name in &from_columns[from_col_idx..] {
+                        aliases.push(Some(col_name.clone()));
+                    }
+                    from_col_idx = from_columns.len();
+                } else {
+                    // Fallback: no FROM clause info available
+                    aliases.push(None);
+                }
+            }
+            vibesql_ast::SelectItem::QualifiedWildcard { qualifier, .. } => {
+                // Expand qualified wildcard (e.g., t.*) to columns from that table
+                if let Some(table) = database.get_table(qualifier) {
+                    for col in &table.schema.columns {
+                        aliases.push(Some(col.name.clone()));
+                    }
+                } else {
+                    // Table not found - might be an alias, fallback to unknown
+                    aliases.push(None);
+                }
             }
         }
-        all_aliases.push(right_aliases);
+    }
+
+    aliases
+}
+
+/// Collect aliases and column names from all SELECT statements in a UNION chain
+/// Returns a vec where each element is a vec of aliases/column names for that SELECT's columns
+///
+/// For each SELECT item, this returns:
+/// - The explicit alias if present (e.g., "x" in SELECT col AS x)
+/// - The column name if it's a ColumnRef without an alias (e.g., "col" in SELECT col)
+/// - For wildcards: The actual column names from the table schema
+/// - None for complex expressions without aliases
+fn collect_union_aliases(
+    database: &vibesql_storage::Database,
+    stmt: &vibesql_ast::SelectStmt,
+) -> Vec<Vec<Option<String>>> {
+    let mut all_aliases = Vec::new();
+
+    // Collect from the main SELECT (with wildcard expansion)
+    all_aliases.push(collect_select_aliases(database, stmt));
+
+    // Recursively collect from set operations
+    let mut current_set_op = stmt.set_operation.as_ref();
+    while let Some(set_op) = current_set_op {
+        all_aliases.push(collect_select_aliases(database, &set_op.right));
         current_set_op = set_op.right.set_operation.as_ref();
     }
 
@@ -1142,55 +1210,28 @@ impl SelectExecutor<'_> {
     /// 2. Column names from the first SELECT (e.g., ORDER BY x)
     /// 3. Original column names from expressions (e.g., ORDER BY a when SELECT a AS x)
     ///
-    /// The select_list parameter provides column names from the first SELECT for name resolution.
+    /// The all_union_aliases parameter provides expanded column names (with wildcards resolved)
+    /// from all UNION branches for name resolution.
     fn sort_set_operation_results(
         &self,
         mut rows: Vec<vibesql_storage::Row>,
         order_by: &[vibesql_ast::OrderByItem],
-        select_list: &[vibesql_ast::SelectItem],
-        all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches
+        _select_list: &[vibesql_ast::SelectItem],
+        all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches (wildcards expanded)
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         use crate::select::grouping::compare_sql_values;
         use std::cmp::Ordering;
 
-        // Build column name map for the UNION result
-        // Each column can have both an alias name and an underlying expression name
-        // SQLite allows ORDER BY to reference either one
-        let mut column_info: Vec<(String, Option<String>)> = Vec::new(); // (alias_or_derived_name, original_expr_name)
-        for item in select_list {
-            match item {
-                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
-                    let alias_name = if let Some(a) = alias {
-                        a.clone()
-                    } else {
-                        // Derive from expression when no alias
-                        match expr {
-                            vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
-                            _ => "?column?".to_string(),
-                        }
-                    };
-
-                    // Extract original column name from expression (if it's a column reference)
-                    let orig_name = match expr {
-                        vibesql_ast::Expression::ColumnRef { column, .. } => {
-                            // Only track if different from alias (for SELECT a AS x case)
-                            if alias.is_some() && alias.as_ref() != Some(column) {
-                                Some(column.clone())
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-
-                    column_info.push((alias_name, orig_name));
-                }
-                vibesql_ast::SelectItem::Wildcard { .. }
-                | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
-                    column_info.push(("*".to_string(), None));
-                }
-            }
-        }
+        // Build column name map from the first branch's aliases (with wildcards already expanded)
+        // The all_union_aliases already contains expanded column names from collect_union_aliases
+        let column_info: Vec<(String, Option<String>)> = if let Some(first_branch) = all_union_aliases.first() {
+            first_branch.iter().map(|name_opt| {
+                let name = name_opt.clone().unwrap_or_else(|| "?column?".to_string());
+                (name, None) // Original name is the same as alias for expanded wildcards
+            }).collect()
+        } else {
+            Vec::new()
+        };
 
         // Parse order_by items and resolve to column indices
         let mut sort_columns: Vec<(usize, bool)> = Vec::new(); // (column_index, is_desc)
