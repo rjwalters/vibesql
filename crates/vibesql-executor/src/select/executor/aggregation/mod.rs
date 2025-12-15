@@ -480,7 +480,9 @@ impl SelectExecutor<'_> {
         let final_result = if stmt.set_operation.is_some() {
             result_rows
         } else {
-            apply_limit_offset(result_rows, stmt.limit, stmt.offset)
+            let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+            let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+            apply_limit_offset(result_rows, limit, offset)
         };
 
         Ok(final_result)

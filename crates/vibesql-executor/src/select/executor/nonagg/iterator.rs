@@ -142,16 +142,17 @@ impl SelectExecutor<'_> {
         }
 
         // Stage 3: OFFSET (skip rows lazily)
-        let mut iterator: Box<dyn Iterator<Item = _>> = if let Some(offset) = stmt.offset {
-            let offset_usize = offset.max(0);
+        let mut iterator: Box<dyn Iterator<Item = _>> = if let Some(ref offset_expr) = stmt.offset {
+            let offset_usize = crate::select::helpers::evaluate_limit_offset_expr(offset_expr, self.database, "OFFSET")?;
             Box::new(iterator.skip(offset_usize))
         } else {
             iterator
         };
 
         // Stage 4: LIMIT (take only needed rows)
-        if let Some(limit) = stmt.limit {
-            iterator = Box::new(iterator.take(limit));
+        if let Some(ref limit_expr) = stmt.limit {
+            let limit_usize = crate::select::helpers::evaluate_limit_offset_expr(limit_expr, self.database, "LIMIT")?;
+            iterator = Box::new(iterator.take(limit_usize));
         }
 
         // Stage 5: Materialize filtered results

@@ -84,7 +84,7 @@ pub(super) fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Express
                 group_by: None,
                 having: None,
                 order_by: None,
-                limit: Some(1),
+                limit: Some(Expression::Literal(vibesql_types::SqlValue::Integer(1))),
                 offset: None,
                 set_operation: None,
                 values: None,

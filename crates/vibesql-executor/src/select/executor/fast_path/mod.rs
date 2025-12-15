@@ -167,13 +167,14 @@ impl SelectExecutor<'_> {
 
         // Fall back to standard fast path with execute_from_clause
         // Pass LIMIT for early termination optimization (#3253)
+        let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
         let from_result = crate::select::scan::execute_from_clause(
             stmt.from.as_ref().unwrap(),
             &HashMap::new(), // No CTEs
             self.database,
             resolved_where.as_ref(),
             stmt.order_by.as_deref(),
-            stmt.limit, // LIMIT pushdown for ORDER BY optimization
+            limit, // LIMIT pushdown for ORDER BY optimization
             None,       // No outer row
             None,       // No outer schema
             |_| unreachable!("Fast path doesn't support subqueries"),
@@ -206,8 +207,9 @@ impl SelectExecutor<'_> {
         let projected_rows = self.apply_projection_fast(&stmt.select_list, sorted_rows, &schema)?;
 
         // Apply LIMIT/OFFSET
+        let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
         let final_rows =
-            crate::select::helpers::apply_limit_offset(projected_rows, stmt.limit, stmt.offset);
+            crate::select::helpers::apply_limit_offset(projected_rows, limit, offset);
 
         Ok(final_rows)
     }

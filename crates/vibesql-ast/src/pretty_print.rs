@@ -839,13 +839,13 @@ impl ToSql for SelectStmt {
         }
 
         // LIMIT
-        if let Some(limit) = self.limit {
-            result.push_str(&format!(" LIMIT {}", limit));
+        if let Some(limit) = &self.limit {
+            result.push_str(&format!(" LIMIT {}", limit.to_sql()));
         }
 
         // OFFSET
-        if let Some(offset) = self.offset {
-            result.push_str(&format!(" OFFSET {}", offset));
+        if let Some(offset) = &self.offset {
+            result.push_str(&format!(" OFFSET {}", offset.to_sql()));
         }
 
         // Set operation

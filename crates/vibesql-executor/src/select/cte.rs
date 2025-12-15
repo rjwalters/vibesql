@@ -230,8 +230,8 @@ where
         group_by: cte.query.group_by.clone(),
         having: cte.query.having.clone(),
         order_by: cte.query.order_by.clone(),
-        limit: cte.query.limit,
-        offset: cte.query.offset,
+        limit: cte.query.limit.clone(),
+        offset: cte.query.offset.clone(),
         set_operation: None,  // Remove UNION ALL for base term execution
         values: cte.query.values.clone(),
     };

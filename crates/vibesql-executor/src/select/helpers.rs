@@ -65,6 +65,67 @@ pub(super) fn apply_distinct(rows: Vec<vibesql_storage::Row>) -> Vec<vibesql_sto
     result
 }
 
+/// Evaluate a LIMIT or OFFSET expression to a usize value
+///
+/// Evaluates arbitrary expressions (e.g., `5+3`, `(SELECT 10)`) at runtime
+/// and converts the result to a non-negative integer.
+pub(super) fn evaluate_limit_offset_expr(
+    expr: &vibesql_ast::Expression,
+    database: &vibesql_storage::Database,
+    clause_name: &str,
+) -> Result<usize, crate::ExecutorError> {
+    use crate::evaluator::ExpressionEvaluator;
+
+    // Create empty schema and row for expression evaluation
+    let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
+    let evaluator = ExpressionEvaluator::with_database(&empty_schema, database);
+    let empty_row = vibesql_storage::Row::new(vec![]);
+
+    // Evaluate the expression
+    let value = evaluator.eval(expr, &empty_row)?;
+
+    // Convert to integer
+    match value {
+        vibesql_types::SqlValue::Integer(n) => {
+            if n < 0 {
+                Err(crate::ExecutorError::InvalidLimitOffset {
+                    clause: clause_name.to_string(),
+                    value: n.to_string(),
+                    reason: "must be non-negative".to_string(),
+                })
+            } else {
+                Ok(n as usize)
+            }
+        }
+        vibesql_types::SqlValue::Null => Err(crate::ExecutorError::InvalidLimitOffset {
+            clause: clause_name.to_string(),
+            value: "NULL".to_string(),
+            reason: "must be an integer".to_string(),
+        }),
+        other => Err(crate::ExecutorError::InvalidLimitOffset {
+            clause: clause_name.to_string(),
+            value: format!("{:?}", other),
+            reason: "must be an integer".to_string(),
+        }),
+    }
+}
+
+/// Evaluate optional LIMIT expression to Option<usize>
+pub(super) fn evaluate_limit(
+    limit: &Option<vibesql_ast::Expression>,
+    database: &vibesql_storage::Database,
+) -> Result<Option<usize>, crate::ExecutorError> {
+    limit.as_ref().map(|e| evaluate_limit_offset_expr(e, database, "LIMIT")).transpose()
+}
+
+/// Evaluate optional OFFSET expression to Option<usize>
+pub(super) fn evaluate_offset(
+    offset: &Option<vibesql_ast::Expression>,
+    database: &vibesql_storage::Database,
+) -> Result<Option<usize>, crate::ExecutorError> {
+    offset.as_ref().map(|e| evaluate_limit_offset_expr(e, database, "OFFSET")).transpose()
+}
+
 /// Apply LIMIT and OFFSET to a result set
 pub(super) fn apply_limit_offset(
     rows: Vec<vibesql_storage::Row>,

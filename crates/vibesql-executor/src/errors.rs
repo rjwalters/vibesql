@@ -267,6 +267,12 @@ pub enum ExecutorError {
         column_number: i64,   // The column number that was specified
         select_list_len: usize,
     },
+    /// Invalid LIMIT or OFFSET value (SQLite-compatible error)
+    InvalidLimitOffset {
+        clause: String,  // "LIMIT" or "OFFSET"
+        value: String,   // The value that was provided
+        reason: String,  // Why it's invalid
+    },
     Other(String),
 }
 
@@ -1056,6 +1062,9 @@ impl std::fmt::Display for ExecutorError {
                         ordinal, select_list_len
                     )
                 }
+            }
+            ExecutorError::InvalidLimitOffset { clause, value, reason } => {
+                write!(f, "{} value {} {}", clause, value, reason)
             }
             ExecutorError::Other(msg) => {
                 write!(f, "{}", vibe_msg!("executor-other", message = msg.as_str()))

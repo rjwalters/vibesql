@@ -143,4 +143,55 @@ impl SelectExecutor<'_> {
     pub(super) fn expression_references_column(&self, expr: &vibesql_ast::Expression) -> bool {
         expression_references_column(expr)
     }
+
+    /// Evaluate a LIMIT or OFFSET expression and convert to usize
+    ///
+    /// LIMIT and OFFSET accept arbitrary expressions (e.g., `5+3`, `(SELECT 10)`)
+    /// that must evaluate to a non-negative integer at runtime.
+    ///
+    /// # Errors
+    ///
+    /// - Expression evaluation fails
+    /// - Result is not an integer
+    /// - Result is negative
+    pub(super) fn eval_limit_offset_expr(
+        &self,
+        expr: &vibesql_ast::Expression,
+        clause_name: &str,
+    ) -> Result<usize, crate::errors::ExecutorError> {
+        use crate::evaluator::ExpressionEvaluator;
+
+        // Create empty schema and row for expression evaluation
+        let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
+        let evaluator = ExpressionEvaluator::with_database(&empty_schema, self.database);
+        let empty_row = vibesql_storage::Row::new(vec![]);
+
+        // Evaluate the expression
+        let value = evaluator.eval(expr, &empty_row)?;
+
+        // Convert to integer
+        match value {
+            vibesql_types::SqlValue::Integer(n) => {
+                if n < 0 {
+                    Err(crate::errors::ExecutorError::InvalidLimitOffset {
+                        clause: clause_name.to_string(),
+                        value: n.to_string(),
+                        reason: "must be non-negative".to_string(),
+                    })
+                } else {
+                    Ok(n as usize)
+                }
+            }
+            vibesql_types::SqlValue::Null => Err(crate::errors::ExecutorError::InvalidLimitOffset {
+                clause: clause_name.to_string(),
+                value: "NULL".to_string(),
+                reason: "must be an integer".to_string(),
+            }),
+            other => Err(crate::errors::ExecutorError::InvalidLimitOffset {
+                clause: clause_name.to_string(),
+                value: format!("{:?}", other),
+                reason: "must be an integer".to_string(),
+            }),
+        }
+    }
 }

@@ -57,8 +57,8 @@ pub struct SelectStmt {
     pub group_by: Option<GroupByClause>,
     pub having: Option<Expression>,
     pub order_by: Option<Vec<OrderByItem>>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
+    pub limit: Option<Expression>,
+    pub offset: Option<Expression>,
     /// Set operation (UNION, INTERSECT, EXCEPT) combining this query with another
     pub set_operation: Option<SetOperation>,
     /// VALUES clause for standalone VALUES statements (SQL:1999)

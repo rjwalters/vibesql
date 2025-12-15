@@ -323,7 +323,11 @@ mod tests {
         match &rewritten.where_clause {
             Some(Expression::Exists { subquery: exists_subquery, negated }) => {
                 assert!(!negated, "Negation should match input");
-                assert_eq!(exists_subquery.limit, Some(1), "LIMIT 1 should be added");
+                assert_eq!(
+                    exists_subquery.limit,
+                    Some(Expression::Literal(SqlValue::Integer(1))),
+                    "LIMIT 1 should be added"
+                );
                 assert!(
                     exists_subquery.where_clause.is_some(),
                     "Correlation predicate should be added"

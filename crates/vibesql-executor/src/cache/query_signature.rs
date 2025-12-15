@@ -184,9 +184,11 @@ impl QuerySignature {
             }
         }
 
-        // Hash LIMIT/OFFSET (these are often literals, but we treat them as part of structure)
-        select.limit.hash(hasher);
-        select.offset.hash(hasher);
+        // Hash LIMIT/OFFSET expressions
+        // Note: We hash the presence of limit/offset but not the expression itself
+        // since Expression doesn't implement Hash
+        select.limit.is_some().hash(hasher);
+        select.offset.is_some().hash(hasher);
     }
 
     /// Hash a FROM clause structure
@@ -650,9 +652,11 @@ impl QuerySignature {
             }
         }
 
-        // Hash LIMIT/OFFSET
-        select.limit.hash(hasher);
-        select.offset.hash(hasher);
+        // Hash LIMIT/OFFSET expressions
+        // Note: We hash the presence of limit/offset but not the expression itself
+        // since arena Expression doesn't implement Hash
+        select.limit.is_some().hash(hasher);
+        select.offset.is_some().hash(hasher);
     }
 
     /// Hash an arena-allocated FROM clause structure

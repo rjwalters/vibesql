@@ -399,8 +399,8 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 .order_by
                 .as_ref()
                 .map(|v| v.iter().map(|item| self.convert_order_by_item(item)).collect()),
-            limit: stmt.limit,
-            offset: stmt.offset,
+            limit: stmt.limit.as_ref().map(|e| self.convert_expression(e)),
+            offset: stmt.offset.as_ref().map(|e| self.convert_expression(e)),
             set_operation: stmt.set_operation.as_ref().map(|so| self.convert_set_operation(so)),
             values: stmt.values.as_ref().map(|rows| {
                 rows.iter()
