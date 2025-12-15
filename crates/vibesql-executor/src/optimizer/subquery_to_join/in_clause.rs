@@ -38,7 +38,7 @@
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
-use super::helpers::{is_self_join, rewrite_column_refs_with_alias};
+use super::helpers::{is_self_join, is_simple_single_table_self_join, rewrite_column_refs_with_alias};
 
 /// Result of converting an IN subquery to a join
 /// Contains the new FROM clause
@@ -86,15 +86,31 @@ pub(super) fn try_convert_in_to_join(
     // that might be correlated references.
     //
     // Example that should NOT be transformed:
-    //   SELECT x FROM t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
-    //   If the inner `SELECT x` has `x` as a correlated reference (not from t1),
-    //   rewriting it to `__subquery_t1.x` will fail because that column doesn't exist.
+    //   SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
+    //   If the inner `SELECT x` has `x` as a correlated reference (from t2, not t1),
+    //   rewriting it to `__subquery_t1.x` will fail because that column doesn't exist in t1.
     //
-    // Conservative check: if SELECT column is unqualified, it might be correlated,
-    // so skip the optimization and let runtime evaluation handle it safely.
+    // We can only safely optimize unqualified columns when the outer query has a SINGLE
+    // table that matches the subquery's table (pure self-join). If the outer query has
+    // multiple tables, an unqualified column could reference any of them.
+    //
+    // Safe to optimize:
+    //   SELECT col0 FROM tab0 WHERE col0 IN (SELECT col3 FROM tab0 WHERE ...)
+    //   Single table 'tab0' in outer query, unqualified 'col3' must be from tab0.
+    //
+    // Must skip optimization:
+    //   SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
+    //   Multiple tables in outer query, unqualified 'x' could be from t2 (correlated).
     if let Expression::ColumnRef { table: None, .. } = &subquery_column {
-        // Unqualified column in SELECT list - could be correlated, skip optimization
-        return None;
+        // Check if outer query has exactly one table and it matches the subquery's table
+        let is_simple_self_join = is_simple_single_table_self_join(from, &table_name, &table_alias);
+
+        if !is_simple_self_join {
+            // Either not a self-join, or outer query has multiple tables.
+            // Unqualified column might be correlated, skip optimization to be safe.
+            return None;
+        }
+        // else: Simple self-join with single table - safe to optimize
     }
 
     // Detect self-join: check if subquery table name conflicts with outer query tables

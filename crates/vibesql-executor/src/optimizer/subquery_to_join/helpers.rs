@@ -45,6 +45,36 @@ pub(super) fn is_self_join(
         .any(|n| n.eq_ignore_ascii_case(effective_name) || n.eq_ignore_ascii_case(table_name))
 }
 
+/// Check if this is a simple self-join: exactly one table in outer query matching subquery's table
+///
+/// Returns true only when:
+/// 1. The outer FROM clause has exactly ONE table (not a join, not multiple tables)
+/// 2. That table's name matches the subquery's table name
+///
+/// This is used to safely determine if unqualified columns in a subquery can be optimized.
+/// When the outer query has multiple tables, unqualified columns could reference any of them,
+/// so we must skip optimization to avoid incorrectly rewriting correlated references.
+pub(super) fn is_simple_single_table_self_join(
+    from: &FromClause,
+    table_name: &str,
+    table_alias: &Option<String>,
+) -> bool {
+    // Only match simple single-table FROM clauses
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            // Check if this single table matches the subquery's table
+            let outer_effective_name = alias.as_deref().unwrap_or(name);
+            let subquery_effective_name = table_alias.as_deref().unwrap_or(table_name);
+
+            // Match either by effective name or table name (case-insensitive)
+            outer_effective_name.eq_ignore_ascii_case(subquery_effective_name)
+                || name.eq_ignore_ascii_case(table_name)
+        }
+        // Joins, subqueries, or VALUES have multiple "tables" - not a simple self-join
+        _ => false,
+    }
+}
+
 /// Qualify an unqualified column reference with a table name
 /// Only rewrites unqualified columns, leaves qualified ones unchanged
 pub(super) fn qualify_outer_column_refs(expr: &Expression, outer_table: &str) -> Expression {
