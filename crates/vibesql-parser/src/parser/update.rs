@@ -8,8 +8,9 @@ impl Parser {
         // Parse table name with optional schema qualifier and quoted flag
         // Supports: tablename, "TableName", schema.table, "schema"."table"
         let table_ref = self.parse_table_ref()?;
-        let table_name = table_ref.name;
-        let quoted = table_ref.quoted;
+        // Use full_name() to get combined schema.table format for backward compatibility
+        let table_name = table_ref.full_name();
+        let quoted = table_ref.is_any_quoted();
 
         // Parse SET keyword
         self.expect_keyword(Keyword::Set)?;

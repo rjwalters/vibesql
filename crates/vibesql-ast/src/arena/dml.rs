@@ -31,10 +31,15 @@ pub enum ConflictClause {
 /// INSERT statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt<'arena> {
+    /// Optional schema name for schema-qualified table references (e.g., schema.table)
+    pub schema_name: Option<Symbol>,
+    /// Whether the schema name was quoted (delimited) in the original SQL.
+    /// Per SQL:1999, quoted identifiers are case-sensitive.
+    pub schema_quoted: bool,
     pub table_name: Symbol,
     /// Whether the table name was quoted (delimited) in the original SQL.
     /// Per SQL:1999, quoted identifiers are case-sensitive.
-    pub quoted: bool,
+    pub table_quoted: bool,
     pub columns: BumpVec<'arena, Symbol>,
     pub source: InsertSource<'arena>,
     /// Conflict resolution strategy (None = fail on conflict)

@@ -15,7 +15,7 @@ fn test_after_delete_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -75,7 +75,7 @@ fn test_before_delete_trigger_fires() {
     create_audit_table(&mut db);
 
     // Insert a user first
-    let insert = vibesql_ast::InsertStmt { quoted: false,
+    let insert = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "USERS".to_string(),
         columns: vec!["id".to_string(), "username".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![

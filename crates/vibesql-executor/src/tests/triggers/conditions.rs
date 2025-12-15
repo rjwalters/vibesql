@@ -69,7 +69,7 @@ fn test_when_clause_filters_firing() {
         .expect("Failed to create trigger");
 
     // Insert row with amount=50 (should NOT fire)
-    let insert1 = vibesql_ast::InsertStmt { quoted: false,
+    let insert1 = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "TRANSACTIONS".to_string(),
         columns: vec!["id".to_string(), "amount".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![
@@ -85,7 +85,7 @@ fn test_when_clause_filters_firing() {
     assert_eq!(count_audit_rows(&db), 0);
 
     // Insert row with amount=150 (should fire)
-    let insert2 = vibesql_ast::InsertStmt { quoted: false,
+    let insert2 = vibesql_ast::InsertStmt { schema_name: None, schema_quoted: false, table_quoted: false,
         table_name: "TRANSACTIONS".to_string(),
         columns: vec!["id".to_string(), "amount".to_string()],
         source: vibesql_ast::InsertSource::Values(vec![vec![

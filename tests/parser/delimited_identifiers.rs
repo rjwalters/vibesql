@@ -360,7 +360,6 @@ fn test_error_on_case_mismatch_quoted_table() {
 // ========================================================================
 
 #[test]
-#[ignore] // TODO: Schema-qualified quoted identifiers need parser support for INSERT
 fn test_quoted_schema_and_table_names() {
     let mut db = Database::new();
 
@@ -379,9 +378,9 @@ fn test_quoted_schema_and_table_names() {
     execute_create_table(&mut db, r#"CREATE TABLE "mySchema"."users" (id INT)"#).unwrap();
     execute_create_table(&mut db, r#"CREATE TABLE "MYSCHEMA"."users" (id INT)"#).unwrap();
 
-    // Insert different data using direct storage API (parser doesn't support schema-qualified INSERT)
-    db.insert_row("mySchema.users", Row::new(vec![SqlValue::Integer(1)])).unwrap();
-    db.insert_row("MYSCHEMA.users", Row::new(vec![SqlValue::Integer(2)])).unwrap();
+    // Insert different data using SQL INSERT with schema-qualified names
+    execute_insert_sql(&mut db, r#"INSERT INTO "mySchema"."users" VALUES (1)"#).unwrap();
+    execute_insert_sql(&mut db, r#"INSERT INTO "MYSCHEMA"."users" VALUES (2)"#).unwrap();
 
     // Query each separately
     let result1 = execute_select(&db, r#"SELECT * FROM "mySchema"."users""#).unwrap();
@@ -401,11 +400,11 @@ fn test_mixed_quoted_unquoted_schema_table() {
         vibesql_executor::SchemaExecutor::execute_create_schema(&create_schema, &mut db).unwrap();
     }
 
-    // Create table: quoted schema, unquoted table (normalized to USERS)
+    // Create table: quoted schema, unquoted table (normalized to users)
     execute_create_table(&mut db, r#"CREATE TABLE "myApp".users (id INT)"#).unwrap();
 
-    // Insert using direct storage API (parser doesn't support schema-qualified INSERT)
-    db.insert_row("myApp.users", Row::new(vec![SqlValue::Integer(42)])).unwrap();
+    // Insert using SQL INSERT with schema-qualified name
+    execute_insert_sql(&mut db, r#"INSERT INTO "myApp".users VALUES (42)"#).unwrap();
 
     // Query with quoted schema, unquoted table
     let result = execute_select(&db, r#"SELECT * FROM "myApp".users"#).unwrap();

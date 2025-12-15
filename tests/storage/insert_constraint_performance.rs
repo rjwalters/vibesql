@@ -41,7 +41,10 @@ fn test_insert_with_merged_constraint_validation() {
     // Batch insert multiple rows
     for i in 0..num_rows {
         let stmt = InsertStmt {
+            schema_name: None,
+            schema_quoted: false,
             table_name: "test_table".to_string(),
+            table_quoted: false,
             columns: vec![],
             source: InsertSource::Values(vec![vec![
                 Expression::Literal(SqlValue::Integer(i)),
@@ -50,7 +53,6 @@ fn test_insert_with_merged_constraint_validation() {
             ]]),
             conflict_clause: None,
             on_duplicate_key_update: None,
-            quoted: false,
         };
 
         InsertExecutor::execute(&mut db, &stmt).unwrap();
@@ -108,12 +110,14 @@ fn test_insert_multi_row_with_constraints() {
     let start = std::time::Instant::now();
 
     let stmt = InsertStmt {
+        schema_name: None,
+        schema_quoted: false,
         table_name: "test_table".to_string(),
+        table_quoted: false,
         columns: vec![],
         source: InsertSource::Values(rows),
         conflict_clause: None,
         on_duplicate_key_update: None,
-        quoted: false,
     };
 
     InsertExecutor::execute(&mut db, &stmt).unwrap();
