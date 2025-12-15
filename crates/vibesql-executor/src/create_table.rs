@@ -139,6 +139,7 @@ impl CreateTableExecutor {
                         data_type: col_def.data_type.clone(),
                         nullable: col_def.nullable,
                         default_value,
+                        generated_expr: col_def.generated_expr.as_ref().map(|expr| (**expr).clone()),
                     }
                 })
                 .collect();

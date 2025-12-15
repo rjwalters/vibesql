@@ -518,6 +518,7 @@ fn json_column_to_schema(col: &JsonColumn) -> Result<ColumnSchema, StorageError>
         data_type,
         nullable: col.nullable,
         default_value: None,
+        generated_expr: None,
     })
 }
 

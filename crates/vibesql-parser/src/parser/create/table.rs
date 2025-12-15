@@ -67,11 +67,21 @@ impl Parser {
 
             // Parse data type (optional for SQLite compatibility)
             // SQLite allows typeless columns with BLOB affinity
-            let data_type = if self.is_column_constraint_or_separator() {
+            // Also check for generated column syntax: AS(expression)
+            let (data_type, generated_expr) = if self.peek_keyword(Keyword::As) {
+                // Generated column: AS(expression)
+                self.advance(); // consume AS
+                self.expect_token(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect_token(Token::RParen)?;
+                // Generated columns have the type inferred from the expression
+                // For now, use BLOB affinity (will be refined by type inference)
+                (DataType::BinaryLargeObject, Some(Box::new(expr)))
+            } else if self.is_column_constraint_or_separator() {
                 // No data type specified - use BLOB affinity (SQLite default)
-                DataType::BinaryLargeObject
+                (DataType::BinaryLargeObject, None)
             } else {
-                self.parse_data_type()?
+                (self.parse_data_type()?, None)
             };
 
             // Parse optional DEFAULT clause (before COMMENT, per MySQL standard)
@@ -116,6 +126,7 @@ impl Parser {
                 constraints,
                 default_value,
                 comment,
+                generated_expr,
             });
 
             if matches!(self.peek(), Token::Comma) {

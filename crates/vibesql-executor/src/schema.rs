@@ -147,6 +147,7 @@ impl CombinedSchema {
                 data_type,
                 nullable: true,      // Derived table columns are always nullable
                 default_value: None, // Derived table columns have no defaults
+                generated_expr: None, // Derived table columns are not generated
             })
             .collect();
 

@@ -298,6 +298,7 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                 data_type,
                 nullable,
                 default_value,
+                generated_expr: None,
             });
         }
 

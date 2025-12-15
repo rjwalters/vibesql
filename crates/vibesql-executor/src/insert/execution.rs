@@ -178,6 +178,9 @@ fn execute_insert_internal(
         let generated_id =
             super::defaults::apply_default_values(&schema, &mut full_row_values, db)?;
 
+        // Apply generated/computed column values (AS(expression) syntax)
+        super::defaults::apply_generated_columns(&schema, &mut full_row_values)?;
+
         // Track the first generated ID across all rows
         if first_generated_id.is_none() {
             first_generated_id = generated_id;

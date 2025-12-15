@@ -144,6 +144,7 @@ fn parse_add_column(
         constraints,
         default_value,
         comment: None,
+        generated_expr: None,
     };
 
     Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
@@ -325,6 +326,7 @@ fn parse_modify_column(
         constraints,
         default_value,
         comment: None,
+        generated_expr: None,
     };
 
     Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt { table_name, column_name, new_column_def }))
@@ -401,6 +403,7 @@ fn parse_change_column(
         constraints,
         default_value,
         comment: None,
+        generated_expr: None,
     };
 
     Ok(AlterTableStmt::ChangeColumn(ChangeColumnStmt {

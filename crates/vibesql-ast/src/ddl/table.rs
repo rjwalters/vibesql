@@ -151,6 +151,10 @@ pub struct ColumnDef {
     pub constraints: Vec<ColumnConstraint>,
     pub default_value: Option<Box<Expression>>,
     pub comment: Option<String>,
+    /// Generated/computed column expression (AS(expression) syntax)
+    /// When present, this column's value is computed from the expression
+    /// rather than being stored explicitly
+    pub generated_expr: Option<Box<Expression>>,
 }
 
 /// Column-level constraint

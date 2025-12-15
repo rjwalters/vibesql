@@ -107,6 +107,7 @@ impl SelectIntoExecutor {
                         constraints: vec![],
                         default_value: None,
                         comment: None,
+                        generated_expr: None,
                     });
                 }
             }

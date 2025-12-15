@@ -67,6 +67,7 @@ fn apply_column_aliases(
                 data_type: col.data_type.clone(),
                 nullable: col.nullable,
                 default_value: col.default_value.clone(),
+                generated_expr: col.generated_expr.clone(),
             })
             .collect();
         // TableSchema::new() rebuilds the column_index_cache
@@ -264,6 +265,7 @@ pub(crate) fn execute_table_scan(
                         data_type: value.get_type(),
                         nullable: true, // Views return nullable columns by default
                         default_value: None,
+                        generated_expr: None, // Views don't have generated columns
                     }
                 })
                 .collect()
@@ -277,6 +279,7 @@ pub(crate) fn execute_table_scan(
                     data_type: vibesql_types::DataType::Varchar { max_length: None },
                     nullable: true,
                     default_value: None,
+                    generated_expr: None, // Views don't have generated columns
                 })
                 .collect()
         };

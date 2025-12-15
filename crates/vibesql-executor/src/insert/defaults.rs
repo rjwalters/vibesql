@@ -220,3 +220,20 @@ pub fn apply_default_values(
     }
     Ok(first_generated_id)
 }
+
+/// Apply generated/computed column values
+/// Generated columns are defined with AS(expression) syntax and computed on INSERT/UPDATE
+pub fn apply_generated_columns(
+    schema: &vibesql_catalog::TableSchema,
+    row_values: &mut [vibesql_types::SqlValue],
+) -> Result<(), ExecutorError> {
+    for (col_idx, col) in schema.columns.iter().enumerate() {
+        // If column has a generated expression, compute and apply it
+        if let Some(generated_expr) = &col.generated_expr {
+            let generated_value = evaluate_default_expression(generated_expr)?;
+            let coerced_value = super::validation::coerce_value(generated_value, &col.data_type)?;
+            row_values[col_idx] = coerced_value;
+        }
+    }
+    Ok(())
+}
