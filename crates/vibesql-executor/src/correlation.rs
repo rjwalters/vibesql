@@ -219,17 +219,39 @@ fn is_expression_correlated(
                     // This references the subquery's own table, not outer query
                     return false;
                 }
+            } else {
+                // Unqualified column reference
+                //
+                // For self-join scenarios where the same table appears in both outer and
+                // inner queries (e.g., SELECT * FROM tab0 WHERE x IN (SELECT y FROM tab0)),
+                // unqualified columns will resolve to the innermost (subquery's) table by
+                // SQL's standard scoping rules.
+                //
+                // Check if the subquery has a table that also exists in the outer schema.
+                // If so, assume unqualified columns belong to the subquery (NOT correlated).
+                // This enables caching optimization for self-join IN subqueries.
+                //
+                // Note: This is a heuristic. For true correlation detection, we would need
+                // the database schema to check if the column actually exists in each table.
+                // But for the common self-join case, this heuristic is correct.
+                for subquery_table in subquery_tables {
+                    // Check if this subquery table exists in outer schema
+                    // Compare using case-insensitive matching (lowercase subquery table vs canonical outer)
+                    let subquery_table_lower = subquery_table.to_lowercase();
+                    if outer_schema
+                        .table_schemas
+                        .keys()
+                        .any(|outer_table| outer_table.canonical() == subquery_table_lower)
+                    {
+                        // Self-join detected: subquery table matches an outer table
+                        // Unqualified columns will resolve to the subquery's table first
+                        return false;
+                    }
+                }
             }
-            // Note: For unqualified column references, we DON'T immediately assume they
-            // belong to the subquery's tables. We need to check if the column actually
-            // exists in outer schema to determine correlation.
-            //
-            // Fix for issue #4493: The previous logic incorrectly assumed that if the
-            // subquery has ANY tables, then ALL unqualified columns belong to those tables.
-            // But a column like `x` might not exist in the subquery's table `t1`, and
-            // instead belong to the outer query's table `t2`.
 
             // Check if this column exists in outer schema
+            // Only relevant for non-self-join cases where the column might be correlated
             outer_schema.get_column_index(table.as_deref(), column).is_some()
         }
 

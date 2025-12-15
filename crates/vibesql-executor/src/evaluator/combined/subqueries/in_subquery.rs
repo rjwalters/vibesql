@@ -36,6 +36,12 @@ thread_local! {
     /// This cache is separate from the row cache to avoid modifying the core evaluator structure
     static IN_SUBQUERY_HASHSET_CACHE: RefCell<lru::LruCache<u64, InSubqueryHashSetEntry>> =
         RefCell::new(lru::LruCache::new(std::num::NonZeroUsize::new(1000).unwrap()));
+
+    /// Thread-local cache for correlation check results
+    /// Maps (subquery_hash, outer_schema_hash) -> is_correlated
+    /// This avoids expensive re-computation of correlation status on every evaluation
+    static CORRELATION_CACHE: RefCell<lru::LruCache<u64, bool>> =
+        RefCell::new(lru::LruCache::new(std::num::NonZeroUsize::new(1000).unwrap()));
 }
 
 /// Clear the thread-local IN subquery HashSet cache.
@@ -59,6 +65,23 @@ pub fn clear_in_subquery_cache() {
     IN_SUBQUERY_HASHSET_CACHE.with(|cache| {
         cache.borrow_mut().clear();
     });
+    CORRELATION_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
+}
+
+/// Compute a hash of the schema table names for correlation caching
+/// The hash only includes table names since that's what correlation checking uses
+fn compute_schema_hash(schema: &crate::schema::CombinedSchema) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Sort table names for consistent hashing
+    let mut table_names: Vec<_> = schema.table_schemas.keys().map(|k| k.canonical()).collect();
+    table_names.sort();
+    for name in table_names {
+        name.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Build a HashSet from subquery result rows for O(1) membership checks
@@ -132,7 +155,20 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // Check if this is a non-correlated subquery that can be cached
-        let is_correlated = crate::correlation::is_correlated(subquery, self.schema);
+        // Use a cache for correlation results to avoid expensive re-computation
+        let subquery_hash = compute_subquery_hash(subquery);
+        let schema_hash = compute_schema_hash(self.schema);
+        let correlation_key = subquery_hash.wrapping_mul(31).wrapping_add(schema_hash);
+
+        let is_correlated = CORRELATION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(&cached_result) = cache.get(&correlation_key) {
+                return cached_result;
+            }
+            let result = crate::correlation::is_correlated(subquery, self.schema);
+            cache.put(correlation_key, result);
+            result
+        });
 
         if !is_correlated {
             // Non-correlated subquery - use HashSet optimization for O(1) lookups
