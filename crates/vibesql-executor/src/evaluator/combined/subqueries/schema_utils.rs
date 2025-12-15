@@ -39,6 +39,13 @@ pub(super) fn build_merged_outer_schema<'a>(
         let mut builder = crate::schema::SchemaBuilder::from_schema(outer.clone());
 
         // Add all tables from current schema
+        // Note (issue #4493): When a table name exists in both current and outer schemas,
+        // the table from current_schema will overwrite the one from outer_schema in the HashMap.
+        // This is intentional - we want the MOST RECENT (nearest) definition of each table
+        // because:
+        // 1. Subqueries should see the nearest enclosing scope's version of a table
+        // 2. Column resolution searches current schema first, then outer schema
+        // 3. If a column exists in multiple levels, the nearest one takes precedence (SQL scoping rules)
         for (table_id, (_offset, table_schema)) in &current_schema.table_schemas {
             builder.add_table(table_id.display().to_string(), table_schema.clone());
         }
