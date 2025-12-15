@@ -59,12 +59,8 @@ pub(crate) fn create_subquery_cache() -> LruCache<u64, Vec<vibesql_storage::Row>
     LruCache::new(NonZeroUsize::new(get_subquery_cache_size()).unwrap())
 }
 
-// Thread-local cache for subquery hashes by AST pointer
-// Defined at module level so both compute and clear functions can access it
-thread_local! {
-    static SUBQUERY_HASH_CACHE: std::cell::RefCell<lru::LruCache<usize, u64>> =
-        std::cell::RefCell::new(lru::LruCache::new(NonZeroUsize::new(1000).unwrap()));
-}
+// NOTE: Pointer-based hash caching was removed because it caused correctness bugs.
+// See compute_subquery_hash() for details.
 
 /// Compute a hash for a subquery to use as a cache key
 ///
@@ -93,36 +89,29 @@ thread_local! {
 ///
 /// See: https://github.com/rjwalters/vibesql/issues/2137#hash-improvement
 ///
-/// Cache subquery hashes by AST pointer to avoid repeated expensive format!() calls.
-/// The AST is immutable during query execution, so pointer-based caching is safe.
+/// Compute hash directly without pointer-based caching.
+///
+/// While pointer-based caching can improve performance by avoiding repeated format!()
+/// calls for the same AST within a query, it causes correctness bugs because:
+/// 1. The thread-local cache persists across different query executions
+/// 2. When memory is reused (same pointer for different AST nodes), stale hashes are returned
+/// 3. This caused index/between tests to return wrong results
+///
+/// The performance cost of format!() is minimal compared to actual query execution.
+/// For better performance, derive Hash for SelectStmt and related AST types.
 pub(crate) fn compute_subquery_hash(subquery: &vibesql_ast::SelectStmt) -> u64 {
-    let ptr = subquery as *const _ as usize;
-
-    SUBQUERY_HASH_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(&cached_hash) = cache.get(&ptr) {
-            return cached_hash;
-        }
-
-        // Cache miss - compute the hash
-        let mut hasher = DefaultHasher::new();
-        format!("{:?}", subquery).hash(&mut hasher);
-        let hash = hasher.finish();
-
-        cache.put(ptr, hash);
-        hash
-    })
+    let mut hasher = DefaultHasher::new();
+    format!("{:?}", subquery).hash(&mut hasher);
+    hasher.finish()
 }
 
-/// Clear the subquery hash cache
+/// Clear the subquery hash cache (no-op).
 ///
-/// This must be called between query executions to invalidate pointer-based
-/// cache keys. The cache uses AST pointers as keys, which become invalid when
-/// ASTs are dropped and memory is reused.
-pub(crate) fn clear_subquery_hash_cache() {
-    SUBQUERY_HASH_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
+/// Kept for API compatibility. Pointer-based hash caching has been removed
+/// because it caused correctness bugs when memory was reused across queries.
+#[inline]
+pub fn clear_subquery_hash_cache() {
+    // No-op: pointer-based caching removed
 }
 
 /// Compute a composite cache key for a correlated subquery
