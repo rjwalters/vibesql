@@ -132,7 +132,7 @@ impl Parser {
                         self.consume_keyword(Keyword::As)?;
                     }
 
-                    // Parse alias - keywords allowed as aliases
+                    // Parse alias - keywords allowed as aliases (except clause keywords)
                     // SQLite allows derived tables without aliases; auto-generate if not provided
                     let alias = match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
@@ -141,10 +141,39 @@ impl Parser {
                             alias
                         }
                         Token::Keyword { keyword: kw, .. } => {
-                            // Allow keywords as alias names for derived tables
-                            let alias = kw.to_string();
-                            self.advance();
-                            alias
+                            // Only consume keyword if it looks like it could be an alias
+                            // (not a SQL keyword that starts a new clause)
+                            if !matches!(
+                                kw,
+                                Keyword::Where
+                                    | Keyword::Order
+                                    | Keyword::Limit
+                                    | Keyword::Offset
+                                    | Keyword::Group
+                                    | Keyword::Having
+                                    | Keyword::Union
+                                    | Keyword::Intersect
+                                    | Keyword::Except
+                                    | Keyword::Join
+                                    | Keyword::Inner
+                                    | Keyword::Left
+                                    | Keyword::Right
+                                    | Keyword::Full
+                                    | Keyword::Cross
+                                    | Keyword::Natural
+                                    | Keyword::On
+                                    | Keyword::Using
+                            ) {
+                                let alias = kw.to_string();
+                                self.advance();
+                                alias
+                            } else {
+                                // Generate default alias for clause keywords
+                                format!(
+                                    "(subquery-{})",
+                                    DERIVED_TABLE_COUNTER.fetch_add(1, Ordering::Relaxed)
+                                )
+                            }
                         }
                         _ => {
                             // Auto-generate unique alias for SQLite compatibility

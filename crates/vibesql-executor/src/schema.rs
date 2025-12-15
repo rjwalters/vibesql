@@ -125,6 +125,20 @@ pub struct CombinedSchema {
 }
 
 impl CombinedSchema {
+    /// Create an empty combined schema with no tables
+    ///
+    /// Used for SELECT statements without a FROM clause when the expression
+    /// evaluation needs outer context for column resolution.
+    pub fn empty() -> Self {
+        CombinedSchema {
+            table_schemas: HashMap::new(),
+            total_columns: 0,
+            hidden_columns: HashSet::new(),
+            outer_schema: None,
+            duplicate_aliases: HashSet::new(),
+        }
+    }
+
     /// Create a new combined schema from a single table
     ///
     /// Note: Table name is automatically normalized via TableIdentifier for case-insensitive lookups

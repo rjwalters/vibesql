@@ -57,9 +57,14 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let execute_start = std::time::Instant::now();
 
-        // Reset arena for fresh query execution (only at top level)
+        // Reset arena and clear pointer-based caches for fresh query execution (only at top level)
+        // The subquery hash cache uses pointer-based keys which become invalid when ASTs are
+        // dropped and memory is reused, so we must clear it between queries.
+        // Note: The IN subquery result cache and correlation cache use content hashes as keys,
+        // not pointers, so they can safely persist across queries.
         if self.subquery_depth == 0 {
             self.reset_arena();
+            crate::evaluator::caching::clear_subquery_hash_cache();
         }
 
         // Check timeout before starting execution
@@ -1351,13 +1356,43 @@ impl SelectExecutor<'_> {
             self.outer_row,
             self.outer_schema,
             |query| {
-                // For derived table subqueries, create a child executor with CTE context
-                // This allows CTEs from the outer WITH clause to be referenced in subqueries
-                // Critical for queries like TPC-DS Q2 where CTEs are used in FROM subqueries
+                // For derived table subqueries, create a child executor with:
+                // 1. CTE context (allows CTEs from outer WITH clause to be referenced)
+                // 2. Outer context (allows correlated columns from outer queries to be resolved)
+                // Critical for:
+                // - TPC-DS Q2: CTEs in FROM subqueries
+                // - select1-18.x: Nested correlated subqueries referencing outer columns
                 if !cte_results.is_empty() {
-                    let child = SelectExecutor::new_with_cte_and_depth(
+                    // FIX for select1-18.x: When both CTE and outer context exist,
+                    // we need to use new_with_outer_and_cte_and_depth to pass both
+                    if let (Some(outer_row), Some(outer_schema)) =
+                        (self.outer_row, self.outer_schema)
+                    {
+                        let child = SelectExecutor::new_with_outer_and_cte_and_depth(
+                            self.database,
+                            outer_row,
+                            outer_schema,
+                            cte_results,
+                            self.subquery_depth,
+                        );
+                        child.execute_with_columns(query)
+                    } else {
+                        let child = SelectExecutor::new_with_cte_and_depth(
+                            self.database,
+                            cte_results,
+                            self.subquery_depth,
+                        );
+                        child.execute_with_columns(query)
+                    }
+                } else if let (Some(outer_row), Some(outer_schema)) =
+                    (self.outer_row, self.outer_schema)
+                {
+                    // FIX for select1-18.x: Pass outer context for derived table subqueries
+                    // This enables column resolution from outer scopes in deeply nested queries
+                    let child = SelectExecutor::new_with_outer_context_and_depth(
                         self.database,
-                        cte_results,
+                        outer_row,
+                        outer_schema,
                         self.subquery_depth,
                     );
                     child.execute_with_columns(query)

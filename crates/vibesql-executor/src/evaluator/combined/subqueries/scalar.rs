@@ -132,43 +132,45 @@ impl CombinedExpressionEvaluator<'_> {
             cached_rows
         } else {
             // Cache miss - execute subquery
-            // Build merged schema and row outside if-else to ensure they live long enough
-            let merged_schema = if !is_uncorrelated {
+            // Fix for select1-18.x: ALWAYS build merged schema if outer context exists,
+            // even if is_correlated() returns false. The is_correlated() heuristic can
+            // miss correlations with unqualified column names (e.g., column 'c' from outer
+            // table t1 when subquery has no column named 'c'). By always passing outer
+            // context, the column resolver can correctly find external references.
+            // This matches the approach used in eval_exists().
+            let has_outer_context =
+                !self.schema.table_schemas.is_empty() || self.outer_schema.is_some();
+            let merged_schema = if has_outer_context {
                 Some(build_merged_outer_schema(self.schema, self.outer_schema))
             } else {
                 None
             };
 
-            let merged_row = if !is_uncorrelated {
+            let merged_row = if has_outer_context {
                 Some(build_merged_outer_row(row, self.outer_row))
             } else {
                 None
             };
 
-            let select_executor = if is_uncorrelated {
-                // Uncorrelated: execute without outer context
-                if let Some(cte_ctx) = self.cte_context {
+            let select_executor =
+                if let (Some(ref schema), Some(ref outer_row)) = (&merged_schema, &merged_row) {
+                    // Execute with outer context for column resolution
+                    if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                            database, outer_row, schema, cte_ctx, self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                            database, outer_row, schema, self.depth,
+                        )
+                    }
+                } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_cte_and_depth(
                         database, cte_ctx, self.depth,
                     )
                 } else {
                     crate::select::SelectExecutor::new(database)
-                }
-            } else {
-                // Correlated: execute with outer context (merged schema + merged row - fix for
-                // #2463)
-                let schema_ref = merged_schema.as_ref().unwrap();
-                let row_ref = merged_row.as_ref().unwrap();
-                if let Some(cte_ctx) = self.cte_context {
-                    crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
-                        database, row_ref, schema_ref, cte_ctx, self.depth,
-                    )
-                } else {
-                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                        database, row_ref, schema_ref, self.depth,
-                    )
-                }
-            };
+                };
 
             let executed_rows = select_executor.execute(subquery)?;
 
