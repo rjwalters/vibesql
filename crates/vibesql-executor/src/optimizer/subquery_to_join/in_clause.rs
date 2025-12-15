@@ -38,7 +38,7 @@
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
-use super::helpers::{is_self_join, qualify_outer_column_refs, rewrite_column_refs_with_alias};
+use super::helpers::{is_self_join, rewrite_column_refs_with_alias};
 
 /// Result of converting an IN subquery to a join
 /// Contains the new FROM clause
