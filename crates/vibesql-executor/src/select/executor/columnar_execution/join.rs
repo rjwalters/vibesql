@@ -237,7 +237,7 @@ impl SelectExecutor<'_> {
         // Check if WHERE clause contains expressions that can't be handled by SIMD filtering
         // (e.g., scalar subqueries). If so, fall back to row-oriented execution (#4501).
         if let Some(ref where_expr) = folded_where {
-            if contains_unsupported_predicates(where_expr, &join_conditions) {
+            if contains_unsupported_predicates(where_expr) {
                 log::debug!(
                     "Columnar join: WHERE clause contains unsupported predicates (e.g., scalar subquery), falling back"
                 );
@@ -530,10 +530,7 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
 ///
 /// These require row-by-row evaluation and can't be optimized by columnar SIMD filtering.
 /// When detected, the caller should fall back to row-oriented execution.
-fn contains_unsupported_predicates(
-    expr: &vibesql_ast::Expression,
-    join_conditions: &[EquiJoinCondition],
-) -> bool {
+fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
     match expr {
         // Subquery expressions can't be handled by SIMD filtering
         vibesql_ast::Expression::ScalarSubquery(_) => true,
@@ -548,8 +545,8 @@ fn contains_unsupported_predicates(
                 op,
                 vibesql_ast::BinaryOperator::And | vibesql_ast::BinaryOperator::Or
             ) {
-                return contains_unsupported_predicates(left, join_conditions)
-                    || contains_unsupported_predicates(right, join_conditions);
+                return contains_unsupported_predicates(left)
+                    || contains_unsupported_predicates(right);
             }
 
             // For equality comparisons, check if either side is a subquery
@@ -567,14 +564,11 @@ fn contains_unsupported_predicates(
             }
 
             // Check if either side contains unsupported predicates
-            contains_unsupported_predicates(left, join_conditions)
-                || contains_unsupported_predicates(right, join_conditions)
+            contains_unsupported_predicates(left) || contains_unsupported_predicates(right)
         }
 
         // Unary operations need recursive checking
-        vibesql_ast::Expression::UnaryOp { expr, .. } => {
-            contains_unsupported_predicates(expr, join_conditions)
-        }
+        vibesql_ast::Expression::UnaryOp { expr, .. } => contains_unsupported_predicates(expr),
 
         // Other expressions don't contain subqueries
         _ => false,
