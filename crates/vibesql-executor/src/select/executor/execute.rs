@@ -339,12 +339,17 @@ impl SelectExecutor<'_> {
             // This is critical for GROUP BY queries to avoid CROSS JOINs
             // LIMIT enables early termination when ORDER BY is satisfied by index (#3253)
             // Pass select_list for table elimination optimization (#3556)
+            let limit_val = stmt
+                .limit
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                .transpose()?;
             Some(self.execute_from_with_where(
                 from_clause,
                 &cte_results,
                 resolved_where.as_ref(),
                 stmt.order_by.as_deref(),
-                stmt.limit,
+                limit_val,
                 Some(&stmt.select_list),
             )?)
         } else {
@@ -404,12 +409,17 @@ impl SelectExecutor<'_> {
                     cte_results.entry(name.clone()).or_insert_with(|| result.clone());
                 }
             }
+            let limit_val = stmt
+                .limit
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                .transpose()?;
             Some(self.execute_from_with_where(
                 from_clause,
                 &cte_results,
                 resolved_where.as_ref(),
                 stmt.order_by.as_deref(),
-                stmt.limit,
+                limit_val,
                 Some(&stmt.select_list),
             )?)
         } else {
@@ -552,7 +562,17 @@ impl SelectExecutor<'_> {
                         // Apply LIMIT/OFFSET to columnar join results (#3776)
                         // Skip if set_operation exists - it will be applied later
                         if stmt.set_operation.is_none() {
-                            apply_limit_offset(result, stmt.limit, stmt.offset)
+                            let limit_val = stmt
+                                .limit
+                                .as_ref()
+                                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                                .transpose()?;
+                            let offset_val = stmt
+                                .offset
+                                .as_ref()
+                                .map(|expr| self.eval_limit_offset_expr(expr, "OFFSET"))
+                                .transpose()?;
+                            apply_limit_offset(result, limit_val, offset_val)
                         } else {
                             result
                         }
@@ -590,7 +610,17 @@ impl SelectExecutor<'_> {
             // Apply LIMIT/OFFSET to the final result (after all set operations and ORDER BY)
             // For queries WITHOUT set operations, LIMIT/OFFSET is already applied
             // in execute_without_aggregation() or execute_with_aggregation()
-            results = apply_limit_offset(results, stmt.limit, stmt.offset);
+            let limit_val = stmt
+                .limit
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                .transpose()?;
+            let offset_val = stmt
+                .offset
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "OFFSET"))
+                .transpose()?;
+            results = apply_limit_offset(results, limit_val, offset_val);
         }
 
         Ok(results)
@@ -792,9 +822,19 @@ impl SelectExecutor<'_> {
             }
         };
 
-        // Stage 3: Limit/Offset (convert usize to u64)
-        let limit_u64 = stmt.limit.map(|l| l as u64);
-        let offset_u64 = stmt.offset.map(|o| o as u64);
+        // Stage 3: Limit/Offset (evaluate expressions and convert to u64)
+        let limit_usize = stmt
+            .limit
+            .as_ref()
+            .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+            .transpose()?;
+        let offset_usize = stmt
+            .offset
+            .as_ref()
+            .map(|expr| self.eval_limit_offset_expr(expr, "OFFSET"))
+            .transpose()?;
+        let limit_u64 = limit_usize.map(|l| l as u64);
+        let offset_u64 = offset_usize.map(|o| o as u64);
         let final_result = pipeline.apply_limit_offset(result, limit_u64, offset_u64)?;
 
         #[cfg(feature = "profile-q6")]
@@ -935,12 +975,17 @@ impl SelectExecutor<'_> {
             } else {
                 stmt.order_by.as_deref()
             };
+            let limit_val = stmt
+                .limit
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                .transpose()?;
             let from_result = self.execute_from_with_where(
                 from_clause,
                 cte_results,
                 resolved_where.as_ref(),
                 order_by_hint,
-                stmt.limit,
+                limit_val,
                 Some(&stmt.select_list),
             )?;
 

@@ -45,9 +45,16 @@ impl SelectExecutor<'_> {
         stmt: &SelectStmt,
     ) -> Result<Option<Vec<Row>>, ExecutorError> {
         // Only applies when LIMIT is specified
-        let limit = match stmt.limit {
-            Some(l) if l > 0 => l,
-            _ => return Ok(None),
+        let limit = match &stmt.limit {
+            Some(expr) => {
+                let val = crate::select::helpers::evaluate_limit_offset_expr(expr, self.database, "LIMIT")?;
+                if val > 0 {
+                    val
+                } else {
+                    return Ok(None);
+                }
+            }
+            None => return Ok(None),
         };
 
         // Must have an ORDER BY clause
@@ -353,8 +360,10 @@ impl SelectExecutor<'_> {
             };
 
             // Apply LIMIT/OFFSET
+            let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+            let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
             let limited_rows =
-                crate::select::helpers::apply_limit_offset(sorted_rows, stmt.limit, stmt.offset);
+                crate::select::helpers::apply_limit_offset(sorted_rows, limit, offset);
 
             // Check if this is SELECT * - no projection needed
             let is_select_star = stmt.select_list.len() == 1
@@ -460,8 +469,10 @@ impl SelectExecutor<'_> {
                 let rows = result.into_rows();
 
                 // Apply LIMIT/OFFSET
+                let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+                let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
                 let limited_rows =
-                    crate::select::helpers::apply_limit_offset(rows, stmt.limit, stmt.offset);
+                    crate::select::helpers::apply_limit_offset(rows, limit, offset);
 
                 return Ok(Some(limited_rows));
             }

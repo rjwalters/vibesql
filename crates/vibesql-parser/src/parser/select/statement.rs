@@ -220,17 +220,7 @@ impl Parser {
         // Parse LIMIT clause
         let limit = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;
-            match self.peek() {
-                Token::Number(n) => {
-                    let limit_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid LIMIT value: {}", n),
-                    })?;
-
-                    self.advance();
-                    Some(limit_value)
-                }
-                _ => return Err(ParseError { message: "Expected number after LIMIT".to_string() }),
-            }
+            Some(self.parse_expression()?)
         } else {
             None
         };
@@ -238,18 +228,7 @@ impl Parser {
         // Parse OFFSET clause
         let offset = if allow_order_limit && self.peek_keyword(Keyword::Offset) {
             self.consume_keyword(Keyword::Offset)?;
-            match self.peek() {
-                Token::Number(n) => {
-                    let offset_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid OFFSET value: {}", n),
-                    })?;
-                    self.advance();
-                    Some(offset_value)
-                }
-                _ => {
-                    return Err(ParseError { message: "Expected number after OFFSET".to_string() })
-                }
-            }
+            Some(self.parse_expression()?)
         } else {
             None
         };
@@ -506,16 +485,7 @@ impl Parser {
         // Parse LIMIT
         let limit = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;
-            match self.peek() {
-                Token::Number(n) => {
-                    let limit_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid LIMIT value: {}", n),
-                    })?;
-                    self.advance();
-                    Some(limit_value)
-                }
-                _ => return Err(ParseError { message: "Expected number after LIMIT".to_string() }),
-            }
+            Some(self.parse_expression()?)
         } else {
             None
         };
@@ -523,16 +493,7 @@ impl Parser {
         // Parse OFFSET
         let offset = if allow_order_limit && self.peek_keyword(Keyword::Offset) {
             self.consume_keyword(Keyword::Offset)?;
-            match self.peek() {
-                Token::Number(n) => {
-                    let offset_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid OFFSET value: {}", n),
-                    })?;
-                    self.advance();
-                    Some(offset_value)
-                }
-                _ => return Err(ParseError { message: "Expected number after OFFSET".to_string() }),
-            }
+            Some(self.parse_expression()?)
         } else {
             None
         };

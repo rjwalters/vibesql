@@ -30,8 +30,8 @@ pub struct SelectStmt<'arena> {
     pub group_by: Option<GroupByClause<'arena>>,
     pub having: Option<Expression<'arena>>,
     pub order_by: Option<BumpVec<'arena, OrderByItem<'arena>>>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
+    pub limit: Option<Expression<'arena>>,
+    pub offset: Option<Expression<'arena>>,
     pub set_operation: Option<SetOperation<'arena>>,
     /// VALUES clause for standalone VALUES statements (SQL:1999)
     pub values: Option<BumpVec<'arena, BumpVec<'arena, Expression<'arena>>>>,

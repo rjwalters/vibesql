@@ -140,7 +140,9 @@ impl SelectExecutor<'_> {
 
         // Apply LIMIT/OFFSET (for expression-only, limit defaults to 1 row)
         let rows = vec![Row::new(values)];
-        Ok(self.apply_arena_limit_offset(rows, stmt.limit, stmt.offset))
+        let limit = self.evaluate_arena_limit(&stmt.limit)?;
+        let offset = self.evaluate_arena_offset(&stmt.offset)?;
+        Ok(self.apply_arena_limit_offset(rows, limit, offset))
     }
 
     /// Execute SELECT with FROM clause.
@@ -221,7 +223,9 @@ impl SelectExecutor<'_> {
         }
 
         // Apply LIMIT/OFFSET
-        Ok(self.apply_arena_limit_offset(results, stmt.limit, stmt.offset))
+        let limit = self.evaluate_arena_limit(&stmt.limit)?;
+        let offset = self.evaluate_arena_offset(&stmt.offset)?;
+        Ok(self.apply_arena_limit_offset(results, limit, offset))
     }
 
     /// Project a row according to the SELECT list.
@@ -308,6 +312,46 @@ impl SelectExecutor<'_> {
         results.extend(keyed_rows.into_iter().map(|(_, row)| row));
 
         Ok(())
+    }
+
+    /// Evaluate an arena LIMIT or OFFSET expression to a usize value
+    fn evaluate_arena_limit_offset_expr(
+        &self,
+        expr: &vibesql_ast::arena::Expression,
+    ) -> Result<usize, ExecutorError> {
+        match expr {
+            vibesql_ast::arena::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
+                if *n < 0 {
+                    return Err(ExecutorError::InvalidLimitOffset {
+                        clause: "LIMIT/OFFSET".to_string(),
+                        value: n.to_string(),
+                        reason: "must be non-negative".to_string(),
+                    });
+                }
+                Ok(*n as usize)
+            }
+            _ => Err(ExecutorError::InvalidLimitOffset {
+                clause: "LIMIT/OFFSET".to_string(),
+                value: "<expression>".to_string(),
+                reason: "must be a constant integer".to_string(),
+            }),
+        }
+    }
+
+    /// Evaluate optional arena LIMIT expression to Option<usize>
+    fn evaluate_arena_limit(
+        &self,
+        limit: &Option<vibesql_ast::arena::Expression>,
+    ) -> Result<Option<usize>, ExecutorError> {
+        limit.as_ref().map(|e| self.evaluate_arena_limit_offset_expr(e)).transpose()
+    }
+
+    /// Evaluate optional arena OFFSET expression to Option<usize>
+    fn evaluate_arena_offset(
+        &self,
+        offset: &Option<vibesql_ast::arena::Expression>,
+    ) -> Result<Option<usize>, ExecutorError> {
+        offset.as_ref().map(|e| self.evaluate_arena_limit_offset_expr(e)).transpose()
     }
 
     /// Apply LIMIT and OFFSET to results.

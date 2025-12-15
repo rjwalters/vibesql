@@ -21,8 +21,8 @@ fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_
         group_by: None,
         having: None,
         order_by: None,
-        limit,
-        offset,
+        limit: limit.map(|n| vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n as i64))),
+        offset: offset.map(|n| vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n as i64))),
     }
 }
 
@@ -250,7 +250,7 @@ fn test_limit_with_inner_join() {
         group_by: None,
         having: None,
         order_by: None,
-        limit: Some(3),
+        limit: Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))),
         offset: None,
     };
 
@@ -364,7 +364,7 @@ fn test_offset_with_inner_join() {
         having: None,
         order_by: None,
         limit: None,
-        offset: Some(5),
+        offset: Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5))),
     };
 
     let result = executor.execute(&stmt).unwrap();
@@ -476,8 +476,8 @@ fn test_limit_offset_with_inner_join() {
         group_by: None,
         having: None,
         order_by: None,
-        limit: Some(3),
-        offset: Some(2),
+        limit: Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3))),
+        offset: Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(2))),
     };
 
     let result = executor.execute(&stmt).unwrap();
