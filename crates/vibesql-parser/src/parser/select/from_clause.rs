@@ -182,7 +182,8 @@ impl Parser {
                         self.consume_keyword(Keyword::As)?;
                     }
 
-                    // Parse alias (required for VALUES tables) - keywords allowed as aliases
+                    // Parse alias (optional for VALUES tables) - keywords allowed as aliases
+                    // If no alias is provided, generate a default one
                     let alias = match self.peek() {
                         Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
                             let alias = id.clone();
@@ -190,14 +191,40 @@ impl Parser {
                             alias
                         }
                         Token::Keyword { keyword: kw, .. } => {
-                            let alias = kw.to_string();
-                            self.advance();
-                            alias
+                            // Only consume keyword if it looks like it could be an alias
+                            // (not a SQL keyword that starts a new clause)
+                            if !matches!(
+                                kw,
+                                Keyword::Where
+                                    | Keyword::Order
+                                    | Keyword::Limit
+                                    | Keyword::Offset
+                                    | Keyword::Group
+                                    | Keyword::Having
+                                    | Keyword::Union
+                                    | Keyword::Intersect
+                                    | Keyword::Except
+                                    | Keyword::Join
+                                    | Keyword::Inner
+                                    | Keyword::Left
+                                    | Keyword::Right
+                                    | Keyword::Full
+                                    | Keyword::Cross
+                                    | Keyword::Natural
+                                    | Keyword::On
+                                    | Keyword::Using
+                            ) {
+                                let alias = kw.to_string();
+                                self.advance();
+                                alias
+                            } else {
+                                // Generate default alias when no explicit alias provided
+                                "_values_".to_string()
+                            }
                         }
                         _ => {
-                            return Err(ParseError {
-                                message: "VALUES table must have an alias".to_string(),
-                            })
+                            // Generate default alias when no explicit alias provided
+                            "_values_".to_string()
                         }
                     };
 

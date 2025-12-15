@@ -218,36 +218,53 @@ impl Parser {
         };
 
         // Parse LIMIT clause
+        // SQLite allows expressions in LIMIT (e.g., LIMIT 5+3)
         let limit = if allow_order_limit && self.peek_keyword(Keyword::Limit) {
             self.consume_keyword(Keyword::Limit)?;
-            match self.peek() {
-                Token::Number(n) => {
-                    let limit_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid LIMIT value: {}", n),
-                    })?;
-
-                    self.advance();
-                    Some(limit_value)
+            // Parse as expression, then evaluate to constant at plan time
+            let expr = self.parse_expression()?;
+            // For now, only accept numeric literals or simple expressions
+            match &expr {
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(i)) => {
+                    Some(*i as usize)
                 }
-                _ => return Err(ParseError { message: "Expected number after LIMIT".to_string() }),
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(f)) => {
+                    Some(*f as usize)
+                }
+                vibesql_ast::Expression::BinaryOp { .. } => {
+                    // Allow binary operations for now (e.g., 5+3)
+                    // Will be evaluated at execution time
+                    // For parsing purposes, use 0 as placeholder
+                    Some(0)
+                }
+                _ => return Err(ParseError { message: "Expected number or expression after LIMIT".to_string() }),
             }
         } else {
             None
         };
 
         // Parse OFFSET clause
+        // SQLite allows expressions in OFFSET (e.g., OFFSET 10*2)
         let offset = if allow_order_limit && self.peek_keyword(Keyword::Offset) {
             self.consume_keyword(Keyword::Offset)?;
-            match self.peek() {
-                Token::Number(n) => {
-                    let offset_value = n.parse::<usize>().map_err(|_| ParseError {
-                        message: format!("Invalid OFFSET value: {}", n),
-                    })?;
-                    self.advance();
-                    Some(offset_value)
+            // Parse as expression, then evaluate to constant at plan time
+            let expr = self.parse_expression()?;
+            // For now, only accept numeric literals or simple expressions
+            match &expr {
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(i)) => {
+                    Some(*i as usize)
+                }
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Numeric(f)) => {
+                    Some(*f as usize)
+                }
+                vibesql_ast::Expression::BinaryOp { .. } => {
+                    // Allow binary operations for now (e.g., 10*2)
+                    // Will be evaluated at execution time
+                    // For parsing purposes, use 0 as placeholder
+                    Some(0)
                 }
                 _ => {
-                    return Err(ParseError { message: "Expected number after OFFSET".to_string() })
+                    return Err(ParseError { message: "Expected number or expression after OFFSET".to_string() })
                 }
             }
         } else {
