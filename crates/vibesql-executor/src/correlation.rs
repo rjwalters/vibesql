@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn test_empty_outer_schema() {
         let outer_schema =
-            CombinedSchema { table_schemas: std::collections::HashMap::new(), total_columns: 0, hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new() };
+            CombinedSchema { table_schemas: std::collections::HashMap::new(), total_columns: 0, hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new(), joined_columns: std::collections::HashSet::new() };
 
         let subquery = SelectStmt {
             with_clause: None,

@@ -210,6 +210,7 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
         hidden_columns: std::collections::HashSet::new(),
         outer_schema: None,
         duplicate_aliases: std::collections::HashSet::new(),
+        joined_columns: std::collections::HashSet::new(),
     };
 
     let where_expr = vibesql_ast::Expression::BinaryOp {
