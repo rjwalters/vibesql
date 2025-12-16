@@ -248,6 +248,68 @@ fn test_having_misuse_of_aliased_aggregate() {
     }
 }
 
+/// Test that HAVING uses GROUP BY column values, not SELECT aliases with same name
+///
+/// Issue: When SELECT has "-col AS col", HAVING "col > 5" should reference the
+/// GROUP BY column (original col value), not the SELECT alias (-col).
+/// For example:
+///   SELECT -x AS x FROM t GROUP BY x HAVING x > 15
+/// Should filter by the original x values (20, 30 pass), not the alias (-20, -30 fail).
+#[test]
+fn test_having_uses_group_by_column_not_select_alias() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Create test table
+    let create_sql = "CREATE TABLE t (x INTEGER)";
+    let stmt = Parser::parse_sql(create_sql).unwrap();
+    match stmt {
+        Statement::CreateTable(create_stmt) => {
+            CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
+        }
+        _ => panic!("Expected CREATE TABLE"),
+    }
+
+    // Insert values 10, 20, 30
+    for val in [10, 20, 30] {
+        let insert_sql = format!("INSERT INTO t VALUES ({})", val);
+        let stmt = Parser::parse_sql(&insert_sql).unwrap();
+        match stmt {
+            Statement::Insert(insert_stmt) => {
+                InsertExecutor::execute(&mut db, &insert_stmt).unwrap();
+            }
+            _ => panic!("Expected INSERT"),
+        }
+    }
+
+    // Test: SELECT -x AS x FROM t GROUP BY x HAVING x > 15
+    // Should return -20, -30 (x values 20 and 30 pass the filter)
+    // NOT 0 rows (which would happen if HAVING used alias value -x)
+    let query = "SELECT -x AS x FROM t GROUP BY x HAVING x > 15";
+    let stmt = Parser::parse_sql(query).unwrap();
+    match stmt {
+        Statement::Select(select_stmt) => {
+            let executor = SelectExecutor::new(&db);
+            let result = executor.execute(&select_stmt).unwrap();
+            assert_eq!(
+                result.len(),
+                2,
+                "HAVING x > 15 should pass x=20 and x=30 (using GROUP BY column, not alias)"
+            );
+            // Results are -20 and -30 (the alias values)
+            let values: Vec<i64> = result
+                .iter()
+                .map(|r| match &r.values[0] {
+                    vibesql_types::SqlValue::Integer(v) => *v,
+                    _ => panic!("Expected integer"),
+                })
+                .collect();
+            assert!(values.contains(&-20), "Should contain -20 (from x=20)");
+            assert!(values.contains(&-30), "Should contain -30 (from x=30)");
+        }
+        _ => panic!("Expected SELECT"),
+    }
+}
+
 /// Test that valid uses of aggregate aliases still work
 #[test]
 fn test_having_valid_aggregate_alias_in_order_by() {

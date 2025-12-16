@@ -278,11 +278,15 @@ impl SelectExecutor<'_> {
                 resolve_base_expressions_aliases(&base_expressions, &expanded_select_list)?;
 
             // For each grouping set, group rows and compute aggregates
-            for resolved_set in grouping_sets {
+            for original_set in grouping_sets {
+                // Save original GROUP BY expressions for HAVING alias resolution
+                // HAVING should reference GROUP BY columns, not SELECT aliases with same names
+                let original_group_by_exprs = original_set.group_by_exprs.clone();
+
                 // Resolve SELECT list aliases in GROUP BY expressions
                 // This allows: SELECT n_name AS nation ... GROUP BY nation
                 let resolved_set =
-                    resolve_grouping_set_aliases(&resolved_set, &expanded_select_list)?;
+                    resolve_grouping_set_aliases(&original_set, &expanded_select_list)?;
 
                 let grouping_context = GroupingContext {
                     base_expressions: resolved_base_expressions.clone(),
@@ -341,8 +345,13 @@ impl SelectExecutor<'_> {
                     // Apply HAVING filter
                     let include_group = if let Some(having_expr) = &stmt.having {
                         // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
-                        let resolved_having =
-                            resolve_having_aliases(having_expr, &expanded_select_list);
+                        // Pass ORIGINAL GROUP BY expressions so aliases that shadow GROUP BY columns
+                        // aren't resolved (HAVING should use GROUP BY columns, not SELECT aliases)
+                        let resolved_having = resolve_having_aliases(
+                            having_expr,
+                            &expanded_select_list,
+                            &original_group_by_exprs,
+                        );
                         let having_result = self.evaluate_with_aggregates_and_grouping(
                             &resolved_having,
                             &group_rows,
@@ -454,8 +463,9 @@ impl SelectExecutor<'_> {
                 // Apply HAVING filter
                 let include_group = if let Some(having_expr) = &stmt.having {
                     // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
+                    // No GROUP BY, so no GROUP BY expressions to exclude from alias resolution
                     let resolved_having =
-                        resolve_having_aliases(having_expr, &expanded_select_list);
+                        resolve_having_aliases(having_expr, &expanded_select_list, &[]);
                     let having_result = self.evaluate_with_aggregates_and_grouping(
                         &resolved_having,
                         &group_rows,
