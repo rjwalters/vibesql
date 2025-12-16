@@ -67,6 +67,9 @@ pub struct Database {
     /// Last generated AUTO_INCREMENT value for LAST_INSERT_ROWID()
     /// Tracks the most recent auto-generated ID from INSERT operations
     pub(super) last_insert_rowid: i64,
+    /// Number of rows changed by the last INSERT/UPDATE/DELETE statement
+    /// Used by the changes() function for SQLite compatibility
+    pub(super) last_changes_count: usize,
     /// Search count for sqlite_search_count() compatibility
     /// Tracks the number of rows examined during query execution
     /// Used by SQLite TCL tests to verify query optimization behavior

@@ -169,6 +169,42 @@ impl Database {
     }
 
     // ============================================================================
+    // changes() Support (Row Modification Count)
+    // ============================================================================
+
+    /// Get the number of rows changed by the last INSERT/UPDATE/DELETE statement
+    ///
+    /// Returns the count of rows affected by the most recent DML operation.
+    /// This is used to implement the SQLite changes() function.
+    ///
+    /// Returns 0 if no DML operations have been performed yet.
+    ///
+    /// # Example
+    /// ```text
+    /// // Insert multiple rows
+    /// db.execute("INSERT INTO users (name) VALUES ('Alice'), ('Bob'), ('Carol')")?;
+    ///
+    /// // Get the number of rows inserted
+    /// let changes = db.last_changes_count();
+    /// assert_eq!(changes, 3);
+    ///
+    /// // Delete some rows
+    /// db.execute("DELETE FROM users WHERE name = 'Alice'")?;
+    /// assert_eq!(db.last_changes_count(), 1);
+    /// ```
+    pub fn last_changes_count(&self) -> usize {
+        self.last_changes_count
+    }
+
+    /// Set the number of rows changed by the last DML statement
+    ///
+    /// This is called internally by INSERT, UPDATE, and DELETE executors
+    /// after completing their operations.
+    pub fn set_last_changes_count(&mut self, count: usize) {
+        self.last_changes_count = count;
+    }
+
+    // ============================================================================
     // sqlite_search_count Support (TCL Test Compatibility)
     // ============================================================================
 

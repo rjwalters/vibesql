@@ -67,6 +67,7 @@ mod aggregate_without_from;
 mod alter_table_constraints;
 mod auto_increment_tests;
 mod between_predicates;
+mod changes_function_tests;
 mod common;
 mod comparison_ops;
 mod count_star_fast_path;
