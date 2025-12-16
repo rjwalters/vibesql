@@ -100,6 +100,119 @@ pub fn resolve_base_expressions_aliases(
     Ok(resolved)
 }
 
+/// Resolve aliases in HAVING expression against SELECT list
+///
+/// Recursively replaces column references that match SELECT list aliases
+/// with the underlying expression. This allows:
+/// ```sql
+/// SELECT log, count(*) AS y FROM t1 GROUP BY log HAVING y >= 4
+/// ```
+///
+/// The alias `y` will be resolved to `count(*)`.
+pub fn resolve_having_aliases(
+    having_expr: &Expression,
+    select_list: &[vibesql_ast::SelectItem],
+) -> Expression {
+    match having_expr {
+        // Check if this column reference matches a SELECT list alias
+        Expression::ColumnRef { table: None, column } => {
+            // Search for matching alias in SELECT list (case-insensitive)
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name), .. } =
+                    item
+                {
+                    if alias_name.eq_ignore_ascii_case(column) {
+                        // Found matching alias, use the SELECT list expression
+                        return expr.clone();
+                    }
+                }
+            }
+            // No match, return original expression
+            having_expr.clone()
+        }
+
+        // Recursively resolve in binary operations
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(resolve_having_aliases(left, select_list)),
+            op: *op,
+            right: Box::new(resolve_having_aliases(right, select_list)),
+        },
+
+        // Recursively resolve in unary operations
+        Expression::UnaryOp { op, expr } => Expression::UnaryOp {
+            op: *op,
+            expr: Box::new(resolve_having_aliases(expr, select_list)),
+        },
+
+        // Recursively resolve in function arguments
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args.iter().map(|a| resolve_having_aliases(a, select_list)).collect(),
+            character_unit: character_unit.clone(),
+        },
+
+        // Recursively resolve in aggregate function arguments
+        Expression::AggregateFunction { name, distinct, args, order_by } => {
+            Expression::AggregateFunction {
+                name: name.clone(),
+                distinct: *distinct,
+                args: args.iter().map(|a| resolve_having_aliases(a, select_list)).collect(),
+                order_by: order_by.clone(),
+            }
+        }
+
+        // Recursively resolve in CASE expressions
+        Expression::Case { operand, when_clauses, else_result } => {
+            let resolved_operand = operand
+                .as_ref()
+                .map(|o| Box::new(resolve_having_aliases(o, select_list)));
+            let resolved_when_clauses = when_clauses
+                .iter()
+                .map(|wc| vibesql_ast::CaseWhen {
+                    conditions: wc
+                        .conditions
+                        .iter()
+                        .map(|c| resolve_having_aliases(c, select_list))
+                        .collect(),
+                    result: resolve_having_aliases(&wc.result, select_list),
+                })
+                .collect();
+            let resolved_else =
+                else_result.as_ref().map(|e| Box::new(resolve_having_aliases(e, select_list)));
+            Expression::Case {
+                operand: resolved_operand,
+                when_clauses: resolved_when_clauses,
+                else_result: resolved_else,
+            }
+        }
+
+        // Recursively resolve in boolean expressions
+        Expression::Conjunction(terms) => Expression::Conjunction(
+            terms.iter().map(|t| resolve_having_aliases(t, select_list)).collect(),
+        ),
+        Expression::Disjunction(terms) => Expression::Disjunction(
+            terms.iter().map(|t| resolve_having_aliases(t, select_list)).collect(),
+        ),
+
+        // Recursively resolve in comparison expressions
+        Expression::Between { expr, low, high, negated, symmetric } => Expression::Between {
+            expr: Box::new(resolve_having_aliases(expr, select_list)),
+            low: Box::new(resolve_having_aliases(low, select_list)),
+            high: Box::new(resolve_having_aliases(high, select_list)),
+            negated: *negated,
+            symmetric: *symmetric,
+        },
+
+        Expression::IsNull { expr, negated } => Expression::IsNull {
+            expr: Box::new(resolve_having_aliases(expr, select_list)),
+            negated: *negated,
+        },
+
+        // For other expression types, return as-is
+        _ => having_expr.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use vibesql_ast::SelectItem;

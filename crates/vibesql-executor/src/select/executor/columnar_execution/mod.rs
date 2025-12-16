@@ -745,7 +745,51 @@ impl SelectExecutor<'_> {
             }
         } else {
             // Non-GROUP BY path: Simple aggregation
-            columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?
+            let agg_result =
+                columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?;
+
+            // Apply HAVING filter if present (same as GROUP BY path)
+            // For non-GROUP BY, there are no group columns, so group_col_count = 0
+            if let Some(having_expr) = &stmt.having {
+                log::debug!(
+                    "Applying columnar HAVING filter (no GROUP BY): {} rows, {} aggregates",
+                    agg_result.len(),
+                    aggregates.len()
+                );
+
+                match having::apply_having_filter(
+                    agg_result,
+                    having_expr,
+                    0, // No GROUP BY columns
+                    &aggregates,
+                    &schema,
+                ) {
+                    Ok(rows) => rows,
+                    Err(ExecutorError::UnsupportedFeature(msg))
+                        if msg.contains("not supported in columnar")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!(
+                            "Native columnar: HAVING (no GROUP BY) falling back to row-oriented: {}",
+                            msg
+                        );
+                        return Ok(None);
+                    }
+                    Err(ExecutorError::Other(msg))
+                        if msg.contains("not supported in columnar path")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!(
+                            "Native columnar: HAVING (no GROUP BY) falling back to row-oriented: {}",
+                            msg
+                        );
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e),
+                }
+            } else {
+                agg_result
+            }
         };
 
         #[cfg(feature = "profile-q6")]

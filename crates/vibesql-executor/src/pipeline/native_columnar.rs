@@ -246,9 +246,16 @@ impl ExecutionPipeline for NativeColumnarPipeline {
         input: PipelineInput<'_>,
         select_items: &[SelectItem],
         group_by: Option<&[Expression]>,
-        _having: Option<&Expression>,
+        having: Option<&Expression>,
         ctx: &ExecutionContext<'_>,
     ) -> Result<PipelineOutput, ExecutorError> {
+        // HAVING not supported in native columnar pipeline - fall back to row-oriented
+        if having.is_some() {
+            return Err(ExecutorError::UnsupportedFeature(
+                "HAVING not supported in native columnar pipeline".to_string(),
+            ));
+        }
+
         // Extract aggregate expressions from select items
         let agg_exprs: Vec<Expression> = select_items
             .iter()

@@ -22,7 +22,8 @@ use crate::{
         filter::apply_where_filter_combined_auto,
         grouping::{
             expand_group_by_clause, get_base_expressions, group_rows,
-            resolve_base_expressions_aliases, resolve_grouping_set_aliases, GroupingContext,
+            resolve_base_expressions_aliases, resolve_grouping_set_aliases,
+            resolve_having_aliases, GroupingContext,
         },
         helpers::{apply_distinct, apply_limit_offset},
     },
@@ -339,8 +340,11 @@ impl SelectExecutor<'_> {
 
                     // Apply HAVING filter
                     let include_group = if let Some(having_expr) = &stmt.having {
+                        // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
+                        let resolved_having =
+                            resolve_having_aliases(having_expr, &expanded_select_list);
                         let having_result = self.evaluate_with_aggregates_and_grouping(
-                            having_expr,
+                            &resolved_having,
                             &group_rows,
                             &group_key,
                             &evaluator,
@@ -428,8 +432,11 @@ impl SelectExecutor<'_> {
 
                 // Apply HAVING filter
                 let include_group = if let Some(having_expr) = &stmt.having {
+                    // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
+                    let resolved_having =
+                        resolve_having_aliases(having_expr, &expanded_select_list);
                     let having_result = self.evaluate_with_aggregates_and_grouping(
-                        having_expr,
+                        &resolved_having,
                         &group_rows,
                         &group_key,
                         &evaluator,
@@ -511,7 +518,10 @@ impl SelectExecutor<'_> {
         // even if the input is empty. If we have no GROUP BY and result_rows is empty,
         // this is a bug - we should have created at least one group with empty rows.
         // Add a safety check here.
-        let result_rows = if result_rows.is_empty() && stmt.group_by.is_none() {
+        // IMPORTANT: Don't apply this when HAVING is present - HAVING can legitimately
+        // filter out the single group, resulting in 0 rows.
+        let result_rows =
+            if result_rows.is_empty() && stmt.group_by.is_none() && stmt.having.is_none() {
             // Recompute aggregates for empty input
             // This should not happen if the logic above is correct, but acts as a failsafe
             let grouping_context = GroupingContext::default();
