@@ -15,6 +15,8 @@
 
 use std::collections::HashMap;
 #[allow(unused_imports)]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[allow(unused_imports)]
 use std::sync::Arc;
 
 pub use super::operations::SpatialIndexMetadata as ExportedSpatialIndexMetadata;
@@ -65,6 +67,10 @@ pub struct Database {
     /// Last generated AUTO_INCREMENT value for LAST_INSERT_ROWID()
     /// Tracks the most recent auto-generated ID from INSERT operations
     pub(super) last_insert_rowid: i64,
+    /// Search count for sqlite_search_count() compatibility
+    /// Tracks the number of rows examined during query execution
+    /// Used by SQLite TCL tests to verify query optimization behavior
+    pub(super) search_count: AtomicU64,
     /// Optional persistence engine for WAL-based async persistence
     /// Enables durable storage when enabled
     pub(super) persistence_engine: Option<PersistenceEngine>,

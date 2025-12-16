@@ -167,4 +167,50 @@ impl Database {
     pub fn set_last_insert_rowid(&mut self, id: i64) {
         self.last_insert_rowid = id;
     }
+
+    // ============================================================================
+    // sqlite_search_count Support (TCL Test Compatibility)
+    // ============================================================================
+
+    /// Get the current search count
+    ///
+    /// Returns the number of rows examined during query execution.
+    /// This is used to implement sqlite_search_count() for TCL test compatibility.
+    ///
+    /// In SQLite, this tracks "MoveTo" and "Next" VDBE operations.
+    /// In VibeSQL, this tracks rows read during table/index scans.
+    ///
+    /// # Example
+    /// ```text
+    /// // Reset before query
+    /// db.reset_search_count();
+    ///
+    /// // Execute query...
+    /// db.execute("SELECT * FROM users WHERE id = 1")?;
+    ///
+    /// // Get count of rows examined
+    /// let count = db.search_count();
+    /// ```
+    pub fn search_count(&self) -> u64 {
+        self.search_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Reset the search count to zero
+    ///
+    /// Call this before executing a query to measure how many rows
+    /// were examined by that specific query.
+    pub fn reset_search_count(&self) {
+        self.search_count.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Increment the search count by a specified amount
+    ///
+    /// Called internally by the executor when rows are examined during
+    /// table scans, index scans, or other row-reading operations.
+    ///
+    /// # Arguments
+    /// * `count` - Number of rows examined (typically 1 for row-by-row, or batch size for columnar)
+    pub fn increment_search_count(&self, count: u64) {
+        self.search_count.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+    }
 }

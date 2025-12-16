@@ -422,6 +422,8 @@ pub(crate) fn execute_table_scan(
             // Filtering will happen later with full outer row context
             // Issue #3790: Must use scan_live_vec() to filter deleted rows
             let live_rows = table.scan_live_vec();
+            // sqlite_search_count: Track rows examined during table scan
+            database.increment_search_count(live_rows.len() as u64);
             use crate::select::from_iterator::FromIterator;
             return Ok(super::FromResult::from_iterator(
                 schema,
@@ -466,6 +468,8 @@ pub(crate) fn execute_table_scan(
                 // - Before: 60K clones + 20K clones = 80K clones
                 // - After: 20K clones only = 75% reduction in cloning
                 let all_rows = table.scan();
+                // sqlite_search_count: Track rows examined during table scan
+                database.increment_search_count(all_rows.len() as u64);
 
                 if crate::profiling::is_scan_debug_enabled() {
                     eprintln!(
@@ -535,6 +539,8 @@ pub(crate) fn execute_table_scan(
             // table names Issue #3562: Pass CTE context so IN subqueries can reference
             // CTEs
             let live_rows = table.scan_live_vec();
+            // sqlite_search_count: Track rows examined during table scan
+            database.increment_search_count(live_rows.len() as u64);
             let filtered_rows = apply_table_local_predicates(
                 live_rows,
                 schema.clone(),
@@ -552,6 +558,8 @@ pub(crate) fn execute_table_scan(
     // No table-local predicates or no WHERE clause: return live rows
     // Issue #3790: Must filter deleted rows via scan_live_vec()
     let live_rows = table.scan_live_vec();
+    // sqlite_search_count: Track rows examined during table scan
+    database.increment_search_count(live_rows.len() as u64);
 
     #[cfg(feature = "parallel")]
     let rows = parallel_scan_materialize(&live_rows);

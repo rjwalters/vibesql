@@ -283,6 +283,8 @@ pub(crate) fn execute_index_scan(
                 } else {
                     streaming_iter.filter_map(|idx| table.get_row(idx)).cloned().collect()
                 };
+                // sqlite_search_count: Track rows examined during streaming index scan
+                database.increment_search_count(rows.len() as u64);
 
                 // Build schema and return result
                 let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
@@ -471,6 +473,8 @@ pub(crate) fn execute_index_scan(
     // Issue #3790: Use get_row() which returns None for deleted rows
     let row_refs: Vec<&Row> =
         matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
+    // sqlite_search_count: Track rows examined during index scan
+    database.increment_search_count(row_refs.len() as u64);
 
     // Apply WHERE clause predicates if needed (zero-copy filtering)
     // Performance optimization: Skip WHERE clause evaluation if the index already
