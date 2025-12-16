@@ -122,6 +122,11 @@ pub struct CombinedSchema {
     /// Used to detect ambiguous qualified column references like "A.f1" when table "A" appears twice
     /// Stores normalized (lowercase) table identifiers for case-insensitive matching
     pub duplicate_aliases: HashSet<TableIdentifier>,
+    /// Column names that have been joined via NATURAL JOIN or USING clause (issue #4517)
+    /// These columns exist in multiple tables but should NOT be considered ambiguous
+    /// because they are logically the same column after the join.
+    /// Stored as lowercase for case-insensitive matching.
+    pub joined_columns: HashSet<String>,
 }
 
 impl CombinedSchema {
@@ -136,6 +141,7 @@ impl CombinedSchema {
             hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
+            joined_columns: HashSet::new(),
         }
     }
 
@@ -153,6 +159,7 @@ impl CombinedSchema {
             hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
+            joined_columns: HashSet::new(),
         }
     }
 
@@ -189,6 +196,7 @@ impl CombinedSchema {
             hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
+            joined_columns: HashSet::new(),
         }
     }
 
@@ -229,6 +237,7 @@ impl CombinedSchema {
             hidden_columns: left.hidden_columns,
             outer_schema: left.outer_schema,
             duplicate_aliases,
+            joined_columns: left.joined_columns,
         }
     }
 
@@ -270,12 +279,17 @@ impl CombinedSchema {
         // Merge duplicate aliases from both sides
         duplicate_aliases.extend(right.duplicate_aliases);
 
+        // Merge joined columns from both sides
+        let mut joined_columns = left.joined_columns;
+        joined_columns.extend(right.joined_columns);
+
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
             hidden_columns,
             outer_schema: left.outer_schema,
             duplicate_aliases,
+            joined_columns,
         }
     }
 
@@ -336,10 +350,20 @@ impl CombinedSchema {
     /// Check if an unqualified column reference is ambiguous
     /// (i.e., exists in multiple tables in the schema)
     ///
-    /// Returns true if the column exists in more than one table.
+    /// Returns true if the column exists in more than one table,
+    /// UNLESS the column is a "joined column" from NATURAL JOIN or USING clause.
+    /// Joined columns are deduplicated and should be accessible without qualification.
+    ///
     /// Only relevant for unqualified column references - qualified references
     /// (with table prefix) are never ambiguous.
     pub fn is_column_ambiguous(&self, column: &str) -> bool {
+        // Columns joined via NATURAL JOIN or USING clause are never ambiguous (issue #4517)
+        // They logically represent a single column even though they exist in multiple tables
+        let column_lower = column.to_lowercase();
+        if self.joined_columns.contains(&column_lower) {
+            return false;
+        }
+
         let mut match_count = 0;
         for (_start_index, schema) in self.table_schemas.values() {
             if schema.get_column_index(column).is_some() {
@@ -522,6 +546,18 @@ impl CombinedSchema {
     pub fn hide_column(&mut self, idx: usize) {
         self.hidden_columns.insert(idx);
     }
+
+    /// Mark a column name as a "joined column" from NATURAL JOIN or USING clause.
+    ///
+    /// Joined columns exist in multiple tables but should NOT be considered ambiguous
+    /// because they are logically the same column after the join. This allows
+    /// unqualified references to these columns without triggering an ambiguity error.
+    ///
+    /// # Arguments
+    /// * `column` - The column name (will be normalized to lowercase)
+    pub fn add_joined_column(&mut self, column: &str) {
+        self.joined_columns.insert(column.to_lowercase());
+    }
 }
 
 /// Builder for incrementally constructing a CombinedSchema
@@ -534,6 +570,7 @@ pub struct SchemaBuilder {
     column_offset: usize,
     hidden_columns: HashSet<usize>,
     duplicate_aliases: HashSet<TableIdentifier>,
+    joined_columns: HashSet<String>,
 }
 
 impl SchemaBuilder {
@@ -544,6 +581,7 @@ impl SchemaBuilder {
             column_offset: 0,
             hidden_columns: HashSet::new(),
             duplicate_aliases: HashSet::new(),
+            joined_columns: HashSet::new(),
         }
     }
 
@@ -557,6 +595,7 @@ impl SchemaBuilder {
             column_offset,
             hidden_columns: schema.hidden_columns,
             duplicate_aliases: schema.duplicate_aliases,
+            joined_columns: schema.joined_columns,
         }
     }
 
@@ -596,6 +635,7 @@ impl SchemaBuilder {
             hidden_columns: self.hidden_columns,
             outer_schema: None,
             duplicate_aliases: self.duplicate_aliases,
+            joined_columns: self.joined_columns,
         }
     }
 }
@@ -1226,5 +1266,112 @@ mod tests {
 
         // d only in t3 - not ambiguous
         assert!(!schema.is_column_ambiguous("d"));
+    }
+
+    // ==========================================================================
+    // Joined Column Tests (Issue #4517 - NATURAL JOIN columns not ambiguous)
+    // ==========================================================================
+
+    #[test]
+    fn test_joined_column_not_ambiguous_natural_join() {
+        // Test that columns marked as "joined" via NATURAL JOIN are not ambiguous
+        // This simulates: SELECT b FROM t1 NATURAL JOIN t2 WHERE t1.b = t2.b AND t1.c = t2.c
+        let t1 = CombinedSchema::from_table(
+            "t1".to_string(),
+            table_schema_with_columns(
+                "t1",
+                vec![
+                    ("a", DataType::Integer),
+                    ("b", DataType::Integer),
+                    ("c", DataType::Integer),
+                ],
+            ),
+        );
+        let mut schema = CombinedSchema::combine(
+            t1,
+            "t2".to_string(),
+            table_schema_with_columns(
+                "t2",
+                vec![
+                    ("b", DataType::Integer),
+                    ("c", DataType::Integer),
+                    ("d", DataType::Integer),
+                ],
+            ),
+        );
+
+        // Before marking as joined, b and c should be ambiguous
+        assert!(schema.is_column_ambiguous("b"), "b should be ambiguous before NATURAL JOIN processing");
+        assert!(schema.is_column_ambiguous("c"), "c should be ambiguous before NATURAL JOIN processing");
+
+        // Mark b and c as joined columns (as would happen in NATURAL JOIN processing)
+        schema.add_joined_column("b");
+        schema.add_joined_column("c");
+
+        // After marking as joined, b and c should NOT be ambiguous
+        assert!(!schema.is_column_ambiguous("b"), "b should NOT be ambiguous after NATURAL JOIN");
+        assert!(!schema.is_column_ambiguous("c"), "c should NOT be ambiguous after NATURAL JOIN");
+
+        // a only in t1, d only in t2 - never ambiguous
+        assert!(!schema.is_column_ambiguous("a"));
+        assert!(!schema.is_column_ambiguous("d"));
+    }
+
+    #[test]
+    fn test_joined_column_case_insensitive() {
+        // Test that joined column matching is case-insensitive
+        let t1 = CombinedSchema::from_table(
+            "t1".to_string(),
+            table_schema_with_columns("t1", vec![("Name", DataType::Integer)]),
+        );
+        let mut schema = CombinedSchema::combine(
+            t1,
+            "t2".to_string(),
+            table_schema_with_columns("t2", vec![("NAME", DataType::Integer)]),
+        );
+
+        // Before marking as joined, should be ambiguous
+        assert!(schema.is_column_ambiguous("name"));
+        assert!(schema.is_column_ambiguous("NAME"));
+        assert!(schema.is_column_ambiguous("Name"));
+
+        // Mark as joined with lowercase
+        schema.add_joined_column("name");
+
+        // All case variants should now be non-ambiguous
+        assert!(!schema.is_column_ambiguous("name"));
+        assert!(!schema.is_column_ambiguous("NAME"));
+        assert!(!schema.is_column_ambiguous("Name"));
+    }
+
+    #[test]
+    fn test_joined_column_with_using_clause() {
+        // Test USING clause behavior (similar to NATURAL JOIN but explicit columns)
+        // This simulates: SELECT id FROM t1 JOIN t2 USING(id)
+        let t1 = CombinedSchema::from_table(
+            "t1".to_string(),
+            table_schema_with_columns(
+                "t1",
+                vec![("id", DataType::Integer), ("value1", DataType::Integer)],
+            ),
+        );
+        let mut schema = CombinedSchema::combine(
+            t1,
+            "t2".to_string(),
+            table_schema_with_columns(
+                "t2",
+                vec![("id", DataType::Integer), ("value2", DataType::Integer)],
+            ),
+        );
+
+        // Mark id as joined (as would happen in USING clause processing)
+        schema.add_joined_column("id");
+
+        // id should NOT be ambiguous (it's a USING column)
+        assert!(!schema.is_column_ambiguous("id"));
+
+        // value1 and value2 are unique to their tables - not ambiguous
+        assert!(!schema.is_column_ambiguous("value1"));
+        assert!(!schema.is_column_ambiguous("value2"));
     }
 }

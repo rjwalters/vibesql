@@ -157,7 +157,7 @@ fn collect_columns_from_grouping_elements(
 }
 
 /// Recursively collect column references from an expression
-fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<ColumnRef>) {
+pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<ColumnRef>) {
     match expr {
         Expression::ColumnRef { table, column } => {
             // Skip the special "*" wildcard (used in COUNT(*))
@@ -502,6 +502,7 @@ pub fn remap_schema(
         hidden_columns: std::collections::HashSet::new(),
         outer_schema: None,
         duplicate_aliases: std::collections::HashSet::new(),
+        joined_columns: std::collections::HashSet::new(),
     }
 }
 

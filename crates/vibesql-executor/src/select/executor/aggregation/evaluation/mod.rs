@@ -151,12 +151,22 @@ impl SelectExecutor<'_> {
     }
 
     /// Apply ORDER BY to aggregated results
+    ///
+    /// The `group_by_exprs` parameter contains the GROUP BY expressions, which are appended
+    /// as hidden columns after the SELECT list columns. This allows ORDER BY to reference
+    /// GROUP BY columns that are not in the SELECT list.
+    ///
+    /// The `order_by_aggregates` parameter contains aggregate expressions extracted from
+    /// ORDER BY items, which are also appended as hidden columns. This allows ORDER BY
+    /// expressions like "ORDER BY max(n)+0" to work.
     pub(in crate::select::executor) fn apply_order_by_to_aggregates(
         &self,
         rows: Vec<vibesql_storage::Row>,
         _stmt: &vibesql_ast::SelectStmt,
         order_by: &[vibesql_ast::OrderByItem],
         expanded_select_list: &[vibesql_ast::SelectItem],
+        group_by_exprs: &[vibesql_ast::Expression],
+        order_by_aggregates: &[vibesql_ast::Expression],
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Build a schema from the expanded SELECT list to enable ORDER BY column resolution
         let mut result_columns = Vec::new();
@@ -192,6 +202,31 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Add GROUP BY expressions as hidden columns for ORDER BY resolution
+        // These come after the SELECT list columns
+        for expr in group_by_exprs {
+            let column_name = match expr {
+                vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+                _ => format!("__group_by_{}", result_columns.len()),
+            };
+            result_columns.push(vibesql_catalog::ColumnSchema::new(
+                column_name,
+                vibesql_types::DataType::Varchar { max_length: Some(255) },
+                true,
+            ));
+        }
+
+        // Add ORDER BY aggregate expressions as hidden columns
+        // These come after GROUP BY columns
+        let order_by_agg_start_idx = result_columns.len();
+        for (i, _) in order_by_aggregates.iter().enumerate() {
+            result_columns.push(vibesql_catalog::ColumnSchema::new(
+                format!("__order_by_agg_{}", i),
+                vibesql_types::DataType::Varchar { max_length: Some(255) },
+                true,
+            ));
+        }
+
         let result_table_schema =
             vibesql_catalog::TableSchema::new("result".to_string(), result_columns);
 
@@ -207,7 +242,7 @@ impl SelectExecutor<'_> {
         // Evaluate ORDER BY expressions and attach sort keys to rows
         let mut rows_with_keys: Vec<(
             vibesql_storage::Row,
-            Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>,
+            Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>)>,
         )> = Vec::new();
         for row in rows {
             // Clear CSE cache before evaluating each row to prevent column values
@@ -226,17 +261,48 @@ impl SelectExecutor<'_> {
                     term_index,
                     None,
                 )?;
+
+                // Replace aggregate expressions with references to their hidden columns
+                let resolved_expr = replace_aggregates_with_columns(
+                    &resolved_expr,
+                    order_by_aggregates,
+                    order_by_agg_start_idx,
+                );
+
                 let key_value = result_evaluator.eval(&resolved_expr, &row)?;
-                sort_keys.push((key_value, order_item.direction.clone()));
+                sort_keys.push((key_value, order_item.direction.clone(), order_item.nulls_order.clone()));
             }
             rows_with_keys.push((row, sort_keys));
         }
 
-        // Sort using the sort keys
+        // Sort using the sort keys with NULLS FIRST/LAST handling
         rows_with_keys.sort_by(|(_, keys_a), (_, keys_b)| {
             use crate::select::grouping::compare_sql_values;
+            use vibesql_types::SqlValue;
 
-            for ((val_a, dir), (val_b, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, nulls_order), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+                // Handle NULLS FIRST/LAST
+                let (a_is_null, b_is_null) = (matches!(val_a, SqlValue::Null), matches!(val_b, SqlValue::Null));
+                if a_is_null || b_is_null {
+                    if a_is_null && b_is_null {
+                        continue; // Both null, consider equal for this key
+                    }
+                    // Determine if nulls should sort first or last based on NULLS order and direction
+                    let nulls_first = match nulls_order {
+                        Some(vibesql_ast::NullsOrder::First) => true,
+                        Some(vibesql_ast::NullsOrder::Last) => false,
+                        None => {
+                            // Default: NULLS LAST for ASC, NULLS FIRST for DESC
+                            matches!(dir, vibesql_ast::OrderDirection::Desc)
+                        }
+                    };
+                    return if a_is_null {
+                        if nulls_first { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater }
+                    } else {
+                        if nulls_first { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less }
+                    };
+                }
+
                 let cmp = match dir {
                     vibesql_ast::OrderDirection::Asc => compare_sql_values(val_a, val_b),
                     vibesql_ast::OrderDirection::Desc => compare_sql_values(val_a, val_b).reverse(),
@@ -252,7 +318,59 @@ impl SelectExecutor<'_> {
         // Extract rows without sort keys
         Ok(rows_with_keys.into_iter().map(|(row, _)| row).collect())
     }
+}
 
+/// Replace aggregate expressions with column references to their hidden columns.
+///
+/// When ORDER BY contains aggregates like `max(n)+0`, we pre-compute the aggregate values
+/// and store them in hidden columns. This function replaces the aggregate expressions
+/// with ColumnRef expressions pointing to those hidden columns.
+fn replace_aggregates_with_columns(
+    expr: &vibesql_ast::Expression,
+    order_by_aggregates: &[vibesql_ast::Expression],
+    start_idx: usize,
+) -> vibesql_ast::Expression {
+    use vibesql_ast::Expression;
+
+    // Check if this expression is one of the pre-computed aggregates
+    if let Expression::AggregateFunction { .. } = expr {
+        for (i, agg) in order_by_aggregates.iter().enumerate() {
+            if format!("{:?}", expr) == format!("{:?}", agg) {
+                // Replace with column reference to the hidden column
+                return Expression::ColumnRef {
+                    table: None,
+                    column: format!("__order_by_agg_{}", i),
+                };
+            }
+        }
+    }
+
+    // Recursively process compound expressions
+    match expr {
+        Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
+            left: Box::new(replace_aggregates_with_columns(left, order_by_aggregates, start_idx)),
+            op: *op,
+            right: Box::new(replace_aggregates_with_columns(right, order_by_aggregates, start_idx)),
+        },
+        Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
+            op: *op,
+            expr: Box::new(replace_aggregates_with_columns(inner, order_by_aggregates, start_idx)),
+        },
+        Expression::Function { name, args, character_unit } => Expression::Function {
+            name: name.clone(),
+            args: args.iter().map(|a| replace_aggregates_with_columns(a, order_by_aggregates, start_idx)).collect(),
+            character_unit: character_unit.clone(),
+        },
+        Expression::Cast { expr: inner, data_type, .. } => Expression::Cast {
+            expr: Box::new(replace_aggregates_with_columns(inner, order_by_aggregates, start_idx)),
+            data_type: data_type.clone(),
+        },
+        // For other expressions, return as-is
+        _ => expr.clone(),
+    }
+}
+
+impl SelectExecutor<'_> {
     /// Evaluate an expression in the context of aggregation with grouping context
     ///
     /// This is used for ROLLUP/CUBE/GROUPING SETS to support the GROUPING() function

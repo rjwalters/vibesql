@@ -664,6 +664,35 @@ impl SelectExecutor<'_> {
                     return Ok(None);
                 }
             }
+
+            // Issue #4510: columnar_group_by_batch returns [group_keys..., aggregates...] format.
+            // If the SELECT list has aggregates before GROUP BY columns (e.g., SELECT count(*), col
+            // FROM t GROUP BY col), the result order won't match. Fall back to row-oriented.
+            // The SELECT list must have all non-aggregates first, then all aggregates.
+            let mut first_agg_pos = None;
+            let mut last_non_agg_pos = None;
+            for (i, item) in stmt.select_list.iter().enumerate() {
+                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                    if matches!(expr, Expression::AggregateFunction { .. }) {
+                        if first_agg_pos.is_none() {
+                            first_agg_pos = Some(i);
+                        }
+                    } else {
+                        last_non_agg_pos = Some(i);
+                    }
+                }
+            }
+            // If first aggregate comes before last non-aggregate, order doesn't match columnar
+            if let (Some(first_agg), Some(last_non_agg)) = (first_agg_pos, last_non_agg_pos) {
+                if first_agg < last_non_agg {
+                    log::debug!(
+                        "Native columnar: skipping GROUP BY - aggregate at position {} before non-aggregate at {}",
+                        first_agg,
+                        last_non_agg
+                    );
+                    return Ok(None);
+                }
+            }
         }
 
         // Execute using native columnar pipeline
@@ -745,7 +774,51 @@ impl SelectExecutor<'_> {
             }
         } else {
             // Non-GROUP BY path: Simple aggregation
-            columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?
+            let agg_result =
+                columnar::execute_columnar_batch(&batch, &predicates, &aggregates, Some(&schema))?;
+
+            // Apply HAVING filter if present (same as GROUP BY path)
+            // For non-GROUP BY, there are no group columns, so group_col_count = 0
+            if let Some(having_expr) = &stmt.having {
+                log::debug!(
+                    "Applying columnar HAVING filter (no GROUP BY): {} rows, {} aggregates",
+                    agg_result.len(),
+                    aggregates.len()
+                );
+
+                match having::apply_having_filter(
+                    agg_result,
+                    having_expr,
+                    0, // No GROUP BY columns
+                    &aggregates,
+                    &schema,
+                ) {
+                    Ok(rows) => rows,
+                    Err(ExecutorError::UnsupportedFeature(msg))
+                        if msg.contains("not supported in columnar")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!(
+                            "Native columnar: HAVING (no GROUP BY) falling back to row-oriented: {}",
+                            msg
+                        );
+                        return Ok(None);
+                    }
+                    Err(ExecutorError::Other(msg))
+                        if msg.contains("not supported in columnar path")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!(
+                            "Native columnar: HAVING (no GROUP BY) falling back to row-oriented: {}",
+                            msg
+                        );
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e),
+                }
+            } else {
+                agg_result
+            }
         };
 
         #[cfg(feature = "profile-q6")]

@@ -551,6 +551,7 @@ fn test_distinct_with_order_by() {
                 column: "category".to_string(),
             },
             direction: vibesql_ast::OrderDirection::Asc,
+            nulls_order: None,
         }]),
         limit: None,
         offset: None,

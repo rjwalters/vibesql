@@ -104,6 +104,7 @@ fn test_index_ordering() {
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
             direction: OrderDirection::Asc,
+            nulls_order: None,
         }]),
         limit: None,
         offset: None,

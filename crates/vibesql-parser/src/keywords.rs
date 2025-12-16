@@ -353,7 +353,10 @@ impl Keyword {
             Keyword::Type | Keyword::Sql |
             // Vector index parameter: M is only contextual in HNSW WITH clause
             // SQLite TCL tests commonly use 'm' as a column name
-            Keyword::M
+            Keyword::M |
+            // NULLS is only contextual in ORDER BY (NULLS FIRST/LAST)
+            // Can be used as identifier for table/column/CTE names
+            Keyword::Nulls
         )
     }
 }

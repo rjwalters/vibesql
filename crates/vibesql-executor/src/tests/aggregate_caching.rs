@@ -302,6 +302,7 @@ fn test_cache_cleared_between_groups() {
                 column: "category".to_string(),
             },
             direction: vibesql_ast::OrderDirection::Asc,
+            nulls_order: None,
         }]),
         limit: None,
         offset: None,

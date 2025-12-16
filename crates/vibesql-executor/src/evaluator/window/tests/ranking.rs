@@ -1,4 +1,4 @@
-use vibesql_ast::{Expression, NullsOrder, OrderByItem, OrderDirection};
+use vibesql_ast::{Expression, OrderByItem, OrderDirection};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 

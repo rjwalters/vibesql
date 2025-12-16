@@ -337,6 +337,41 @@ impl Parser {
                     quoted: table.is_any_quoted(),
                 })
             }
+            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as table names
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                let table = self.parse_table_ref()?;
+
+                // Check for optional alias
+                let alias = if self.peek_keyword(Keyword::As) {
+                    self.consume_keyword(Keyword::As)?;
+                    Some(self.parse_alias_name()?)
+                } else if matches!(
+                    self.peek(),
+                    Token::Identifier(_) | Token::DelimitedIdentifier(_)
+                ) && !self.is_join_keyword()
+                {
+                    match self.peek() {
+                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                            let alias = id.clone();
+                            self.advance();
+                            Some(alias)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                let column_aliases =
+                    if alias.is_some() { self.parse_column_alias_list()? } else { None };
+
+                Ok(vibesql_ast::FromClause::Table {
+                    name: table.full_name(),
+                    alias,
+                    column_aliases,
+                    quoted: table.is_any_quoted(),
+                })
+            }
             _ => Err(ParseError {
                 message: "Expected table name or subquery in FROM clause".to_string(),
             }),

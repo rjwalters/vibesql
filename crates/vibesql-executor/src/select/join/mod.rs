@@ -1256,6 +1256,10 @@ fn remove_duplicate_columns_for_natural_join(
                 // Position in result = left_col_count + position_in_right_schema
                 let hidden_idx = left_col_count + table_start_idx + col_idx;
                 result.schema.hide_column(hidden_idx);
+
+                // Also mark this column as a "joined column" so it won't be
+                // considered ambiguous when referenced without table qualification (issue #4517)
+                result.schema.add_joined_column(&col.name);
             }
         }
     }
@@ -1285,6 +1289,12 @@ fn remove_duplicate_columns_for_using_join(
     // Create a set of USING column names (lowercase for case-insensitive comparison)
     let using_cols_lower: HashSet<String> =
         using_cols.iter().map(|c| c.to_lowercase()).collect();
+
+    // Mark all USING columns as "joined columns" so they won't be
+    // considered ambiguous when referenced without table qualification (issue #4517)
+    for col in using_cols {
+        result.schema.add_joined_column(col);
+    }
 
     // Count columns in left schema
     let left_col_count = left_schema.total_columns;

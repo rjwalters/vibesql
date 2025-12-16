@@ -212,7 +212,7 @@ fn build_aggregate_result_schema(select_list: &[SelectItem]) -> CombinedSchema {
     let table_id = vibesql_catalog::TableIdentifier::unquoted("result");
     table_schemas.insert(table_id, (0, table_schema.clone()));
 
-    CombinedSchema { table_schemas, total_columns: table_schema.columns.len(), hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new() }
+    CombinedSchema { table_schemas, total_columns: table_schema.columns.len(), hidden_columns: std::collections::HashSet::new(), outer_schema: None, duplicate_aliases: std::collections::HashSet::new(), joined_columns: std::collections::HashSet::new() }
 }
 
 /// Map an expression to a column reference in the result schema
