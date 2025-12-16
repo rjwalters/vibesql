@@ -357,7 +357,536 @@ impl From<String> for TableIdentifier {
     }
 }
 
-/// A general SQL identifier (for columns, indexes, views, etc.)
+/// A SQL column identifier with proper case handling per SQL:1999.
+///
+/// This type handles column references with optional table and schema qualifiers.
+/// Each component (schema, table, column) has independent quoted/unquoted semantics.
+///
+/// ## Supported Forms
+///
+/// | SQL Form | Description |
+/// |----------|-------------|
+/// | `id` | Unqualified column reference |
+/// | `users.id` | Table-qualified column reference |
+/// | `myschema.users.id` | Fully-qualified column reference |
+///
+/// ## SQL:1999 Compliance
+///
+/// Per SQL:1999, identifier handling depends on whether each component was quoted:
+///
+/// | Input | Quoted | Canonical | Matches `mycolumn`? |
+/// |-------|--------|-----------|---------------------|
+/// | `MyColumn` | No | `mycolumn` | Yes |
+/// | `"MyColumn"` | Yes | `MyColumn` | No |
+/// | `MYCOLUMN` | No | `mycolumn` | Yes |
+///
+/// ## Example
+///
+/// ```
+/// use vibesql_catalog::ColumnIdentifier;
+///
+/// // Unquoted identifiers are case-insensitive
+/// let c1 = ColumnIdentifier::simple("MyColumn", false);
+/// let c2 = ColumnIdentifier::simple("mycolumn", false);
+/// assert_eq!(c1, c2);
+///
+/// // Quoted identifiers are case-sensitive
+/// let quoted = ColumnIdentifier::simple("MyColumn", true);
+/// assert_ne!(c1, quoted);
+///
+/// // Table-qualified column
+/// let qualified = ColumnIdentifier::qualified("users", false, "id", false);
+/// assert_eq!(qualified.canonical(), "users.id");
+/// ```
+#[derive(Debug, Clone)]
+pub struct ColumnIdentifier {
+    // Optional schema part
+    schema_canonical: Option<String>,
+    schema_display: Option<String>,
+    schema_quoted: bool,
+
+    // Optional table part
+    table_canonical: Option<String>,
+    table_display: Option<String>,
+    table_quoted: bool,
+
+    // Column part (always present)
+    column_canonical: String,
+    column_display: String,
+    column_quoted: bool,
+
+    /// Canonical form for HashMap keys and comparison.
+    /// Format: "schema.table.column" or "table.column" or "column"
+    canonical: String,
+
+    /// Display form preserving user's original input.
+    /// Used for error messages and user-facing output.
+    display: String,
+}
+
+impl ColumnIdentifier {
+    /// Create a simple (unqualified) column identifier.
+    ///
+    /// # Arguments
+    ///
+    /// * `column` - The column name as written by the user
+    /// * `quoted` - Whether the identifier was quoted (delimited) in SQL
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vibesql_catalog::ColumnIdentifier;
+    ///
+    /// let c = ColumnIdentifier::simple("MyColumn", false);
+    /// assert_eq!(c.canonical(), "mycolumn");
+    /// assert_eq!(c.display(), "MyColumn");
+    /// ```
+    pub fn simple(column: &str, quoted: bool) -> Self {
+        let column_canonical = if quoted {
+            column.to_string()
+        } else {
+            column.to_ascii_lowercase()
+        };
+
+        Self {
+            schema_canonical: None,
+            schema_display: None,
+            schema_quoted: false,
+            table_canonical: None,
+            table_display: None,
+            table_quoted: false,
+            column_canonical: column_canonical.clone(),
+            column_display: column.to_string(),
+            column_quoted: quoted,
+            canonical: column_canonical,
+            display: column.to_string(),
+        }
+    }
+
+    /// Create a table-qualified column identifier.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - The table name as written by the user
+    /// * `table_quoted` - Whether the table was quoted in SQL
+    /// * `column` - The column name as written by the user
+    /// * `column_quoted` - Whether the column was quoted in SQL
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vibesql_catalog::ColumnIdentifier;
+    ///
+    /// let c = ColumnIdentifier::qualified("Users", false, "ID", false);
+    /// assert_eq!(c.canonical(), "users.id");
+    /// assert_eq!(c.table_canonical(), Some("users"));
+    /// assert_eq!(c.column_canonical(), "id");
+    /// ```
+    pub fn qualified(
+        table: &str,
+        table_quoted: bool,
+        column: &str,
+        column_quoted: bool,
+    ) -> Self {
+        let table_canonical = if table_quoted {
+            table.to_string()
+        } else {
+            table.to_ascii_lowercase()
+        };
+
+        let column_canonical = if column_quoted {
+            column.to_string()
+        } else {
+            column.to_ascii_lowercase()
+        };
+
+        let canonical = format!("{}.{}", table_canonical, column_canonical);
+        let display = format!("{}.{}", table, column);
+
+        Self {
+            schema_canonical: None,
+            schema_display: None,
+            schema_quoted: false,
+            table_canonical: Some(table_canonical),
+            table_display: Some(table.to_string()),
+            table_quoted,
+            column_canonical,
+            column_display: column.to_string(),
+            column_quoted,
+            canonical,
+            display,
+        }
+    }
+
+    /// Create a fully-qualified (schema.table.column) identifier.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - The schema name as written by the user
+    /// * `schema_quoted` - Whether the schema was quoted in SQL
+    /// * `table` - The table name as written by the user
+    /// * `table_quoted` - Whether the table was quoted in SQL
+    /// * `column` - The column name as written by the user
+    /// * `column_quoted` - Whether the column was quoted in SQL
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vibesql_catalog::ColumnIdentifier;
+    ///
+    /// let c = ColumnIdentifier::fully_qualified(
+    ///     "myApp", true,   // quoted schema
+    ///     "users", false,  // unquoted table
+    ///     "ID", false      // unquoted column
+    /// );
+    /// assert_eq!(c.canonical(), "myApp.users.id");
+    /// ```
+    pub fn fully_qualified(
+        schema: &str,
+        schema_quoted: bool,
+        table: &str,
+        table_quoted: bool,
+        column: &str,
+        column_quoted: bool,
+    ) -> Self {
+        let schema_canonical = if schema_quoted {
+            schema.to_string()
+        } else {
+            schema.to_ascii_lowercase()
+        };
+
+        let table_canonical = if table_quoted {
+            table.to_string()
+        } else {
+            table.to_ascii_lowercase()
+        };
+
+        let column_canonical = if column_quoted {
+            column.to_string()
+        } else {
+            column.to_ascii_lowercase()
+        };
+
+        let canonical = format!("{}.{}.{}", schema_canonical, table_canonical, column_canonical);
+        let display = format!("{}.{}.{}", schema, table, column);
+
+        Self {
+            schema_canonical: Some(schema_canonical),
+            schema_display: Some(schema.to_string()),
+            schema_quoted,
+            table_canonical: Some(table_canonical),
+            table_display: Some(table.to_string()),
+            table_quoted,
+            column_canonical,
+            column_display: column.to_string(),
+            column_quoted,
+            canonical,
+            display,
+        }
+    }
+
+    /// Create an unquoted column identifier (convenience constructor).
+    ///
+    /// This creates a simple, case-insensitive column reference.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vibesql_catalog::ColumnIdentifier;
+    ///
+    /// let c = ColumnIdentifier::unquoted("MyColumn");
+    /// assert_eq!(c.canonical(), "mycolumn");
+    /// ```
+    pub fn unquoted(column: &str) -> Self {
+        Self::simple(column, false)
+    }
+
+    /// Create a quoted column identifier (convenience constructor).
+    ///
+    /// This creates a simple, case-sensitive column reference.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vibesql_catalog::ColumnIdentifier;
+    ///
+    /// let c = ColumnIdentifier::quoted("MyColumn");
+    /// assert_eq!(c.canonical(), "MyColumn");
+    /// ```
+    pub fn quoted(column: &str) -> Self {
+        Self::simple(column, true)
+    }
+
+    /// Create a table.column reference with unquoted identifiers.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vibesql_catalog::ColumnIdentifier;
+    ///
+    /// let c = ColumnIdentifier::table_column("users", "id");
+    /// assert_eq!(c.canonical(), "users.id");
+    /// ```
+    pub fn table_column(table: &str, column: &str) -> Self {
+        Self::qualified(table, false, column, false)
+    }
+
+    /// Create an identifier from a canonical name (for internal use).
+    ///
+    /// This is used when loading from persistence where we only have the
+    /// canonical form. The display form is set to match canonical.
+    pub fn from_canonical(canonical: String, quoted: bool) -> Self {
+        Self {
+            schema_canonical: None,
+            schema_display: None,
+            schema_quoted: false,
+            table_canonical: None,
+            table_display: None,
+            table_quoted: false,
+            column_canonical: canonical.clone(),
+            column_display: canonical.clone(),
+            column_quoted: quoted,
+            canonical: canonical.clone(),
+            display: canonical,
+        }
+    }
+
+    /// Get the canonical form of the identifier.
+    ///
+    /// This is used for HashMap keys and equality comparison.
+    /// Format: "schema.table.column" or "table.column" or "column"
+    #[inline]
+    pub fn canonical(&self) -> &str {
+        &self.canonical
+    }
+
+    /// Get the display form of the identifier.
+    ///
+    /// This preserves the user's original input and should be used
+    /// in error messages and user-facing output.
+    #[inline]
+    pub fn display(&self) -> &str {
+        &self.display
+    }
+
+    /// Get the column name in canonical form.
+    #[inline]
+    pub fn column_canonical(&self) -> &str {
+        &self.column_canonical
+    }
+
+    /// Get the column name in display form.
+    #[inline]
+    pub fn column_display(&self) -> &str {
+        &self.column_display
+    }
+
+    /// Check if the column was quoted.
+    #[inline]
+    pub fn is_column_quoted(&self) -> bool {
+        self.column_quoted
+    }
+
+    /// Get the table name in canonical form (if qualified).
+    #[inline]
+    pub fn table_canonical(&self) -> Option<&str> {
+        self.table_canonical.as_deref()
+    }
+
+    /// Get the table name in display form (if qualified).
+    #[inline]
+    pub fn table_display(&self) -> Option<&str> {
+        self.table_display.as_deref()
+    }
+
+    /// Check if the table was quoted (if qualified).
+    #[inline]
+    pub fn is_table_quoted(&self) -> bool {
+        self.table_quoted
+    }
+
+    /// Get the schema name in canonical form (if fully qualified).
+    #[inline]
+    pub fn schema_canonical(&self) -> Option<&str> {
+        self.schema_canonical.as_deref()
+    }
+
+    /// Get the schema name in display form (if fully qualified).
+    #[inline]
+    pub fn schema_display(&self) -> Option<&str> {
+        self.schema_display.as_deref()
+    }
+
+    /// Check if the schema was quoted (if fully qualified).
+    #[inline]
+    pub fn is_schema_quoted(&self) -> bool {
+        self.schema_quoted
+    }
+
+    /// Check if this is a table-qualified column (has table but not schema).
+    #[inline]
+    pub fn is_qualified(&self) -> bool {
+        self.table_canonical.is_some()
+    }
+
+    /// Check if this is a fully-qualified column (has schema.table.column).
+    #[inline]
+    pub fn is_fully_qualified(&self) -> bool {
+        self.schema_canonical.is_some()
+    }
+
+    /// Check if this column reference is ambiguous (no table qualifier).
+    #[inline]
+    pub fn is_ambiguous(&self) -> bool {
+        self.table_canonical.is_none()
+    }
+
+    /// Get the canonical form as an owned String.
+    #[inline]
+    pub fn into_canonical(self) -> String {
+        self.canonical
+    }
+
+    /// Check if this column matches another by canonical column name only.
+    ///
+    /// This ignores table and schema qualifiers, useful for finding columns
+    /// by name across different tables.
+    pub fn matches_column_name(&self, name: &str, case_sensitive: bool) -> bool {
+        if case_sensitive {
+            self.column_canonical == name
+        } else {
+            self.column_canonical == name.to_ascii_lowercase()
+        }
+    }
+
+    /// Resolve an ambiguous column against a table.
+    ///
+    /// If this column is unqualified, creates a new column identifier
+    /// qualified with the given table. If already qualified, returns self.
+    pub fn resolve_against(&self, table: &TableIdentifier) -> Self {
+        if self.is_qualified() {
+            return self.clone();
+        }
+
+        if table.is_qualified() {
+            // Table has schema qualification
+            Self::fully_qualified(
+                table.schema_display().unwrap_or_default(),
+                table.is_schema_quoted(),
+                table.table_display(),
+                table.is_table_quoted(),
+                &self.column_display,
+                self.column_quoted,
+            )
+        } else {
+            // Simple table name
+            Self::qualified(
+                table.table_display(),
+                table.is_table_quoted(),
+                &self.column_display,
+                self.column_quoted,
+            )
+        }
+    }
+
+    /// Check if this column reference matches another.
+    ///
+    /// Matching rules:
+    /// - An unqualified column matches if the column names match
+    /// - A qualified column matches only if both table and column match
+    /// - A fully-qualified column matches only if schema, table, and column match
+    pub fn matches(&self, other: &ColumnIdentifier) -> bool {
+        // Both must have same qualification level for exact match
+        if self.is_fully_qualified() != other.is_fully_qualified() {
+            // But an unqualified can match a qualified if column name matches
+            if self.is_ambiguous() {
+                return self.column_canonical == other.column_canonical;
+            }
+            if other.is_ambiguous() {
+                return self.column_canonical == other.column_canonical;
+            }
+            return false;
+        }
+
+        if self.is_qualified() != other.is_qualified() {
+            // Unqualified matches qualified if column name matches
+            if self.is_ambiguous() {
+                return self.column_canonical == other.column_canonical;
+            }
+            if other.is_ambiguous() {
+                return self.column_canonical == other.column_canonical;
+            }
+            return false;
+        }
+
+        // Same qualification level - compare canonical forms
+        self.canonical == other.canonical
+    }
+
+    /// Create a column identifier by stripping qualifiers.
+    ///
+    /// Returns a new unqualified column identifier with just the column name.
+    pub fn unqualify(&self) -> Self {
+        Self::simple(&self.column_display, self.column_quoted)
+    }
+
+    /// Create a column identifier with a different table qualifier.
+    ///
+    /// Useful when remapping columns during query planning.
+    pub fn with_table(&self, table: &str, table_quoted: bool) -> Self {
+        if let Some(schema_display) = &self.schema_display {
+            Self::fully_qualified(
+                schema_display,
+                self.schema_quoted,
+                table,
+                table_quoted,
+                &self.column_display,
+                self.column_quoted,
+            )
+        } else {
+            Self::qualified(table, table_quoted, &self.column_display, self.column_quoted)
+        }
+    }
+}
+
+impl PartialEq for ColumnIdentifier {
+    /// Two column identifiers are equal if their canonical forms match.
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical == other.canonical
+    }
+}
+
+impl Eq for ColumnIdentifier {}
+
+impl Hash for ColumnIdentifier {
+    /// Hash based on canonical form for consistent HashMap behavior.
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.canonical.hash(state);
+    }
+}
+
+impl fmt::Display for ColumnIdentifier {
+    /// Display uses the original user input form.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display)
+    }
+}
+
+impl From<&str> for ColumnIdentifier {
+    /// Convert from a string, assuming unquoted (case-insensitive).
+    fn from(s: &str) -> Self {
+        Self::simple(s, false)
+    }
+}
+
+impl From<String> for ColumnIdentifier {
+    /// Convert from a String, assuming unquoted (case-insensitive).
+    fn from(s: String) -> Self {
+        Self::simple(&s, false)
+    }
+}
+
+/// A general SQL identifier (for indexes, views, etc.)
 ///
 /// This is a type alias for now, but can be specialized later if needed.
 pub type Identifier = TableIdentifier;
@@ -702,5 +1231,323 @@ mod tests {
         // Should NOT find with unquoted schema (even if lowercase matches)
         let lookup3 = TableIdentifier::qualified("myApp", false, "users", false);
         assert_eq!(map.get(&lookup3), None);
+    }
+
+    // ==================== ColumnIdentifier Tests ====================
+
+    #[test]
+    fn test_column_unquoted_case_insensitive() {
+        let c1 = ColumnIdentifier::simple("MyColumn", false);
+        let c2 = ColumnIdentifier::simple("mycolumn", false);
+        let c3 = ColumnIdentifier::simple("MYCOLUMN", false);
+
+        // All unquoted variations should be equal
+        assert_eq!(c1, c2);
+        assert_eq!(c2, c3);
+
+        // Canonical should be lowercase
+        assert_eq!(c1.canonical(), "mycolumn");
+        assert_eq!(c2.canonical(), "mycolumn");
+        assert_eq!(c3.canonical(), "mycolumn");
+
+        // Display preserves original
+        assert_eq!(c1.display(), "MyColumn");
+        assert_eq!(c2.display(), "mycolumn");
+        assert_eq!(c3.display(), "MYCOLUMN");
+    }
+
+    #[test]
+    fn test_column_quoted_case_sensitive() {
+        let c1 = ColumnIdentifier::simple("MyColumn", true);
+        let c2 = ColumnIdentifier::simple("mycolumn", true);
+        let c3 = ColumnIdentifier::simple("MYCOLUMN", true);
+
+        // Quoted identifiers with different cases should NOT be equal
+        assert_ne!(c1, c2);
+        assert_ne!(c2, c3);
+        assert_ne!(c1, c3);
+
+        // Canonical preserves exact case
+        assert_eq!(c1.canonical(), "MyColumn");
+        assert_eq!(c2.canonical(), "mycolumn");
+        assert_eq!(c3.canonical(), "MYCOLUMN");
+    }
+
+    #[test]
+    fn test_column_qualified() {
+        let c = ColumnIdentifier::qualified("Users", false, "ID", false);
+        assert_eq!(c.canonical(), "users.id");
+        assert_eq!(c.table_canonical(), Some("users"));
+        assert_eq!(c.column_canonical(), "id");
+        assert!(c.is_qualified());
+        assert!(!c.is_fully_qualified());
+        assert!(!c.is_ambiguous());
+    }
+
+    #[test]
+    fn test_column_fully_qualified() {
+        let c = ColumnIdentifier::fully_qualified(
+            "myApp", true,  // quoted schema
+            "users", false, // unquoted table
+            "ID", false,    // unquoted column
+        );
+        assert_eq!(c.canonical(), "myApp.users.id");
+        assert_eq!(c.schema_canonical(), Some("myApp"));
+        assert_eq!(c.table_canonical(), Some("users"));
+        assert_eq!(c.column_canonical(), "id");
+        assert!(c.is_qualified());
+        assert!(c.is_fully_qualified());
+        assert!(!c.is_ambiguous());
+    }
+
+    #[test]
+    fn test_column_convenience_constructors() {
+        let unquoted = ColumnIdentifier::unquoted("MyColumn");
+        assert_eq!(unquoted.canonical(), "mycolumn");
+        assert!(!unquoted.is_column_quoted());
+
+        let quoted = ColumnIdentifier::quoted("MyColumn");
+        assert_eq!(quoted.canonical(), "MyColumn");
+        assert!(quoted.is_column_quoted());
+
+        let table_col = ColumnIdentifier::table_column("users", "id");
+        assert_eq!(table_col.canonical(), "users.id");
+        assert!(table_col.is_qualified());
+    }
+
+    #[test]
+    fn test_column_hashmap_lookup() {
+        let mut map: HashMap<ColumnIdentifier, i32> = HashMap::new();
+
+        // Insert with unquoted identifier
+        let key = ColumnIdentifier::simple("userId", false);
+        map.insert(key, 42);
+
+        // Should find with different case (unquoted)
+        let lookup1 = ColumnIdentifier::simple("USERID", false);
+        let lookup2 = ColumnIdentifier::simple("UserId", false);
+        let lookup3 = ColumnIdentifier::simple("userid", false);
+
+        assert_eq!(map.get(&lookup1), Some(&42));
+        assert_eq!(map.get(&lookup2), Some(&42));
+        assert_eq!(map.get(&lookup3), Some(&42));
+
+        // Quoted "userid" (lowercase) SHOULD find the value
+        let quoted_lower = ColumnIdentifier::simple("userid", true);
+        assert_eq!(map.get(&quoted_lower), Some(&42));
+
+        // But quoted "USERID" (uppercase) should NOT find it
+        let quoted_upper = ColumnIdentifier::simple("USERID", true);
+        assert_eq!(map.get(&quoted_upper), None);
+    }
+
+    #[test]
+    fn test_column_matches_column_name() {
+        let c = ColumnIdentifier::qualified("users", false, "id", false);
+
+        // Case-insensitive match
+        assert!(c.matches_column_name("id", false));
+        assert!(c.matches_column_name("ID", false));
+        assert!(c.matches_column_name("Id", false));
+
+        // Case-sensitive match
+        assert!(c.matches_column_name("id", true));
+        assert!(!c.matches_column_name("ID", true));
+        assert!(!c.matches_column_name("Id", true));
+    }
+
+    #[test]
+    fn test_column_matches() {
+        // Same qualified columns
+        let c1 = ColumnIdentifier::qualified("users", false, "id", false);
+        let c2 = ColumnIdentifier::qualified("USERS", false, "ID", false);
+        assert!(c1.matches(&c2));
+
+        // Unqualified matches qualified by column name
+        let unqualified = ColumnIdentifier::simple("id", false);
+        assert!(unqualified.matches(&c1));
+        assert!(c1.matches(&unqualified));
+
+        // Different tables should not match when both qualified
+        let c3 = ColumnIdentifier::qualified("orders", false, "id", false);
+        assert!(!c1.matches(&c3));
+
+        // But unqualified still matches
+        assert!(unqualified.matches(&c3));
+    }
+
+    #[test]
+    fn test_column_resolve_against() {
+        let col = ColumnIdentifier::simple("id", false);
+        let table = TableIdentifier::new("users", false);
+
+        let resolved = col.resolve_against(&table);
+        assert_eq!(resolved.canonical(), "users.id");
+        assert!(resolved.is_qualified());
+
+        // Already qualified column should not change
+        let qualified = ColumnIdentifier::qualified("orders", false, "id", false);
+        let resolved2 = qualified.resolve_against(&table);
+        assert_eq!(resolved2.canonical(), "orders.id");
+    }
+
+    #[test]
+    fn test_column_resolve_against_qualified_table() {
+        let col = ColumnIdentifier::simple("id", false);
+        let table = TableIdentifier::qualified("myapp", false, "users", false);
+
+        let resolved = col.resolve_against(&table);
+        assert_eq!(resolved.canonical(), "myapp.users.id");
+        assert!(resolved.is_fully_qualified());
+    }
+
+    #[test]
+    fn test_column_unqualify() {
+        let qualified = ColumnIdentifier::qualified("users", false, "ID", true);
+        let unqualified = qualified.unqualify();
+
+        assert!(!unqualified.is_qualified());
+        assert_eq!(unqualified.column_canonical(), "ID"); // Quoted preserved
+        assert!(unqualified.is_column_quoted());
+    }
+
+    #[test]
+    fn test_column_with_table() {
+        let col = ColumnIdentifier::simple("id", false);
+        let with_table = col.with_table("users", false);
+
+        assert_eq!(with_table.canonical(), "users.id");
+        assert_eq!(with_table.table_canonical(), Some("users"));
+    }
+
+    #[test]
+    fn test_column_display_trait() {
+        let c = ColumnIdentifier::qualified("Users", false, "ID", false);
+        assert_eq!(format!("{}", c), "Users.ID");
+
+        let simple = ColumnIdentifier::simple("MyColumn", false);
+        assert_eq!(format!("{}", simple), "MyColumn");
+    }
+
+    #[test]
+    fn test_column_from_traits() {
+        let c1: ColumnIdentifier = "MyColumn".into();
+        let c2: ColumnIdentifier = String::from("MyColumn").into();
+
+        assert_eq!(c1, c2);
+        assert_eq!(c1.canonical(), "mycolumn"); // From assumes unquoted
+    }
+
+    #[test]
+    fn test_column_from_canonical() {
+        let c = ColumnIdentifier::from_canonical("mycolumn".to_string(), false);
+        assert_eq!(c.canonical(), "mycolumn");
+        assert_eq!(c.display(), "mycolumn");
+        assert!(!c.is_column_quoted());
+
+        let quoted = ColumnIdentifier::from_canonical("MyColumn".to_string(), true);
+        assert_eq!(quoted.canonical(), "MyColumn");
+        assert_eq!(quoted.display(), "MyColumn");
+        assert!(quoted.is_column_quoted());
+    }
+
+    #[test]
+    fn test_column_into_canonical() {
+        let c = ColumnIdentifier::simple("MyColumn", false);
+        let canonical: String = c.into_canonical();
+        assert_eq!(canonical, "mycolumn");
+    }
+
+    #[test]
+    fn test_column_qualified_equality() {
+        // Table case differs, but both unquoted → should match
+        let c1 = ColumnIdentifier::qualified("Users", false, "id", false);
+        let c2 = ColumnIdentifier::qualified("USERS", false, "ID", false);
+        assert_eq!(c1, c2);
+        assert_eq!(c1.canonical(), "users.id");
+
+        // Table quoted with different case → should NOT match
+        let c3 = ColumnIdentifier::qualified("Users", true, "id", false);
+        let c4 = ColumnIdentifier::qualified("USERS", true, "id", false);
+        assert_ne!(c3, c4);
+
+        // Column quoted with different case → should NOT match
+        let c5 = ColumnIdentifier::qualified("users", false, "Id", true);
+        let c6 = ColumnIdentifier::qualified("users", false, "ID", true);
+        assert_ne!(c5, c6);
+    }
+
+    #[test]
+    fn test_column_qualified_hashmap() {
+        let mut map: HashMap<ColumnIdentifier, i32> = HashMap::new();
+
+        // Insert with quoted table, unquoted column
+        let key = ColumnIdentifier::qualified("Users", true, "id", false);
+        map.insert(key, 42);
+
+        // Should find with exact table case, any column case
+        let lookup1 = ColumnIdentifier::qualified("Users", true, "ID", false);
+        assert_eq!(map.get(&lookup1), Some(&42));
+
+        // Should NOT find with different table case
+        let lookup2 = ColumnIdentifier::qualified("USERS", true, "id", false);
+        assert_eq!(map.get(&lookup2), None);
+
+        // Should NOT find with unquoted table
+        let lookup3 = ColumnIdentifier::qualified("Users", false, "id", false);
+        assert_eq!(map.get(&lookup3), None);
+    }
+
+    #[test]
+    fn test_column_issue_examples() {
+        // Examples from issue #4527
+
+        // Unquoted case-insensitive
+        let c1 = ColumnIdentifier::simple("MyColumn", false);
+        let c2 = ColumnIdentifier::simple("mycolumn", false);
+        let c3 = ColumnIdentifier::simple("MYCOLUMN", false);
+        assert_eq!(c1, c2);
+        assert_eq!(c2, c3);
+        assert_eq!(c1.canonical(), "mycolumn");
+
+        // Quoted case-sensitive
+        let q1 = ColumnIdentifier::simple("MyColumn", true);
+        let q2 = ColumnIdentifier::simple("mycolumn", true);
+        assert_ne!(q1, q2);
+        assert_eq!(q1.canonical(), "MyColumn");
+
+        // Qualified column
+        let qc = ColumnIdentifier::qualified("Users", false, "ID", false);
+        assert_eq!(qc.canonical(), "users.id");
+        assert_eq!(qc.table_canonical(), Some("users"));
+        assert_eq!(qc.column_canonical(), "id");
+
+        // Fully qualified
+        let fq = ColumnIdentifier::fully_qualified(
+            "myApp", true,  // quoted schema
+            "users", false, // unquoted table
+            "ID", false,    // unquoted column
+        );
+        assert_eq!(fq.canonical(), "myApp.users.id");
+    }
+
+    #[test]
+    fn test_column_ambiguous_predicates() {
+        let simple = ColumnIdentifier::simple("id", false);
+        assert!(simple.is_ambiguous());
+        assert!(!simple.is_qualified());
+        assert!(!simple.is_fully_qualified());
+
+        let qualified = ColumnIdentifier::qualified("users", false, "id", false);
+        assert!(!qualified.is_ambiguous());
+        assert!(qualified.is_qualified());
+        assert!(!qualified.is_fully_qualified());
+
+        let fully = ColumnIdentifier::fully_qualified(
+            "myapp", false, "users", false, "id", false,
+        );
+        assert!(!fully.is_ambiguous());
+        assert!(fully.is_qualified());
+        assert!(fully.is_fully_qualified());
     }
 }

@@ -27,7 +27,7 @@ pub use column::ColumnSchema;
 pub use domain::{DomainConstraintDef, DomainDefinition};
 pub use errors::CatalogError;
 pub use foreign_key::{ForeignKeyConstraint, ReferentialAction};
-pub use identifier::{Identifier, TableIdentifier};
+pub use identifier::{ColumnIdentifier, Identifier, TableIdentifier};
 pub use index::{IndexMetadata, IndexType, IndexedColumn, SortOrder, VectorDistanceMetric};
 pub use privilege::PrivilegeGrant;
 pub use schema::Schema;
