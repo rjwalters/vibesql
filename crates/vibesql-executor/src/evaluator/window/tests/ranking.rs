@@ -1,4 +1,4 @@
-use vibesql_ast::{Expression, OrderByItem, OrderDirection};
+use vibesql_ast::{Expression, NullsOrder, OrderByItem, OrderDirection};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
@@ -38,6 +38,7 @@ fn test_rank_with_ties() {
             column: String::new(), // Will use first column
         },
         direction: OrderDirection::Desc,
+        nulls_order: None,
     }]);
 
     let result = evaluate_rank(&partition, &order_by);
@@ -56,6 +57,7 @@ fn test_rank_no_ties() {
     let order_by = Some(vec![OrderByItem {
         expr: Expression::ColumnRef { table: None, column: String::new() },
         direction: OrderDirection::Desc,
+        nulls_order: None,
     }]);
 
     let result = evaluate_rank(&partition, &order_by);
@@ -91,6 +93,7 @@ fn test_dense_rank_with_ties() {
     let order_by = Some(vec![OrderByItem {
         expr: Expression::ColumnRef { table: None, column: String::new() },
         direction: OrderDirection::Desc,
+        nulls_order: None,
     }]);
 
     let result = evaluate_dense_rank(&partition, &order_by);
@@ -111,6 +114,7 @@ fn test_dense_rank_multiple_tie_groups() {
     let order_by = Some(vec![OrderByItem {
         expr: Expression::ColumnRef { table: None, column: String::new() },
         direction: OrderDirection::Desc,
+        nulls_order: None,
     }]);
 
     let result = evaluate_dense_rank(&partition, &order_by);

@@ -486,6 +486,7 @@ mod tests {
             &[vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
+                nulls_order: None,
             }],
             &None
         ));
@@ -495,6 +496,7 @@ mod tests {
             &[vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
+                nulls_order: None,
             }],
             &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
         ));
@@ -504,6 +506,7 @@ mod tests {
             &[vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
+                nulls_order: None,
             }],
             &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
         ));
@@ -513,6 +516,7 @@ mod tests {
             &[vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Desc,
+                nulls_order: None,
             }],
             &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
         ));
@@ -522,6 +526,7 @@ mod tests {
             &[vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
+                nulls_order: None,
             }],
             &Some(vec![
                 ("a".to_string(), vibesql_ast::OrderDirection::Asc),
@@ -538,6 +543,7 @@ mod tests {
                         column: "a".to_string()
                     },
                     direction: vibesql_ast::OrderDirection::Asc,
+                    nulls_order: None,
                 },
                 vibesql_ast::OrderByItem {
                     expr: vibesql_ast::Expression::ColumnRef {
@@ -545,6 +551,7 @@ mod tests {
                         column: "b".to_string()
                     },
                     direction: vibesql_ast::OrderDirection::Asc,
+                    nulls_order: None,
                 },
             ],
             &Some(vec![("a".to_string(), vibesql_ast::OrderDirection::Asc)])
