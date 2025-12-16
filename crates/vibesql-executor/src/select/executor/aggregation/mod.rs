@@ -358,8 +358,29 @@ impl SelectExecutor<'_> {
                     if include_group {
                         // Include GROUP BY values after SELECT values for ORDER BY resolution
                         // ORDER BY can reference GROUP BY columns not in SELECT list
+                        // For ROLLUP/CUBE/GROUPING SETS, we need to include ALL base expression
+                        // values (with NULLs for rolled-up columns) to ensure consistent row width.
                         let mut row_values = aggregate_results;
-                        row_values.extend(group_key.iter().cloned());
+
+                        // Build hidden columns for all base expressions
+                        // group_key only contains values for non-rolled-up columns, so we need
+                        // to reconstruct the full list using rolled_up flags
+                        let mut key_idx = 0;
+                        for is_rolled_up in &resolved_set.rolled_up {
+                            if *is_rolled_up {
+                                // Rolled up column - use NULL
+                                row_values.push(vibesql_types::SqlValue::Null);
+                            } else {
+                                // Present column - use value from group_key
+                                if key_idx < group_key.len() {
+                                    row_values.push(group_key[key_idx].clone());
+                                    key_idx += 1;
+                                } else {
+                                    // Safety fallback - shouldn't happen if logic is correct
+                                    row_values.push(vibesql_types::SqlValue::Null);
+                                }
+                            }
+                        }
 
                         // Compute ORDER BY aggregates and append them to row values
                         // This allows ORDER BY expressions like "ORDER BY max(n)+0"

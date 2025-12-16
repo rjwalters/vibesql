@@ -173,6 +173,7 @@ fn test_select_with_order_by() {
         order_by: Some(vec![OrderByItem {
             expr: Expression::ColumnRef { table: None, column: "name".to_string() },
             direction: OrderDirection::Asc,
+            nulls_order: None,
         }]),
         limit: None,
         offset: None,
@@ -358,6 +359,7 @@ fn test_order_by_desc() {
         order_by: Some(vec![OrderByItem {
             expr: Expression::ColumnRef { table: None, column: "created_at".to_string() },
             direction: OrderDirection::Desc,
+            nulls_order: None,
         }]),
         limit: None,
         offset: None,
