@@ -79,9 +79,11 @@ fn execute_insert_internal(
     // Use the schema's table name for catalog operations (matches how table was created)
     let table_name = &schema.name;
 
-    // Determine target column indices and types
-    let target_column_info =
-        super::validation::resolve_target_columns(&schema, table_name, &stmt.columns)?;
+    // Determine target column indices and types, including rowid pseudo-column support
+    let resolved_columns =
+        super::validation::resolve_target_columns_with_rowid(&schema, table_name, &stmt.columns)?;
+    let target_column_info = &resolved_columns.columns;
+    let rowid_position = resolved_columns.rowid_position;
 
     // Get the rows to insert based on the source
     let rows_to_insert = match &stmt.source {
@@ -127,11 +129,13 @@ fn execute_insert_internal(
     };
 
     // Validate each row has correct number of values
-    super::validation::validate_row_column_counts(
-        &rows_to_insert,
-        target_column_info.len(),
-        table_name,
-    )?;
+    // If rowid is specified, the expected count includes the rowid column
+    let expected_value_count = if rowid_position.is_some() {
+        target_column_info.len() + 1
+    } else {
+        target_column_info.len()
+    };
+    super::validation::validate_row_column_counts(&rows_to_insert, expected_value_count, table_name)?;
 
     // Estimate DML cost for query analysis and optimization decisions
     // This helps with profiling and can inform future batch size decisions
@@ -161,7 +165,7 @@ fn execute_insert_internal(
 
     // For multi-row INSERT, validate all rows first, then insert all
     // This ensures atomicity: all rows succeed or all fail
-    let mut validated_rows = Vec::new();
+    let mut validated_rows: Vec<(Vec<vibesql_types::SqlValue>, Option<u64>)> = Vec::new();
     let mut primary_key_values: Vec<Vec<vibesql_types::SqlValue>> = Vec::new(); // Track PK values for duplicate checking within batch
     let mut unique_constraint_values = if schema.get_unique_constraint_indices().is_empty() {
         Vec::new()
@@ -179,7 +183,49 @@ fn execute_insert_internal(
         // Start with NULL for all columns, then fill in provided values
         let mut full_row_values = vec![vibesql_types::SqlValue::Null; schema.columns.len()];
 
-        for (expr, (col_idx, data_type)) in value_exprs.iter().zip(target_column_info.iter()) {
+        // Extract rowid value if present (SQLite compatibility)
+        let explicit_rowid = if let Some(rowid_pos) = rowid_position {
+            // Get the rowid expression
+            let rowid_expr = &value_exprs[rowid_pos];
+
+            // Extract literal value from expression
+            match rowid_expr {
+                vibesql_ast::Expression::Literal(val) => {
+                    // Convert to u64 for row_id
+                    match val {
+                        vibesql_types::SqlValue::Integer(i) if *i > 0 => Some(*i as u64),
+                        vibesql_types::SqlValue::Bigint(i) if *i > 0 => Some(*i as u64),
+                        vibesql_types::SqlValue::Null => None, // NULL rowid means auto-assign
+                        _ => {
+                            return Err(ExecutorError::UnsupportedExpression(
+                                "ROWID must be a positive integer".to_string(),
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(ExecutorError::UnsupportedExpression(
+                        "ROWID value must be a literal integer".to_string(),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        // Filter out the rowid value when iterating over column values
+        let column_values: Vec<_> = if let Some(rowid_pos) = rowid_position {
+            value_exprs
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| *idx != rowid_pos)
+                .map(|(_, expr)| expr)
+                .collect()
+        } else {
+            value_exprs.iter().collect()
+        };
+
+        for (expr, (col_idx, data_type)) in column_values.iter().zip(target_column_info.iter()) {
             // Evaluate expression (literals, DEFAULT, procedural variables, and trigger
             // pseudo-variables)
             let value = super::defaults::evaluate_insert_expression_with_trigger_context(
@@ -238,8 +284,8 @@ fn execute_insert_internal(
             }
         }
 
-        // Store validated row for insertion
-        validated_rows.push(full_row_values);
+        // Store validated row for insertion (with optional explicit rowid)
+        validated_rows.push((full_row_values, explicit_rowid));
     }
 
     // All rows validated successfully, now insert them
@@ -281,6 +327,14 @@ fn execute_insert_internal(
         && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
         && !has_insert_triggers;
 
+    // Helper to create a Row with optional explicit rowid
+    let make_row = |(values, rowid): (Vec<vibesql_types::SqlValue>, Option<u64>)| {
+        match rowid {
+            Some(id) => vibesql_storage::Row::with_row_id(values, id),
+            None => vibesql_storage::Row::new(values),
+        }
+    };
+
     if use_batch_insert && validated_rows.len() > 1 {
         // Fast path: Use batch insert for multiple rows without triggers
         // Use cost-based batch sizing to optimize for tables with many indexes
@@ -292,7 +346,7 @@ fn execute_insert_internal(
             // Chunked batch insert for high-cost tables
             for chunk in validated_rows.chunks(optimal_batch_size) {
                 let rows: Vec<vibesql_storage::Row> =
-                    chunk.iter().map(|v| vibesql_storage::Row::new(v.clone())).collect();
+                    chunk.iter().map(|(v, rowid)| make_row((v.clone(), *rowid))).collect();
 
                 rows_inserted += db.insert_rows_batch(&storage_table_name, rows).map_err(|e| {
                     ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
@@ -301,7 +355,7 @@ fn execute_insert_internal(
         } else {
             // Single batch insert for low-cost tables
             let rows: Vec<vibesql_storage::Row> =
-                validated_rows.into_iter().map(vibesql_storage::Row::new).collect();
+                validated_rows.into_iter().map(make_row).collect();
 
             rows_inserted = db.insert_rows_batch(&storage_table_name, rows).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
@@ -309,7 +363,7 @@ fn execute_insert_internal(
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
-        for full_row_values in validated_rows {
+        for (full_row_values, explicit_rowid) in validated_rows {
             // Check if ON DUPLICATE KEY UPDATE is specified
             if let Some(ref assignments) = stmt.on_duplicate_key_update {
                 // Try to update an existing row if there's a conflict
@@ -338,7 +392,7 @@ fn execute_insert_internal(
             }
 
             // Fire BEFORE INSERT triggers only if triggers exist
-            let row_to_insert = vibesql_storage::Row::new(full_row_values.clone());
+            let row_to_insert = make_row((full_row_values.clone(), explicit_rowid));
             if has_insert_triggers {
                 crate::TriggerFirer::execute_before_triggers(
                     db,
@@ -356,7 +410,7 @@ fn execute_insert_internal(
                 .row_count();
 
             // Insert the row
-            let row = vibesql_storage::Row::new(full_row_values);
+            let row = make_row((full_row_values, explicit_rowid));
             db.insert_row(&storage_table_name, row.clone()).map_err(|e| {
                 ExecutorError::UnsupportedExpression(format!("Storage error: {}", e))
             })?;

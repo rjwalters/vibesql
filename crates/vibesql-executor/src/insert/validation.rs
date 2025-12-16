@@ -1,40 +1,74 @@
 use crate::errors::ExecutorError;
 
-/// Determine target column indices and types for an INSERT statement
-pub fn resolve_target_columns(
+/// Result of resolving INSERT column targets
+pub struct ResolvedInsertColumns {
+    /// Column indices and types for regular columns (schema columns)
+    pub columns: Vec<(usize, vibesql_types::DataType)>,
+    /// Position of rowid pseudo-column in the input column list, if specified
+    /// This allows extracting the rowid value from VALUES for explicit rowid inserts
+    pub rowid_position: Option<usize>,
+}
+
+/// Check if a column name is a ROWID pseudo-column (SQLite compatibility)
+/// Returns true for "rowid", "_rowid_", "oid" (case-insensitive)
+fn is_rowid_pseudo_column(col_name: &str) -> bool {
+    let lower = col_name.to_lowercase();
+    lower == "rowid" || lower == "_rowid_" || lower == "oid"
+}
+
+/// Determine target column indices and types for an INSERT statement,
+/// including support for the ROWID pseudo-column (SQLite compatibility)
+pub fn resolve_target_columns_with_rowid(
     schema: &vibesql_catalog::TableSchema,
     table_name: &str,
     specified_columns: &[String],
-) -> Result<Vec<(usize, vibesql_types::DataType)>, ExecutorError> {
+) -> Result<ResolvedInsertColumns, ExecutorError> {
     if specified_columns.is_empty() {
         // No columns specified: INSERT INTO t VALUES (...)
         // Use all columns in schema order
-        Ok(schema
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, col)| (idx, col.data_type.clone()))
-            .collect())
+        Ok(ResolvedInsertColumns {
+            columns: schema
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(idx, col)| (idx, col.data_type.clone()))
+                .collect(),
+            rowid_position: None,
+        })
     } else {
         // Columns specified: INSERT INTO t (col1, col2) VALUES (...)
-        // Validate and resolve columns
-        specified_columns
-            .iter()
-            .map(|col_name| {
-                schema
-                    .get_column_index(col_name)
-                    .map(|idx| {
-                        let col = &schema.columns[idx];
-                        (idx, col.data_type.clone())
-                    })
-                    .ok_or_else(|| ExecutorError::ColumnNotFound {
-                        column_name: col_name.clone(),
-                        table_name: table_name.to_string(),
-                        searched_tables: vec![table_name.to_string()],
-                        available_columns: schema.columns.iter().map(|c| c.name.clone()).collect(),
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()
+        // Validate and resolve columns, handling rowid pseudo-column specially
+        let mut columns = Vec::new();
+        let mut rowid_position = None;
+
+        for (input_idx, col_name) in specified_columns.iter().enumerate() {
+            // First check if there's a real column with this name
+            if let Some(schema_idx) = schema.get_column_index(col_name) {
+                let col = &schema.columns[schema_idx];
+                columns.push((schema_idx, col.data_type.clone()));
+            } else if is_rowid_pseudo_column(col_name) {
+                // It's a rowid pseudo-column - record its position but don't add to columns
+                if rowid_position.is_some() {
+                    return Err(ExecutorError::UnsupportedExpression(
+                        "Multiple rowid columns specified in INSERT".to_string(),
+                    ));
+                }
+                rowid_position = Some(input_idx);
+            } else {
+                // Column not found and not a pseudo-column
+                return Err(ExecutorError::ColumnNotFound {
+                    column_name: col_name.clone(),
+                    table_name: table_name.to_string(),
+                    searched_tables: vec![table_name.to_string()],
+                    available_columns: schema.columns.iter().map(|c| c.name.clone()).collect(),
+                });
+            }
+        }
+
+        Ok(ResolvedInsertColumns {
+            columns,
+            rowid_position,
+        })
     }
 }
 

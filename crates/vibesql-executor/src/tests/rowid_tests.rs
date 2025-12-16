@@ -402,3 +402,172 @@ fn test_rowid_with_table_alias() {
     assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(1));
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Bigint(2));
 }
+
+/// Test that explicit row_id is preserved when using Row::with_row_id()
+#[test]
+fn test_explicit_rowid_preserved() {
+    let mut db = vibesql_storage::Database::new();
+    let schema = vibesql_catalog::TableSchema::new(
+        "t1".to_string(),
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert with explicit rowid = 5
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::with_row_id(
+            vec![vibesql_types::SqlValue::Integer(100)],
+            5,
+        ),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // SELECT rowid, x FROM t1
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![
+            vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "rowid".to_string(),
+                },
+                alias: None,
+                source_text: None,
+            },
+            vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                },
+                alias: None,
+                source_text: None,
+            },
+        ],
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+    assert_eq!(result.len(), 1);
+    // Rowid should be 5 (the explicit value), not 1 (physical index)
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(5));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(100));
+}
+
+/// Test that mixed explicit and auto-assigned rowids work correctly
+#[test]
+fn test_mixed_explicit_and_auto_rowid() {
+    let mut db = vibesql_storage::Database::new();
+    let schema = vibesql_catalog::TableSchema::new(
+        "t1".to_string(),
+        vec![vibesql_catalog::ColumnSchema::new(
+            "x".to_string(),
+            vibesql_types::DataType::Integer,
+            false,
+        )],
+    );
+    db.create_table(schema).unwrap();
+
+    // Insert with explicit rowid = 10
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::with_row_id(
+            vec![vibesql_types::SqlValue::Integer(100)],
+            10,
+        ),
+    )
+    .unwrap();
+
+    // Insert without explicit rowid (should get auto-assigned based on physical index)
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(200)]),
+    )
+    .unwrap();
+
+    // Insert with explicit rowid = 20
+    db.insert_row(
+        "t1",
+        vibesql_storage::Row::with_row_id(
+            vec![vibesql_types::SqlValue::Integer(300)],
+            20,
+        ),
+    )
+    .unwrap();
+
+    let executor = SelectExecutor::new(&db);
+
+    // SELECT rowid, x FROM t1
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![
+            vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "rowid".to_string(),
+                },
+                alias: None,
+                source_text: None,
+            },
+            vibesql_ast::SelectItem::Expression {
+                expr: vibesql_ast::Expression::ColumnRef {
+                    table: None,
+                    column: "x".to_string(),
+                },
+                alias: None,
+                source_text: None,
+            },
+        ],
+        from: Some(vibesql_ast::FromClause::Table {
+            quoted: false,
+            name: "t1".to_string(),
+            alias: None,
+            column_aliases: None,
+        }),
+        where_clause: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+    };
+
+    let result = executor.execute(&stmt).unwrap();
+    assert_eq!(result.len(), 3);
+    // First row: explicit rowid 10
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Bigint(10));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(100));
+    // Second row: auto-assigned rowid 2 (physical index 1 + 1)
+    assert_eq!(result[1].values[0], vibesql_types::SqlValue::Bigint(2));
+    assert_eq!(result[1].values[1], vibesql_types::SqlValue::Integer(200));
+    // Third row: explicit rowid 20
+    assert_eq!(result[2].values[0], vibesql_types::SqlValue::Bigint(20));
+    assert_eq!(result[2].values[1], vibesql_types::SqlValue::Integer(300));
+}
