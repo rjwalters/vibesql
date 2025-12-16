@@ -62,18 +62,25 @@ pub fn evaluate_insert_expression_with_trigger_context(
             }
         }
         _ => {
-            // For any other expression type, use full expression evaluator if trigger context
-            // available
+            // For any other expression type, use full expression evaluator
             if let (Some(ctx), Some(db)) = (trigger_context, database) {
-                // Create a dummy row for evaluation
+                // Create a dummy row for evaluation (trigger context available)
                 let dummy_row = vibesql_storage::Row::new(vec![]);
                 let evaluator =
                     crate::ExpressionEvaluator::with_trigger_context(ctx.table_schema, db, ctx);
                 evaluator.eval(expr, &dummy_row)
+            } else if let Some(db) = database {
+                // No trigger context, but we have database access - evaluate the expression
+                // Create a minimal dummy schema for expression evaluation
+                // INSERT value expressions don't reference columns from current row
+                let dummy_schema =
+                    vibesql_catalog::TableSchema::new("__insert_expr__".to_string(), vec![]);
+                let dummy_row = vibesql_storage::Row::new(vec![]);
+                let evaluator = crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                evaluator.eval(expr, &dummy_row)
             } else {
                 Err(ExecutorError::UnsupportedExpression(
-                    "Complex expressions in INSERT VALUES are only supported within trigger bodies"
-                        .to_string(),
+                    "Complex expressions in INSERT VALUES require database context".to_string(),
                 ))
             }
         }
