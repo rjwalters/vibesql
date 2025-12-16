@@ -692,23 +692,39 @@ pub(crate) fn resolve_order_by_alias<'a>(
 
         // Second, check if column matches a SELECT list expression that has an alias
         // This handles: SELECT col AS alias ... ORDER BY col
-        // In this case, we need to reference by the alias since that's what the result schema uses
-        for item in select_list {
-            // Check if the SELECT expression is a column reference to the same column
-            if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
-                alias: Some(alias_name),
-                ..
-            } = item
-            {
-                if select_col.eq_ignore_ascii_case(column) {
-                    // The ORDER BY column matches the original column, but it's aliased
-                    // Return a new ColumnRef using the alias name
-                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: alias_name.clone(),
-                    }));
+        // HOWEVER: If the column exists in the FROM schema, we should NOT transform it
+        // to the alias. The ORDER BY should reference the actual column from the schema.
+        //
+        // Example: SELECT cnt as tests_affected FROM (SELECT COUNT(*) as cnt ...) sub ORDER BY cnt
+        // Here, 'cnt' exists in the subquery schema, so ORDER BY cnt should evaluate 'cnt' directly,
+        // not be transformed to 'tests_affected' (which doesn't exist in the schema).
+        //
+        // Only transform to alias when the column does NOT exist in the FROM schema (rare case).
+        let column_exists_in_schema = schema.map_or(false, |s| {
+            // Check if column exists in any table in the schema
+            s.table_schemas.values().any(|(_start_idx, table_schema)| {
+                table_schema.get_column_index(column).is_some()
+            })
+        });
+
+        if !column_exists_in_schema {
+            for item in select_list {
+                // Check if the SELECT expression is a column reference to the same column
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
+                    alias: Some(alias_name),
+                    ..
+                } = item
+                {
+                    if select_col.eq_ignore_ascii_case(column) {
+                        // The ORDER BY column matches the original column, but it's aliased
+                        // Return a new ColumnRef using the alias name
+                        return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                            schema: None,
+                            table: None,
+                            column: alias_name.clone(),
+                        }));
+                    }
                 }
             }
         }
