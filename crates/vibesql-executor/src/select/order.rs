@@ -81,8 +81,8 @@ fn resolve_position_to_column_name(
     if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = &select_list[idx] {
         Some(if let Some(alias_name) = alias {
             alias_name.clone()
-        } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
-            column.clone()
+        } else if let vibesql_ast::Expression::ColumnRef(col_id) = expr {
+            col_id.column_canonical().to_string()
         } else {
             format!("col{}", idx + 1)
         })
@@ -388,7 +388,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
         ColumnPositionResult::Position(pos) => {
             let idx = validate_column_position(pos, column_count, term_index)?;
             if let Some(col_name) = resolve_position_to_column_name(idx, select_list) {
-                return Ok(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: col_name });
+                return Ok(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false)));
             }
         }
         ColumnPositionResult::Negative(pos) => {
@@ -423,8 +423,8 @@ fn resolve_order_by_for_aggregates_inner(
                 // Return a ColumnRef to the alias name (or derive from expression)
                 let col_name = if let Some(alias_name) = alias {
                     alias_name.clone()
-                } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
-                    column.clone()
+                } else if let vibesql_ast::Expression::ColumnRef(col_id) = expr {
+                    col_id.column_canonical().to_string()
                 } else if let vibesql_ast::Expression::AggregateFunction { name, .. } = expr {
                     // For aggregate functions, use the function name (lowercase)
                     // This matches the schema column name generated in apply_order_by_to_aggregates
@@ -432,7 +432,7 @@ fn resolve_order_by_for_aggregates_inner(
                 } else {
                     format!("col{}", idx + 1)
                 };
-                return vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: col_name };
+                return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false));
             }
         }
         // If not a valid column position, just return the literal as-is
@@ -440,51 +440,52 @@ fn resolve_order_by_for_aggregates_inner(
     }
 
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
-    if let vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } = order_expr {
-        // First, check if column matches an alias name - return ColumnRef to that alias
-        for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { alias: Some(alias_name), .. } = item {
-                if alias_name.eq_ignore_ascii_case(column) {
-                    // ORDER BY uses alias name, return ColumnRef to that alias
-                    return vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: alias_name.clone(),
-                    };
+    if let vibesql_ast::Expression::ColumnRef(col_id) = order_expr {
+        if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+            let column = col_id.column_canonical();
+            // First, check if column matches an alias name - return ColumnRef to that alias
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression { alias: Some(alias_name), .. } = item {
+                    if alias_name.eq_ignore_ascii_case(column) {
+                        // ORDER BY uses alias name, return ColumnRef to that alias
+                        return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(alias_name, false));
+                    }
                 }
             }
-        }
 
-        // Second, check if column matches an original column name that has an alias
-        for item in select_list {
-            if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
-                alias: Some(alias_name),
-                ..
-            } = item
-            {
-                if select_col.eq_ignore_ascii_case(column) {
-                    // ORDER BY uses original column name, return ColumnRef to the alias
-                    return vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: alias_name.clone(),
-                    };
+            // Second, check if column matches an original column name that has an alias
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: vibesql_ast::Expression::ColumnRef(select_col_id),
+                    alias: Some(alias_name),
+                    ..
+                } = item
+                {
+                    if select_col_id.schema_canonical().is_none() {
+                        let select_col = select_col_id.column_canonical();
+                        if select_col.eq_ignore_ascii_case(column) {
+                            // ORDER BY uses original column name, return ColumnRef to the alias
+                            return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(alias_name, false));
+                        }
+                    }
                 }
             }
-        }
 
-        // Third, check if column matches a SELECT list column without alias
-        for item in select_list {
-            if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
-                alias: None,
-                ..
-            } = item
-            {
-                if select_col.eq_ignore_ascii_case(column) {
-                    // Found matching non-aliased column, return as-is
-                    return order_expr.clone();
+            // Third, check if column matches a SELECT list column without alias
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: vibesql_ast::Expression::ColumnRef(select_col_id),
+                    alias: None,
+                    ..
+                } = item
+                {
+                    if select_col_id.schema_canonical().is_none() {
+                        let select_col = select_col_id.column_canonical();
+                        if select_col.eq_ignore_ascii_case(column) {
+                            // Found matching non-aliased column, return as-is
+                            return order_expr.clone();
+                        }
+                    }
                 }
             }
         }
@@ -494,7 +495,7 @@ fn resolve_order_by_for_aggregates_inner(
     // This handles cases like GROUPING(a) + GROUPING(b) matching an alias like "lochierarchy"
     // before we try to recursively decompose the expression
     if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-        return vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: alias };
+        return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&alias, false));
     }
 
     // Handle CASE expressions by recursively resolving sub-expressions
@@ -547,7 +548,7 @@ fn resolve_order_by_for_aggregates_inner(
         if name.eq_ignore_ascii_case("GROUPING") || name.eq_ignore_ascii_case("GROUPING_ID") {
             // Try to find a matching GROUPING expression in the SELECT list
             if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-                return vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: alias };
+                return vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&alias, false));
             }
         }
     }
@@ -568,8 +569,8 @@ fn find_matching_select_expression(
                 // Return alias if present, otherwise derive column name from expression
                 return Some(if let Some(alias_name) = alias {
                     alias_name.clone()
-                } else if let vibesql_ast::Expression::ColumnRef { column, .. } = select_expr {
-                    column.clone()
+                } else if let vibesql_ast::Expression::ColumnRef(col_id) = select_expr {
+                    col_id.column_canonical().to_string()
                 } else if let vibesql_ast::Expression::AggregateFunction { name, .. } = select_expr
                 {
                     // For aggregate functions, use the function name (lowercase)
@@ -589,9 +590,14 @@ fn find_matching_select_expression(
 fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -> bool {
     match (a, b) {
         (
-            vibesql_ast::Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
-            vibesql_ast::Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
-        ) => t1 == t2 && c1.eq_ignore_ascii_case(c2),
+            vibesql_ast::Expression::ColumnRef(col_id1),
+            vibesql_ast::Expression::ColumnRef(col_id2),
+        ) => {
+            col_id1.schema_canonical().is_none()
+                && col_id2.schema_canonical().is_none()
+                && col_id1.table_canonical() == col_id2.table_canonical()
+                && col_id1.column_canonical() == col_id2.column_canonical()
+        }
 
         (vibesql_ast::Expression::Literal(v1), vibesql_ast::Expression::Literal(v2)) => v1 == v2,
 
@@ -654,11 +660,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
                     return Ok(Cow::Borrowed(expr));
                 }
                 ResolvedPosition::ColumnName(col_name) => {
-                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: col_name,
-                    }));
+                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col_name, false))));
                 }
                 ResolvedPosition::NotFound => {
                     // Fallback: shouldn't reach here if validation passed
@@ -679,36 +681,38 @@ pub(crate) fn resolve_order_by_alias<'a>(
     }
 
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
-    if let vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } = order_expr {
-        // First, search for matching alias in SELECT list (ORDER BY using alias name)
-        for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
-                if alias_name.eq_ignore_ascii_case(column) {
-                    // Found matching alias, use the SELECT list expression
-                    return Ok(Cow::Borrowed(expr));
+    if let vibesql_ast::Expression::ColumnRef(col_id) = order_expr {
+        if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+            let column = col_id.column_canonical();
+            // First, search for matching alias in SELECT list (ORDER BY using alias name)
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
+                    if alias_name.eq_ignore_ascii_case(column) {
+                        // Found matching alias, use the SELECT list expression
+                        return Ok(Cow::Borrowed(expr));
+                    }
                 }
             }
-        }
 
-        // Second, check if column matches a SELECT list expression that has an alias
-        // This handles: SELECT col AS alias ... ORDER BY col
-        // In this case, we need to reference by the alias since that's what the result schema uses
-        for item in select_list {
-            // Check if the SELECT expression is a column reference to the same column
-            if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
-                alias: Some(alias_name),
-                ..
-            } = item
-            {
-                if select_col.eq_ignore_ascii_case(column) {
-                    // The ORDER BY column matches the original column, but it's aliased
-                    // Return a new ColumnRef using the alias name
-                    return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: alias_name.clone(),
-                    }));
+            // Second, check if column matches a SELECT list expression that has an alias
+            // This handles: SELECT col AS alias ... ORDER BY col
+            // In this case, we need to reference by the alias since that's what the result schema uses
+            for item in select_list {
+                // Check if the SELECT expression is a column reference to the same column
+                if let vibesql_ast::SelectItem::Expression {
+                    expr: vibesql_ast::Expression::ColumnRef(select_col_id),
+                    alias: Some(alias_name),
+                    ..
+                } = item
+                {
+                    if select_col_id.schema_canonical().is_none() {
+                        let select_col = select_col_id.column_canonical();
+                        if select_col.eq_ignore_ascii_case(column) {
+                            // The ORDER BY column matches the original column, but it's aliased
+                            // Return a new ColumnRef using the alias name
+                            return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(alias_name, false))));
+                        }
+                    }
                 }
             }
         }
@@ -866,15 +870,18 @@ fn resolve_alias_or_clone(
     select_list: &[vibesql_ast::SelectItem],
 ) -> Option<vibesql_ast::Expression> {
     // Check if this is a simple column reference that matches an alias
-    if let vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } = expr {
-        // Search for matching alias in SELECT list
-        for item in select_list {
-            if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias: Some(alias_name), .. } =
-                item
-            {
-                if alias_name.eq_ignore_ascii_case(column) {
-                    // Found matching alias, return the SELECT list expression
-                    return Some(select_expr.clone());
+    if let vibesql_ast::Expression::ColumnRef(col_id) = expr {
+        if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+            let column = col_id.column_canonical();
+            // Search for matching alias in SELECT list
+            for item in select_list {
+                if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias: Some(alias_name), .. } =
+                    item
+                {
+                    if alias_name.eq_ignore_ascii_case(column) {
+                        // Found matching alias, return the SELECT list expression
+                        return Some(select_expr.clone());
+                    }
                 }
             }
         }
@@ -943,7 +950,8 @@ fn resolve_where_expression_with_schema(
 
     match expr {
         // Column reference: check if it's an alias
-        Expression::ColumnRef { schema: None, table: None, column, .. } => {
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+            let column = col_id.column_canonical();
             // SQLite behavior: table column names ALWAYS take precedence over aliases
             // If the column name exists in the table schema, it refers to the table column,
             // not to any SELECT alias with the same name.
@@ -961,24 +969,24 @@ fn resolve_where_expression_with_schema(
             // (this is for backward compatibility when no schema is provided)
             for item in select_list {
                 if let vibesql_ast::SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: col_name },
+                    expr: Expression::ColumnRef(sel_col_id),
                     ..
                 } = item
                 {
-                    if col_name.eq_ignore_ascii_case(column) {
-                        // The name matches a column reference in SELECT - don't resolve to alias
-                        return expr.clone();
+                    if sel_col_id.schema_canonical().is_none() && sel_col_id.table_canonical().is_none() {
+                        let col_name = sel_col_id.column_canonical();
+                        if col_name.eq_ignore_ascii_case(column) {
+                            // The name matches a column reference in SELECT - don't resolve to alias
+                            return expr.clone();
+                        }
                     }
-                }
-                // Also check qualified column references
-                if let vibesql_ast::SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: Some(_), column: col_name, .. },
-                    ..
-                } = item
-                {
-                    if col_name.eq_ignore_ascii_case(column) {
-                        // The name matches a column reference in SELECT - don't resolve to alias
-                        return expr.clone();
+                    // Also check qualified column references
+                    if sel_col_id.schema_canonical().is_none() && sel_col_id.table_canonical().is_some() {
+                        let col_name = sel_col_id.column_canonical();
+                        if col_name.eq_ignore_ascii_case(column) {
+                            // The name matches a column reference in SELECT - don't resolve to alias
+                            return expr.clone();
+                        }
                     }
                 }
             }
@@ -1002,10 +1010,13 @@ fn resolve_where_expression_with_schema(
         }
 
         // Qualified column reference: not an alias, return as-is
-        Expression::ColumnRef { schema: None, table: Some(_), .. } => expr.clone(),
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => expr.clone(),
 
         // Schema-qualified column reference: not an alias, return as-is
-        Expression::ColumnRef { schema: Some(_), .. } => expr.clone(),
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_some() => expr.clone(),
+
+        // Any other ColumnRef case (shouldn't happen, but handle for completeness)
+        Expression::ColumnRef(_) => expr.clone(),
 
         // BinaryOp: resolve both sides
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
@@ -1279,7 +1290,7 @@ fn collect_aggregates_from_expr(
 
         // Leaf expressions - nothing to extract
         Expression::Literal(_)
-        | Expression::ColumnRef { .. }
+        | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

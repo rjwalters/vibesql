@@ -68,7 +68,7 @@ impl SelectExecutor<'_> {
             let order_item = &order_by[0];
             // Must be a column reference
             let order_col = match &order_item.expr {
-                Expression::ColumnRef { column, .. } => column,
+                Expression::ColumnRef(col_id) => col_id.column_canonical(),
                 _ => return Ok(None),
             };
             // Find the order column in the projected columns

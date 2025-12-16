@@ -456,8 +456,8 @@ fn select_list_has_rowid(select_list: &[SelectItem]) -> bool {
 /// Check if an expression contains ROWID pseudo-column references
 fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef { column, .. } => {
-            let lower = column.to_lowercase();
+        vibesql_ast::Expression::ColumnRef(col_id) => {
+            let lower = col_id.column_canonical().to_lowercase();
             lower == "rowid" || lower == "_rowid_" || lower == "oid"
         }
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {
@@ -554,8 +554,8 @@ fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
             let is_join_condition = matches!(
                 (left.as_ref(), right.as_ref()),
                 (
-                    vibesql_ast::Expression::ColumnRef { .. },
-                    vibesql_ast::Expression::ColumnRef { .. }
+                    vibesql_ast::Expression::ColumnRef(_),
+                    vibesql_ast::Expression::ColumnRef(_)
                 )
             );
 

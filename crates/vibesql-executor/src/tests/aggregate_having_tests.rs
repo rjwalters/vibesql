@@ -138,20 +138,12 @@ fn test_having_clause() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "dept".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::Function {
                     name: "SUM".to_string(),
-                    args: vec![vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "amount".to_string(),
-                    }],
+                    args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                     character_unit: None,
                 },
                 alias: None, source_text: None },
@@ -163,16 +155,12 @@ fn test_having_clause() {
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "dept".to_string() },
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept", false)),
         ])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "amount".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                 character_unit: None,
             }),
             op: vibesql_ast::BinaryOperator::GreaterThan,

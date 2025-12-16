@@ -143,7 +143,9 @@ impl ExpressionMapper {
         resolvable: &mut bool,
     ) {
         match expr {
-            Expression::ColumnRef { table, column, .. } => {
+            Expression::ColumnRef(col_id) => {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
                 let column_lower = column.to_lowercase();
                 if let Some(t) = table {
                     let table_lower = t.to_lowercase();

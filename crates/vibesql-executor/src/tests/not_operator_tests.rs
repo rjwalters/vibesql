@@ -64,7 +64,7 @@ fn test_not_in_select_where() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "pk".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("pk", false)),
             alias: None,
             source_text: None,
         }],
@@ -76,11 +76,7 @@ fn test_not_in_select_where() {
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "col0".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(542),
@@ -148,7 +144,7 @@ fn test_not_with_equality() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "pk".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("pk", false)),
             alias: None,
             source_text: None,
         }],
@@ -160,11 +156,7 @@ fn test_not_with_equality() {
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "col0".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(100),
@@ -240,11 +232,7 @@ fn test_not_in_delete_where() {
         where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "col0".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(542),
@@ -333,7 +321,7 @@ fn test_not_with_null() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "pk".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("pk", false)),
             alias: None,
             source_text: None,
         }],
@@ -345,11 +333,7 @@ fn test_not_with_null() {
         where_clause: Some(vibesql_ast::Expression::UnaryOp {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "col0".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(542),

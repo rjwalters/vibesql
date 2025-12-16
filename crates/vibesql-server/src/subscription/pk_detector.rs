@@ -408,7 +408,9 @@ fn map_columns_to_result_positions(
 /// Extract column name from an expression (if it's a simple column reference)
 fn extract_column_name(expr: &Expression, table_alias: Option<&str>) -> Option<String> {
     match expr {
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
             // For qualified references (t.col), check if table matches our alias
             if let Some(tbl) = table {
                 if let Some(alias) = table_alias {
@@ -417,7 +419,7 @@ fn extract_column_name(expr: &Expression, table_alias: Option<&str>) -> Option<S
                     }
                 }
             }
-            Some(column.clone())
+            Some(column.to_string())
         }
         _ => None, // Not a simple column reference
     }

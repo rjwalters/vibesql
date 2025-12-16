@@ -138,11 +138,7 @@ fn test_repeated_sum_cached() {
     let sum_amount = vibesql_ast::Expression::AggregateFunction {
         name: "SUM".to_string(),
         distinct: false,
-        args: vec![vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "amount".to_string(),
-        }],
+        args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
         order_by: None,
     };
 
@@ -280,11 +276,7 @@ fn test_cache_cleared_between_groups() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "category".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression { expr: doubled_count, alias: None , source_text: None },
         ],
@@ -295,15 +287,11 @@ fn test_cache_cleared_between_groups() {
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "category".to_string() },
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false)),
         ])),
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "category".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false)),
             direction: vibesql_ast::OrderDirection::Asc,
             nulls_order: None,
         }]),
@@ -355,14 +343,14 @@ fn test_distinct_aggregates_not_confused() {
     let count_val = vibesql_ast::Expression::AggregateFunction {
         name: "COUNT".to_string(),
         distinct: false,
-        args: vec![vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "val".to_string() }],
+        args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
         order_by: None,
     };
 
     let count_distinct_val = vibesql_ast::Expression::AggregateFunction {
         name: "COUNT".to_string(),
         distinct: true,
-        args: vec![vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "val".to_string() }],
+        args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
         order_by: None,
     };
 

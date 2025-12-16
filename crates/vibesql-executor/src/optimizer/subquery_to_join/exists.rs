@@ -231,10 +231,10 @@ fn try_convert_complex_exists_to_join(
         select_list: subquery_columns
             .iter()
             .map(|col| SelectItem::Expression {
-                expr: Expression::ColumnRef {
-                    schema: None,
-                    table: col.table.clone(),
-                    column: col.column.clone(),
+                expr: if let Some(ref t) = col.table {
+                    Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(t, false, &col.column, false))
+                } else {
+                    Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&col.column, false))
                 },
                 alias: Some(col.column.clone()), source_text: None })
             .collect(),
@@ -414,8 +414,8 @@ fn extract_subquery_column_from_correlation(
 /// Extract column reference from an expression
 fn extract_column_ref(expr: &Expression) -> Option<ColumnRef> {
     match expr {
-        Expression::ColumnRef { table, column, .. } => {
-            Some(ColumnRef { table: table.clone(), column: column.clone() })
+        Expression::ColumnRef(col_id) => {
+            Some(ColumnRef { table: col_id.table_canonical().map(|t| t.to_string()), column: col_id.column_canonical().to_string() })
         }
         _ => None,
     }
@@ -430,16 +430,14 @@ fn rewrite_join_condition_for_derived_table(
     alias: &str,
 ) -> Expression {
     match condition {
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
             // Check if this column is one of the subquery columns
             if subquery_columns.iter().any(|c| {
-                c.column == *column && (c.table.is_none() || c.table.as_ref() == table.as_ref())
+                c.column == column && (c.table.is_none() || c.table.as_deref() == table)
             }) {
-                Expression::ColumnRef {
-                    schema: None,
-                    table: Some(alias.to_string()),
-                    column: column.clone(),
-                }
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(alias, false, column, false))
             } else {
                 condition.clone()
             }

@@ -84,10 +84,10 @@ impl<'a> RowSelector<'a> {
     ) -> Option<Vec<vibesql_types::SqlValue>> {
         if let Expression::BinaryOp { left, op: BinaryOperator::Equal, right } = where_expr {
             // Check: column = literal
-            if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+            if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
                 (left.as_ref(), right.as_ref())
             {
-                if let Some(col_index) = schema.get_column_index(column) {
+                if let Some(col_index) = schema.get_column_index(col_id.column_canonical()) {
                     if col_index == pk_col_index {
                         return Some(vec![value.clone()]);
                     }
@@ -95,10 +95,10 @@ impl<'a> RowSelector<'a> {
             }
 
             // Check: literal = column
-            if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+            if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
                 (left.as_ref(), right.as_ref())
             {
-                if let Some(col_index) = schema.get_column_index(column) {
+                if let Some(col_index) = schema.get_column_index(col_id.column_canonical()) {
                     if col_index == pk_col_index {
                         return Some(vec![value.clone()]);
                     }
@@ -156,18 +156,18 @@ impl<'a> RowSelector<'a> {
             }
             Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
                 // Check: column = literal
-                if let (Expression::ColumnRef { column, .. }, Expression::Literal(value)) =
+                if let (Expression::ColumnRef(col_id), Expression::Literal(value)) =
                     (left.as_ref(), right.as_ref())
                 {
-                    if let Some(col_index) = schema.get_column_index(column) {
+                    if let Some(col_index) = schema.get_column_index(col_id.column_canonical()) {
                         equalities.insert(col_index, value.clone());
                     }
                 }
                 // Check: literal = column
-                else if let (Expression::Literal(value), Expression::ColumnRef { column, .. }) =
+                else if let (Expression::Literal(value), Expression::ColumnRef(col_id)) =
                     (left.as_ref(), right.as_ref())
                 {
-                    if let Some(col_index) = schema.get_column_index(column) {
+                    if let Some(col_index) = schema.get_column_index(col_id.column_canonical()) {
                         equalities.insert(col_index, value.clone());
                     }
                 }

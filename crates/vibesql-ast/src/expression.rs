@@ -2,6 +2,7 @@
 
 use vibesql_types::SqlValue;
 
+use crate::identifier::ColumnIdentifier;
 use crate::{BinaryOperator, OrderByItem, SelectStmt, UnaryOperator};
 
 /// SQL Expression (can appear in SELECT, WHERE, etc.)
@@ -27,11 +28,11 @@ pub enum Expression {
     NamedPlaceholder(String),
 
     /// Column reference (id, users.id, schema.table.column)
-    ColumnRef {
-        schema: Option<String>,
-        table: Option<String>,
-        column: String,
-    },
+    ///
+    /// Uses `ColumnIdentifier` for proper SQL:1999 case sensitivity handling:
+    /// - Unquoted identifiers are case-insensitive (fold to lowercase)
+    /// - Quoted identifiers are case-sensitive (preserve exact case)
+    ColumnRef(ColumnIdentifier),
 
     /// Binary operation (a + b, x = y, etc.)
     /// Note: AND/OR chains should use Conjunction/Disjunction for efficiency

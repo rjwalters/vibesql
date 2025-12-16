@@ -114,7 +114,7 @@ fn test_expression_analysis_single_table() {
     mapper.add_table("users", &schema);
 
     // Single column reference
-    let expr = Expression::ColumnRef { schema: None, table: Some("users".to_string()), column: "id".to_string() };
+    let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false));
 
     let analysis = mapper.analyze_expression(&expr);
     assert!(analysis.all_resolvable);
@@ -131,16 +131,8 @@ fn test_expression_analysis_two_tables() {
     // Binary operation: users.id = orders.user_id
     let expr = Expression::BinaryOp {
         op: vibesql_ast::BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("users".to_string()),
-            column: "id".to_string(),
-        }),
-        right: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("orders".to_string()),
-            column: "user_id".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
     };
 
     let analysis = mapper.analyze_expression(&expr);
@@ -154,7 +146,7 @@ fn test_expression_analysis_unresolvable() {
     let mapper = ExpressionMapper::new();
 
     // Try to reference non-existent column
-    let expr = Expression::ColumnRef { schema: None, table: Some("users".to_string()), column: "id".to_string() };
+    let expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false));
 
     let analysis = mapper.analyze_expression(&expr);
     assert!(!analysis.all_resolvable);
@@ -169,16 +161,8 @@ fn test_expression_refs_only_tables() {
 
     let expr = Expression::BinaryOp {
         op: vibesql_ast::BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("users".to_string()),
-            column: "id".to_string(),
-        }),
-        right: Box::new(Expression::ColumnRef {
-            schema: None,
-            table: Some("orders".to_string()),
-            column: "user_id".to_string(),
-        }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("orders", false, "user_id", false))),
     };
 
     let mut allowed = HashSet::new();

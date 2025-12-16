@@ -245,7 +245,7 @@ fn test_create_table_with_table_unique_constraint() {
 fn test_create_table_with_check_constraint() {
     let mut db = Database::new();
     let check_expr = Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
         op: vibesql_ast::BinaryOperator::GreaterThan,
         right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
     };

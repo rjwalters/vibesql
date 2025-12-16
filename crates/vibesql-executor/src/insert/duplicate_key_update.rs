@@ -165,10 +165,11 @@ fn evaluate_duplicate_key_expression(
                 })?;
             Ok(insert_values[column_idx].clone())
         }
-        vibesql_ast::Expression::ColumnRef { column, .. } => {
+        vibesql_ast::Expression::ColumnRef(col_id) => {
             // Column reference - get the value from existing row
+            let column = col_id.column_canonical();
             let column_idx =
-                schema.columns.iter().position(|col| col.name == *column).ok_or_else(|| {
+                schema.columns.iter().position(|col| col.name == column).ok_or_else(|| {
                     ExecutorError::UnsupportedExpression(format!("Column '{}' not found", column))
                 })?;
             Ok(existing_row_values[column_idx].clone())

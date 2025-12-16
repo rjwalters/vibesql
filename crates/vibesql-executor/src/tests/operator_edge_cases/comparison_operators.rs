@@ -36,11 +36,7 @@ fn test_nested_comparisons() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "val".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(10),
@@ -48,11 +44,7 @@ fn test_nested_comparisons() {
             }),
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "val".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(20),

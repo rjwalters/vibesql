@@ -37,7 +37,7 @@ fn test_update_with_subquery_multiple_rows_error() {
 
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "amount".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -115,10 +115,10 @@ fn test_update_with_subquery_multiple_columns_error() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "min_amt".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("min_amt", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "max_amt".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("max_amt", false)),
                 alias: None, source_text: None },
         ],
         into_table: None,

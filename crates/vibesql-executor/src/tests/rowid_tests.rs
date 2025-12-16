@@ -58,25 +58,13 @@ fn test_select_rowid() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "rowid".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "a".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "b".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
                 alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
@@ -137,11 +125,7 @@ fn test_select_underscore_rowid() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "_rowid_".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("_rowid_", false)),
             alias: None,
             source_text: None,
         }],
@@ -194,11 +178,7 @@ fn test_select_oid() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "oid".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("oid", false)),
             alias: None,
             source_text: None,
         }],
@@ -251,11 +231,7 @@ fn test_rowid_case_insensitive() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "ROWID".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("ROWID", false)),
             alias: None,
             source_text: None,
         }],
@@ -321,11 +297,7 @@ fn test_real_rowid_column_takes_precedence() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "rowid".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
             alias: None,
             source_text: None,
         }],
@@ -384,11 +356,7 @@ fn test_rowid_with_table_alias() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("t".to_string()),
-                column: "rowid".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t", false, "rowid", false)),
             alias: None,
             source_text: None,
         }],
@@ -447,20 +415,12 @@ fn test_explicit_rowid_preserved() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "rowid".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
                 alias: None,
                 source_text: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "x".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
                 alias: None,
                 source_text: None,
             },
@@ -539,20 +499,12 @@ fn test_mixed_explicit_and_auto_rowid() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "rowid".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rowid", false)),
                 alias: None,
                 source_text: None,
             },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "x".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
                 alias: None,
                 source_text: None,
             },

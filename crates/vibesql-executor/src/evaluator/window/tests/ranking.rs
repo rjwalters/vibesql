@@ -33,11 +33,7 @@ fn test_rank_with_ties() {
     let partition = Partition::new(make_test_rows(vec![95, 90, 90, 85]));
 
     let order_by = Some(vec![OrderByItem {
-        expr: Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: String::new(), // Will use first column
-        },
+        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("", false)),
         direction: OrderDirection::Desc,
         nulls_order: None,
     }]);
@@ -56,7 +52,7 @@ fn test_rank_no_ties() {
     let partition = Partition::new(make_test_rows(vec![4, 3, 2, 1]));
 
     let order_by = Some(vec![OrderByItem {
-        expr: Expression::ColumnRef { schema: None, table: None, column: String::new() },
+        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("", false)),
         direction: OrderDirection::Desc,
         nulls_order: None,
     }]);
@@ -92,7 +88,7 @@ fn test_dense_rank_with_ties() {
     let partition = Partition::new(make_test_rows(vec![95, 90, 90, 85]));
 
     let order_by = Some(vec![OrderByItem {
-        expr: Expression::ColumnRef { schema: None, table: None, column: String::new() },
+        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("", false)),
         direction: OrderDirection::Desc,
         nulls_order: None,
     }]);
@@ -113,7 +109,7 @@ fn test_dense_rank_multiple_tie_groups() {
     let partition = Partition::new(make_test_rows(vec![100, 90, 90, 80, 80, 80, 70]));
 
     let order_by = Some(vec![OrderByItem {
-        expr: Expression::ColumnRef { schema: None, table: None, column: String::new() },
+        expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("", false)),
         direction: OrderDirection::Desc,
         nulls_order: None,
     }]);

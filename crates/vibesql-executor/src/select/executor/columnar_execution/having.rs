@@ -123,9 +123,9 @@ fn evaluate_expr_on_result_row(
                 AggregateSource::CountStar
             } else if args.len() == 1 {
                 match &args[0] {
-                    Expression::ColumnRef { table, column, .. } => {
+                    Expression::ColumnRef(col_id) => {
                         if let Some(idx) =
-                            schema.get_column_index(table.as_deref(), column.as_str())
+                            schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
                         {
                             AggregateSource::Column(idx)
                         } else {
@@ -216,14 +216,14 @@ fn evaluate_expr_on_result_row(
         // Note: The result row has group columns first, then aggregate values.
         // The group columns are stored in GROUP BY clause order, which may not match
         // schema order. We fall back to row-based for this case as a temporary fix.
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
             // Column references in HAVING with GROUP BY require knowing the mapping
             // from GROUP BY expression order to result row positions. Since the columnar
             // path currently doesn't have this mapping, fall back to row-based execution.
             Err(ExecutorError::Other(format!(
                 "Column reference {}.{} in HAVING not supported in columnar path - falling back to row-based",
-                table.as_deref().unwrap_or(""),
-                column
+                col_id.table_canonical().unwrap_or(""),
+                col_id.column_canonical()
             )))
         }
 
@@ -466,9 +466,11 @@ fn sources_match(spec_source: &AggregateSource, having_source: &AggregateSource)
 fn expressions_equal(a: &Expression, b: &Expression) -> bool {
     match (a, b) {
         (
-            Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
-            Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
-        ) => t1 == t2 && c1 == c2,
+            Expression::ColumnRef(col_id1),
+            Expression::ColumnRef(col_id2),
+        ) if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() => {
+            col_id1.table_canonical() == col_id2.table_canonical() && col_id1.column_canonical() == col_id2.column_canonical()
+        }
         (
             Expression::BinaryOp { left: l1, op: o1, right: r1 },
             Expression::BinaryOp { left: l2, op: o2, right: r2 },

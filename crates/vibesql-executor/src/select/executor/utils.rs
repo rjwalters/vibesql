@@ -5,7 +5,7 @@ use super::builder::SelectExecutor;
 /// Check if an expression references a column (which requires FROM clause)
 fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef { .. } => true,
+        vibesql_ast::Expression::ColumnRef(_) => true,
         vibesql_ast::Expression::PseudoVariable { .. } => true, /* Pseudo-variables reference */
         // columns (OLD.x, NEW.x)
         vibesql_ast::Expression::Default => false, // DEFAULT doesn't reference columns

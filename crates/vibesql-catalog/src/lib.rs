@@ -8,7 +8,6 @@ mod column;
 mod domain;
 pub mod errors;
 mod foreign_key;
-mod identifier;
 mod index;
 mod privilege;
 mod schema;
@@ -27,7 +26,8 @@ pub use column::ColumnSchema;
 pub use domain::{DomainConstraintDef, DomainDefinition};
 pub use errors::CatalogError;
 pub use foreign_key::{ForeignKeyConstraint, ReferentialAction};
-pub use identifier::{ColumnIdentifier, Identifier, TableIdentifier};
+// Re-export identifiers from vibesql-ast
+pub use vibesql_ast::{ColumnIdentifier, Identifier, TableIdentifier};
 pub use index::{IndexMetadata, IndexType, IndexedColumn, SortOrder, VectorDistanceMetric};
 pub use privilege::PrivilegeGrant;
 pub use schema::Schema;

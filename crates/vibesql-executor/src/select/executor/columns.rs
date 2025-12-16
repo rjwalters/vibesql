@@ -197,25 +197,27 @@ fn derive_expression_name_impl(
     mode: ColumnNamingMode,
 ) -> String {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
+        vibesql_ast::Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
             match mode {
                 ColumnNamingMode::Full => {
                     // Use schema to get the full column name (table.column format)
                     // with original table name from schema, not the query alias
                     if let Some(s) = schema {
-                        s.get_full_column_name(table.as_deref(), column)
+                        s.get_full_column_name(table, column)
                     } else if let Some(t) = table {
                         format!("{}.{}", t, column)
                     } else {
-                        column.clone()
+                        column.to_string()
                     }
                 }
                 ColumnNamingMode::Short => {
                     // Use schema to get just the original column name (preserves case)
                     if let Some(s) = schema {
-                        s.get_original_column_name(table.as_deref(), column)
+                        s.get_original_column_name(table, column)
                     } else {
-                        column.clone()
+                        column.to_string()
                     }
                 }
                 ColumnNamingMode::Expression => {
@@ -223,11 +225,11 @@ fn derive_expression_name_impl(
                     if let Some(src) = source_text {
                         src.clone()
                     } else if let Some(s) = schema {
-                        s.get_full_column_name(table.as_deref(), column)
+                        s.get_full_column_name(table, column)
                     } else if let Some(t) = table {
                         format!("{}.{}", t, column)
                     } else {
-                        column.clone()
+                        column.to_string()
                     }
                 }
             }

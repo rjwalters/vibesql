@@ -173,7 +173,7 @@ fn test_update_unique_constraint_composite() {
             },
         ],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),

@@ -8,7 +8,7 @@ use vibesql_ast::{BinaryOperator, Expression};
 /// Compute the depth of an expression tree (used for sorting by complexity)
 pub(super) fn expression_depth(expr: &Expression) -> usize {
     match expr {
-        Expression::ColumnRef { .. } | Expression::Literal(_) => 1,
+        Expression::ColumnRef(_) | Expression::Literal(_) => 1,
         Expression::BinaryOp { left, right, .. } => {
             1 + expression_depth(left).max(expression_depth(right))
         }
@@ -30,10 +30,10 @@ pub(super) fn hash_expression(expr: &Expression) -> u64 {
 fn hash_expression_recursive<H: std::hash::Hasher>(expr: &Expression, hasher: &mut H) {
     use std::hash::Hash;
     match expr {
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
             "col".hash(hasher);
-            table.hash(hasher);
-            column.hash(hasher);
+            col_id.table_canonical().hash(hasher);
+            col_id.column_canonical().hash(hasher);
         }
         Expression::Literal(val) => {
             "lit".hash(hasher);

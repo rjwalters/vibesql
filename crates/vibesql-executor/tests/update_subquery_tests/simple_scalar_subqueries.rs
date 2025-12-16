@@ -53,7 +53,7 @@ fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_as
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: column_name.to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column_name.to_string(), false)),
             alias: None, source_text: None }],
         into_table: None,
         into_variables: None,
@@ -85,7 +85,7 @@ fn create_aggregate_subquery(
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
                 name: func_name.to_string(),
-                args: vec![Expression::ColumnRef { schema: None, table: None, column: column_name.to_string() }],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&column_name.to_string(), false))],
                 character_unit: None,
             },
             alias: None, source_text: None }],
@@ -355,7 +355,7 @@ fn test_update_with_subquery_and_where_clause() {
 
     let subquery = create_scalar_subquery("config", "max_salary");
     let where_clause = vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
         op: vibesql_ast::BinaryOperator::Equal,
         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     });

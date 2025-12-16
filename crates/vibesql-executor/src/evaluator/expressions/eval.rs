@@ -64,8 +64,8 @@ impl ExpressionEvaluator<'_> {
             )),
 
             // Column reference - look up column index and get value from row
-            vibesql_ast::Expression::ColumnRef { schema, table, column } => {
-                self.eval_column_ref(schema.as_deref(), table.as_deref(), column, row)
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                self.eval_column_ref(col_id.schema_canonical(), col_id.table_canonical(), col_id.column_canonical(), row)
             }
 
             // Binary operations

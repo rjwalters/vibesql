@@ -227,8 +227,8 @@ impl AggregateAnalysis {
     /// Extract table references from an expression
     fn extract_table_refs(expr: &Expression, tables: &mut HashSet<String>) {
         match expr {
-            Expression::ColumnRef { schema: None, table: Some(table), .. } => {
-                tables.insert(table.clone());
+            Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+                tables.insert(col_id.table_canonical().unwrap().to_string());
             }
             Expression::BinaryOp { left, right, .. } => {
                 Self::extract_table_refs(left, tables);
@@ -491,7 +491,7 @@ mod tests {
     use super::*;
 
     fn make_column_ref(table: &str, column: &str) -> Expression {
-        Expression::ColumnRef { schema: None, table: Some(table.to_string()), column: column.to_string() }
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(table, false, column, false))
     }
 
     fn make_aggregate(name: &str, arg: Expression) -> Expression {

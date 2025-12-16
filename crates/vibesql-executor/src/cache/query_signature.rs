@@ -315,10 +315,10 @@ impl QuerySignature {
             | Expression::NumberedPlaceholder(_)
             | Expression::NamedPlaceholder(_) => "LITERAL_PLACEHOLDER".hash(hasher),
 
-            Expression::ColumnRef { table, column, .. } => {
+            Expression::ColumnRef(col_id) => {
                 "COLUMN".hash(hasher);
-                table.hash(hasher);
-                column.hash(hasher);
+                col_id.table_canonical().hash(hasher);
+                col_id.column_canonical().hash(hasher);
             }
 
             Expression::PseudoVariable { pseudo_table, column } => {
@@ -1113,7 +1113,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -1125,7 +1125,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             group_by: None,
@@ -1142,7 +1142,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -1154,7 +1154,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             group_by: None,
@@ -1185,7 +1185,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -1197,7 +1197,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             group_by: None,
@@ -1214,7 +1214,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -1226,7 +1226,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::LessThan, // Different operator!
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(5))),
             }),
             group_by: None,

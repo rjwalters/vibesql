@@ -853,18 +853,18 @@ fn collect_equality_predicates_recursive(
         // Handle equality: col = value or value = col
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check col = literal
-            if let Expression::ColumnRef { column, .. } = left.as_ref() {
+            if let Expression::ColumnRef(col_id) = left.as_ref() {
                 if let Expression::Literal(value) = right.as_ref() {
                     if !matches!(value, vibesql_types::SqlValue::Null) {
-                        predicates.insert(column.to_uppercase(), value.clone());
+                        predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }
             // Check literal = col (reversed)
-            if let Expression::ColumnRef { column, .. } = right.as_ref() {
+            if let Expression::ColumnRef(col_id) = right.as_ref() {
                 if let Expression::Literal(value) = left.as_ref() {
                     if !matches!(value, vibesql_types::SqlValue::Null) {
-                        predicates.insert(column.to_uppercase(), value.clone());
+                        predicates.insert(col_id.column_canonical().to_uppercase(), value.clone());
                     }
                 }
             }

@@ -44,7 +44,8 @@ fn test_parse_count_column() {
                     assert!(!(*distinct));
                     assert_eq!(args.len(), 1);
                     match &args[0] {
-                        vibesql_ast::Expression::ColumnRef { column, .. } if column == "id" => {}
+                        vibesql_ast::Expression::ColumnRef(col_id)
+                            if col_id.column_canonical() == "id" => {}
                         _ => panic!("Expected column reference"),
                     }
                 }

@@ -23,7 +23,8 @@ fn test_double_equals_sqlite_compat() {
 
                 // Check left is 'id'
                 match *left {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "id");
                     }
                     _ => panic!("Expected ColumnRef for left"),
@@ -76,7 +77,9 @@ fn test_between_integer() {
 
                 // Check expr is 'age'
                 match *expr {
-                    vibesql_ast::Expression::ColumnRef { table, column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
                         assert_eq!(table, None);
                         assert_eq!(column, "age");
                     }
@@ -122,7 +125,9 @@ fn test_not_between() {
 
                 // Check expr is 'price'
                 match *expr {
-                    vibesql_ast::Expression::ColumnRef { table, column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
                         assert_eq!(table, None);
                         assert_eq!(column, "price");
                     }
@@ -152,7 +157,8 @@ fn test_between_with_expressions() {
 
                 // Verify expr is 'total'
                 match *expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "total");
                     }
                     _ => panic!("Expected ColumnRef"),
@@ -191,7 +197,8 @@ fn test_between_with_column_references() {
             vibesql_ast::Expression::Between { low, high, .. } => {
                 // Verify low is min_val
                 match *low {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "min_val");
                     }
                     _ => panic!("Expected ColumnRef for low"),
@@ -199,7 +206,8 @@ fn test_between_with_column_references() {
 
                 // Verify high is max_val
                 match *high {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "max_val");
                     }
                     _ => panic!("Expected ColumnRef for high"),
@@ -247,7 +255,8 @@ fn test_between_symmetric() {
 
                 // Check expr is 'x'
                 match *expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "x");
                     }
                     _ => panic!("Expected ColumnRef for expr"),

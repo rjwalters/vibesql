@@ -275,16 +275,10 @@ impl ToSql for Expression {
 
             Expression::NamedPlaceholder(name) => format!(":{}", name),
 
-            Expression::ColumnRef { schema, table, column } => match (schema, table) {
-                (Some(s), Some(t)) => format!(
-                    "{}.{}.{}",
-                    format_identifier(s),
-                    format_identifier(t),
-                    format_identifier(column)
-                ),
-                (None, Some(t)) => format!("{}.{}", format_identifier(t), format_identifier(column)),
-                _ => format_identifier(column),
-            },
+            Expression::ColumnRef(col_id) => {
+                // Use display form which preserves user's original input
+                col_id.display().to_string()
+            }
 
             Expression::BinaryOp { op, left, right } => {
                 let left_sql = left.to_sql();
@@ -1090,6 +1084,7 @@ impl ToSql for MixedGroupingItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ColumnIdentifier;
 
     #[test]
     fn test_binary_operators() {
@@ -1126,11 +1121,11 @@ mod tests {
 
     #[test]
     fn test_column_ref() {
-        let expr = Expression::ColumnRef { schema: None, table: None, column: "id".to_string() };
+        let expr = Expression::ColumnRef(ColumnIdentifier::simple("id", false));
         assert_eq!(expr.to_sql(), "id");
 
         let expr =
-            Expression::ColumnRef { schema: None, table: Some("users".to_string()), column: "name".to_string() };
+            Expression::ColumnRef(ColumnIdentifier::qualified("users", false, "name", false));
         assert_eq!(expr.to_sql(), "users.name");
     }
 
@@ -1138,7 +1133,7 @@ mod tests {
     fn test_binary_op() {
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("id", false))),
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         };
         assert_eq!(expr.to_sql(), "id = 1");
@@ -1150,7 +1145,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+                expr: Expression::ColumnRef(ColumnIdentifier::simple("id", false)),
                 alias: None,
                 source_text: None,
             }],
@@ -1181,12 +1176,12 @@ mod tests {
             distinct: false,
             select_list: vec![
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
+                    expr: Expression::ColumnRef(ColumnIdentifier::simple("id", false)),
                     alias: None,
                     source_text: None,
                 },
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+                    expr: Expression::ColumnRef(ColumnIdentifier::simple("name", false)),
                     alias: None,
                     source_text: None,
                 },
@@ -1201,7 +1196,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "active".to_string() }),
+                left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("active", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
             group_by: None,
@@ -1221,7 +1216,7 @@ mod tests {
             with_clause: None,
             distinct: true,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+                expr: Expression::ColumnRef(ColumnIdentifier::simple("name", false)),
                 alias: None,
                 source_text: None,
             }],
@@ -1237,7 +1232,7 @@ mod tests {
             group_by: None,
             having: None,
             order_by: Some(vec![OrderByItem {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
+                expr: Expression::ColumnRef(ColumnIdentifier::simple("name", false)),
                 direction: OrderDirection::Asc,
                 nulls_order: None,
             }]),
@@ -1267,16 +1262,8 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    schema: None,
-                    table: Some("o".to_string()),
-                    column: "customer_id".to_string(),
-                }),
-                right: Box::new(Expression::ColumnRef {
-                    schema: None,
-                    table: Some("c".to_string()),
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified("o", false, "customer_id", false))),
+                right: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified("c", false, "id", false))),
             }),
             using_columns: None,
             natural: false,
@@ -1290,7 +1277,7 @@ mod tests {
         let expr = Expression::AggregateFunction {
             name: "count".to_string(),
             distinct: true,
-            args: vec![Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }],
+            args: vec![Expression::ColumnRef(ColumnIdentifier::simple("id", false))],
             order_by: None,
         };
         assert_eq!(expr.to_sql(), "COUNT(DISTINCT id)");
@@ -1303,7 +1290,7 @@ mod tests {
             when_clauses: vec![CaseWhen {
                 conditions: vec![Expression::BinaryOp {
                     op: BinaryOperator::GreaterThan,
-                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
+                    left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("x", false))),
                     right: Box::new(Expression::Literal(SqlValue::Integer(0))),
                 }],
                 result: Expression::Literal(SqlValue::Varchar("positive".into())),
@@ -1318,7 +1305,7 @@ mod tests {
     #[test]
     fn test_in_list() {
         let expr = Expression::InList {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+            expr: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("id", false))),
             values: vec![
                 Expression::Literal(SqlValue::Integer(1)),
                 Expression::Literal(SqlValue::Integer(2)),
@@ -1332,7 +1319,7 @@ mod tests {
     #[test]
     fn test_between() {
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
+            expr: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("age", false))),
             low: Box::new(Expression::Literal(SqlValue::Integer(18))),
             high: Box::new(Expression::Literal(SqlValue::Integer(65))),
             negated: false,
@@ -1344,16 +1331,8 @@ mod tests {
     #[test]
     fn test_group_by_rollup() {
         let group_by = GroupByClause::Rollup(vec![
-            GroupingElement::Single(Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "year".to_string(),
-            }),
-            GroupingElement::Single(Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "month".to_string(),
-            }),
+            GroupingElement::Single(Expression::ColumnRef(ColumnIdentifier::simple("year", false))),
+            GroupingElement::Single(Expression::ColumnRef(ColumnIdentifier::simple("month", false))),
         ]);
         assert_eq!(group_by.to_sql(), "ROLLUP(year, month)");
     }
@@ -1363,13 +1342,9 @@ mod tests {
         let expr = Expression::WindowFunction {
             function: WindowFunctionSpec::Ranking { name: "row_number".to_string(), args: vec![] },
             over: WindowSpec {
-                partition_by: Some(vec![Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "dept".to_string(),
-                }]),
+                partition_by: Some(vec![Expression::ColumnRef(ColumnIdentifier::simple("dept", false))]),
                 order_by: Some(vec![OrderByItem {
-                    expr: Expression::ColumnRef { schema: None, table: None, column: "salary".to_string() },
+                    expr: Expression::ColumnRef(ColumnIdentifier::simple("salary", false)),
                     direction: OrderDirection::Desc,
                     nulls_order: None,
                 }]),

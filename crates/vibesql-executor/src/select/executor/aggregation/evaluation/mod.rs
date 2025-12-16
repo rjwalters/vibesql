@@ -88,7 +88,7 @@ impl SelectExecutor<'_> {
 
             // Truly simple expressions: Literal, ColumnRef (cannot contain aggregates)
             vibesql_ast::Expression::Literal(_)
-            | vibesql_ast::Expression::ColumnRef { .. }
+            | vibesql_ast::Expression::ColumnRef(_)
             | vibesql_ast::Expression::Wildcard
             | vibesql_ast::Expression::CurrentDate
             | vibesql_ast::Expression::CurrentTime { .. }
@@ -178,7 +178,7 @@ impl SelectExecutor<'_> {
                     } else {
                         // Try to extract column name from expression
                         match expr {
-                            vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+                            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
                             vibesql_ast::Expression::AggregateFunction { name, .. } => {
                                 name.to_lowercase()
                             }
@@ -206,7 +206,7 @@ impl SelectExecutor<'_> {
         // These come after the SELECT list columns
         for expr in group_by_exprs {
             let column_name = match expr {
-                vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+                vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
                 _ => format!("__group_by_{}", result_columns.len()),
             };
             result_columns.push(vibesql_catalog::ColumnSchema::new(
@@ -337,11 +337,7 @@ fn replace_aggregates_with_columns(
         for (i, agg) in order_by_aggregates.iter().enumerate() {
             if format!("{:?}", expr) == format!("{:?}", agg) {
                 // Replace with column reference to the hidden column
-                return Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: format!("__order_by_agg_{}", i),
-                };
+                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(&format!("__order_by_agg_{}", i), false));
             }
         }
     }
@@ -560,7 +556,7 @@ impl SelectExecutor<'_> {
             }
 
             // Column references - check if the column is rolled up
-            vibesql_ast::Expression::ColumnRef { .. } => {
+            vibesql_ast::Expression::ColumnRef(_) => {
                 if grouping_context.is_rolled_up(expr) == 1 {
                     return Ok(vibesql_types::SqlValue::Null);
                 }

@@ -8,11 +8,7 @@ use vibesql_types::{SqlValue, StringValue};
 #[test]
 fn test_case_expression_simple() {
     let expr = Expression::Case {
-        operand: Some(Box::new(Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "status".to_string(),
-        })),
+        operand: Some(Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false)))),
         when_clauses: vec![
             CaseWhen {
                 conditions: vec![Expression::Literal(SqlValue::Integer(1))],
@@ -40,7 +36,7 @@ fn test_case_expression_searched() {
         when_clauses: vec![CaseWhen {
             conditions: vec![Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }],
             result: Expression::Literal(SqlValue::Varchar(StringValue::from("adult"))),
@@ -65,7 +61,7 @@ fn test_scalar_subquery() {
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
                 name: "AVG".to_string(),
-                args: vec![Expression::ColumnRef { schema: None, table: None, column: "salary".to_string() }],
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },
             alias: None,
@@ -101,7 +97,7 @@ fn test_in_expression() {
             values: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
-            expr: Expression::ColumnRef { schema: None, table: None, column: "department_id".to_string() },
+            expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("department_id", false)),
             alias: None,
             source_text: None,
         }],
@@ -121,7 +117,7 @@ fn test_in_expression() {
     };
 
     let expr = Expression::In {
-        expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "dept_id".to_string() }),
+        expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("dept_id", false))),
         subquery: Box::new(subquery),
         negated: false,
     };
@@ -155,7 +151,7 @@ fn test_not_in_expression() {
     };
 
     let expr = Expression::In {
-        expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+        expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
         subquery: Box::new(subquery),
         negated: true,
     };

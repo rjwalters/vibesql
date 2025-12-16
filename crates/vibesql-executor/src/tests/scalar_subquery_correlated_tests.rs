@@ -87,11 +87,9 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
             expr: vibesql_ast::Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("J".to_string()),          // UPPERCASE alias
-                    column: "I_CURRENT_PRICE".to_string(), // UPPERCASE column - this was failing
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("J", false, "I_CURRENT_PRICE", false)
+                )],
                 order_by: None,
             },
             alias: None,
@@ -103,17 +101,13 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("J".to_string()),     // UPPERCASE alias
-                column: "I_CATEGORY".to_string(), // UPPERCASE column
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("J", false, "I_CATEGORY", false)
+            )),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("I".to_string()),     // UPPERCASE outer alias
-                column: "I_CATEGORY".to_string(), // UPPERCASE column
-            }),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::qualified("I", false, "I_CATEGORY", false)
+            )),
         }),
         group_by: None,
         having: None,
@@ -132,11 +126,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("I".to_string()),
-                column: "I_ITEM_SK".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("I", false, "I_ITEM_SK", false)),
             alias: None,
             source_text: None,
         }],
@@ -146,11 +136,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("I".to_string()),
-                column: "I_CURRENT_PRICE".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("I", false, "I_CURRENT_PRICE", false))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::ScalarSubquery(subquery)),
         }),
@@ -272,11 +258,7 @@ fn test_correlated_subquery_basic() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "salary".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },
             alias: None,
@@ -288,17 +270,9 @@ fn test_correlated_subquery_basic() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "department".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("department", false))),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "department".to_string(),
-            }),
+            right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("department", false))),
         }),
         group_by: None,
         having: None,
@@ -317,18 +291,10 @@ fn test_correlated_subquery_basic() {
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "name".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "salary".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false)),
                 alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
@@ -337,11 +303,7 @@ fn test_correlated_subquery_basic() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "salary".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::ScalarSubquery(subquery)),
         }),

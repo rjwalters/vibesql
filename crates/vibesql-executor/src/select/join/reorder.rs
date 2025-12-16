@@ -350,15 +350,16 @@ impl JoinOrderAnalyzer {
         tables: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         match expr {
-            Expression::ColumnRef { table, column, .. } => {
+            Expression::ColumnRef(col_id) => {
+                let column = col_id.column_canonical();
                 // If explicit table prefix exists, use it
-                if let Some(t) = table {
-                    return (Some(t.clone()), Some(column.clone()));
+                if let Some(t) = col_id.table_canonical() {
+                    return (Some(t.to_string()), Some(column.to_string()));
                 }
 
                 // Otherwise, infer table from column prefix
                 let inferred_table = self.infer_table_from_column(column, tables);
-                (inferred_table, Some(column.clone()))
+                (inferred_table, Some(column.to_string()))
             }
             Expression::Literal(_) => (None, None),
             _ => (None, None),

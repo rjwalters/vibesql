@@ -117,7 +117,10 @@ mod eliminate_unused_tables_tests {
     use super::super::eliminate_unused_tables;
 
     fn make_column_ref(table: Option<&str>, column: &str) -> Expression {
-        Expression::ColumnRef { schema: None, table: table.map(|t| t.to_string()), column: column.to_string() }
+        match table {
+            Some(t) => Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(t, false, column, false)),
+            None => Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(column, false)),
+        }
     }
 
     fn make_table(name: &str, alias: Option<&str>) -> FromClause {
@@ -515,14 +518,10 @@ mod helper_function_tests {
     fn collect_unqualified_columns_finds_refs() {
         let select_list = vec![
             SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false)),
                 alias: None, source_text: None },
             SelectItem::Expression {
-                expr: Expression::ColumnRef {
-                    schema: None,
-                    table: Some("t1".to_string()),
-                    column: "col2".to_string(),
-                },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "col2", false)),
                 alias: None, source_text: None },
         ];
         let result = collect_unqualified_columns(&select_list);
@@ -533,10 +532,10 @@ mod helper_function_tests {
     #[test]
     fn has_unqualified_column_ref_detects_unqualified() {
         let qualified =
-            Expression::ColumnRef { schema: None, table: Some("t1".to_string()), column: "col1".to_string() };
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("t1", false, "col1", false));
         assert!(!has_unqualified_column_ref(&qualified));
 
-        let unqualified = Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() };
+        let unqualified = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false));
         assert!(has_unqualified_column_ref(&unqualified));
     }
 }

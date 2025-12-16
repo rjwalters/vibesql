@@ -36,12 +36,12 @@ fn extract_column_names_from_select_list(select_list: &[SelectItem]) -> Vec<Stri
 /// Extract a column name from an expression (for schema inference)
 fn extract_column_name_from_expr(expr: &Expression) -> String {
     match expr {
-        Expression::ColumnRef { column, .. } => column.clone(),
+        Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
         Expression::AggregateFunction { name, args, .. } => {
             // For aggregates like SUM(col), use the column name if simple
             if args.len() == 1 {
-                if let Expression::ColumnRef { column, .. } = &args[0] {
-                    return column.clone();
+                if let Expression::ColumnRef(col_id) = &args[0] {
+                    return col_id.column_canonical().to_string();
                 }
             }
             name.clone()
@@ -375,17 +375,17 @@ fn qualify_columns(expr: &vibesql_ast::Expression, table_name: &str) -> vibesql_
     let table_name_lower = table_name.to_lowercase();
 
     match expr {
-        Expression::ColumnRef { schema: None, table: None, column, .. } => {
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
             // Add table qualifier to unqualified column
-            Expression::ColumnRef {
-                schema: None,
-                table: Some(table_name_lower.clone()),
-                column: column.clone(),
-            }
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&table_name_lower, false, col_id.column_canonical(), false))
         }
-        Expression::ColumnRef { schema: None, table: Some(t), column, .. } => {
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
             // Already qualified, keep as is
-            Expression::ColumnRef { schema: None, table: Some(t.clone()), column: column.clone() }
+            expr.clone()
+        }
+        Expression::ColumnRef(_) => {
+            // Schema-qualified or other cases, keep as is
+            expr.clone()
         }
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
             op: *op,

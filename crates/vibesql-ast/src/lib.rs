@@ -154,6 +154,7 @@ mod ddl;
 mod dml;
 mod expression;
 mod grant;
+mod identifier;
 mod introspection;
 mod operators;
 mod revoke;
@@ -203,3 +204,6 @@ pub use select::{
     SetOperation, SetOperator,
 };
 pub use statement::Statement;
+
+// SQL Identifiers with SQL:1999 case sensitivity handling
+pub use identifier::{ColumnIdentifier, Identifier, TableIdentifier};

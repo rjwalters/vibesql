@@ -380,7 +380,7 @@ fn evaluate_window_function_for_partition(
                         // COUNT(*) or COUNT(expr)
                         // Check if arg is the special "*" column reference
                         let arg_expr = if args.is_empty()
-                            || matches!(&args[0], Expression::ColumnRef { column, .. } if column == "*")
+                            || matches!(&args[0], Expression::ColumnRef(col_id) if col_id.column_canonical() == "*")
                         {
                             None // COUNT(*) should count all rows
                         } else {

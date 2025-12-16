@@ -135,21 +135,23 @@ fn collect_correlation_refs_from_expr(
     refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
 ) {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
+        vibesql_ast::Expression::ColumnRef(col_id) => {
+            let table = col_id.table_canonical();
+            let column = col_id.column_canonical();
             // Check if this column reference belongs to the outer schema
             if let Some(table_name) = table {
                 let table_lower = table_name.to_lowercase();
                 if !subquery_tables.iter().any(|t| t.to_lowercase() == table_lower) {
                     // Not in subquery's tables, check if in outer schema
                     if outer_schema.get_column_index(Some(table_name), column).is_some() {
-                        refs.insert((Some(table_name.clone()), column.clone()));
+                        refs.insert((Some(table_name.to_string()), column.to_string()));
                     }
                 }
             } else if !subquery_tables.is_empty() {
                 // Unqualified reference - check if it's in outer schema but not in subquery tables
                 // This is conservative: we only add it if we're sure it's external
                 if outer_schema.get_column_index(None, column).is_some() {
-                    refs.insert((None, column.clone()));
+                    refs.insert((None, column.to_string()));
                 }
             }
         }

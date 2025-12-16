@@ -472,13 +472,13 @@ mod tests {
         // Build: col0 < 10 OR col1 > 20
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             op: BinaryOperator::Or,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(20))),
             }),

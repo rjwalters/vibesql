@@ -31,7 +31,7 @@ fn test_delete_no_matching_rows() {
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
@@ -75,11 +75,7 @@ fn test_delete_column_not_found() {
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "nonexistent_column".to_string(),
-            }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("nonexistent_column", false))),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),

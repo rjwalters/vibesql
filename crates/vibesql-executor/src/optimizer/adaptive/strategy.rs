@@ -364,17 +364,9 @@ mod tests {
                     name: "SUM".to_string(),
                     distinct: false,
                     args: vec![Expression::BinaryOp {
-                        left: Box::new(Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "price".to_string(),
-                        }),
+                        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                         op: BinaryOperator::Multiply,
-                        right: Box::new(Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "quantity".to_string(),
-                        }),
+                        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
                     }],
                     order_by: None,
                 },
@@ -461,11 +453,7 @@ mod tests {
     #[test]
     fn test_row_oriented_for_group_by_when_native_disabled() {
         let mut stmt = make_aggregate_query("orders");
-        stmt.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "region".to_string(),
-        }]));
+        stmt.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false))]));
 
         // With native disabled, GROUP BY queries fall back to row-oriented
         // (StandardColumnar doesn't support GROUP BY)
@@ -479,11 +467,7 @@ mod tests {
     #[test]
     fn test_native_columnar_for_group_by_when_enabled() {
         let mut stmt = make_aggregate_query("orders");
-        stmt.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef {
-            schema: None,
-            table: None,
-            column: "region".to_string(),
-        }]));
+        stmt.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("region", false))]));
 
         // With native enabled, GROUP BY queries can use NativeColumnar
         let cte_results = HashMap::new();

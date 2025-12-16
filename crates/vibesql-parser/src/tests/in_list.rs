@@ -18,7 +18,7 @@ fn test_parse_in_with_integer_list() {
             &select.where_clause.unwrap()
         {
             // Left side should be column reference
-            assert!(matches!(**expr, vibesql_ast::Expression::ColumnRef { .. }));
+            assert!(matches!(**expr, vibesql_ast::Expression::ColumnRef(_)));
 
             // Should have 3 values
             assert_eq!(values.len(), 3);

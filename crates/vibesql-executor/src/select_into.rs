@@ -122,7 +122,9 @@ impl SelectIntoExecutor {
         _database: &Database,
     ) -> Result<String, ExecutorError> {
         match expr {
-            vibesql_ast::Expression::ColumnRef { column, .. } => Ok(column.clone()),
+            vibesql_ast::Expression::ColumnRef(col_id) => {
+                Ok(col_id.column_canonical().to_string())
+            }
             vibesql_ast::Expression::Literal(_) => Ok("column".to_string()),
             vibesql_ast::Expression::BinaryOp { .. } => Ok("expr".to_string()),
             vibesql_ast::Expression::UnaryOp { .. } => Ok("expr".to_string()),

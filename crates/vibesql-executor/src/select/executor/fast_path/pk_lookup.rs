@@ -211,7 +211,7 @@ impl SelectExecutor<'_> {
         // Verify ORDER BY is on the last PK column
         let last_pk_col = pk_columns.last().unwrap();
         let order_col = match &order_by[0].expr {
-            Expression::ColumnRef { column, .. } => column.as_str(),
+            Expression::ColumnRef(col_id) => col_id.column_canonical(),
             _ => return Ok(None),
         };
 

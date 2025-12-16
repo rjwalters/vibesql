@@ -115,15 +115,17 @@ impl SelectExecutor<'_> {
         schema: &CombinedSchema,
     ) -> Result<(), ExecutorError> {
         match expr {
-            Expression::ColumnRef { table, column, .. } => {
-                if schema.get_column_index(table.as_deref(), column).is_none() {
+            Expression::ColumnRef(col_id) => {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
+                if schema.get_column_index(table, column).is_none() {
                     // SQLite compatibility: Allow ROWID pseudo-column references
                     // Only if there's no actual column with that name (real columns take precedence)
                     let lower = column.to_lowercase();
                     let is_rowid_alias = lower == "rowid" || lower == "_rowid_" || lower == "oid";
                     if is_rowid_alias {
                         // Verify the qualifier matches a table in the schema (if qualified)
-                        if let Some(ref qualifier) = table {
+                        if let Some(qualifier) = table {
                             let qualifier_lower = qualifier.to_lowercase();
                             let table_exists = schema
                                 .table_schemas
@@ -147,8 +149,8 @@ impl SelectExecutor<'_> {
                         .flat_map(|(_, s)| s.columns.iter().map(|c| c.name.clone()))
                         .collect();
                     return Err(ExecutorError::ColumnNotFound {
-                        column_name: column.clone(),
-                        table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                        column_name: column.to_string(),
+                        table_name: table.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
                         searched_tables: schema.table_names(),
                         available_columns,
                     });
@@ -191,14 +193,18 @@ impl SelectExecutor<'_> {
 
         for item in order_by {
             let col_idx = match &item.expr {
-                Expression::ColumnRef { table, column, .. } => schema
-                    .get_column_index(table.as_deref(), column)
-                    .ok_or_else(|| ExecutorError::ColumnNotFound {
-                        column_name: column.clone(),
-                        table_name: table.clone().unwrap_or_default(),
-                        searched_tables: schema.table_names(),
-                        available_columns: vec![],
-                    })?,
+                Expression::ColumnRef(col_id) => {
+                    let table = col_id.table_canonical();
+                    let column = col_id.column_canonical();
+                    schema
+                        .get_column_index(table, column)
+                        .ok_or_else(|| ExecutorError::ColumnNotFound {
+                            column_name: column.to_string(),
+                            table_name: table.map(|t| t.to_string()).unwrap_or_default(),
+                            searched_tables: schema.table_names(),
+                            available_columns: vec![],
+                        })?
+                }
                 _ => {
                     return Err(ExecutorError::Other(
                         "Fast path ORDER BY requires simple column references".to_string(),
@@ -329,15 +335,15 @@ impl SelectExecutor<'_> {
         right: &Expression,
     ) -> Option<(String, SqlValue)> {
         // Try left = column, right = literal
-        if let Expression::ColumnRef { column, .. } = left {
+        if let Expression::ColumnRef(col_id) = left {
             if let Some(value) = self.literal_to_value(right) {
-                return Some((column.clone(), value));
+                return Some((col_id.column_canonical().to_string(), value));
             }
         }
         // Try left = literal, right = column
-        if let Expression::ColumnRef { column, .. } = right {
+        if let Expression::ColumnRef(col_id) = right {
             if let Some(value) = self.literal_to_value(left) {
-                return Some((column.clone(), value));
+                return Some((col_id.column_canonical().to_string(), value));
             }
         }
         None
@@ -392,8 +398,8 @@ impl SelectExecutor<'_> {
                     return None; // NOT IN is not a contradiction detector
                 }
                 // Check if the IN expression is for our target column
-                if let Expression::ColumnRef { column, .. } = col_expr.as_ref() {
-                    if column.eq_ignore_ascii_case(column_name) {
+                if let Expression::ColumnRef(col_id) = col_expr.as_ref() {
+                    if col_id.column_canonical().eq_ignore_ascii_case(column_name) {
                         // Extract all literal values from the IN list
                         let mut result = Vec::new();
                         for v in values {
@@ -430,8 +436,8 @@ impl SelectExecutor<'_> {
 
         for item in select_list {
             match item {
-                SelectItem::Expression { expr: Expression::ColumnRef { column, .. }, .. } => {
-                    columns.push(column.clone());
+                SelectItem::Expression { expr: Expression::ColumnRef(col_id), .. } => {
+                    columns.push(col_id.column_canonical().to_string());
                 }
                 // Wildcards or complex expressions can't use covering scan
                 _ => return None,
@@ -462,13 +468,13 @@ impl SelectExecutor<'_> {
         for item in select_list {
             match item {
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { column, .. }, ..
+                    expr: Expression::ColumnRef(col_id), ..
                 } => {
                     // Find column index by name (case-insensitive)
                     let idx = table_schema
                         .columns
                         .iter()
-                        .position(|c| c.name.eq_ignore_ascii_case(column))?;
+                        .position(|c| c.name.eq_ignore_ascii_case(col_id.column_canonical()))?;
                     indices.push(idx);
                 }
                 _ => return None, // Not a simple column reference
@@ -514,8 +520,8 @@ impl SelectExecutor<'_> {
                 if *negated {
                     return None;
                 }
-                if let Expression::ColumnRef { column, .. } = col_expr.as_ref() {
-                    if column.eq_ignore_ascii_case(target_column) {
+                if let Expression::ColumnRef(col_id) = col_expr.as_ref() {
+                    if col_id.column_canonical().eq_ignore_ascii_case(target_column) {
                         let low_val = self.literal_to_value(low)?;
                         let high_val = self.literal_to_value(high)?;
                         return Some((low_val, high_val));

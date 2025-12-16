@@ -46,28 +46,32 @@ fn extract_tables_recursive_branch(
     tables: &mut HashSet<String>,
 ) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef { schema: None, table: Some(table_name), .. } => {
-            let normalized = table_name.to_lowercase();
-            if schema.contains_table(&normalized) {
-                tables.insert(normalized);
-                true
-            } else {
-                // Table qualification not in schema - treat as complex predicate
-                false
-            }
-        }
-        vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } => {
-            // Unqualified column reference - need to resolve it to table(s)
-            // Search all tables in the schema to find which contain this column
-            let column_lower = column.to_lowercase();
-            let mut found = false;
-            for (table_name, (_start_idx, table_schema)) in &schema.table_schemas {
-                if table_schema.columns.iter().any(|col| col.name.to_lowercase() == column_lower) {
-                    tables.insert(table_name.to_string());
-                    found = true;
+        vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() => {
+            match col_id.table_canonical() {
+                Some(table_name) => {
+                    let normalized = table_name.to_lowercase();
+                    if schema.contains_table(&normalized) {
+                        tables.insert(normalized);
+                        true
+                    } else {
+                        // Table qualification not in schema - treat as complex predicate
+                        false
+                    }
+                }
+                None => {
+                    // Unqualified column reference - need to resolve it to table(s)
+                    // Search all tables in the schema to find which contain this column
+                    let column_lower = col_id.column_canonical().to_lowercase();
+                    let mut found = false;
+                    for (table_name, (_start_idx, table_schema)) in &schema.table_schemas {
+                        if table_schema.columns.iter().any(|col| col.name.to_lowercase() == column_lower) {
+                            tables.insert(table_name.to_string());
+                            found = true;
+                        }
+                    }
+                    found // Return true if column found in at least one table
                 }
             }
-            found // Return true if column found in at least one table
         }
         vibesql_ast::Expression::BinaryOp { left, op: _, right } => {
             extract_tables_recursive_branch(left, schema, tables)
@@ -186,11 +190,11 @@ fn extract_column_reference_branch(
     schema: &CombinedSchema,
 ) -> Option<(String, String)> {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
-            if let Some(table_name) = table {
+        vibesql_ast::Expression::ColumnRef(col_id) => {
+            if let Some(table_name) = col_id.table_canonical() {
                 let normalized_table = table_name.to_lowercase();
                 if schema.contains_table(&normalized_table) {
-                    return Some((normalized_table, column.to_lowercase()));
+                    return Some((normalized_table, col_id.column_canonical().to_lowercase()));
                 }
             }
             None

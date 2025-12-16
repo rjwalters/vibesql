@@ -181,11 +181,7 @@ pub fn create_check_price_table(db: &mut vibesql_storage::Database, nullable_pri
         vec![(
             "price_positive".to_string(),
             vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "price".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                 op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(0),
@@ -225,11 +221,7 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
             (
                 "price_positive".to_string(),
                 vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "price".to_string(),
-                    }),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),
                     op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
                     right: Box::new(vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Integer(0),
@@ -239,11 +231,7 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
             (
                 "quantity_positive".to_string(),
                 vibesql_ast::Expression::BinaryOp {
-                    left: Box::new(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "quantity".to_string(),
-                    }),
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("quantity", false))),
                     op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
                     right: Box::new(vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Integer(0),
@@ -283,17 +271,9 @@ pub fn create_check_comparison_table(db: &mut vibesql_storage::Database) {
         vec![(
             "bonus_less_than_salary".to_string(),
             vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "bonus".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("bonus", false))),
                 op: vibesql_ast::BinaryOperator::LessThan,
-                right: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "salary".to_string(),
-                }),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))),
             },
         )],
         Vec::new(),

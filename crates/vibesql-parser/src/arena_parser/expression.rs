@@ -491,6 +491,9 @@ impl<'arena> ArenaParser<'arena> {
                                 schema: Some(name_sym),
                                 table: Some(second_sym),
                                 column: third_sym,
+                                schema_quoted: false,
+                                table_quoted: false,
+                                column_quoted: false,
                             });
                         } else if matches!(self.peek(), Token::Symbol('*')) {
                             // schema.table.* - not supported, treat as error
@@ -504,6 +507,9 @@ impl<'arena> ArenaParser<'arena> {
                         schema: None,
                         table: Some(name_sym),
                         column: second_sym,
+                        schema_quoted: false,
+                        table_quoted: false,
+                        column_quoted: false,
                     });
                 } else if matches!(self.peek(), Token::Symbol('*')) {
                     self.advance();
@@ -511,7 +517,14 @@ impl<'arena> ArenaParser<'arena> {
                 }
             }
 
-            return Ok(Expression::ColumnRef { schema: None, table: None, column: name_sym });
+            return Ok(Expression::ColumnRef {
+                schema: None,
+                table: None,
+                column: name_sym,
+                schema_quoted: false,
+                table_quoted: false,
+                column_quoted: false,
+            });
         }
 
         // Wildcard (*)
@@ -617,6 +630,9 @@ impl<'arena> ArenaParser<'arena> {
                             schema: None,
                             table: None,
                             column: self.interner.intern("DATE"),
+                            schema_quoted: false,
+                            table_quoted: false,
+                            column_quoted: false,
                         })
                     }
                 }
@@ -642,6 +658,9 @@ impl<'arena> ArenaParser<'arena> {
                             schema: None,
                             table: None,
                             column: self.interner.intern("TIME"),
+                            schema_quoted: false,
+                            table_quoted: false,
+                            column_quoted: false,
                         })
                     }
                 }
@@ -669,6 +688,9 @@ impl<'arena> ArenaParser<'arena> {
                             schema: None,
                             table: None,
                             column: self.interner.intern("TIMESTAMP"),
+                            schema_quoted: false,
+                            table_quoted: false,
+                            column_quoted: false,
                         })
                     }
                 }

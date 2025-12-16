@@ -9,7 +9,7 @@ use super::utils::resolve_column_with_fallback;
 /// Check if an expression contains any column reference (for CTE fallback)
 fn expr_has_column(expr: &Expression) -> bool {
     match expr {
-        Expression::ColumnRef { .. } => true,
+        Expression::ColumnRef(_) => true,
         Expression::BinaryOp { left, right, .. } => expr_has_column(left) || expr_has_column(right),
         Expression::UnaryOp { expr: inner, .. } => expr_has_column(inner),
         _ => false,
@@ -86,18 +86,26 @@ pub(super) fn extract_in_predicates_from_or(
         table_set: &HashSet<String>,
     ) -> Option<(String, String, vibesql_types::SqlValue)> {
         if let Expression::BinaryOp { op: BinaryOperator::Equal, left, right } = pred {
-            if let (Expression::ColumnRef { schema: None, table: Some(t), column: c, .. }, Expression::Literal(v)) =
+            if let (Expression::ColumnRef(col_id), Expression::Literal(v)) =
                 (left.as_ref(), right.as_ref())
             {
-                if table_set.contains(&t.to_lowercase()) {
-                    return Some((t.clone(), c.clone(), v.clone()));
+                if col_id.schema_canonical().is_none() {
+                    if let Some(t) = col_id.table_canonical() {
+                        if table_set.contains(&t.to_lowercase()) {
+                            return Some((t.to_string(), col_id.column_canonical().to_string(), v.clone()));
+                        }
+                    }
                 }
             }
-            if let (Expression::Literal(v), Expression::ColumnRef { schema: None, table: Some(t), column: c, .. }) =
+            if let (Expression::Literal(v), Expression::ColumnRef(col_id)) =
                 (left.as_ref(), right.as_ref())
             {
-                if table_set.contains(&t.to_lowercase()) {
-                    return Some((t.clone(), c.clone(), v.clone()));
+                if col_id.schema_canonical().is_none() {
+                    if let Some(t) = col_id.table_canonical() {
+                        if table_set.contains(&t.to_lowercase()) {
+                            return Some((t.to_string(), col_id.column_canonical().to_string(), v.clone()));
+                        }
+                    }
                 }
             }
         }
@@ -133,11 +141,7 @@ pub(super) fn extract_in_predicates_from_or(
         for ((t, c), vals) in col_vals {
             if col_count.get(&(t.clone(), c.clone())) == Some(&branches.len()) && vals.len() >= 2 {
                 let in_pred = Expression::InList {
-                    expr: Box::new(Expression::ColumnRef {
-                        schema: None,
-                        table: Some(t.clone()),
-                        column: c.clone(),
-                    }),
+                    expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(&t, false, &c, false))),
                     values: vals.into_iter().map(Expression::Literal).collect(),
                     negated: false,
                 };
@@ -432,16 +436,20 @@ pub(super) fn extract_where_equijoins_with_schema(
                 // Use schema-based lookup
 
                 let left_table = match left.as_ref() {
-                    Expression::ColumnRef { schema: None, table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { schema: None, table: None, column, .. } => {
-                        resolve_column_with_fallback(column, column_to_table)
+                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+                        Some(col_id.table_canonical().unwrap().to_lowercase())
+                    }
+                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+                        resolve_column_with_fallback(col_id.column_canonical(), column_to_table)
                     }
                     _ => None,
                 };
                 let right_table = match right.as_ref() {
-                    Expression::ColumnRef { schema: None, table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { schema: None, table: None, column, .. } => {
-                        resolve_column_with_fallback(column, column_to_table)
+                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_some() => {
+                        Some(col_id.table_canonical().unwrap().to_lowercase())
+                    }
+                    Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+                        resolve_column_with_fallback(col_id.column_canonical(), column_to_table)
                     }
                     _ => None,
                 };

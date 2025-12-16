@@ -17,7 +17,8 @@ fn test_parse_select_with_backtick_column_names() {
                 vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
                     assert!(alias.is_none());
                     match expr {
-                        vibesql_ast::Expression::ColumnRef { column, .. } => {
+                        vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                             // Backtick identifiers preserve case
                             assert_eq!(column, "user_id");
                         }
@@ -64,9 +65,11 @@ fn test_parse_select_with_backtick_qualified_column() {
             assert_eq!(select.select_list.len(), 1);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, table, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+                        let column = col_id.column_canonical();
+                        let table = col_id.table_canonical();
                         assert_eq!(column, "my_column");
-                        assert_eq!(table.as_ref().unwrap(), "my_table");
+                        assert_eq!(table.unwrap(), "my_table");
                     }
                     _ => panic!("Expected qualified ColumnRef"),
                 },
@@ -89,7 +92,8 @@ fn test_parse_select_with_backtick_reserved_words() {
             assert_eq!(select.select_list.len(), 2);
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "select");
                     }
                     _ => panic!("Expected ColumnRef"),
@@ -120,7 +124,8 @@ fn test_parse_select_mixed_backtick_and_regular() {
             // First column (regular identifier - uppercased)
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "id");
                     }
                     _ => panic!("Expected ColumnRef"),
@@ -130,7 +135,8 @@ fn test_parse_select_mixed_backtick_and_regular() {
             // Second column (backtick - preserves case)
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } => {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
                         assert_eq!(column, "userName");
                     }
                     _ => panic!("Expected ColumnRef"),

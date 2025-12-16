@@ -141,17 +141,24 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_tag!(writer, ExprTag::Literal);
             write_sql_value(writer, value)?;
         }
-        Expression::ColumnRef { schema, table, column } => {
+        Expression::ColumnRef(col_id) => {
             write_tag!(writer, ExprTag::ColumnRef);
-            write_bool(writer, schema.is_some())?;
-            if let Some(s) = schema {
+            // Write schema (optional)
+            write_bool(writer, col_id.schema_display().is_some())?;
+            if let Some(s) = col_id.schema_display() {
                 write_string(writer, s)?;
             }
-            write_bool(writer, table.is_some())?;
-            if let Some(t) = table {
+            // Write table (optional)
+            write_bool(writer, col_id.table_display().is_some())?;
+            if let Some(t) = col_id.table_display() {
                 write_string(writer, t)?;
             }
-            write_string(writer, column)?;
+            // Write column (always present)
+            write_string(writer, col_id.column_display())?;
+            // Write quoted flags
+            write_bool(writer, col_id.is_schema_quoted())?;
+            write_bool(writer, col_id.is_table_quoted())?;
+            write_bool(writer, col_id.is_column_quoted())?;
         }
         Expression::BinaryOp { op, left, right } => {
             write_tag!(writer, ExprTag::BinaryOp);
@@ -439,7 +446,20 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let has_table = read_bool(reader)?;
             let table = if has_table { Some(read_string(reader)?) } else { None };
             let column = read_string(reader)?;
-            Ok(Expression::ColumnRef { schema, table, column })
+            let schema_quoted = read_bool(reader)?;
+            let table_quoted = read_bool(reader)?;
+            let column_quoted = read_bool(reader)?;
+            // Construct ColumnIdentifier based on qualification level
+            let col_id = match (schema, table) {
+                (Some(s), Some(t)) => vibesql_ast::ColumnIdentifier::fully_qualified(
+                    &s, schema_quoted, &t, table_quoted, &column, column_quoted,
+                ),
+                (None, Some(t)) => vibesql_ast::ColumnIdentifier::qualified(
+                    &t, table_quoted, &column, column_quoted,
+                ),
+                (_, None) => vibesql_ast::ColumnIdentifier::simple(&column, column_quoted),
+            };
+            Ok(Expression::ColumnRef(col_id))
         }
         ExprTag::BinaryOp => {
             let op = read_binary_operator(reader)?;
@@ -693,7 +713,7 @@ mod tests {
     #[test]
     fn test_column_ref_roundtrip() {
         let expr =
-            Expression::ColumnRef { schema: None, table: Some("users".to_string()), column: "id".to_string() };
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false));
         let mut buf = Vec::new();
         write_expression(&mut buf, &expr).unwrap();
 

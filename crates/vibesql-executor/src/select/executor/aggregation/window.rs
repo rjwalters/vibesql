@@ -144,11 +144,7 @@ pub(super) fn apply_window_functions_to_aggregates(
             let arg_col_idx = win_func.select_index;
 
             // Create an expression that references this column
-            let arg_expr = Expression::ColumnRef {
-                schema: None,
-                table: Some("result".to_string()),
-                column: format!("col{}", arg_col_idx),
-            };
+            let arg_expr = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("result", false, &format!("col{}", arg_col_idx), false));
 
             // Evaluate the window function for each row in the partition
             for row_idx in 0..partition.len() {
@@ -227,22 +223,14 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
             // Check if expressions match
             if expressions_match(expr, select_expr) {
                 let col_name = alias.clone().unwrap_or_else(|| format!("col{}", idx));
-                return Expression::ColumnRef {
-                    schema: None,
-                    table: Some("result".to_string()),
-                    column: col_name,
-                };
+                return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("result", false, &col_name, false));
             }
 
             // Also check if expr matches an alias
             if let Some(alias) = alias {
-                if let Expression::ColumnRef { column, table: None, .. } = expr {
-                    if column.eq_ignore_ascii_case(alias) {
-                        return Expression::ColumnRef {
-                            schema: None,
-                            table: Some("result".to_string()),
-                            column: alias.clone(),
-                        };
+                if let Expression::ColumnRef(col_id) = expr {
+                    if col_id.table_canonical().is_none() && col_id.column_canonical().eq_ignore_ascii_case(alias) {
+                        return Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("result", false, alias, false));
                     }
                 }
             }

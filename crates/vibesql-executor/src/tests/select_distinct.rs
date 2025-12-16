@@ -69,11 +69,7 @@ fn test_distinct_removes_duplicate_rows() {
             values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "category".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false)),
             alias: None,
             source_text: None,
         }],
@@ -184,18 +180,10 @@ fn test_distinct_with_multiple_columns() {
         distinct: true,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "customer_id".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("customer_id", false)),
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "status".to_string(),
-                },
+                expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("status", false)),
                 alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
@@ -282,11 +270,7 @@ fn test_distinct_with_null_values() {
             values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "description".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("description", false)),
             alias: None,
             source_text: None,
         }],
@@ -438,7 +422,7 @@ fn test_distinct_with_where_clause() {
             values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "role".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("role", false)),
             alias: None,
             source_text: None,
         }],
@@ -448,11 +432,7 @@ fn test_distinct_with_where_clause() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "id".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
         }),
@@ -535,11 +515,7 @@ fn test_distinct_with_order_by() {
             values: None,
         distinct: true,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "category".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false)),
             alias: None,
             source_text: None,
         }],
@@ -552,11 +528,7 @@ fn test_distinct_with_order_by() {
         group_by: None,
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "category".to_string(),
-            },
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("category", false)),
             direction: vibesql_ast::OrderDirection::Asc,
             nulls_order: None,
         }]),

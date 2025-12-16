@@ -34,7 +34,7 @@ mod evaluator_tests {
 
         // Should resolve inner_col from inner row
         let expr =
-            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "inner_col".to_string() };
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("inner_col", false));
 
         let result = evaluator.eval(&expr, &inner_row).unwrap();
         assert_eq!(result, SqlValue::Integer(42));
@@ -62,7 +62,7 @@ mod evaluator_tests {
 
         // Should resolve outer_col from outer row (not in inner schema)
         let expr =
-            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "outer_col".to_string() };
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("outer_col", false));
 
         let result = evaluator.eval(&expr, &inner_row).unwrap();
         assert_eq!(result, SqlValue::Integer(100));
@@ -87,7 +87,7 @@ mod evaluator_tests {
         let evaluator =
             ExpressionEvaluator::with_outer_context(&inner_schema, &outer_row, &outer_schema);
 
-        let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "col".to_string() };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col", false));
 
         let result = evaluator.eval(&expr, &inner_row).unwrap();
         // Should get inner value (42), not outer (999)
@@ -114,7 +114,7 @@ mod evaluator_tests {
 
         // Try to resolve non-existent column
         let expr =
-            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "nonexistent".to_string() };
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("nonexistent", false));
 
         let result = evaluator.eval(&expr, &inner_row);
         assert!(matches!(result, Err(ExecutorError::ColumnNotFound { .. })));
@@ -131,7 +131,7 @@ mod evaluator_tests {
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = vibesql_storage::Row::new(vec![SqlValue::Integer(42)]);
 
-        let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "col".to_string() };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col", false));
 
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Integer(42));
@@ -171,7 +171,7 @@ mod evaluator_tests {
             ExpressionEvaluator::with_outer_context(&inner_schema, &outer_row, &outer_schema);
 
         // Try to resolve non-existent column
-        let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "email".to_string() };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("email", false));
 
         let result = evaluator.eval(&expr, &inner_row);
 
@@ -227,11 +227,7 @@ mod evaluator_tests {
         let row = vibesql_storage::Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(99)]);
 
         // Try to resolve with table qualifier
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("products".to_string()),
-            column: "description".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("products", false, "description", false));
 
         let result = evaluator.eval(&expr, &row);
 
@@ -274,11 +270,7 @@ mod evaluator_tests {
         ]);
 
         // Column reference with correct table qualifier
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("users".to_string()),
-            column: "name".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "name", false));
 
         let result = evaluator.eval(&expr, &row);
         assert_eq!(result, Ok(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))));
@@ -296,11 +288,7 @@ mod evaluator_tests {
         let row = vibesql_storage::Row::new(vec![SqlValue::Integer(99)]);
 
         // Use different case for table qualifier
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("PRODUCTS".to_string()),
-            column: "id".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("PRODUCTS", false, "id", false));
 
         let result = evaluator.eval(&expr, &row);
         assert_eq!(result, Ok(SqlValue::Integer(99)));
@@ -318,11 +306,7 @@ mod evaluator_tests {
         let row = vibesql_storage::Row::new(vec![SqlValue::Integer(42)]);
 
         // Column reference with wrong table qualifier
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("products".to_string()),
-            column: "id".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("products", false, "id", false));
 
         let result = evaluator.eval(&expr, &row);
 
@@ -357,11 +341,7 @@ mod evaluator_tests {
             ExpressionEvaluator::with_outer_context(&inner_schema, &outer_row, &outer_schema);
 
         // Column reference with invalid table qualifier
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("products".to_string()),
-            column: "product_id".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("products", false, "product_id", false));
 
         let result = evaluator.eval(&expr, &inner_row);
 
@@ -397,11 +377,7 @@ mod evaluator_tests {
             ExpressionEvaluator::with_outer_context(&inner_schema, &outer_row, &outer_schema);
 
         // Column reference with outer table qualifier
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("outer_table".to_string()),
-            column: "outer_col".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("outer_table", false, "outer_col", false));
 
         let result = evaluator.eval(&expr, &inner_row);
         assert_eq!(result, Ok(SqlValue::Integer(999)));
@@ -429,11 +405,7 @@ mod evaluator_tests {
         ]);
 
         // Column reference with correct table but non-existent column
-        let expr = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("users".to_string()),
-            column: "email".to_string(),
-        };
+        let expr = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "email", false));
 
         let result = evaluator.eval(&expr, &row);
 
@@ -475,25 +447,17 @@ mod evaluator_tests {
 
         // Without qualifier - should get inner value (shadowing)
         let expr_unqualified =
-            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "id".to_string() };
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false));
         let result = evaluator.eval(&expr_unqualified, &inner_row);
         assert_eq!(result, Ok(SqlValue::Integer(42)));
 
         // With inner qualifier - should get inner value
-        let expr_inner = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("inner_table".to_string()),
-            column: "id".to_string(),
-        };
+        let expr_inner = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("inner_table", false, "id", false));
         let result = evaluator.eval(&expr_inner, &inner_row);
         assert_eq!(result, Ok(SqlValue::Integer(42)));
 
         // With outer qualifier - should get outer value
-        let expr_outer = vibesql_ast::Expression::ColumnRef {
-            schema: None,
-            table: Some("outer_table".to_string()),
-            column: "id".to_string(),
-        };
+        let expr_outer = vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("outer_table", false, "id", false));
         let result = evaluator.eval(&expr_outer, &inner_row);
         assert_eq!(result, Ok(SqlValue::Integer(999)));
     }

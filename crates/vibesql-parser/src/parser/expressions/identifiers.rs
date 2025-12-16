@@ -7,18 +7,25 @@ impl Parser {
     ) -> Result<Option<vibesql_ast::Expression>, ParseError> {
         // Extract identifier string from token (handles regular identifiers and
         // keywords-as-identifiers)
-        let first = match self.peek() {
-            Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+        // Track whether identifier is quoted for proper SQL:1999 case handling
+        let (first, first_quoted) = match self.peek() {
+            Token::Identifier(id) => {
                 let name = id.clone();
                 self.advance();
-                name
+                (name, false)
+            }
+            Token::DelimitedIdentifier(id) => {
+                // Delimited identifiers (backtick/double-quote) preserve case
+                let name = id.clone();
+                self.advance();
+                (name, true)
             }
             Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
                 // Allow certain keywords (MONTH, YEAR, DAY, etc.) to be used as column names
                 // SQL:1999 normalizes unquoted identifiers to lowercase
                 let name = format!("{}", kw).to_lowercase();
                 self.advance();
-                name
+                (name, false)
             }
             _ => return Ok(None),
         };
@@ -117,18 +124,23 @@ impl Parser {
         // Keywords are allowed as column names when qualified (e.g., ss.year)
         if matches!(self.peek(), Token::Symbol('.')) {
             self.advance(); // consume first '.'
-            let second = match self.peek() {
-                Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+            let (second, second_quoted) = match self.peek() {
+                Token::Identifier(id) => {
                     let name = id.clone();
                     self.advance();
-                    name
+                    (name, false)
+                }
+                Token::DelimitedIdentifier(id) => {
+                    let name = id.clone();
+                    self.advance();
+                    (name, true)
                 }
                 Token::Keyword { keyword: kw, .. } => {
                     // Allow keywords as column names when qualified (e.g., table.year)
                     // SQL:1999 normalizes unquoted identifiers to lowercase
                     let name = kw.to_string().to_lowercase();
                     self.advance();
-                    name
+                    (name, false)
                 }
                 _ => {
                     return Err(ParseError {
@@ -154,16 +166,21 @@ impl Parser {
             // Check for three-part name (schema.table.column)
             if matches!(self.peek(), Token::Symbol('.')) {
                 self.advance(); // consume second '.'
-                let third = match self.peek() {
-                    Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                let (third, third_quoted) = match self.peek() {
+                    Token::Identifier(id) => {
                         let name = id.clone();
                         self.advance();
-                        name
+                        (name, false)
+                    }
+                    Token::DelimitedIdentifier(id) => {
+                        let name = id.clone();
+                        self.advance();
+                        (name, true)
                     }
                     Token::Keyword { keyword: kw, .. } => {
                         let name = kw.to_string().to_lowercase();
                         self.advance();
-                        name
+                        (name, false)
                     }
                     _ => {
                         return Err(ParseError {
@@ -173,26 +190,20 @@ impl Parser {
                 };
 
                 // schema.table.column
-                Ok(Some(vibesql_ast::Expression::ColumnRef {
-                    schema: Some(first),
-                    table: Some(second),
-                    column: third,
-                }))
+                Ok(Some(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::fully_qualified(&first, first_quoted, &second, second_quoted, &third, third_quoted)
+                )))
             } else {
                 // table.column (two-part name)
-                Ok(Some(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some(first),
-                    column: second,
-                }))
+                Ok(Some(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified(&first, first_quoted, &second, second_quoted)
+                )))
             }
         } else {
             // Simple column reference
-            Ok(Some(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: first,
-            }))
+            Ok(Some(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple(&first, first_quoted)
+            )))
         }
     }
 }

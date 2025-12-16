@@ -407,11 +407,7 @@ fn analyze_select_list(select_list: &[SelectItem]) -> Option<ProjectionPlan> {
             }
             SelectItem::Expression { expr, alias, .. } => {
                 let column_name = match expr {
-                    Expression::ColumnRef { column, table: None, .. } => column.clone(),
-                    Expression::ColumnRef { column, table: Some(_), .. } => {
-                        // Qualified column ref - support it
-                        column.clone()
-                    }
+                    Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
                     _ => {
                         // Complex expression - fall back
                         return None;
@@ -478,16 +474,16 @@ fn extract_column_placeholder_pair(
     right: &Expression,
 ) -> Option<(usize, String)> {
     // Try col = ?
-    if let Expression::ColumnRef { column, .. } = left {
+    if let Expression::ColumnRef(col_id) = left {
         if let Expression::Placeholder(idx) = right {
-            return Some((*idx, column.clone()));
+            return Some((*idx, col_id.column_canonical().to_string()));
         }
     }
 
     // Try ? = col
     if let Expression::Placeholder(idx) = left {
-        if let Expression::ColumnRef { column, .. } = right {
-            return Some((*idx, column.clone()));
+        if let Expression::ColumnRef(col_id) = right {
+            return Some((*idx, col_id.column_canonical().to_string()));
         }
     }
 

@@ -60,11 +60,7 @@ fn test_avg_precision_decimal() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "price".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
                 character_unit: None,
             },
             alias: None,
@@ -151,11 +147,7 @@ fn test_sum_mixed_numeric_types() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
-                args: vec![vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "amount".to_string(),
-                }],
+                args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                 character_unit: None,
             },
             alias: None,
@@ -250,21 +242,13 @@ fn test_aggregate_with_case_expression() {
                     operand: None,
                     when_clauses: vec![vibesql_ast::CaseWhen {
                         conditions: vec![vibesql_ast::Expression::BinaryOp {
-                            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                                schema: None,
-                                table: None,
-                                column: "type".to_string(),
-                            }),
+                            left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("type", false))),
                             op: vibesql_ast::BinaryOperator::Equal,
                             right: Box::new(vibesql_ast::Expression::Literal(
                                 vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("credit")),
                             )),
                         }],
-                        result: vibesql_ast::Expression::ColumnRef {
-                            schema: None,
-                            table: None,
-                            column: "amount".to_string(),
-                        },
+                        result: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false)),
                     }],
                     else_result: Some(Box::new(vibesql_ast::Expression::Literal(
                         vibesql_types::SqlValue::Integer(0),
@@ -329,11 +313,7 @@ fn test_max_with_unary_plus() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Plus,
-                    expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "col0".to_string(),
-                    }),
+                    expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 }],
                 order_by: None,
             },
@@ -392,11 +372,7 @@ fn test_max_with_unary_minus() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
-                    expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "col0".to_string(),
-                    }),
+                    expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))),
                 }],
                 order_by: None,
             },
@@ -456,11 +432,7 @@ fn test_count_with_not() {
                 distinct: false,
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Not,
-                    expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                        schema: None,
-                        table: None,
-                        column: "col1".to_string(),
-                    }),
+                    expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col1", false))),
                 }],
                 order_by: None,
             },

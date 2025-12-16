@@ -146,8 +146,8 @@ pub(super) fn derive_cte_schema(
                         } else {
                             // Try to extract name from expression
                             match expr {
-                                vibesql_ast::Expression::ColumnRef { column, .. } => {
-                                    column.clone()
+                                vibesql_ast::Expression::ColumnRef(col_id) => {
+                                    col_id.column_canonical().to_string()
                                 }
                                 _ => format!("col{}", i),
                             }

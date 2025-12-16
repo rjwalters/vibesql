@@ -114,7 +114,7 @@ fn collect_window_functions_from_expression(
             // Wildcard doesn't contain window functions
         }
         Expression::Literal(_)
-        | Expression::ColumnRef { .. }
+        | Expression::ColumnRef(_)
         | Expression::PseudoVariable { .. }
         | Expression::SessionVariable { .. } => {
             // These are leaf nodes

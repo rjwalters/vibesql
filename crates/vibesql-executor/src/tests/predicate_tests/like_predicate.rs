@@ -57,11 +57,7 @@ fn test_like_wildcard_percent() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "name".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Al%"),
             ))),
@@ -129,11 +125,7 @@ fn test_like_wildcard_underscore() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "name".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("_at"),
             ))),
@@ -201,11 +193,7 @@ fn test_not_like() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "name".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Al%"),
             ))),
@@ -260,11 +248,7 @@ fn test_like_null_pattern() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "name".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
             negated: false,
         }),
@@ -317,11 +301,7 @@ fn test_like_null_value() {
             column_aliases: None,
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
-            expr: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: None,
-                column: "name".to_string(),
-            }),
+            expr: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))),
             pattern: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("Al%"),
             ))),

@@ -316,7 +316,7 @@ mod tests {
         use vibesql_types::SqlValue;
 
         let check_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("age", false))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(0))),
         };

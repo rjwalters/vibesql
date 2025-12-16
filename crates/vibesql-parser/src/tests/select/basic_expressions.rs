@@ -137,7 +137,8 @@ fn test_parse_select_columns() {
             // Check first column (id)
             match &select.select_list[0] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "id" => {}
+                    vibesql_ast::Expression::ColumnRef(col_id)
+                        if col_id.column_canonical() == "id" => {}
                     _ => panic!("Expected id column"),
                 },
                 _ => panic!("Expected Expression select item"),
@@ -146,7 +147,8 @@ fn test_parse_select_columns() {
             // Check second column (name)
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "name" => {}
+                    vibesql_ast::Expression::ColumnRef(col_id)
+                        if col_id.column_canonical() == "name" => {}
                     _ => panic!("Expected name column"),
                 },
                 _ => panic!("Expected Expression select item"),
@@ -155,7 +157,8 @@ fn test_parse_select_columns() {
             // Check third column (age)
             match &select.select_list[2] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
-                    vibesql_ast::Expression::ColumnRef { column, .. } if column == "age" => {}
+                    vibesql_ast::Expression::ColumnRef(col_id)
+                        if col_id.column_canonical() == "age" => {}
                     _ => panic!("Expected age column"),
                 },
                 _ => panic!("Expected Expression select item"),

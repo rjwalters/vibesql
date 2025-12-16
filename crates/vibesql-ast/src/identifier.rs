@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```
-//! use vibesql_catalog::TableIdentifier;
+//! use vibesql_ast::TableIdentifier;
 //!
 //! // Unquoted identifiers are case-insensitive
 //! let id1 = TableIdentifier::new("MyTable", false);
@@ -103,7 +103,7 @@ impl TableIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::TableIdentifier;
+    /// use vibesql_ast::TableIdentifier;
     ///
     /// // Unquoted: case-insensitive
     /// let unquoted = TableIdentifier::new("MyTable", false);
@@ -175,7 +175,7 @@ impl TableIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::TableIdentifier;
+    /// use vibesql_ast::TableIdentifier;
     ///
     /// // "myApp".users → myApp.users (schema case-sensitive, table case-insensitive)
     /// let id = TableIdentifier::qualified("myApp", true, "users", false);
@@ -383,7 +383,7 @@ impl From<String> for TableIdentifier {
 /// ## Example
 ///
 /// ```
-/// use vibesql_catalog::ColumnIdentifier;
+/// use vibesql_ast::ColumnIdentifier;
 ///
 /// // Unquoted identifiers are case-insensitive
 /// let c1 = ColumnIdentifier::simple("MyColumn", false);
@@ -435,7 +435,7 @@ impl ColumnIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::ColumnIdentifier;
+    /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::simple("MyColumn", false);
     /// assert_eq!(c.canonical(), "mycolumn");
@@ -475,7 +475,7 @@ impl ColumnIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::ColumnIdentifier;
+    /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::qualified("Users", false, "ID", false);
     /// assert_eq!(c.canonical(), "users.id");
@@ -532,7 +532,7 @@ impl ColumnIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::ColumnIdentifier;
+    /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::fully_qualified(
     ///     "myApp", true,   // quoted schema
@@ -592,7 +592,7 @@ impl ColumnIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::ColumnIdentifier;
+    /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::unquoted("MyColumn");
     /// assert_eq!(c.canonical(), "mycolumn");
@@ -608,7 +608,7 @@ impl ColumnIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::ColumnIdentifier;
+    /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::quoted("MyColumn");
     /// assert_eq!(c.canonical(), "MyColumn");
@@ -622,7 +622,7 @@ impl ColumnIdentifier {
     /// # Example
     ///
     /// ```
-    /// use vibesql_catalog::ColumnIdentifier;
+    /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::table_column("users", "id");
     /// assert_eq!(c.canonical(), "users.id");

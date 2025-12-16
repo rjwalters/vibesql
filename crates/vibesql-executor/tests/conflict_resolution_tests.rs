@@ -225,10 +225,7 @@ fn test_update_or_ignore_primary_key_conflict() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             },
@@ -269,10 +266,7 @@ fn test_update_or_ignore_unique_constraint_conflict() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             },
@@ -308,10 +302,7 @@ fn test_update_or_ignore_no_conflict() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             },
@@ -351,10 +342,7 @@ fn test_update_or_replace_primary_key_conflict() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "email".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("email", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com")))),
             },
@@ -393,10 +381,7 @@ fn test_update_or_replace_unique_constraint_conflict() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             },
@@ -434,10 +419,7 @@ fn test_update_or_replace_no_conflict() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             },
@@ -502,10 +484,7 @@ fn test_update_or_ignore_not_null_violation() {
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef {
-                    table: None,
-                    column: "id".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             },

@@ -124,7 +124,8 @@ pub fn evaluate_expression(
 
     match expr {
         // Variable, parameter, or session variable reference
-        Expression::ColumnRef { schema: None, table: None, column, .. } => {
+        Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() => {
+            let column = col_id.column_canonical();
             // Check if it's a session variable (starts with @)
             if let Some(var_name) = column.strip_prefix('@') {
                 // Strip @ prefix
@@ -137,7 +138,7 @@ pub fn evaluate_expression(
             } else {
                 // Regular variable or parameter reference
                 ctx.get_value(column).cloned().ok_or_else(|| ExecutorError::VariableNotFound {
-                    variable_name: column.clone(),
+                    variable_name: column.to_string(),
                     available_variables: ctx.get_available_names(),
                 })
             }

@@ -207,12 +207,12 @@ fn is_expression_correlated(
         | Expression::NamedPlaceholder(_)
         | Expression::Wildcard => false,
 
-        Expression::ColumnRef { table, column, .. } => {
+        Expression::ColumnRef(col_id) => {
             // Check if this column reference belongs to the outer schema
             // But exclude references to the subquery's own tables
 
             // If table is explicitly specified, check if it's one of the subquery's own tables
-            if let Some(table_name) = table {
+            if let Some(table_name) = col_id.table_canonical() {
                 // Case-insensitive check if this table is in the subquery's FROM clause
                 let table_lower = table_name.to_lowercase();
                 if subquery_tables.iter().any(|t| t.to_lowercase() == table_lower) {
@@ -252,7 +252,7 @@ fn is_expression_correlated(
 
             // Check if this column exists in outer schema
             // Only relevant for non-self-join cases where the column might be correlated
-            outer_schema.get_column_index(table.as_deref(), column).is_some()
+            outer_schema.get_column_index(col_id.table_canonical(), col_id.column_canonical()).is_some()
         }
 
         Expression::BinaryOp { left, right, .. } => {
@@ -489,7 +489,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false)),
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -501,7 +501,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col4".to_string() }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col4", false))),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Float(97.5))),
             }),
             group_by: None,
@@ -535,11 +535,7 @@ mod tests {
             from: None,
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef {
-                    schema: None,
-                    table: Some("tab0".to_string()),
-                    column: "col3".to_string(),
-                }),
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("tab0", false, "col3", false))),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(5))),
             }),
             group_by: None,

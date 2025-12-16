@@ -18,7 +18,7 @@ fn test_parse_like_exact_match() {
             &select.where_clause.unwrap()
         {
             // Left side should be column reference
-            assert!(matches!(**expr, vibesql_ast::Expression::ColumnRef { .. }));
+            assert!(matches!(**expr, vibesql_ast::Expression::ColumnRef(_)));
 
             // Pattern should be string literal
             assert!(matches!(

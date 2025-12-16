@@ -72,7 +72,7 @@ fn extract_select_columns(stmt: &Statement) -> Option<Vec<String>> {
 /// Convert an expression to a column name
 fn expr_to_column_name(expr: &vibesql_ast::Expression, idx: usize) -> String {
     match expr {
-        vibesql_ast::Expression::ColumnRef { column, .. } => column.clone(),
+        vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
         vibesql_ast::Expression::Literal(lit) => lit.to_string(),
         _ => format!("column{}", idx + 1),
     }

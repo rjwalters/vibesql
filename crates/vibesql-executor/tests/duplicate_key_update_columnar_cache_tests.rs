@@ -317,11 +317,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
             column: "stock".to_string(),
             value: vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: None,
-                    column: "stock".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("stock", false))),
                 right: Box::new(vibesql_ast::Expression::DuplicateKeyValue {
                     column: "stock".to_string(),
                 }),
