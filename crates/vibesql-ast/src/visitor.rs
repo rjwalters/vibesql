@@ -1265,6 +1265,7 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
             }
             other => other,
         }),
+        conflict_clause: stmt.conflict_clause,
     }
 }
 

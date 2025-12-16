@@ -17,13 +17,36 @@ pub enum InsertSource {
     Select(Box<SelectStmt>),
 }
 
-/// Conflict resolution strategy for INSERT statements
-#[derive(Debug, Clone, PartialEq)]
+/// Conflict resolution strategy for INSERT and UPDATE statements (SQLite extension)
+///
+/// SQLite supports conflict resolution clauses in both INSERT and UPDATE statements:
+/// - `INSERT OR REPLACE INTO ...`
+/// - `UPDATE OR REPLACE ... SET ...`
+///
+/// See: <https://www.sqlite.org/lang_conflict.html>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictClause {
-    /// INSERT OR REPLACE / REPLACE INTO - delete conflicting row and insert new one
-    Replace,
-    /// INSERT OR IGNORE - silently ignore constraint violations (future)
+    /// ABORT - Abort current statement, rollback changes from this statement (default)
+    /// When a constraint violation occurs, the statement is aborted and all changes
+    /// made by the statement are rolled back, but changes from prior statements
+    /// in the same transaction are preserved.
+    Abort,
+    /// FAIL - Abort statement but keep prior changes within the statement
+    /// When a constraint violation occurs, the statement is aborted but changes
+    /// made by the statement prior to the violation are preserved.
+    Fail,
+    /// IGNORE - Skip the row causing violation, continue with next row
+    /// When a constraint violation occurs, the row is simply skipped and processing
+    /// continues with the next row.
     Ignore,
+    /// REPLACE - Delete conflicting rows, then insert/update the new row
+    /// When a UNIQUE or PRIMARY KEY constraint violation occurs, the conflicting
+    /// row is deleted before inserting/updating the new row.
+    Replace,
+    /// ROLLBACK - Abort and rollback entire transaction
+    /// When a constraint violation occurs, the entire transaction is rolled back
+    /// and the statement returns an error.
+    Rollback,
 }
 
 /// INSERT statement
@@ -68,6 +91,9 @@ pub struct UpdateStmt {
     pub quoted: bool,
     pub assignments: Vec<Assignment>,
     pub where_clause: Option<WhereClause>,
+    /// Optional conflict resolution clause (SQLite extension)
+    /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...
+    pub conflict_clause: Option<ConflictClause>,
 }
 
 /// Column assignment (column = value)

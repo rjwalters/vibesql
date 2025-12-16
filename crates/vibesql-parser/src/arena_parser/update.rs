@@ -1,7 +1,7 @@
 //! Arena-allocated UPDATE statement parsing.
 
 use bumpalo::collections::Vec as BumpVec;
-use vibesql_ast::arena::{Assignment, UpdateStmt, WhereClause};
+use vibesql_ast::arena::{Assignment, ConflictClause, UpdateStmt, WhereClause};
 
 use super::ArenaParser;
 use crate::{keywords::Keyword, token::Token, ParseError};
@@ -12,6 +12,28 @@ impl<'arena> ArenaParser<'arena> {
         &mut self,
     ) -> Result<&'arena UpdateStmt<'arena>, ParseError> {
         self.consume_keyword(Keyword::Update)?;
+
+        // Check for conflict clause: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL
+        let conflict_clause = if self.try_consume_keyword(Keyword::Or) {
+            if self.try_consume_keyword(Keyword::Replace) {
+                Some(ConflictClause::Replace)
+            } else if self.try_consume_keyword(Keyword::Ignore) {
+                Some(ConflictClause::Ignore)
+            } else if self.try_consume_keyword(Keyword::Abort) {
+                Some(ConflictClause::Abort)
+            } else if self.try_consume_keyword(Keyword::Rollback) {
+                Some(ConflictClause::Rollback)
+            } else if self.try_consume_keyword(Keyword::Fail) {
+                Some(ConflictClause::Fail)
+            } else {
+                return Err(ParseError {
+                    message: "Expected REPLACE, IGNORE, ABORT, ROLLBACK, or FAIL after UPDATE OR"
+                        .to_string(),
+                });
+            }
+        } else {
+            None
+        };
 
         // Parse table name and track if quoted (for SQL:1999 case-sensitive lookups)
         let (table_name, quoted) = match self.peek() {
@@ -62,7 +84,7 @@ impl<'arena> ArenaParser<'arena> {
         // Consume optional semicolon
         self.try_consume(&Token::Semicolon);
 
-        let stmt = UpdateStmt { table_name, quoted, assignments, where_clause };
+        let stmt = UpdateStmt { table_name, quoted, assignments, where_clause, conflict_clause };
 
         Ok(self.arena.alloc(stmt))
     }

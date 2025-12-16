@@ -5,18 +5,28 @@ impl Parser {
     pub(super) fn parse_insert_statement(&mut self) -> Result<vibesql_ast::InsertStmt, ParseError> {
         self.expect_keyword(Keyword::Insert)?;
 
-        // Check for conflict clause: INSERT OR REPLACE | INSERT OR IGNORE
+        // Check for conflict clause: INSERT OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL
         let conflict_clause = if self.peek_keyword(Keyword::Or) {
             self.advance(); // consume OR
             if self.peek_keyword(Keyword::Replace) {
-                self.advance(); // consume REPLACE
+                self.advance();
                 Some(vibesql_ast::ConflictClause::Replace)
             } else if self.peek_keyword(Keyword::Ignore) {
-                self.advance(); // consume IGNORE
+                self.advance();
                 Some(vibesql_ast::ConflictClause::Ignore)
+            } else if self.peek_keyword(Keyword::Abort) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Abort)
+            } else if self.peek_keyword(Keyword::Rollback) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Rollback)
+            } else if self.peek_keyword(Keyword::Fail) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Fail)
             } else {
                 return Err(ParseError {
-                    message: "Expected REPLACE or IGNORE after INSERT OR".to_string(),
+                    message: "Expected REPLACE, IGNORE, ABORT, ROLLBACK, or FAIL after INSERT OR"
+                        .to_string(),
                 });
             }
         } else {

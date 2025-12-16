@@ -61,6 +61,7 @@ fn test_create_update_statement() {
             value: Expression::Literal(SqlValue::Varchar(StringValue::from("Bob"))),
         }],
         where_clause: None,
+        conflict_clause: None,
     });
 
     match stmt {

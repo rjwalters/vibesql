@@ -19,13 +19,25 @@ pub enum InsertSource<'arena> {
     Select(&'arena SelectStmt<'arena>),
 }
 
-/// Conflict resolution strategy for INSERT statements
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Conflict resolution strategy for INSERT and UPDATE statements (SQLite extension)
+///
+/// SQLite supports conflict resolution clauses in both INSERT and UPDATE statements:
+/// - `INSERT OR REPLACE INTO ...`
+/// - `UPDATE OR REPLACE ... SET ...`
+///
+/// See: <https://www.sqlite.org/lang_conflict.html>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictClause {
-    /// INSERT OR REPLACE / REPLACE INTO - delete conflicting row and insert new one
-    Replace,
-    /// INSERT OR IGNORE - silently ignore constraint violations
+    /// ABORT - Abort current statement, rollback changes from this statement (default)
+    Abort,
+    /// FAIL - Abort statement but keep prior changes within the statement
+    Fail,
+    /// IGNORE - Skip the row causing violation, continue with next row
     Ignore,
+    /// REPLACE - Delete conflicting rows, then insert/update the new row
+    Replace,
+    /// ROLLBACK - Abort and rollback entire transaction
+    Rollback,
 }
 
 /// INSERT statement
@@ -70,6 +82,9 @@ pub struct UpdateStmt<'arena> {
     pub quoted: bool,
     pub assignments: BumpVec<'arena, Assignment<'arena>>,
     pub where_clause: Option<WhereClause<'arena>>,
+    /// Optional conflict resolution clause (SQLite extension)
+    /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...
+    pub conflict_clause: Option<ConflictClause>,
 }
 
 /// Column assignment (column = value)

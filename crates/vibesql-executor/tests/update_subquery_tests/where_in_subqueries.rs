@@ -62,7 +62,7 @@ fn test_update_where_in_subquery() {
         quoted: false,
         }),
         where_clause: None,
-        group_by: None,
+                group_by: None,
         having: None,
         order_by: None,
         limit: None,
@@ -84,6 +84,7 @@ fn test_update_where_in_subquery() {
             subquery,
             negated: false,
         })),
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -147,7 +148,7 @@ fn test_update_where_not_in_subquery() {
         quoted: false,
         }),
         where_clause: None,
-        group_by: None,
+                group_by: None,
         having: None,
         order_by: None,
         limit: None,
@@ -169,6 +170,7 @@ fn test_update_where_not_in_subquery() {
             subquery,
             negated: true,
         })),
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -225,7 +227,7 @@ fn test_update_where_subquery_empty_result() {
         quoted: false,
         }),
         where_clause: None,
-        group_by: None,
+                group_by: None,
         having: None,
         order_by: None,
         limit: None,
@@ -247,6 +249,7 @@ fn test_update_where_subquery_empty_result() {
             subquery,
             negated: false,
         })),
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -340,6 +343,7 @@ fn test_update_where_complex_subquery_condition() {
             subquery,
             negated: false,
         })),
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -407,7 +411,7 @@ fn test_update_where_multiple_rows_in_subquery() {
         quoted: false,
         }),
         where_clause: None,
-        group_by: None,
+                group_by: None,
         having: None,
         order_by: None,
         limit: None,
@@ -429,6 +433,7 @@ fn test_update_where_multiple_rows_in_subquery() {
             subquery,
             negated: false,
         })),
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();

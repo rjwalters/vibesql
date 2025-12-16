@@ -325,6 +325,9 @@ pub enum Keyword {
     Volatile,
     // SQLite compatibility keywords
     Pragma,
+    // SQLite conflict resolution keywords
+    Abort,
+    Fail,
 }
 
 impl Keyword {
@@ -654,6 +657,9 @@ impl fmt::Display for Keyword {
             Keyword::Volatile => "VOLATILE",
             // SQLite compatibility keywords
             Keyword::Pragma => "PRAGMA",
+            // SQLite conflict resolution keywords
+            Keyword::Abort => "ABORT",
+            Keyword::Fail => "FAIL",
         };
         write!(f, "{}", keyword_str)
     }

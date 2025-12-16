@@ -48,7 +48,7 @@ fn test_update_with_subquery_multiple_rows_error() {
         quoted: false,
         }),
         where_clause: None,
-        group_by: None,
+                group_by: None,
         having: None,
         order_by: None,
         limit: None,
@@ -65,6 +65,7 @@ fn test_update_with_subquery_multiple_rows_error() {
             value: Expression::ScalarSubquery(subquery),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -129,7 +130,7 @@ fn test_update_with_subquery_multiple_columns_error() {
         quoted: false,
         }),
         where_clause: None,
-        group_by: None,
+                group_by: None,
         having: None,
         order_by: None,
         limit: None,
@@ -146,6 +147,7 @@ fn test_update_with_subquery_multiple_columns_error() {
             value: Expression::ScalarSubquery(subquery),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);

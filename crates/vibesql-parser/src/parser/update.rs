@@ -5,6 +5,34 @@ impl Parser {
     pub(super) fn parse_update_statement(&mut self) -> Result<vibesql_ast::UpdateStmt, ParseError> {
         self.expect_keyword(Keyword::Update)?;
 
+        // Check for conflict clause: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL
+        let conflict_clause = if self.peek_keyword(Keyword::Or) {
+            self.advance(); // consume OR
+            if self.peek_keyword(Keyword::Replace) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Replace)
+            } else if self.peek_keyword(Keyword::Ignore) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Ignore)
+            } else if self.peek_keyword(Keyword::Abort) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Abort)
+            } else if self.peek_keyword(Keyword::Rollback) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Rollback)
+            } else if self.peek_keyword(Keyword::Fail) {
+                self.advance();
+                Some(vibesql_ast::ConflictClause::Fail)
+            } else {
+                return Err(ParseError {
+                    message: "Expected REPLACE, IGNORE, ABORT, ROLLBACK, or FAIL after UPDATE OR"
+                        .to_string(),
+                });
+            }
+        } else {
+            None
+        };
+
         // Parse table name with optional schema qualifier and quoted flag
         // Supports: tablename, "TableName", schema.table, "schema"."table"
         let table_ref = self.parse_table_ref()?;
@@ -67,6 +95,12 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::UpdateStmt { table_name, quoted, assignments, where_clause })
+        Ok(vibesql_ast::UpdateStmt {
+            table_name,
+            quoted,
+            assignments,
+            where_clause,
+            conflict_clause,
+        })
     }
 }
