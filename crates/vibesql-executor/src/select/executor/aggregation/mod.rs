@@ -259,14 +259,14 @@ impl SelectExecutor<'_> {
 
             // Resolve aliases in base expressions for GROUPING() function support
             let resolved_base_expressions =
-                resolve_base_expressions_aliases(&base_expressions, &expanded_select_list);
+                resolve_base_expressions_aliases(&base_expressions, &expanded_select_list)?;
 
             // For each grouping set, group rows and compute aggregates
             for resolved_set in grouping_sets {
                 // Resolve SELECT list aliases in GROUP BY expressions
                 // This allows: SELECT n_name AS nation ... GROUP BY nation
                 let resolved_set =
-                    resolve_grouping_set_aliases(&resolved_set, &expanded_select_list);
+                    resolve_grouping_set_aliases(&resolved_set, &expanded_select_list)?;
 
                 let grouping_context = GroupingContext {
                     base_expressions: resolved_base_expressions.clone(),
