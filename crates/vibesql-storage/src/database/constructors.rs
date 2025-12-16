@@ -36,6 +36,8 @@ impl Clone for Database {
             change_sender: None,
             // Clone resets last_insert_rowid - each database instance tracks independently
             last_insert_rowid: 0,
+            // Clone resets last_changes_count - each database instance tracks independently
+            last_changes_count: 0,
             // Clone resets search_count - each database instance tracks independently
             search_count: AtomicU64::new(0),
             // Clone does not inherit persistence engine - cloned databases are independent
@@ -63,6 +65,7 @@ impl Database {
             columnar_cache: Arc::new(ColumnarCache::new(DEFAULT_COLUMNAR_CACHE_BUDGET)),
             change_sender: None,
             last_insert_rowid: 0,
+            last_changes_count: 0,
             search_count: AtomicU64::new(0),
             persistence_engine: None,
             next_table_id: 1,

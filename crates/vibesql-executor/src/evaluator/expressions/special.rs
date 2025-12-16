@@ -146,6 +146,23 @@ impl ExpressionEvaluator<'_> {
                     return Ok(vibesql_types::SqlValue::Integer(0));
                 }
             }
+            // Handle changes() - returns number of rows modified by last INSERT/UPDATE/DELETE
+            // This is a SQLite-compatible function for tracking DML row counts
+            "CHANGES" => {
+                if !args.is_empty() {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "changes() takes no arguments".to_string(),
+                    ));
+                }
+                if let Some(db) = self.database {
+                    return Ok(vibesql_types::SqlValue::Integer(
+                        db.last_changes_count() as i64,
+                    ));
+                } else {
+                    // No database context available, return 0
+                    return Ok(vibesql_types::SqlValue::Integer(0));
+                }
+            }
             // Handle sqlite_search_count() - TCL test compatibility diagnostic
             // Returns the number of rows examined during query execution
             "SQLITE_SEARCH_COUNT" => {

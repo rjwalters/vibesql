@@ -130,6 +130,8 @@ impl SqlExecutor {
             vibesql_ast::Statement::Insert(insert_stmt) => {
                 match vibesql_executor::InsertExecutor::execute(&mut self.db, &insert_stmt) {
                     Ok(affected_rows) => {
+                        // Track changes count for changes() function
+                        self.db.set_last_changes_count(affected_rows);
                         result.row_count = affected_rows;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -138,6 +140,8 @@ impl SqlExecutor {
             vibesql_ast::Statement::Update(update_stmt) => {
                 match vibesql_executor::UpdateExecutor::execute(&update_stmt, &mut self.db) {
                     Ok(affected_rows) => {
+                        // Track changes count for changes() function
+                        self.db.set_last_changes_count(affected_rows);
                         result.row_count = affected_rows;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
@@ -146,6 +150,8 @@ impl SqlExecutor {
             vibesql_ast::Statement::Delete(delete_stmt) => {
                 match vibesql_executor::DeleteExecutor::execute(&delete_stmt, &mut self.db) {
                     Ok(affected_rows) => {
+                        // Track changes count for changes() function
+                        self.db.set_last_changes_count(affected_rows);
                         result.row_count = affected_rows;
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
