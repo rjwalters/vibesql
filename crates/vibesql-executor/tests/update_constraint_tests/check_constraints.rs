@@ -25,6 +25,7 @@ fn test_update_check_constraint_passes() {
             value: Expression::Literal(SqlValue::Integer(100)),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -48,6 +49,7 @@ fn test_update_check_constraint_violation() {
             value: Expression::Literal(SqlValue::Integer(-10)),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
 
     let result = UpdateExecutor::execute(&stmt, &mut db);
@@ -78,6 +80,7 @@ fn test_update_check_constraint_with_null() {
             value: Expression::Literal(SqlValue::Null),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
 
     let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();
@@ -105,6 +108,7 @@ fn test_update_check_constraint_with_expression() {
             value: Expression::Literal(SqlValue::Integer(15000)),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
     let count = UpdateExecutor::execute(&stmt1, &mut db).unwrap();
     assert_eq!(count, 1);
@@ -118,6 +122,7 @@ fn test_update_check_constraint_with_expression() {
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: None,
+        conflict_clause: None,
     };
 
     let result = UpdateExecutor::execute(&stmt2, &mut db);

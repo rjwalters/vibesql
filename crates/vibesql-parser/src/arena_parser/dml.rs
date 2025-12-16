@@ -18,7 +18,7 @@ impl<'arena> ArenaParser<'arena> {
     ) -> Result<InsertStmt<'arena>, ParseError> {
         self.expect_keyword(Keyword::Insert)?;
 
-        // Check for conflict clause: INSERT OR REPLACE | INSERT OR IGNORE
+        // Check for conflict clause: INSERT OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL
         let conflict_clause = if self.peek_keyword(Keyword::Or) {
             self.advance();
             if self.peek_keyword(Keyword::Replace) {
@@ -27,9 +27,19 @@ impl<'arena> ArenaParser<'arena> {
             } else if self.peek_keyword(Keyword::Ignore) {
                 self.advance();
                 Some(ConflictClause::Ignore)
+            } else if self.peek_keyword(Keyword::Abort) {
+                self.advance();
+                Some(ConflictClause::Abort)
+            } else if self.peek_keyword(Keyword::Rollback) {
+                self.advance();
+                Some(ConflictClause::Rollback)
+            } else if self.peek_keyword(Keyword::Fail) {
+                self.advance();
+                Some(ConflictClause::Fail)
             } else {
                 return Err(ParseError {
-                    message: "Expected REPLACE or IGNORE after INSERT OR".to_string(),
+                    message: "Expected REPLACE, IGNORE, ABORT, ROLLBACK, or FAIL after INSERT OR"
+                        .to_string(),
                 });
             }
         } else {
@@ -147,6 +157,34 @@ impl<'arena> ArenaParser<'arena> {
     ) -> Result<UpdateStmt<'arena>, ParseError> {
         self.expect_keyword(Keyword::Update)?;
 
+        // Check for conflict clause: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL
+        let conflict_clause = if self.peek_keyword(Keyword::Or) {
+            self.advance();
+            if self.peek_keyword(Keyword::Replace) {
+                self.advance();
+                Some(ConflictClause::Replace)
+            } else if self.peek_keyword(Keyword::Ignore) {
+                self.advance();
+                Some(ConflictClause::Ignore)
+            } else if self.peek_keyword(Keyword::Abort) {
+                self.advance();
+                Some(ConflictClause::Abort)
+            } else if self.peek_keyword(Keyword::Rollback) {
+                self.advance();
+                Some(ConflictClause::Rollback)
+            } else if self.peek_keyword(Keyword::Fail) {
+                self.advance();
+                Some(ConflictClause::Fail)
+            } else {
+                return Err(ParseError {
+                    message: "Expected REPLACE, IGNORE, ABORT, ROLLBACK, or FAIL after UPDATE OR"
+                        .to_string(),
+                });
+            }
+        } else {
+            None
+        };
+
         let table_name = self.parse_arena_identifier()?;
 
         self.expect_keyword(Keyword::Set)?;
@@ -170,8 +208,10 @@ impl<'arena> ArenaParser<'arena> {
 
         Ok(UpdateStmt {
             table_name,
+            quoted: false, // Arena parser doesn't track quoted status
             assignments,
             where_clause,
+            conflict_clause,
         })
     }
 

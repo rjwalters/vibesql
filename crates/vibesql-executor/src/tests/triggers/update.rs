@@ -66,6 +66,7 @@ fn test_after_update_trigger_fires() {
                 )),
             },
         )),
+        conflict_clause: None,
     };
     UpdateExecutor::execute(&update, &mut db).expect("Failed to update");
 
@@ -131,6 +132,7 @@ fn test_before_update_trigger_fires() {
                 )),
             },
         )),
+        conflict_clause: None,
     };
     UpdateExecutor::execute(&update, &mut db).expect("Failed to update");
 

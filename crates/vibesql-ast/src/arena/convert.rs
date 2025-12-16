@@ -598,6 +598,7 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             quoted: stmt.quoted,
             assignments: stmt.assignments.iter().map(|a| self.convert_assignment(a)).collect(),
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
+            conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
         }
     }
 
@@ -757,8 +758,11 @@ impl From<arena_select::SetOperator> for SetOperator {
 impl From<arena_dml::ConflictClause> for ConflictClause {
     fn from(cc: arena_dml::ConflictClause) -> Self {
         match cc {
-            arena_dml::ConflictClause::Replace => ConflictClause::Replace,
+            arena_dml::ConflictClause::Abort => ConflictClause::Abort,
+            arena_dml::ConflictClause::Fail => ConflictClause::Fail,
             arena_dml::ConflictClause::Ignore => ConflictClause::Ignore,
+            arena_dml::ConflictClause::Replace => ConflictClause::Replace,
+            arena_dml::ConflictClause::Rollback => ConflictClause::Rollback,
         }
     }
 }

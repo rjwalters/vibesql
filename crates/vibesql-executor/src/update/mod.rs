@@ -89,6 +89,7 @@ impl UpdateExecutor {
     ///         value: Expression::Literal(SqlValue::Integer(60000)),
     ///     }],
     ///     where_clause: None,
+    ///     conflict_clause: None,
     /// };
     ///
     /// let count = UpdateExecutor::execute(&stmt, &mut db).unwrap();

@@ -119,6 +119,7 @@ fn create_update_stmt(
         table_name: table_name.to_string(),
         assignments: vec![Assignment { column: column.to_string(), value }],
         where_clause,
+        conflict_clause: None,
     }
 }
 
@@ -134,6 +135,7 @@ fn create_multi_column_update_stmt(
             .map(|(col, val)| Assignment { column: col.to_string(), value: val })
             .collect(),
         where_clause: None,
+        conflict_clause: None,
     }
 }
 
