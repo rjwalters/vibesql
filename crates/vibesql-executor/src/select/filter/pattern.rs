@@ -144,7 +144,7 @@ impl PredicatePattern {
             let comp_op = ComparisonOp::from_binary_op(op)?;
 
             // Pattern: column op date_literal
-            if let Expression::ColumnRef { table, column } = left.as_ref() {
+            if let Expression::ColumnRef { table, column, .. } = left.as_ref() {
                 let col_idx = schema.get_column_index(table.as_deref(), column)?;
                 if let Expression::Literal(SqlValue::Date(date)) = right.as_ref() {
                     return Some((col_idx, comp_op, *date));
@@ -153,7 +153,7 @@ impl PredicatePattern {
 
             // Pattern: date_literal op column (need to reverse operator)
             if let Expression::Literal(SqlValue::Date(date)) = left.as_ref() {
-                if let Expression::ColumnRef { table, column } = right.as_ref() {
+                if let Expression::ColumnRef { table, column, .. } = right.as_ref() {
                     let col_idx = schema.get_column_index(table.as_deref(), column)?;
                     let reversed_op = match comp_op {
                         ComparisonOp::Lt => ComparisonOp::Gt,
@@ -179,7 +179,7 @@ impl PredicatePattern {
         schema: &CombinedSchema,
     ) -> Option<PredicatePattern> {
         // Extract column reference
-        if let Expression::ColumnRef { table, column } = expr {
+        if let Expression::ColumnRef { table, column, .. } = expr {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
 
             // Extract numeric bounds
@@ -200,7 +200,7 @@ impl PredicatePattern {
         schema: &CombinedSchema,
     ) -> Option<PredicatePattern> {
         // Extract column index
-        if let Expression::ColumnRef { table, column } = left {
+        if let Expression::ColumnRef { table, column, .. } = left {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
 
             // Try to extract integer constant FIRST (before f64)
@@ -226,7 +226,7 @@ impl PredicatePattern {
         schema: &CombinedSchema,
     ) -> Option<PredicatePattern> {
         // Extract column index from right side
-        if let Expression::ColumnRef { table, column } = right {
+        if let Expression::ColumnRef { table, column, .. } = right {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
 
             // Reverse the operator since constant is on left
@@ -338,6 +338,7 @@ mod tests {
         // Test: price < 100.0
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("lineitem".to_string()),
                 column: "price".to_string(),
             }),
@@ -364,6 +365,7 @@ mod tests {
         // Test: quantity > 10
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("lineitem".to_string()),
                 column: "quantity".to_string(),
             }),
@@ -393,6 +395,7 @@ mod tests {
 
         let left_comparison = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("lineitem".to_string()),
                 column: "shipdate".to_string(),
             }),
@@ -402,6 +405,7 @@ mod tests {
 
         let right_comparison = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("lineitem".to_string()),
                 column: "shipdate".to_string(),
             }),

@@ -58,7 +58,34 @@ impl CombinedExpressionEvaluator<'_> {
             )),
 
             // Column reference - look up column index (with optional table qualifier)
-            vibesql_ast::Expression::ColumnRef { table, column } => {
+            vibesql_ast::Expression::ColumnRef { schema, table, column } => {
+                // Handle schema qualifier (three-part names like schema.table.column)
+                // SQLite schemas: "main" (default), "temp" (temporary tables), or attached database names
+                // For our single-database implementation:
+                // - "main" is silently accepted (treated as default)
+                // - Other schemas return "no such column" error to match SQLite behavior
+                if let Some(schema_name) = schema {
+                    let schema_lower = schema_name.to_lowercase();
+                    if schema_lower != "main" {
+                        // SQLite returns "no such column: schema.table.column" for unknown schemas
+                        let mut available_columns = Vec::new();
+                        for (_start, schema) in self.schema.table_schemas.values() {
+                            available_columns.extend(schema.columns.iter().map(|c| c.name.clone()));
+                        }
+                        return Err(ExecutorError::ColumnNotFound {
+                            column_name: format!(
+                                "{}.{}.{}",
+                                schema_name,
+                                table.as_deref().unwrap_or(""),
+                                column
+                            ),
+                            table_name: table.clone().unwrap_or_else(|| "unknown".to_string()),
+                            searched_tables: self.schema.table_names(),
+                            available_columns,
+                        });
+                    }
+                }
+
                 // Special case: "*" is a wildcard used in COUNT(*) and is not a real column
                 // Return NULL here - the actual COUNT(*) logic handles this specially
                 if column == "*" {

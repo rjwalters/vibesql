@@ -119,7 +119,7 @@ fn test_parse_group_by_qualified_columns() {
                 GroupByClause::Simple(exprs) => {
                     assert_eq!(exprs.len(), 1);
                     match &exprs[0] {
-                        vibesql_ast::Expression::ColumnRef { table, column } => {
+                        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
                             assert_eq!(table.as_ref().unwrap(), "u");
                             assert_eq!(column, "dept");
                         }
@@ -323,19 +323,20 @@ fn test_parse_grouping_function() {
 fn test_group_by_clause_len() {
     // Test the len() helper method
     let simple = GroupByClause::Simple(vec![
-        vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
-        vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
+        vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
+        vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "b".to_string() },
     ]);
     assert_eq!(simple.len(), 2);
 
     let rollup = GroupByClause::Rollup(vec![
         GroupingElement::Single(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "a".to_string(),
         }),
         GroupingElement::Composite(vec![
-            vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
-            vibesql_ast::Expression::ColumnRef { table: None, column: "c".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "b".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "c".to_string() },
         ]),
     ]);
     assert_eq!(rollup.len(), 3); // a, b, c = 3 total expressions

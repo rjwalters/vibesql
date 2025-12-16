@@ -314,7 +314,7 @@ mod catalog_tests {
         // Create a check constraint: age >= 18
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(18))),
         };
 
@@ -358,7 +358,7 @@ mod catalog_tests {
         // Create a check constraint: age >= 18
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(18))),
         };
 
@@ -397,8 +397,8 @@ mod catalog_tests {
         // Create a check constraint: min_value < max_value
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::LessThan,
-            left: Box::new(Expression::ColumnRef { table: None, column: "min_value".to_string() }),
-            right: Box::new(Expression::ColumnRef { table: None, column: "max_value".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "min_value".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "max_value".to_string() }),
         };
 
         let check_constraints = vec![("range_check".to_string(), check_expr)];
@@ -456,7 +456,7 @@ mod catalog_tests {
         // Create a check constraint: age >= 18
         let check_expr = Expression::BinaryOp {
             op: BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(18))),
         };
 

@@ -145,6 +145,7 @@ pub(super) fn apply_window_functions_to_aggregates(
 
             // Create an expression that references this column
             let arg_expr = Expression::ColumnRef {
+                schema: None,
                 table: Some("result".to_string()),
                 column: format!("col{}", arg_col_idx),
             };
@@ -227,6 +228,7 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
             if expressions_match(expr, select_expr) {
                 let col_name = alias.clone().unwrap_or_else(|| format!("col{}", idx));
                 return Expression::ColumnRef {
+                    schema: None,
                     table: Some("result".to_string()),
                     column: col_name,
                 };
@@ -234,9 +236,10 @@ fn map_expr_to_result_column(expr: &Expression, select_list: &[SelectItem]) -> E
 
             // Also check if expr matches an alias
             if let Some(alias) = alias {
-                if let Expression::ColumnRef { column, table: None } = expr {
+                if let Expression::ColumnRef { column, table: None, .. } = expr {
                     if column.eq_ignore_ascii_case(alias) {
                         return Expression::ColumnRef {
+                            schema: None,
                             table: Some("result".to_string()),
                             column: alias.clone(),
                         };

@@ -858,7 +858,7 @@ mod tests {
         use vibesql_ast::BinaryOperator;
         let mut expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             right: Box::new(Expression::Placeholder(0)),
         };
         bind_expression_mut(&mut expr, &[SqlValue::Integer(42)]);

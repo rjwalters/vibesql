@@ -179,9 +179,30 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // Column reference
-            ArenaExpression::ColumnRef { table, column } => {
+            ArenaExpression::ColumnRef { schema, table, column } => {
                 let column_str = self.resolve(*column);
                 let table_str = table.map(|t| self.resolve(t));
+
+                // Handle schema qualifier (three-part names like schema.table.column)
+                if let Some(schema_sym) = schema {
+                    let schema_str = self.resolve(*schema_sym);
+                    if !schema_str.eq_ignore_ascii_case("main") {
+                        // SQLite returns "no such column: schema.table.column" for unknown schemas
+                        return Err(ExecutorError::ColumnNotFound {
+                            column_name: format!(
+                                "{}.{}.{}",
+                                schema_str,
+                                table_str.unwrap_or(""),
+                                column_str
+                            ),
+                            table_name: table_str
+                                .map(|t| t.to_string())
+                                .unwrap_or_else(|| "unknown".to_string()),
+                            searched_tables: self.schema.table_names(),
+                            available_columns: self.get_available_columns(),
+                        });
+                    }
+                }
 
                 // Special case: "*" is a wildcard used in COUNT(*)
                 if column_str == "*" {
@@ -840,11 +861,11 @@ mod tests {
         let row =
             Row::new(vec![SqlValue::Integer(42), SqlValue::Varchar(arcstr::ArcStr::from("Bob"))]);
 
-        let expr = ArenaExpression::ColumnRef { table: None, column: id_sym };
+        let expr = ArenaExpression::ColumnRef { schema: None, table: None, column: id_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Integer(42));
 
-        let expr = ArenaExpression::ColumnRef { table: None, column: name_sym };
+        let expr = ArenaExpression::ColumnRef { schema: None, table: None, column: name_sym };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Varchar(arcstr::ArcStr::from("Bob")));
     }
@@ -864,14 +885,14 @@ mod tests {
         let row = Row::new(vec![SqlValue::Integer(1), SqlValue::Null]);
 
         let expr = ArenaExpression::IsNull {
-            expr: arena.alloc(ArenaExpression::ColumnRef { table: None, column: name_sym }),
+            expr: arena.alloc(ArenaExpression::ColumnRef { schema: None, table: None, column: name_sym }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();
         assert_eq!(result, SqlValue::Boolean(true));
 
         let expr = ArenaExpression::IsNull {
-            expr: arena.alloc(ArenaExpression::ColumnRef { table: None, column: id_sym }),
+            expr: arena.alloc(ArenaExpression::ColumnRef { schema: None, table: None, column: id_sym }),
             negated: false,
         };
         let result = evaluator.eval(&expr, &row).unwrap();

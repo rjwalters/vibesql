@@ -613,6 +613,7 @@ impl SelectExecutor<'_> {
                         for column in &table_schema.columns {
                             // Create a column reference expression for each column
                             let column_expr = vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: if schema.table_schemas.len() > 1 {
                                     // Multiple tables: qualify the column
                                     Some(table_name.to_string())
@@ -637,6 +638,7 @@ impl SelectExecutor<'_> {
                     if let Some((_start_idx, table_schema)) = table_result {
                         for column in &table_schema.columns {
                             let column_expr = vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: Some(qualifier.clone()),
                                 column: column.name.clone(),
                             };

@@ -151,10 +151,10 @@ fn extract_column_table_and_name(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::ColumnRef { table: Some(t), column, .. } => {
+        Expression::ColumnRef { schema: None, table: Some(t), column, .. } => {
             Some((t.to_lowercase(), column.to_lowercase()))
         }
-        Expression::ColumnRef { table: None, column, .. } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Try to resolve unqualified column using schema-based mapping
             let col_lower = column.to_lowercase();
             column_to_table.get(&col_lower).map(|t| (t.to_lowercase(), col_lower))

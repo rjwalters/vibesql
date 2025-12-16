@@ -182,6 +182,7 @@ pub fn create_check_price_table(db: &mut vibesql_storage::Database, nullable_pri
             "price_positive".to_string(),
             vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "price".to_string(),
                 }),
@@ -225,6 +226,7 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
                 "price_positive".to_string(),
                 vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "price".to_string(),
                     }),
@@ -238,6 +240,7 @@ pub fn create_multi_check_table(db: &mut vibesql_storage::Database) {
                 "quantity_positive".to_string(),
                 vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "quantity".to_string(),
                     }),
@@ -281,11 +284,13 @@ pub fn create_check_comparison_table(db: &mut vibesql_storage::Database) {
             "bonus_less_than_salary".to_string(),
             vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "bonus".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::LessThan,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 }),

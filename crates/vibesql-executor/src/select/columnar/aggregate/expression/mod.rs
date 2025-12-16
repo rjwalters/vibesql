@@ -107,7 +107,7 @@ pub fn extract_aggregates(
                                 .push(AggregateSpec { op, source: AggregateSource::CountStar });
                             continue;
                         }
-                        Expression::ColumnRef { table: _, column } if column == "*" => {
+                        Expression::ColumnRef { column, .. } if column == "*" => {
                             aggregates
                                 .push(AggregateSpec { op, source: AggregateSource::CountStar });
                             continue;
@@ -123,7 +123,7 @@ pub fn extract_aggregates(
 
                 let source = match &args[0] {
                     // Fast path: simple column reference
-                    Expression::ColumnRef { table, column } => {
+                    Expression::ColumnRef { table, column, .. } => {
                         let column_idx = schema.get_column_index(table.as_deref(), column)?;
                         AggregateSource::Column(column_idx)
                     }
@@ -157,7 +157,7 @@ pub fn extract_aggregates(
 /// Returns None if the expression contains unsupported operations.
 fn is_simple_arithmetic_expr(expr: &Expression, schema: &CombinedSchema) -> Option<()> {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Verify column exists
             schema.get_column_index(table.as_deref(), column)?;
             Some(())

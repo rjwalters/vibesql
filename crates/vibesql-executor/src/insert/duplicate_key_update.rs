@@ -165,7 +165,7 @@ fn evaluate_duplicate_key_expression(
                 })?;
             Ok(insert_values[column_idx].clone())
         }
-        vibesql_ast::Expression::ColumnRef { table: _, column } => {
+        vibesql_ast::Expression::ColumnRef { column, .. } => {
             // Column reference - get the value from existing row
             let column_idx =
                 schema.columns.iter().position(|col| col.name == *column).ok_or_else(|| {

@@ -56,7 +56,7 @@ fn test_all_greater_than_basic() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -81,7 +81,7 @@ fn test_all_greater_than_basic() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -92,6 +92,7 @@ fn test_all_greater_than_basic() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),
@@ -160,7 +161,7 @@ fn test_any_less_than_basic() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -185,7 +186,7 @@ fn test_any_less_than_basic() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -196,6 +197,7 @@ fn test_any_less_than_basic() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),
@@ -265,7 +267,7 @@ fn test_some_equals_basic() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -290,7 +292,7 @@ fn test_some_equals_basic() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -301,6 +303,7 @@ fn test_some_equals_basic() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),
@@ -364,7 +367,7 @@ fn test_all_with_empty_subquery() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -389,7 +392,7 @@ fn test_all_with_empty_subquery() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -400,6 +403,7 @@ fn test_all_with_empty_subquery() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),
@@ -463,7 +467,7 @@ fn test_any_with_empty_subquery() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -488,7 +492,7 @@ fn test_any_with_empty_subquery() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -499,6 +503,7 @@ fn test_any_with_empty_subquery() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),
@@ -569,7 +574,7 @@ fn test_all_with_null_in_subquery() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -594,7 +599,7 @@ fn test_all_with_null_in_subquery() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -605,6 +610,7 @@ fn test_all_with_null_in_subquery() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),
@@ -664,7 +670,7 @@ fn test_all_with_null_left_value() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "y".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "y".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -689,7 +695,7 @@ fn test_all_with_null_left_value() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -700,6 +706,7 @@ fn test_all_with_null_left_value() {
         }),
         where_clause: Some(vibesql_ast::Expression::QuantifiedComparison {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "x".to_string(),
             }),

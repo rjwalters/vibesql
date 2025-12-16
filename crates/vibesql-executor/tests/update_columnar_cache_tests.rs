@@ -59,7 +59,7 @@ fn test_update_invalidates_columnar_cache() {
             value: Expression::Literal(SqlValue::Integer(55000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
@@ -125,7 +125,7 @@ fn test_update_invalidates_prewarmed_cache() {
             value: Expression::Literal(SqlValue::Integer(75000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob")))),
         })),
@@ -199,7 +199,7 @@ fn test_update_no_match_does_not_invalidate_cache() {
             value: Expression::Literal(SqlValue::Integer(999999)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))), // No such id
         })),
@@ -238,7 +238,7 @@ fn test_multiple_updates_invalidate_cache() {
             value: Expression::Literal(SqlValue::Integer(50000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
@@ -263,7 +263,7 @@ fn test_multiple_updates_invalidate_cache() {
             value: Expression::Literal(SqlValue::Integer(55000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
@@ -310,7 +310,7 @@ fn test_update_multiple_columns_invalidates_cache() {
             },
         ],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),

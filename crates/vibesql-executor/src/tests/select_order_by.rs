@@ -67,7 +67,7 @@ fn test_order_by_single_column_asc() {
         group_by: None,
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "age".to_string() },
             direction: vibesql_ast::OrderDirection::Asc,
             nulls_order: None,
         }]),
@@ -164,6 +164,7 @@ fn test_order_by_multiple_columns() {
         order_by: Some(vec![
             vibesql_ast::OrderByItem {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "dept".to_string(),
                 },
@@ -171,7 +172,7 @@ fn test_order_by_multiple_columns() {
                 nulls_order: None,
             },
             vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "age".to_string() },
                 direction: vibesql_ast::OrderDirection::Desc,
                 nulls_order: None,
             },

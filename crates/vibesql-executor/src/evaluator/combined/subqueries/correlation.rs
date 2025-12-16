@@ -135,7 +135,7 @@ fn collect_correlation_refs_from_expr(
     refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
 ) {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table, column } => {
+        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
             // Check if this column reference belongs to the outer schema
             if let Some(table_name) = table {
                 let table_lower = table_name.to_lowercase();

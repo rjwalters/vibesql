@@ -344,7 +344,7 @@ impl SelectExecutor<'_> {
                     |((col_name, sort_order), order_item)| {
                         // Check if column names match and sort direction matches
                         match &order_item.expr {
-                            vibesql_ast::Expression::ColumnRef { table: None, column } => {
+                            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } => {
                                 column == col_name && &order_item.direction == sort_order
                             }
                             _ => false,

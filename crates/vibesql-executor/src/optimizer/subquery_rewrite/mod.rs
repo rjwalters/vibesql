@@ -193,7 +193,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { table: None, column: column.to_string() },
+                expr: Expression::ColumnRef { schema: None, table: None, column: column.to_string() },
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn test_add_distinct_to_uncorrelated_in_subquery() {
         let subquery = simple_select("customers", "region");
-        let in_expr = Expression::ColumnRef { table: None, column: "region".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "region".to_string() };
 
         let mut stmt = simple_select("orders", "order_id");
         stmt.where_clause = Some(Expression::In {
@@ -244,7 +244,7 @@ mod tests {
         let mut subquery = simple_select("customers", "region");
         subquery.distinct = true;
 
-        let in_expr = Expression::ColumnRef { table: None, column: "region".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "region".to_string() };
 
         let mut stmt = simple_select("orders", "order_id");
         stmt.where_clause = Some(Expression::In {
@@ -279,10 +279,12 @@ mod tests {
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("customers".to_string()),
                 column: "region".to_string(),
             }),
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("orders".to_string()),
                 column: "region".to_string(),
             }),
@@ -295,17 +297,19 @@ mod tests {
 
     #[test]
     fn test_in_to_exists_rewrite() {
-        let in_expr = Expression::ColumnRef { table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
 
         let mut subquery = simple_select("customers", "customer_id");
         // Make it correlated
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("customers".to_string()),
                 column: "region".to_string(),
             }),
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("orders".to_string()),
                 column: "region".to_string(),
             }),
@@ -349,17 +353,19 @@ mod tests {
     #[test]
     fn test_complex_expression_skips_in_to_exists() {
         // Test that complex expressions in SELECT list skip IN → EXISTS transformation
-        let in_expr = Expression::ColumnRef { table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
 
         let mut subquery = simple_select("customers", "customer_id");
         // Add WHERE clause to make it correlated
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("customers".to_string()),
                 column: "region".to_string(),
             }),
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("orders".to_string()),
                 column: "region".to_string(),
             }),
@@ -370,6 +376,7 @@ mod tests {
             expr: Expression::Function {
                 name: "UPPER".to_string(),
                 args: vec![Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "customer_id".to_string(),
                 }],
@@ -404,12 +411,12 @@ mod tests {
     #[test]
     fn test_multi_column_in_skips_optimization() {
         // Test that multi-column IN subqueries are not optimized
-        let in_expr = Expression::ColumnRef { table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
 
         let mut subquery = simple_select("customers", "customer_id");
         // Add second column to SELECT list
         subquery.select_list.push(SelectItem::Expression {
-            expr: Expression::ColumnRef { table: None, column: "region".to_string() },
+            expr: Expression::ColumnRef { schema: None, table: None, column: "region".to_string() },
             alias: None, source_text: None });
 
         let mut stmt = simple_select("orders", "order_id");
@@ -442,17 +449,19 @@ mod tests {
     #[test]
     fn test_negated_in_preserved() {
         // Test that NOT IN negation is preserved
-        let in_expr = Expression::ColumnRef { table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
 
         let mut subquery = simple_select("customers", "customer_id");
         // Make it correlated
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("customers".to_string()),
                 column: "region".to_string(),
             }),
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("orders".to_string()),
                 column: "region".to_string(),
             }),
@@ -483,12 +492,12 @@ mod tests {
         // Add nested IN subquery in WHERE clause
         let inner_subquery = simple_select("regions", "region_id");
         outer_subquery.where_clause = Some(Expression::In {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "region_id".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "region_id".to_string() }),
             subquery: Box::new(inner_subquery),
             negated: false,
         });
 
-        let in_expr = Expression::ColumnRef { table: None, column: "customer_id".to_string() };
+        let in_expr = Expression::ColumnRef { schema: None, table: None, column: "customer_id".to_string() };
 
         let mut stmt = simple_select("orders", "order_id");
         stmt.where_clause = Some(Expression::In {
@@ -538,6 +547,7 @@ mod tests {
         let mut stmt_with_in = simple_select("orders", "order_id");
         stmt_with_in.where_clause = Some(Expression::In {
             expr: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "customer_id".to_string(),
             }),
@@ -555,6 +565,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::ColumnRef {
+                    schema: None,
                     table: Some(alias.to_string()),
                     column: column.to_string(),
                 },
@@ -588,10 +599,12 @@ mod tests {
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("l2".to_string()),
                 column: "l_orderkey".to_string(),
             }),
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("l1".to_string()),
                 column: "l_orderkey".to_string(),
             }),
@@ -610,7 +623,7 @@ mod tests {
                 assert!(!negated, "Should not be negated");
                 // The outer expression should be l1.l_orderkey
                 match expr.as_ref() {
-                    Expression::ColumnRef { table: Some(t), column: c } => {
+                    Expression::ColumnRef { schema: None, table: Some(t), column: c, .. } => {
                         assert_eq!(t, "l1");
                         assert_eq!(c, "l_orderkey");
                     }
@@ -634,10 +647,12 @@ mod tests {
         subquery.where_clause = Some(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("o".to_string()),
                 column: "o_custkey".to_string(),
             }),
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("c".to_string()),
                 column: "c_custkey".to_string(),
             }),

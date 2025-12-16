@@ -125,10 +125,10 @@ pub(super) fn extract_referenced_tables_with_schema(
     column_to_table: &HashMap<String, String>,
 ) {
     match expr {
-        Expression::ColumnRef { table: Some(table), .. } => {
+        Expression::ColumnRef { schema: None, table: Some(table), .. } => {
             output.insert(table.to_lowercase());
         }
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Use schema-based lookup
             if let Some(table) = super::utils::resolve_column_with_fallback(column, column_to_table)
             {

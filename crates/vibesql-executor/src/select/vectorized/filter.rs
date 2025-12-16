@@ -641,7 +641,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
 
         let predicate = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(3))),
         };
@@ -660,13 +660,13 @@ mod tests {
         // value > 10 (all false) AND value < 100 (would be all true)
         let predicate = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
@@ -687,13 +687,13 @@ mod tests {
         // value < 100 (all true) OR value > 10 (would be all false)
         let predicate = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),
             op: BinaryOperator::Or,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
@@ -714,13 +714,13 @@ mod tests {
         // value > 3 AND value < 8
         let predicate = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(3))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "value".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(8))),
             }),
@@ -740,7 +740,7 @@ mod tests {
 
         // name LIKE 'Al%'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
             negated: false,
         };
@@ -764,7 +764,7 @@ mod tests {
 
         // name LIKE '%lie'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("%lie")))),
             negated: false,
         };
@@ -783,7 +783,7 @@ mod tests {
 
         // name NOT LIKE 'Al%'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Al%")))),
             negated: true,
         };
@@ -806,7 +806,7 @@ mod tests {
 
         // name LIKE '%li%'
         let predicate = Expression::Like {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
             pattern: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("%li%")))),
             negated: false,
         };

@@ -543,7 +543,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -558,6 +558,7 @@ mod tests {
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::GreaterThan,
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "col1".to_string(),
                     }),
@@ -566,6 +567,7 @@ mod tests {
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "col2".to_string(),
                     }),
@@ -608,7 +610,7 @@ mod tests {
             quoted: false,
             }),
             where_clause: Some(Expression::InList {
-                expr: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 values: vec![
                     Expression::Literal(SqlValue::Integer(1)),
                     Expression::Literal(SqlValue::Integer(2)),

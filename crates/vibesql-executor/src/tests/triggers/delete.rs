@@ -53,6 +53,7 @@ fn test_after_delete_trigger_fires() {
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     column: "id".to_string(),
                     table: None,
                 }),
@@ -113,6 +114,7 @@ fn test_before_delete_trigger_fires() {
             vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Equal,
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     column: "id".to_string(),
                     table: None,
                 }),

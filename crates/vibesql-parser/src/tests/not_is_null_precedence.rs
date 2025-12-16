@@ -38,7 +38,7 @@ fn test_not_is_null_precedence() {
 
                     // Innermost expression should be column reference
                     match &**inner_expr {
-                        Expression::ColumnRef { table, column } => {
+                        Expression::ColumnRef { table, column, .. } => {
                             assert_eq!(*table, None);
                             assert_eq!(column, "col0");
                         }
@@ -79,7 +79,7 @@ fn test_is_not_null_parsing() {
             assert!(*negated, "IS NOT NULL should have negated=true");
 
             match &**expr {
-                Expression::ColumnRef { table, column } => {
+                Expression::ColumnRef { table, column, .. } => {
                     assert_eq!(*table, None);
                     assert_eq!(column, "col0");
                 }

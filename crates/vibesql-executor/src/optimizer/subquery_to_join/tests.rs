@@ -11,7 +11,7 @@ fn simple_table_from(name: &str) -> FromClause {
 }
 
 fn column_ref(column: &str) -> Expression {
-    Expression::ColumnRef { table: None, column: column.to_string() }
+    Expression::ColumnRef { schema: None, table: None, column: column.to_string() }
 }
 
 fn simple_select(table: &str, column: &str) -> SelectStmt {
@@ -283,7 +283,7 @@ fn test_nested_in_subquery_self_join_column_qualification() {
                         Expression::In { expr: inner_expr, .. } => {
                             // The outer expression of the nested IN should be qualified
                             match inner_expr.as_ref() {
-                                Expression::ColumnRef { table: Some(t), column: c } => {
+                                Expression::ColumnRef { schema: None, table: Some(t), column: c, .. } => {
                                     t.starts_with("__subquery_") && c.eq_ignore_ascii_case("col0")
                                 }
                                 _ => false,
@@ -318,7 +318,7 @@ fn table_from_with_alias(name: &str, alias: &str) -> FromClause {
 }
 
 fn qualified_column_ref(table: &str, column: &str) -> Expression {
-    Expression::ColumnRef { table: Some(table.to_string()), column: column.to_string() }
+    Expression::ColumnRef { schema: None, table: Some(table.to_string()), column: column.to_string() }
 }
 
 #[test]
@@ -423,7 +423,7 @@ fn test_exists_self_join_column_qualification() {
             if let Some(cond) = condition {
                 fn contains_rewritten_alias(expr: &Expression) -> bool {
                     match expr {
-                        Expression::ColumnRef { table: Some(t), .. } => t == "__subquery_l2",
+                        Expression::ColumnRef { schema: None, table: Some(t), .. } => t == "__subquery_l2",
                         Expression::BinaryOp { left, right, .. } => {
                             contains_rewritten_alias(left) || contains_rewritten_alias(right)
                         }
@@ -545,7 +545,7 @@ fn test_not_exists_self_join_column_qualification() {
             if let Some(cond) = condition {
                 fn contains_rewritten_l3_ref(expr: &Expression) -> bool {
                     match expr {
-                        Expression::ColumnRef { table: Some(t), .. } => t == "__subquery_l3",
+                        Expression::ColumnRef { schema: None, table: Some(t), .. } => t == "__subquery_l3",
                         Expression::BinaryOp { left, right, .. } => {
                             contains_rewritten_l3_ref(left) || contains_rewritten_l3_ref(right)
                         }

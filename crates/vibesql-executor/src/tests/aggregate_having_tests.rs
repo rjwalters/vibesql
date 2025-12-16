@@ -139,6 +139,7 @@ fn test_having_clause() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "dept".to_string(),
                 },
@@ -147,6 +148,7 @@ fn test_having_clause() {
                 expr: vibesql_ast::Expression::Function {
                     name: "SUM".to_string(),
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "amount".to_string(),
                     }],
@@ -161,12 +163,13 @@ fn test_having_clause() {
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { table: None, column: "dept".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "dept".to_string() },
         ])),
         having: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],

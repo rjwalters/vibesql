@@ -156,12 +156,14 @@ fn test_in_subquery_explicit_multi_column_rejected() {
                 select_list: vec![
                     vibesql_ast::SelectItem::Expression {
                         expr: vibesql_ast::Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "x".to_string(),
                         },
                         alias: None, source_text: None },
                     vibesql_ast::SelectItem::Expression {
                         expr: vibesql_ast::Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "y".to_string(),
                         },
@@ -260,6 +262,7 @@ fn test_in_subquery_single_column_accepted() {
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
                     expr: vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "x".to_string(),
                     },

@@ -123,7 +123,7 @@ fn evaluate_expr_on_result_row(
                 AggregateSource::CountStar
             } else if args.len() == 1 {
                 match &args[0] {
-                    Expression::ColumnRef { table, column } => {
+                    Expression::ColumnRef { table, column, .. } => {
                         if let Some(idx) =
                             schema.get_column_index(table.as_deref(), column.as_str())
                         {
@@ -216,7 +216,7 @@ fn evaluate_expr_on_result_row(
         // Note: The result row has group columns first, then aggregate values.
         // The group columns are stored in GROUP BY clause order, which may not match
         // schema order. We fall back to row-based for this case as a temporary fix.
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Column references in HAVING with GROUP BY require knowing the mapping
             // from GROUP BY expression order to result row positions. Since the columnar
             // path currently doesn't have this mapping, fall back to row-based execution.
@@ -466,8 +466,8 @@ fn sources_match(spec_source: &AggregateSource, having_source: &AggregateSource)
 fn expressions_equal(a: &Expression, b: &Expression) -> bool {
     match (a, b) {
         (
-            Expression::ColumnRef { table: t1, column: c1 },
-            Expression::ColumnRef { table: t2, column: c2 },
+            Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
+            Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
         ) => t1 == t2 && c1 == c2,
         (
             Expression::BinaryOp { left: l1, op: o1, right: r1 },

@@ -135,7 +135,7 @@ fn collect_qualified_columns_from_expr(
     table_columns: &mut HashMap<String, Vec<String>>,
 ) {
     match expr {
-        Expression::ColumnRef { table: Some(t), column } => {
+        Expression::ColumnRef { schema: None, table: Some(t), column, .. } => {
             table_columns.entry(t.to_lowercase()).or_default().push(column.to_lowercase());
         }
         Expression::BinaryOp { left, right, .. } => {

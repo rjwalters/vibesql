@@ -207,7 +207,7 @@ fn is_expression_correlated(
         | Expression::NamedPlaceholder(_)
         | Expression::Wildcard => false,
 
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Check if this column reference belongs to the outer schema
             // But exclude references to the subquery's own tables
 
@@ -489,7 +489,7 @@ mod tests {
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
-                expr: Expression::ColumnRef { table: None, column: "col0".to_string() },
+                expr: Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() },
                 alias: None, source_text: None }],
             into_table: None,
             into_variables: None,
@@ -501,7 +501,7 @@ mod tests {
             }),
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { table: None, column: "col4".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col4".to_string() }),
                 right: Box::new(Expression::Literal(vibesql_types::SqlValue::Float(97.5))),
             }),
             group_by: None,
@@ -536,6 +536,7 @@ mod tests {
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("tab0".to_string()),
                     column: "col3".to_string(),
                 }),

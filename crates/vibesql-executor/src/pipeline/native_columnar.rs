@@ -473,7 +473,7 @@ impl NativeColumnarPipeline {
         let group_cols: Vec<usize> = group_exprs
             .iter()
             .filter_map(|expr| match expr {
-                Expression::ColumnRef { table, column } => {
+                Expression::ColumnRef { table, column, .. } => {
                     ctx.schema.get_column_index(table.as_deref(), column.as_str())
                 }
                 _ => None,

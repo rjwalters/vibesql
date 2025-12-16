@@ -152,7 +152,11 @@ impl Parser {
             self.advance(); // consume '*'
             self.expect_token(Token::RParen)?;
             // Represent * as a special wildcard expression
-            args.push(vibesql_ast::Expression::ColumnRef { table: None, column: "*".to_string() });
+            args.push(vibesql_ast::Expression::ColumnRef {
+                schema: None,
+                table: None,
+                column: "*".to_string(),
+            });
         } else {
             // Parse comma-separated argument list
             loop {

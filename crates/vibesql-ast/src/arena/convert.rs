@@ -107,7 +107,8 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             arena_expr::Expression::NamedPlaceholder(name) => {
                 Expression::NamedPlaceholder(self.resolve(*name))
             }
-            arena_expr::Expression::ColumnRef { table, column } => Expression::ColumnRef {
+            arena_expr::Expression::ColumnRef { schema, table, column } => Expression::ColumnRef {
+                schema: self.resolve_opt(*schema),
                 table: self.resolve_opt(*table),
                 column: self.resolve(*column),
             },

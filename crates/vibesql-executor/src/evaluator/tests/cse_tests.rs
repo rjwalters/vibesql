@@ -24,9 +24,10 @@ fn test_cse_repeated_arithmetic() -> Result<(), ExecutorError> {
 
     // Build expression: (a + b)
     let a_plus_b = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "b".to_string(),
         }),
@@ -63,9 +64,10 @@ fn test_cse_nested_expressions() -> Result<(), ExecutorError> {
 
     // Build expression: (x * y)
     let x_times_y = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
         op: vibesql_ast::BinaryOperator::Multiply,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "y".to_string(),
         }),
@@ -100,9 +102,10 @@ fn test_cse_case_expression() -> Result<(), ExecutorError> {
 
     // Build expression: (x * y)
     let x_times_y = || vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "x".to_string() }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
         op: vibesql_ast::BinaryOperator::Multiply,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "y".to_string(),
         }),
@@ -149,7 +152,7 @@ fn test_cse_disabled_via_env() -> Result<(), ExecutorError> {
 
     let evaluator = ExpressionEvaluator::new(&schema);
 
-    let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() };
+    let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() };
 
     let result = evaluator.eval(&expr, &row)?;
     assert_eq!(result, SqlValue::Integer(42));
@@ -208,9 +211,10 @@ fn test_cse_complex_expression() -> Result<(), ExecutorError> {
     // Build: ((a + b) * c) + ((a + b) * 2)
     // The sub-expression (a + b) should be cached
     let a_plus_b = || vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "b".to_string(),
         }),
@@ -221,6 +225,7 @@ fn test_cse_complex_expression() -> Result<(), ExecutorError> {
             left: Box::new(a_plus_b()),
             op: vibesql_ast::BinaryOperator::Multiply,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "c".to_string(),
             }),
@@ -258,9 +263,10 @@ fn test_cse_with_nulls() -> Result<(), ExecutorError> {
 
     // Build expression: (a + b)
     let expr = vibesql_ast::Expression::BinaryOp {
-        left: Box::new(vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() }),
+        left: Box::new(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
         op: vibesql_ast::BinaryOperator::Plus,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "b".to_string(),
         }),
@@ -307,6 +313,7 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
     let full_name = || vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "first_name".to_string(),
             }),
@@ -317,6 +324,7 @@ fn test_cse_string_expressions() -> Result<(), ExecutorError> {
         }),
         op: vibesql_ast::BinaryOperator::Concat,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "last_name".to_string(),
         }),

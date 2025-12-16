@@ -22,7 +22,7 @@ fn test_parse_in_subquery() {
                     assert!(!negated);
                     // Check left expression is 'id'
                     match *expr {
-                        Expression::ColumnRef { table, column } => {
+                        Expression::ColumnRef { table, column, .. } => {
                             assert_eq!(table, None);
                             assert_eq!(column, "id");
                         }
@@ -52,7 +52,7 @@ fn test_parse_not_in_subquery() {
                     assert!(negated); // Should be negated
                                       // Check left expression is 'status'
                     match *expr {
-                        Expression::ColumnRef { table, column } => {
+                        Expression::ColumnRef { table, column, .. } => {
                             assert_eq!(table, None);
                             assert_eq!(column, "status");
                         }
@@ -79,7 +79,7 @@ fn test_parse_in_subquery_simple_column() {
                 Expression::In { expr, subquery: _, negated } => {
                     assert!(!negated);
                     match *expr {
-                        Expression::ColumnRef { table, column } => {
+                        Expression::ColumnRef { table, column, .. } => {
                             assert_eq!(table, None);
                             assert_eq!(column, "user_id");
                         }

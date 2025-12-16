@@ -64,6 +64,7 @@ fn test_select_with_where() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "age".to_string(),
             }),
@@ -153,6 +154,7 @@ fn test_select_with_and_condition() {
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "price".to_string(),
                 }),
@@ -164,6 +166,7 @@ fn test_select_with_and_condition() {
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "stock".to_string(),
                 }),
@@ -248,6 +251,7 @@ fn test_select_with_or_condition() {
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "category".to_string(),
                 }),
@@ -259,6 +263,7 @@ fn test_select_with_or_condition() {
             op: vibesql_ast::BinaryOperator::Or,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "category".to_string(),
                 }),
@@ -340,6 +345,7 @@ fn test_select_with_null_in_where() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "value".to_string(),
             }),

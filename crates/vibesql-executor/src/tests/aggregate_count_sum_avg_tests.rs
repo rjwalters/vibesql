@@ -139,6 +139,7 @@ fn test_sum_no_group_by() {
             expr: vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -302,6 +303,7 @@ fn test_sum_with_nulls() {
             expr: vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "value".to_string(),
                 }],
@@ -386,6 +388,7 @@ fn test_avg_function() {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "score".to_string(),
                 }],
@@ -469,6 +472,7 @@ fn test_avg_with_nulls() {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "rating".to_string(),
                 }],
@@ -555,6 +559,7 @@ fn test_count_column_all_nulls() {
             expr: vibesql_ast::Expression::Function {
                 name: "COUNT".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "value".to_string(),
                 }],

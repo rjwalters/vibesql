@@ -394,11 +394,13 @@ fn generate_natural_join_condition(
     for (left_table, left_col, right_table, right_col) in common_columns {
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some(left_table),
                 column: left_col,
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some(right_table),
                 column: right_col,
             }),
@@ -589,11 +591,11 @@ fn predicate_references_only_tables(
     table_set: &HashSet<String>,
 ) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table: Some(t), .. } => {
+        vibesql_ast::Expression::ColumnRef { schema: None, table: Some(t), .. } => {
             let t_lower = t.to_lowercase();
             table_set.contains(t) || table_set.contains(&t_lower)
         }
-        vibesql_ast::Expression::ColumnRef { table: None, .. } => {
+        vibesql_ast::Expression::ColumnRef { schema: None, table: None, .. } => {
             // Unqualified column - can't determine which table, assume it might be from nullable
             // side Return false to be conservative (keep the predicate)
             false
@@ -918,8 +920,8 @@ fn parse_semi_join_condition(
         } = &pred
         {
             if let (
-                vibesql_ast::Expression::ColumnRef { table: left_tbl, column: left_col },
-                vibesql_ast::Expression::ColumnRef { table: right_tbl, column: right_col },
+                vibesql_ast::Expression::ColumnRef { schema: None, table: left_tbl, column: left_col, .. },
+                vibesql_ast::Expression::ColumnRef { schema: None, table: right_tbl, column: right_col, .. },
             ) = (left.as_ref(), right.as_ref())
             {
                 // Determine which column is from left and which from right
@@ -1368,11 +1370,13 @@ fn generate_using_join_condition(
         // Create equality condition with qualified column references
         let equality = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some(left_col.0.to_string()),
                 column: left_col.1,
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some(right_col.0.to_string()),
                 column: right_col.1,
             }),

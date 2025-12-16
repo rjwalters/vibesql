@@ -311,7 +311,7 @@ fn validate_expression_column_refs(
     use vibesql_ast::Expression;
 
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Skip "*" - it's a wildcard used in COUNT(*) and is not a real column
             if column == "*" {
                 return Ok(());

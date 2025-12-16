@@ -84,7 +84,7 @@ fn evaluate_batch_expression(
     schema: &CombinedSchema,
 ) -> Result<ColumnArray, ExecutorError> {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Simple column reference - return the column directly
             let col_idx = schema.get_column_index(table.as_deref(), column).ok_or_else(|| {
                 ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))

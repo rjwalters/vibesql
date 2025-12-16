@@ -102,7 +102,7 @@ impl CompiledCaseExpression {
         schema: &CombinedSchema,
     ) -> Option<(usize, SqlValue)> {
         let col_idx = match col_expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 schema.get_column_index(table.as_deref(), column)?
             }
             _ => return None,
@@ -125,7 +125,7 @@ impl CompiledCaseExpression {
         schema: &CombinedSchema,
     ) -> Option<Self> {
         match result {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 let result_col_idx = schema.get_column_index(table.as_deref(), column)?;
                 Some(CompiledCaseExpression::WhenEqualsThenColumn {
                     condition_col_idx,

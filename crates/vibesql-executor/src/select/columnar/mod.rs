@@ -788,7 +788,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
             order_by: None,
         }];
 
@@ -817,7 +817,7 @@ mod tests {
 
         // SELECT SUM(price) FROM test WHERE quantity < 25
         let filter = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
@@ -825,7 +825,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
             order_by: None,
         }];
 
@@ -857,7 +857,7 @@ mod tests {
             Expression::AggregateFunction {
                 name: "SUM".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+                args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
                 order_by: None,
             },
             Expression::AggregateFunction {
@@ -869,7 +869,7 @@ mod tests {
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef { table: None, column: "quantity".to_string() }],
+                args: vec![Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }],
                 order_by: None,
             },
         ];
@@ -911,7 +911,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: true,
-            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
             order_by: None,
         }];
 
@@ -945,7 +945,7 @@ mod tests {
         let aggregates = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { table: None, column: "price".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }],
             order_by: None,
         }];
 

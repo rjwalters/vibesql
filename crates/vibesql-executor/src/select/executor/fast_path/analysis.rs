@@ -264,7 +264,7 @@ pub(crate) fn uses_select_alias(order_by: &[OrderByItem], select_list: &[SelectI
 
     // Check if any ORDER BY column matches an alias
     for item in order_by {
-        if let Expression::ColumnRef { table: None, column } = &item.expr {
+        if let Expression::ColumnRef { schema: None, table: None, column, .. } = &item.expr {
             // Case-insensitive comparison for SQL identifiers
             if aliases.iter().any(|alias| alias.eq_ignore_ascii_case(column)) {
                 return true;
@@ -484,7 +484,7 @@ mod tests {
         // No sorted_by means we need to sort
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -494,7 +494,7 @@ mod tests {
         // Matching sorted_by means no sorting needed
         assert!(!needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -504,7 +504,7 @@ mod tests {
         // Different column means sorting needed
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "b".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "b".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -514,7 +514,7 @@ mod tests {
         // Different direction means sorting needed
         assert!(needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Desc,
                 nulls_order: None,
             }],
@@ -524,7 +524,7 @@ mod tests {
         // ORDER BY prefix of sorted_by is OK
         assert!(!needs_sorting(
             &[vibesql_ast::OrderByItem {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "a".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "a".to_string() },
                 direction: vibesql_ast::OrderDirection::Asc,
                 nulls_order: None,
             }],
@@ -539,6 +539,7 @@ mod tests {
             &[
                 vibesql_ast::OrderByItem {
                     expr: vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "a".to_string()
                     },
@@ -547,6 +548,7 @@ mod tests {
                 },
                 vibesql_ast::OrderByItem {
                     expr: vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "b".to_string()
                     },

@@ -115,7 +115,7 @@ impl SelectExecutor<'_> {
         schema: &CombinedSchema,
     ) -> Result<(), ExecutorError> {
         match expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 if schema.get_column_index(table.as_deref(), column).is_none() {
                     // SQLite compatibility: Allow ROWID pseudo-column references
                     // Only if there's no actual column with that name (real columns take precedence)
@@ -191,7 +191,7 @@ impl SelectExecutor<'_> {
 
         for item in order_by {
             let col_idx = match &item.expr {
-                Expression::ColumnRef { table, column } => schema
+                Expression::ColumnRef { table, column, .. } => schema
                     .get_column_index(table.as_deref(), column)
                     .ok_or_else(|| ExecutorError::ColumnNotFound {
                         column_name: column.clone(),
@@ -462,7 +462,7 @@ impl SelectExecutor<'_> {
         for item in select_list {
             match item {
                 SelectItem::Expression {
-                    expr: Expression::ColumnRef { table: _, column }, ..
+                    expr: Expression::ColumnRef { column, .. }, ..
                 } => {
                     // Find column index by name (case-insensitive)
                     let idx = table_schema

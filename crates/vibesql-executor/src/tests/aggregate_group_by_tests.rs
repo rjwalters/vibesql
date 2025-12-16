@@ -74,6 +74,7 @@ fn test_group_by_select_alias() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "dept".to_string(),
                 },
@@ -95,7 +96,7 @@ fn test_group_by_select_alias() {
         where_clause: None,
         // GROUP BY "department" - uses alias from SELECT list
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { table: None, column: "department".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "department".to_string() },
         ])),
         having: None,
         order_by: None,
@@ -192,6 +193,7 @@ fn test_group_by_numeric_position() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "dept".to_string(),
                 },
@@ -305,6 +307,7 @@ fn test_group_by_with_count() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "dept".to_string(),
                 },
@@ -324,7 +327,7 @@ fn test_group_by_with_count() {
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { table: None, column: "dept".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "dept".to_string() },
         ])),
         having: None,
         order_by: None,

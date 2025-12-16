@@ -76,7 +76,7 @@ fn test_between_integer() {
 
                 // Check expr is 'age'
                 match *expr {
-                    vibesql_ast::Expression::ColumnRef { table, column } => {
+                    vibesql_ast::Expression::ColumnRef { table, column, .. } => {
                         assert_eq!(table, None);
                         assert_eq!(column, "age");
                     }
@@ -122,7 +122,7 @@ fn test_not_between() {
 
                 // Check expr is 'price'
                 match *expr {
-                    vibesql_ast::Expression::ColumnRef { table, column } => {
+                    vibesql_ast::Expression::ColumnRef { table, column, .. } => {
                         assert_eq!(table, None);
                         assert_eq!(column, "price");
                     }

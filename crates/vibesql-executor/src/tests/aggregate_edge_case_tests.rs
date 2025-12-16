@@ -61,6 +61,7 @@ fn test_avg_precision_decimal() {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "price".to_string(),
                 }],
@@ -151,6 +152,7 @@ fn test_sum_mixed_numeric_types() {
             expr: vibesql_ast::Expression::Function {
                 name: "SUM".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -249,6 +251,7 @@ fn test_aggregate_with_case_expression() {
                     when_clauses: vec![vibesql_ast::CaseWhen {
                         conditions: vec![vibesql_ast::Expression::BinaryOp {
                             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: None,
                                 column: "type".to_string(),
                             }),
@@ -258,6 +261,7 @@ fn test_aggregate_with_case_expression() {
                             )),
                         }],
                         result: vibesql_ast::Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "amount".to_string(),
                         },
@@ -326,6 +330,7 @@ fn test_max_with_unary_plus() {
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Plus,
                     expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "col0".to_string(),
                     }),
@@ -388,6 +393,7 @@ fn test_max_with_unary_minus() {
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
                     expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "col0".to_string(),
                     }),
@@ -451,6 +457,7 @@ fn test_count_with_not() {
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Not,
                     expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "col1".to_string(),
                     }),

@@ -117,7 +117,7 @@ mod eliminate_unused_tables_tests {
     use super::super::eliminate_unused_tables;
 
     fn make_column_ref(table: Option<&str>, column: &str) -> Expression {
-        Expression::ColumnRef { table: table.map(|t| t.to_string()), column: column.to_string() }
+        Expression::ColumnRef { schema: None, table: table.map(|t| t.to_string()), column: column.to_string() }
     }
 
     fn make_table(name: &str, alias: Option<&str>) -> FromClause {
@@ -515,10 +515,11 @@ mod helper_function_tests {
     fn collect_unqualified_columns_finds_refs() {
         let select_list = vec![
             SelectItem::Expression {
-                expr: Expression::ColumnRef { table: None, column: "col1".to_string() },
+                expr: Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() },
                 alias: None, source_text: None },
             SelectItem::Expression {
                 expr: Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "col2".to_string(),
                 },
@@ -532,10 +533,10 @@ mod helper_function_tests {
     #[test]
     fn has_unqualified_column_ref_detects_unqualified() {
         let qualified =
-            Expression::ColumnRef { table: Some("t1".to_string()), column: "col1".to_string() };
+            Expression::ColumnRef { schema: None, table: Some("t1".to_string()), column: "col1".to_string() };
         assert!(!has_unqualified_column_ref(&qualified));
 
-        let unqualified = Expression::ColumnRef { table: None, column: "col1".to_string() };
+        let unqualified = Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() };
         assert!(has_unqualified_column_ref(&unqualified));
     }
 }

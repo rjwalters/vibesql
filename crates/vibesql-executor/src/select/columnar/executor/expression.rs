@@ -28,8 +28,8 @@ pub fn compute_expression_aggregate_batch(
         if *bin_op == BinaryOperator::Multiply {
             // Get column indices from left and right operands
             if let (
-                Expression::ColumnRef { column: col1, .. },
-                Expression::ColumnRef { column: col2, .. },
+                Expression::ColumnRef { schema: None, column: col1, .. },
+                Expression::ColumnRef { schema: None, column: col2, .. },
             ) = (left.as_ref(), right.as_ref())
             {
                 // Find column indices by name

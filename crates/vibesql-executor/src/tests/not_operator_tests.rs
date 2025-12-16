@@ -64,7 +64,7 @@ fn test_not_in_select_where() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "pk".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -77,6 +77,7 @@ fn test_not_in_select_where() {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "col0".to_string(),
                 }),
@@ -147,7 +148,7 @@ fn test_not_with_equality() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "pk".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -160,6 +161,7 @@ fn test_not_with_equality() {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "col0".to_string(),
                 }),
@@ -239,6 +241,7 @@ fn test_not_in_delete_where() {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "col0".to_string(),
                 }),
@@ -330,7 +333,7 @@ fn test_not_with_null() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "pk".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "pk".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -343,6 +346,7 @@ fn test_not_with_null() {
             op: vibesql_ast::UnaryOperator::Not,
             expr: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "col0".to_string(),
                 }),

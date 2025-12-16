@@ -54,6 +54,7 @@ fn test_when_clause_filters_firing() {
         when_condition: Some(Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 column: "amount".to_string(),
                 table: None,
             }),

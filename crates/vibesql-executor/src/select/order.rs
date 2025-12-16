@@ -388,7 +388,7 @@ pub(crate) fn resolve_order_by_for_aggregates(
         ColumnPositionResult::Position(pos) => {
             let idx = validate_column_position(pos, column_count, term_index)?;
             if let Some(col_name) = resolve_position_to_column_name(idx, select_list) {
-                return Ok(vibesql_ast::Expression::ColumnRef { table: None, column: col_name });
+                return Ok(vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: col_name });
             }
         }
         ColumnPositionResult::Negative(pos) => {
@@ -432,7 +432,7 @@ fn resolve_order_by_for_aggregates_inner(
                 } else {
                     format!("col{}", idx + 1)
                 };
-                return vibesql_ast::Expression::ColumnRef { table: None, column: col_name };
+                return vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: col_name };
             }
         }
         // If not a valid column position, just return the literal as-is
@@ -440,13 +440,14 @@ fn resolve_order_by_for_aggregates_inner(
     }
 
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
-    if let vibesql_ast::Expression::ColumnRef { table: None, column } = order_expr {
+    if let vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } = order_expr {
         // First, check if column matches an alias name - return ColumnRef to that alias
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression { alias: Some(alias_name), .. } = item {
                 if alias_name.eq_ignore_ascii_case(column) {
                     // ORDER BY uses alias name, return ColumnRef to that alias
                     return vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: alias_name.clone(),
                     };
@@ -457,7 +458,7 @@ fn resolve_order_by_for_aggregates_inner(
         // Second, check if column matches an original column name that has an alias
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
                 alias: Some(alias_name),
                 ..
             } = item
@@ -465,6 +466,7 @@ fn resolve_order_by_for_aggregates_inner(
                 if select_col.eq_ignore_ascii_case(column) {
                     // ORDER BY uses original column name, return ColumnRef to the alias
                     return vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: alias_name.clone(),
                     };
@@ -475,7 +477,7 @@ fn resolve_order_by_for_aggregates_inner(
         // Third, check if column matches a SELECT list column without alias
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
                 alias: None,
                 ..
             } = item
@@ -492,7 +494,7 @@ fn resolve_order_by_for_aggregates_inner(
     // This handles cases like GROUPING(a) + GROUPING(b) matching an alias like "lochierarchy"
     // before we try to recursively decompose the expression
     if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-        return vibesql_ast::Expression::ColumnRef { table: None, column: alias };
+        return vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: alias };
     }
 
     // Handle CASE expressions by recursively resolving sub-expressions
@@ -545,7 +547,7 @@ fn resolve_order_by_for_aggregates_inner(
         if name.eq_ignore_ascii_case("GROUPING") || name.eq_ignore_ascii_case("GROUPING_ID") {
             // Try to find a matching GROUPING expression in the SELECT list
             if let Some(alias) = find_matching_select_expression(order_expr, select_list) {
-                return vibesql_ast::Expression::ColumnRef { table: None, column: alias };
+                return vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: alias };
             }
         }
     }
@@ -587,8 +589,8 @@ fn find_matching_select_expression(
 fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -> bool {
     match (a, b) {
         (
-            vibesql_ast::Expression::ColumnRef { table: t1, column: c1 },
-            vibesql_ast::Expression::ColumnRef { table: t2, column: c2 },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
         ) => t1 == t2 && c1.eq_ignore_ascii_case(c2),
 
         (vibesql_ast::Expression::Literal(v1), vibesql_ast::Expression::Literal(v2)) => v1 == v2,
@@ -653,6 +655,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
                 }
                 ResolvedPosition::ColumnName(col_name) => {
                     return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: col_name,
                     }));
@@ -676,7 +679,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
     }
 
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
-    if let vibesql_ast::Expression::ColumnRef { table: None, column } = order_expr {
+    if let vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } = order_expr {
         // First, search for matching alias in SELECT list (ORDER BY using alias name)
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
@@ -693,7 +696,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
         for item in select_list {
             // Check if the SELECT expression is a column reference to the same column
             if let vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { column: select_col, .. },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, column: select_col, .. },
                 alias: Some(alias_name),
                 ..
             } = item
@@ -702,6 +705,7 @@ pub(crate) fn resolve_order_by_alias<'a>(
                     // The ORDER BY column matches the original column, but it's aliased
                     // Return a new ColumnRef using the alias name
                     return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: alias_name.clone(),
                     }));
@@ -862,7 +866,7 @@ fn resolve_alias_or_clone(
     select_list: &[vibesql_ast::SelectItem],
 ) -> Option<vibesql_ast::Expression> {
     // Check if this is a simple column reference that matches an alias
-    if let vibesql_ast::Expression::ColumnRef { table: None, column } = expr {
+    if let vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } = expr {
         // Search for matching alias in SELECT list
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias: Some(alias_name), .. } =
@@ -939,7 +943,7 @@ fn resolve_where_expression_with_schema(
 
     match expr {
         // Column reference: check if it's an alias
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // SQLite behavior: table column names ALWAYS take precedence over aliases
             // If the column name exists in the table schema, it refers to the table column,
             // not to any SELECT alias with the same name.
@@ -957,7 +961,7 @@ fn resolve_where_expression_with_schema(
             // (this is for backward compatibility when no schema is provided)
             for item in select_list {
                 if let vibesql_ast::SelectItem::Expression {
-                    expr: Expression::ColumnRef { table: None, column: col_name },
+                    expr: Expression::ColumnRef { schema: None, table: None, column: col_name },
                     ..
                 } = item
                 {
@@ -968,7 +972,7 @@ fn resolve_where_expression_with_schema(
                 }
                 // Also check qualified column references
                 if let vibesql_ast::SelectItem::Expression {
-                    expr: Expression::ColumnRef { table: Some(_), column: col_name },
+                    expr: Expression::ColumnRef { schema: None, table: Some(_), column: col_name, .. },
                     ..
                 } = item
                 {
@@ -998,7 +1002,10 @@ fn resolve_where_expression_with_schema(
         }
 
         // Qualified column reference: not an alias, return as-is
-        Expression::ColumnRef { table: Some(_), .. } => expr.clone(),
+        Expression::ColumnRef { schema: None, table: Some(_), .. } => expr.clone(),
+
+        // Schema-qualified column reference: not an alias, return as-is
+        Expression::ColumnRef { schema: Some(_), .. } => expr.clone(),
 
         // BinaryOp: resolve both sides
         Expression::BinaryOp { left, op, right } => Expression::BinaryOp {

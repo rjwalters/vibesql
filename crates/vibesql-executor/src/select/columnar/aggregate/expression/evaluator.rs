@@ -20,7 +20,7 @@ pub fn eval_simple_expr(
     schema: &CombinedSchema,
 ) -> Result<SqlValue, ExecutorError> {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             let col_idx = schema.get_column_index(table.as_deref(), column).ok_or_else(|| {
                 ExecutorError::UnsupportedExpression(format!("Column not found: {}", column))
             })?;

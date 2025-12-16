@@ -45,7 +45,7 @@ fn test_update_with_where_clause() {
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "department".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "department".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                 "Engineering",
@@ -88,7 +88,7 @@ fn test_update_multiple_columns() {
             },
         ],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
@@ -119,6 +119,7 @@ fn test_update_with_expression() {
             value: Expression::BinaryOp {
                 left: Box::new(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "salary".to_string(),
                     }),
@@ -196,7 +197,7 @@ fn test_update_no_matching_rows() {
             value: Expression::Literal(SqlValue::Integer(99999)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),

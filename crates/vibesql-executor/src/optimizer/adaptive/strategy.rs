@@ -365,11 +365,13 @@ mod tests {
                     distinct: false,
                     args: vec![Expression::BinaryOp {
                         left: Box::new(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "price".to_string(),
                         }),
                         op: BinaryOperator::Multiply,
                         right: Box::new(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "quantity".to_string(),
                         }),
@@ -460,6 +462,7 @@ mod tests {
     fn test_row_oriented_for_group_by_when_native_disabled() {
         let mut stmt = make_aggregate_query("orders");
         stmt.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "region".to_string(),
         }]));
@@ -477,6 +480,7 @@ mod tests {
     fn test_native_columnar_for_group_by_when_enabled() {
         let mut stmt = make_aggregate_query("orders");
         stmt.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "region".to_string(),
         }]));
