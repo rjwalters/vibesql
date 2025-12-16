@@ -201,7 +201,7 @@ impl ExpressionHasher {
                 Self::hash_sql_value(val, hasher);
             }
 
-            vibesql_ast::Expression::ColumnRef { table, column } => {
+            vibesql_ast::Expression::ColumnRef { table, column, .. } => {
                 table.hash(hasher);
                 column.hash(hasher);
             }
@@ -554,7 +554,7 @@ mod tests {
         // Column references are NOT deterministic because they depend on row data
         // Caching expressions with column references would cause incorrect results
         // when evaluating across multiple rows with different column values
-        let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "col1".to_string() };
+        let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() };
         assert!(!ExpressionHasher::is_deterministic(&expr));
     }
 

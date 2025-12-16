@@ -141,8 +141,12 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_tag!(writer, ExprTag::Literal);
             write_sql_value(writer, value)?;
         }
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { schema, table, column } => {
             write_tag!(writer, ExprTag::ColumnRef);
+            write_bool(writer, schema.is_some())?;
+            if let Some(s) = schema {
+                write_string(writer, s)?;
+            }
             write_bool(writer, table.is_some())?;
             if let Some(t) = table {
                 write_string(writer, t)?;
@@ -430,10 +434,12 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             Ok(Expression::Literal(value))
         }
         ExprTag::ColumnRef => {
+            let has_schema = read_bool(reader)?;
+            let schema = if has_schema { Some(read_string(reader)?) } else { None };
             let has_table = read_bool(reader)?;
             let table = if has_table { Some(read_string(reader)?) } else { None };
             let column = read_string(reader)?;
-            Ok(Expression::ColumnRef { table, column })
+            Ok(Expression::ColumnRef { schema, table, column })
         }
         ExprTag::BinaryOp => {
             let op = read_binary_operator(reader)?;
@@ -687,7 +693,7 @@ mod tests {
     #[test]
     fn test_column_ref_roundtrip() {
         let expr =
-            Expression::ColumnRef { table: Some("users".to_string()), column: "id".to_string() };
+            Expression::ColumnRef { schema: None, table: Some("users".to_string()), column: "id".to_string() };
         let mut buf = Vec::new();
         write_expression(&mut buf, &expr).unwrap();
 

@@ -44,9 +44,10 @@ pub enum Expression<'arena> {
     /// Named parameter placeholder (:name)
     NamedPlaceholder(Symbol),
 
-    /// Column reference (id, users.id)
+    /// Column reference (id, users.id, schema.table.column)
     /// Second most common expression type.
     ColumnRef {
+        schema: Option<Symbol>,
         table: Option<Symbol>,
         column: Symbol,
     },

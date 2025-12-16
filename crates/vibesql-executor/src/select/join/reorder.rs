@@ -350,7 +350,7 @@ impl JoinOrderAnalyzer {
         tables: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         match expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 // If explicit table prefix exists, use it
                 if let Some(t) = table {
                     return (Some(t.clone()), Some(column.clone()));

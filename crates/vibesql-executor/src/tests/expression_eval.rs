@@ -63,11 +63,11 @@ fn test_eval_column_ref() {
         vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
     ]);
 
-    let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() };
+    let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "id".to_string() };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Integer(1));
 
-    let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() };
+    let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "name".to_string() };
     let result = evaluator.eval(&expr, &row).unwrap();
     assert_eq!(result, vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
 }
@@ -85,7 +85,7 @@ fn test_eval_column_not_found() {
     let evaluator = ExpressionEvaluator::new(&schema);
     let row = vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]);
 
-    let expr = vibesql_ast::Expression::ColumnRef { table: None, column: "missing".to_string() };
+    let expr = vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "missing".to_string() };
     let err = evaluator.eval(&expr, &row).unwrap_err();
     match err {
         ExecutorError::ColumnNotFound { column_name, .. } => assert_eq!(column_name, "missing"),

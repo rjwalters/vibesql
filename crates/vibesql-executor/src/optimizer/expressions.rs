@@ -479,7 +479,7 @@ mod tests {
     fn test_cast_non_literal_not_folded() {
         // CAST(column AS INTEGER) should not be folded
         let expr = Expression::Cast {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
             data_type: DataType::Integer,
         };
 
@@ -570,7 +570,7 @@ mod tests {
     fn test_between_with_column_not_folded() {
         // x BETWEEN 1 AND 10 should not be folded
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Integer(1))),
             high: Box::new(Expression::Literal(SqlValue::Integer(10))),
             negated: false,
@@ -645,7 +645,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Integer(9933))),
             op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
-            right: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
         };
 
         let db = vibesql_storage::Database::new();
@@ -674,7 +674,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Integer(8524))),
             op: vibesql_ast::BinaryOperator::LessThanOrEqual,
-            right: Box::new(Expression::ColumnRef { table: None, column: "col3".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col3".to_string() }),
         };
 
         let db = vibesql_storage::Database::new();
@@ -701,7 +701,7 @@ mod tests {
     fn test_predicate_normalization_already_normalized() {
         // col0 <= 9933 should remain unchanged (already normalized)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "col0".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "col0".to_string() }),
             op: vibesql_ast::BinaryOperator::LessThanOrEqual,
             right: Box::new(Expression::Literal(SqlValue::Integer(9933))),
         };
@@ -732,7 +732,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Integer(100))),
             op: vibesql_ast::BinaryOperator::Equal,
-            right: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
         };
 
         let db = vibesql_storage::Database::new();
@@ -761,7 +761,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Integer(5))),
             op: vibesql_ast::BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
         };
 
         let db = vibesql_storage::Database::new();
@@ -790,7 +790,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Integer(100))),
             op: vibesql_ast::BinaryOperator::LessThan,
-            right: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
         };
 
         let db = vibesql_storage::Database::new();
@@ -819,7 +819,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Integer(200))),
             op: vibesql_ast::BinaryOperator::GreaterThan,
-            right: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
         };
 
         let db = vibesql_storage::Database::new();

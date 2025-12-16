@@ -104,11 +104,13 @@ fn test_inner_join_two_tables() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),
@@ -232,11 +234,13 @@ fn test_right_outer_join() {
             join_type: vibesql_ast::JoinType::RightOuter,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),
@@ -367,11 +371,13 @@ fn test_full_outer_join() {
             join_type: vibesql_ast::JoinType::FullOuter,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),
@@ -568,11 +574,13 @@ fn test_cross_join_with_condition_fails() {
             join_type: vibesql_ast::JoinType::Cross,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("products".to_string()),
                     column: "id".to_string(),
                 }),
@@ -686,12 +694,14 @@ fn test_inner_join_null_values_dont_match() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "name".to_string(),
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t2".to_string()),
                     column: "value".to_string(),
                 },
@@ -711,11 +721,13 @@ fn test_inner_join_null_values_dont_match() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "x".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t2".to_string()),
                     column: "y".to_string(),
                 }),

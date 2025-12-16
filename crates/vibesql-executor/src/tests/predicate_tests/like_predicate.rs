@@ -58,6 +58,7 @@ fn test_like_wildcard_percent() {
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "name".to_string(),
             }),
@@ -129,6 +130,7 @@ fn test_like_wildcard_underscore() {
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "name".to_string(),
             }),
@@ -200,6 +202,7 @@ fn test_not_like() {
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "name".to_string(),
             }),
@@ -258,6 +261,7 @@ fn test_like_null_pattern() {
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "name".to_string(),
             }),
@@ -314,6 +318,7 @@ fn test_like_null_value() {
         }),
         where_clause: Some(vibesql_ast::Expression::Like {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "name".to_string(),
             }),

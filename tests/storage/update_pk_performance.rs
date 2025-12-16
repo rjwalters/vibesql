@@ -66,6 +66,7 @@ fn test_update_with_pk_index_performance() {
                 right: Box::new(Expression::Literal(SqlValue::Integer(i))),
             })),
             quoted: false,
+            conflict_clause: None,
         };
 
         UpdateExecutor::execute(&stmt, &mut db).unwrap();

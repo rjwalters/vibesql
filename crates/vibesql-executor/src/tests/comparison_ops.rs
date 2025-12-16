@@ -37,6 +37,7 @@ fn test_greater_than_comparison() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -88,6 +89,7 @@ fn test_less_than_comparison() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -141,6 +143,7 @@ fn test_not_equal_comparison() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -195,6 +198,7 @@ fn test_less_than_or_equal_comparison() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),

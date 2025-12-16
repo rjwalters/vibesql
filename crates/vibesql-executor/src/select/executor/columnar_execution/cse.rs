@@ -30,7 +30,7 @@ pub(super) fn hash_expression(expr: &Expression) -> u64 {
 fn hash_expression_recursive<H: std::hash::Hasher>(expr: &Expression, hasher: &mut H) {
     use std::hash::Hash;
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             "col".hash(hasher);
             table.hash(hasher);
             column.hash(hasher);

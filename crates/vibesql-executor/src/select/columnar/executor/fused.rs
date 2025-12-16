@@ -248,8 +248,8 @@ fn compute_fused_expression_aggregate(
     if let Expression::BinaryOp { left, op: bin_op, right } = expr {
         if *bin_op == BinaryOperator::Multiply {
             if let (
-                Expression::ColumnRef { column: col1, .. },
-                Expression::ColumnRef { column: col2, .. },
+                Expression::ColumnRef { schema: None, column: col1, .. },
+                Expression::ColumnRef { schema: None, column: col2, .. },
             ) = (left.as_ref(), right.as_ref())
             {
                 let left_idx = batch.column_index_by_name(col1);

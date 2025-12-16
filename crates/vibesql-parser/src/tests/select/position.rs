@@ -101,6 +101,7 @@ fn test_parse_position_with_column() {
                         assert_eq!(
                             **string,
                             vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: None,
                                 column: "name".to_string()
                             }
@@ -132,6 +133,7 @@ fn test_parse_position_both_columns() {
                         assert_eq!(
                             **substring,
                             vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: None,
                                 column: "needle".to_string()
                             }
@@ -139,6 +141,7 @@ fn test_parse_position_both_columns() {
                         assert_eq!(
                             **string,
                             vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: None,
                                 column: "haystack".to_string()
                             }

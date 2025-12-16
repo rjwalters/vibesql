@@ -119,7 +119,7 @@ impl CompiledPredicate {
 
             // IS NULL / IS NOT NULL
             Expression::IsNull { expr, negated } => {
-                if let Expression::ColumnRef { table, column } = expr.as_ref() {
+                if let Expression::ColumnRef { table, column, .. } = expr.as_ref() {
                     let col_idx = schema.get_column_index(table.as_deref(), column)?;
                     if *negated {
                         Some(CompiledPredicate::IsNotNull { col_idx })
@@ -197,14 +197,14 @@ impl CompiledPredicate {
         schema: &CombinedSchema,
     ) -> Option<Self> {
         // Try col <op> literal
-        if let (Expression::ColumnRef { table, column }, Expression::Literal(value)) = (left, right)
+        if let (Expression::ColumnRef { table, column, .. }, Expression::Literal(value)) = (left, right)
         {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
             return Self::compile_comparison_with_idx(col_idx, op, value.clone(), false);
         }
 
         // Try literal <op> col (reverse the operator)
-        if let (Expression::Literal(value), Expression::ColumnRef { table, column }) = (left, right)
+        if let (Expression::Literal(value), Expression::ColumnRef { table, column, .. }) = (left, right)
         {
             let col_idx = schema.get_column_index(table.as_deref(), column)?;
             return Self::compile_comparison_with_idx(col_idx, op, value.clone(), true);
@@ -680,7 +680,7 @@ mod tests {
     fn test_compile_simple_equals() {
         let schema = create_test_schema();
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
@@ -700,7 +700,7 @@ mod tests {
     fn test_evaluate_equals() {
         let schema = create_test_schema();
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
@@ -727,13 +727,13 @@ mod tests {
         let schema = create_test_schema();
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 op: BinaryOperator::GreaterThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::Literal(SqlValue::Integer(100))),
             }),

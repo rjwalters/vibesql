@@ -111,8 +111,8 @@ pub(super) fn extract_equijoin_conditions(
         Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
             // Check if this is col1 = col2 (equi-join)
             if let (
-                Expression::ColumnRef { table: lt, column: lc },
-                Expression::ColumnRef { table: rt, column: rc },
+                Expression::ColumnRef { schema: None, table: lt, column: lc, .. },
+                Expression::ColumnRef { schema: None, table: rt, column: rc, .. },
             ) = (left.as_ref(), right.as_ref())
             {
                 conditions.push(EquiJoinCondition {

@@ -25,20 +25,20 @@ fn test_literal_string_expression() {
 
 #[test]
 fn test_column_reference_expression() {
-    let expr = Expression::ColumnRef { table: None, column: "id".to_string() };
+    let expr = Expression::ColumnRef { schema: None, table: None, column: "id".to_string() };
 
     match expr {
-        Expression::ColumnRef { table: None, column } if column == "id" => {} // Success
+        Expression::ColumnRef { schema: None, table: None, column } if column == "id" => {} // Success
         _ => panic!("Expected column reference"),
     }
 }
 
 #[test]
 fn test_qualified_column_reference() {
-    let expr = Expression::ColumnRef { table: Some("users".to_string()), column: "id".to_string() };
+    let expr = Expression::ColumnRef { schema: None, table: Some("users".to_string()), column: "id".to_string() };
 
     match expr {
-        Expression::ColumnRef { table: Some(t), column: c } if t == "users" && c == "id" => {} /* Success */
+        Expression::ColumnRef { schema: None, table: Some(t), column: c } if t == "users" && c == "id" => {} /* Success */
         _ => panic!("Expected qualified column reference"),
     }
 }
@@ -61,7 +61,7 @@ fn test_binary_operation_addition() {
 fn test_binary_operation_equality() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     };
 
@@ -88,7 +88,7 @@ fn test_function_call_count_star() {
 #[test]
 fn test_is_null_predicate() {
     let expr = Expression::IsNull {
-        expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+        expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
         negated: false,
     };
 
@@ -101,7 +101,7 @@ fn test_is_null_predicate() {
 #[test]
 fn test_is_not_null_predicate() {
     let expr = Expression::IsNull {
-        expr: Box::new(Expression::ColumnRef { table: None, column: "name".to_string() }),
+        expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "name".to_string() }),
         negated: true,
     };
 

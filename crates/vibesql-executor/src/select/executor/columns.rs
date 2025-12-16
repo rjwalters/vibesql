@@ -197,7 +197,7 @@ fn derive_expression_name_impl(
     mode: ColumnNamingMode,
 ) -> String {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table, column } => {
+        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
             match mode {
                 ColumnNamingMode::Full => {
                     // Use schema to get the full column name (table.column format)

@@ -82,7 +82,7 @@ pub(super) fn rewrite_column_refs_with_alias(
     new_alias: &str,
 ) -> Expression {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Rewrite if:
             // 1. No table qualifier (unqualified column from the subquery table)
             // 2. Table qualifier matches the old table name
@@ -92,7 +92,11 @@ pub(super) fn rewrite_column_refs_with_alias(
             };
 
             if should_rewrite {
-                Expression::ColumnRef { table: Some(new_alias.to_string()), column: column.clone() }
+                Expression::ColumnRef {
+                    schema: None,
+                    table: Some(new_alias.to_string()),
+                    column: column.clone(),
+                }
             } else {
                 expr.clone()
             }

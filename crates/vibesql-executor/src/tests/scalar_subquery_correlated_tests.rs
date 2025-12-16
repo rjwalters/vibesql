@@ -88,6 +88,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
                 name: "AVG".to_string(),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("J".to_string()),          // UPPERCASE alias
                     column: "I_CURRENT_PRICE".to_string(), // UPPERCASE column - this was failing
                 }],
@@ -103,11 +104,13 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("J".to_string()),     // UPPERCASE alias
                 column: "I_CATEGORY".to_string(), // UPPERCASE column
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("I".to_string()),     // UPPERCASE outer alias
                 column: "I_CATEGORY".to_string(), // UPPERCASE column
             }),
@@ -130,6 +133,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("I".to_string()),
                 column: "I_ITEM_SK".to_string(),
             },
@@ -143,6 +147,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("I".to_string()),
                 column: "I_CURRENT_PRICE".to_string(),
             }),
@@ -268,6 +273,7 @@ fn test_correlated_subquery_basic() {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 }],
@@ -283,11 +289,13 @@ fn test_correlated_subquery_basic() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "department".to_string(),
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "department".to_string(),
             }),
@@ -310,12 +318,14 @@ fn test_correlated_subquery_basic() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "name".to_string(),
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 },
@@ -328,6 +338,7 @@ fn test_correlated_subquery_basic() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "salary".to_string(),
             }),

@@ -46,7 +46,7 @@ pub fn resolve_group_by_alias(
     }
 
     // Check if GROUP BY expression is a simple column reference (no table qualifier)
-    if let Expression::ColumnRef { table: None, column } = group_expr {
+    if let Expression::ColumnRef { schema: None, table: None, column, .. } = group_expr {
         // Search for matching alias in SELECT list (case-insensitive)
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression { expr, alias: Some(alias_name) , .. } = item {
@@ -129,11 +129,11 @@ pub fn resolve_having_aliases(
 /// Check if a column name matches any GROUP BY column expression
 fn is_group_by_column(column: &str, group_by_exprs: &[Expression]) -> bool {
     for expr in group_by_exprs {
-        if let Expression::ColumnRef { table: None, column: group_col } = expr {
+        if let Expression::ColumnRef { schema: None, table: None, column: group_col } = expr {
             if group_col.eq_ignore_ascii_case(column) {
                 return true;
             }
-        } else if let Expression::ColumnRef { table: Some(_), column: group_col } = expr {
+        } else if let Expression::ColumnRef { schema: None, table: Some(_), column: group_col, .. } = expr {
             // Also match qualified column references
             if group_col.eq_ignore_ascii_case(column) {
                 return true;
@@ -150,7 +150,7 @@ fn resolve_having_aliases_inner(
 ) -> Expression {
     match having_expr {
         // Check if this column reference matches a SELECT list alias
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Skip alias resolution if this column is in GROUP BY
             // GROUP BY columns take precedence over SELECT aliases in HAVING
             if is_group_by_column(column, group_by_exprs) {
@@ -274,7 +274,7 @@ mod tests {
     use super::*;
 
     fn col(name: &str) -> Expression {
-        Expression::ColumnRef { table: None, column: name.to_string() }
+        Expression::ColumnRef { schema: None, table: None, column: name.to_string() }
     }
 
     fn select_item(expr: Expression, alias: Option<&str>) -> SelectItem {
@@ -302,7 +302,7 @@ mod tests {
         let resolved = resolve_group_by_alias(&group_expr, &select_list, 0).unwrap();
 
         assert!(
-            matches!(resolved, Expression::ColumnRef { table: None, column } if column == "n_name")
+            matches!(resolved, Expression::ColumnRef { schema: None, table: None, column, .. } if column == "n_name")
         );
     }
 
@@ -316,7 +316,7 @@ mod tests {
         let resolved = resolve_group_by_alias(&group_expr, &select_list, 0).unwrap();
 
         assert!(
-            matches!(resolved, Expression::ColumnRef { table: None, column } if column == "n_name")
+            matches!(resolved, Expression::ColumnRef { schema: None, table: None, column, .. } if column == "n_name")
         );
     }
 
@@ -330,7 +330,7 @@ mod tests {
         let resolved = resolve_group_by_alias(&group_expr, &select_list, 0).unwrap();
 
         assert!(
-            matches!(resolved, Expression::ColumnRef { table: None, column } if column == "n_name")
+            matches!(resolved, Expression::ColumnRef { schema: None, table: None, column, .. } if column == "n_name")
         );
 
         // GROUP BY 2 should return the second SELECT item
@@ -338,7 +338,7 @@ mod tests {
         let resolved2 = resolve_group_by_alias(&group_expr2, &select_list, 1).unwrap();
 
         assert!(
-            matches!(resolved2, Expression::ColumnRef { table: None, column } if column == "amount")
+            matches!(resolved2, Expression::ColumnRef { schema: None, table: None, column, .. } if column == "amount")
         );
     }
 
@@ -368,7 +368,7 @@ mod tests {
         let resolved = resolve_group_by_alias(&group_expr, &select_list, 0).unwrap();
 
         assert!(
-            matches!(resolved, Expression::ColumnRef { table: None, column } if column == "something_else")
+            matches!(resolved, Expression::ColumnRef { schema: None, table: None, column, .. } if column == "something_else")
         );
     }
 
@@ -379,12 +379,12 @@ mod tests {
 
         // GROUP BY t.nation should NOT resolve to n_name (it's table-qualified)
         let group_expr =
-            Expression::ColumnRef { table: Some("t".to_string()), column: "nation".to_string() };
+            Expression::ColumnRef { schema: None, table: Some("t".to_string()), column: "nation".to_string() };
         let resolved = resolve_group_by_alias(&group_expr, &select_list, 0).unwrap();
 
         // Should remain unchanged
         assert!(
-            matches!(resolved, Expression::ColumnRef { table: Some(t), column } if t == "t" && column == "nation")
+            matches!(resolved, Expression::ColumnRef { schema: None, table: Some(t), column } if t == "t" && column == "nation")
         );
     }
 
@@ -428,10 +428,10 @@ mod tests {
         // Both should resolve to the actual column names
         assert_eq!(resolved_set.group_by_exprs.len(), 2);
         assert!(
-            matches!(&resolved_set.group_by_exprs[0], Expression::ColumnRef { table: None, column } if column == "n1_n_name")
+            matches!(&resolved_set.group_by_exprs[0], Expression::ColumnRef { schema: None, table: None, column, .. } if column == "n1_n_name")
         );
         assert!(
-            matches!(&resolved_set.group_by_exprs[1], Expression::ColumnRef { table: None, column } if column == "n2_n_name")
+            matches!(&resolved_set.group_by_exprs[1], Expression::ColumnRef { schema: None, table: None, column, .. } if column == "n2_n_name")
         );
         // rolled_up should be preserved
         assert_eq!(resolved_set.rolled_up, vec![false, false]);
@@ -447,10 +447,10 @@ mod tests {
 
         assert_eq!(resolved.len(), 2);
         assert!(
-            matches!(&resolved[0], Expression::ColumnRef { table: None, column } if column == "a_col")
+            matches!(&resolved[0], Expression::ColumnRef { schema: None, table: None, column, .. } if column == "a_col")
         );
         assert!(
-            matches!(&resolved[1], Expression::ColumnRef { table: None, column } if column == "b_col")
+            matches!(&resolved[1], Expression::ColumnRef { schema: None, table: None, column, .. } if column == "b_col")
         );
     }
 }

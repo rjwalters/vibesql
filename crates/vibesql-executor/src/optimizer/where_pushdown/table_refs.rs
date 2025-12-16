@@ -46,7 +46,7 @@ fn extract_tables_recursive_branch(
     tables: &mut HashSet<String>,
 ) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table: Some(table_name), .. } => {
+        vibesql_ast::Expression::ColumnRef { schema: None, table: Some(table_name), .. } => {
             let normalized = table_name.to_lowercase();
             if schema.contains_table(&normalized) {
                 tables.insert(normalized);
@@ -56,7 +56,7 @@ fn extract_tables_recursive_branch(
                 false
             }
         }
-        vibesql_ast::Expression::ColumnRef { table: None, column } => {
+        vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Unqualified column reference - need to resolve it to table(s)
             // Search all tables in the schema to find which contain this column
             let column_lower = column.to_lowercase();
@@ -186,7 +186,7 @@ fn extract_column_reference_branch(
     schema: &CombinedSchema,
 ) -> Option<(String, String)> {
     match expr {
-        vibesql_ast::Expression::ColumnRef { table, column } => {
+        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
             if let Some(table_name) = table {
                 let normalized_table = table_name.to_lowercase();
                 if schema.contains_table(&normalized_table) {

@@ -88,7 +88,7 @@ impl SubscriptionFilter {
         match expr {
             Expression::Literal(val) => Ok(val.clone()),
 
-            Expression::ColumnRef { table: _, column } => {
+            Expression::ColumnRef { column, .. } => {
                 // Look up column by name (case-insensitive)
                 let idx = self
                     .column_indices

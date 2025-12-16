@@ -289,9 +289,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -312,7 +312,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::Literal(SqlValue::Float(0.9))),
         };
@@ -344,12 +344,13 @@ mod tests {
 
         // price * (1 - discount)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
                 op: BinaryOperator::Minus,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "discount".to_string(),
                 }),
@@ -381,9 +382,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -408,9 +409,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -435,9 +436,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -465,9 +466,9 @@ mod tests {
 
         // Test addition
         let add_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &add_expr).unwrap();
@@ -477,9 +478,9 @@ mod tests {
 
         // Test multiplication
         let mul_expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &mul_expr).unwrap();
@@ -503,9 +504,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -525,9 +526,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -551,9 +552,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -577,9 +578,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -603,9 +604,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -629,9 +630,9 @@ mod tests {
                 .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -652,7 +653,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Float(5.0))),
         };
@@ -672,7 +673,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         };
@@ -708,15 +709,15 @@ mod tests {
 
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "a".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "a".to_string() }),
                 op: BinaryOperator::Plus,
-                right: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+                right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
             }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "c".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "c".to_string() }),
                 op: BinaryOperator::Minus,
-                right: Box::new(Expression::ColumnRef { table: None, column: "d".to_string() }),
+                right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "d".to_string() }),
             }),
         };
 
@@ -739,7 +740,7 @@ mod tests {
         let a_array = Float64Array::from(vec![10.0, 20.0, 30.0]);
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a_array)]).unwrap();
 
-        let expr = Expression::ColumnRef { table: None, column: "a".to_string() };
+        let expr = Expression::ColumnRef { schema: None, table: None, column: "a".to_string() };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
         let result_arr = result.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -762,7 +763,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::Literal(SqlValue::Null)),
             op: BinaryOperator::Plus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -784,7 +785,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(price_array)]).unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
             op: BinaryOperator::Plus,
             right: Box::new(Expression::Literal(SqlValue::Null)),
         };
@@ -817,9 +818,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
             op: BinaryOperator::Multiply,
-            right: Box::new(Expression::ColumnRef { table: None, column: "discount".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "discount".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -878,12 +879,13 @@ mod tests {
 
         // price * (1 - discount)
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal(SqlValue::Float(1.0))),
                 op: BinaryOperator::Minus,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "discount".to_string(),
                 }),
@@ -920,9 +922,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
             op: BinaryOperator::Divide,
-            right: Box::new(Expression::ColumnRef { table: None, column: "quantity".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "quantity".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();
@@ -955,9 +957,9 @@ mod tests {
         .unwrap();
 
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "revenue".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "revenue".to_string() }),
             op: BinaryOperator::Minus,
-            right: Box::new(Expression::ColumnRef { table: None, column: "cost".to_string() }),
+            right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "cost".to_string() }),
         };
 
         let result = evaluate_arithmetic_simd(&batch, &expr).unwrap();

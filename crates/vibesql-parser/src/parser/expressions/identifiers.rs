@@ -113,26 +113,26 @@ impl Parser {
             return Ok(None);
         }
 
-        // Check for qualified column reference (table.column)
+        // Check for qualified column reference (table.column or schema.table.column)
         // Keywords are allowed as column names when qualified (e.g., ss.year)
         if matches!(self.peek(), Token::Symbol('.')) {
-            self.advance(); // consume '.'
-            let column = match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let column = col.clone();
+            self.advance(); // consume first '.'
+            let second = match self.peek() {
+                Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                    let name = id.clone();
                     self.advance();
-                    column
+                    name
                 }
                 Token::Keyword { keyword: kw, .. } => {
                     // Allow keywords as column names when qualified (e.g., table.year)
                     // SQL:1999 normalizes unquoted identifiers to lowercase
-                    let column = kw.to_string().to_lowercase();
+                    let name = kw.to_string().to_lowercase();
                     self.advance();
-                    column
+                    name
                 }
                 _ => {
                     return Err(ParseError {
-                        message: "Expected column name after '.'".to_string(),
+                        message: "Expected identifier after '.'".to_string(),
                     });
                 }
             };
@@ -145,13 +145,54 @@ impl Parser {
                 } else {
                     vibesql_ast::PseudoTable::New
                 };
-                Ok(Some(vibesql_ast::Expression::PseudoVariable { pseudo_table, column }))
+                return Ok(Some(vibesql_ast::Expression::PseudoVariable {
+                    pseudo_table,
+                    column: second,
+                }));
+            }
+
+            // Check for three-part name (schema.table.column)
+            if matches!(self.peek(), Token::Symbol('.')) {
+                self.advance(); // consume second '.'
+                let third = match self.peek() {
+                    Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                        let name = id.clone();
+                        self.advance();
+                        name
+                    }
+                    Token::Keyword { keyword: kw, .. } => {
+                        let name = kw.to_string().to_lowercase();
+                        self.advance();
+                        name
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected column name after '.'".to_string(),
+                        });
+                    }
+                };
+
+                // schema.table.column
+                Ok(Some(vibesql_ast::Expression::ColumnRef {
+                    schema: Some(first),
+                    table: Some(second),
+                    column: third,
+                }))
             } else {
-                Ok(Some(vibesql_ast::Expression::ColumnRef { table: Some(first), column }))
+                // table.column (two-part name)
+                Ok(Some(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
+                    table: Some(first),
+                    column: second,
+                }))
             }
         } else {
             // Simple column reference
-            Ok(Some(vibesql_ast::Expression::ColumnRef { table: None, column: first }))
+            Ok(Some(vibesql_ast::Expression::ColumnRef {
+                schema: None,
+                table: None,
+                column: first,
+            }))
         }
     }
 }

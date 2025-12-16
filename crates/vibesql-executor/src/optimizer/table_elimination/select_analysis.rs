@@ -122,7 +122,7 @@ pub(super) fn has_any_column_ref(expr: &Expression) -> bool {
 /// Check if expression contains any unqualified column references
 pub(super) fn has_unqualified_column_ref(expr: &Expression) -> bool {
     match expr {
-        Expression::ColumnRef { table: None, .. } => true,
+        Expression::ColumnRef { schema: None, table: None, .. } => true,
         Expression::BinaryOp { left, right, .. } => {
             has_unqualified_column_ref(left) || has_unqualified_column_ref(right)
         }
@@ -150,7 +150,7 @@ pub(super) fn has_unqualified_column_ref(expr: &Expression) -> bool {
 /// Extract tables referenced in an expression (only qualified column refs)
 pub(super) fn extract_tables_from_expr(expr: &Expression, tables: &mut HashSet<String>) {
     match expr {
-        Expression::ColumnRef { table: Some(t), .. } => {
+        Expression::ColumnRef { schema: None, table: Some(t), .. } => {
             tables.insert(t.to_lowercase());
         }
         Expression::BinaryOp { left, right, .. } => {
@@ -218,7 +218,7 @@ pub(super) fn collect_unqualified_columns_from_expr(
     columns: &mut HashSet<String>,
 ) {
     match expr {
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Skip the special "*" wildcard (used in COUNT(*))
             if column != "*" {
                 columns.insert(column.to_lowercase());

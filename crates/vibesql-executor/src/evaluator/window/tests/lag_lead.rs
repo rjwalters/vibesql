@@ -30,7 +30,7 @@ fn test_lag_default_offset() {
     // LAG(value) with default offset of 1
     let partition = Partition::new(make_test_rows(vec![10, 20, 30, 40, 50]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // Row 0: LAG should return NULL (no previous row)
     let result = evaluate_lag(&partition, 0, &value_expr, None, None, simple_eval).unwrap();
@@ -54,7 +54,7 @@ fn test_lag_custom_offset() {
     // LAG(value, 2) - look back 2 rows
     let partition = Partition::new(make_test_rows(vec![10, 20, 30, 40, 50]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // Row 0: offset 2 goes before partition start -> NULL
     let result = evaluate_lag(&partition, 0, &value_expr, Some(2), None, simple_eval).unwrap();
@@ -82,7 +82,7 @@ fn test_lag_with_default_value() {
     // LAG(value, 1, 0) - default value of 0 instead of NULL
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     let default_expr = Expression::Literal(SqlValue::Integer(0));
 
@@ -107,7 +107,7 @@ fn test_lag_offset_beyond_partition_start() {
     // Large offset that goes way before partition start
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // Row 2 with offset 100 should return NULL
     let result = evaluate_lag(&partition, 2, &value_expr, Some(100), None, simple_eval).unwrap();
@@ -128,7 +128,7 @@ fn test_lead_default_offset() {
     // LEAD(value) with default offset of 1
     let partition = Partition::new(make_test_rows(vec![10, 20, 30, 40, 50]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // Row 0: LEAD should return 20 (next row value)
     let result = evaluate_lead(&partition, 0, &value_expr, None, None, simple_eval).unwrap();
@@ -152,7 +152,7 @@ fn test_lead_custom_offset() {
     // LEAD(value, 2) - look forward 2 rows
     let partition = Partition::new(make_test_rows(vec![10, 20, 30, 40, 50]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // Row 0: LEAD(value, 2) should return 30 (row 2)
     let result = evaluate_lead(&partition, 0, &value_expr, Some(2), None, simple_eval).unwrap();
@@ -180,7 +180,7 @@ fn test_lead_with_default_value() {
     // LEAD(value, 1, 999) - default value of 999 instead of NULL
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     let default_expr = Expression::Literal(SqlValue::Integer(999));
 
@@ -205,7 +205,7 @@ fn test_lead_offset_beyond_partition_end() {
     // Large offset that goes way past partition end
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // Row 0 with offset 100 should return NULL
     let result = evaluate_lead(&partition, 0, &value_expr, Some(100), None, simple_eval).unwrap();
@@ -226,7 +226,7 @@ fn test_lag_lead_single_row_partition() {
     // Edge case: partition with only one row
     let partition = Partition::new(make_test_rows(vec![42]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // LAG on single row should return NULL
     let result = evaluate_lag(&partition, 0, &value_expr, None, None, simple_eval).unwrap();
@@ -242,7 +242,7 @@ fn test_lag_lead_with_zero_offset() {
     // Special case: offset of 0 should return current row value
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     // LAG(value, 0) should return current row value
     let result = evaluate_lag(&partition, 1, &value_expr, Some(0), None, simple_eval).unwrap();
@@ -260,7 +260,7 @@ fn test_lag_negative_offset_error() {
     // LAG with negative offset should return error
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     let result = evaluate_lag(&partition, 1, &value_expr, Some(-1), None, simple_eval);
     assert!(result.is_err());
@@ -272,7 +272,7 @@ fn test_lead_negative_offset_error() {
     // LEAD with negative offset should return error
     let partition = Partition::new(make_test_rows(vec![10, 20, 30]));
 
-    let value_expr = Expression::ColumnRef { table: None, column: "0".to_string() };
+    let value_expr = Expression::ColumnRef { schema: None, table: None, column: "0".to_string() };
 
     let result = evaluate_lead(&partition, 1, &value_expr, Some(-1), None, simple_eval);
     assert!(result.is_err());

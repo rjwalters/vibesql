@@ -86,14 +86,14 @@ pub(super) fn extract_in_predicates_from_or(
         table_set: &HashSet<String>,
     ) -> Option<(String, String, vibesql_types::SqlValue)> {
         if let Expression::BinaryOp { op: BinaryOperator::Equal, left, right } = pred {
-            if let (Expression::ColumnRef { table: Some(t), column: c }, Expression::Literal(v)) =
+            if let (Expression::ColumnRef { schema: None, table: Some(t), column: c, .. }, Expression::Literal(v)) =
                 (left.as_ref(), right.as_ref())
             {
                 if table_set.contains(&t.to_lowercase()) {
                     return Some((t.clone(), c.clone(), v.clone()));
                 }
             }
-            if let (Expression::Literal(v), Expression::ColumnRef { table: Some(t), column: c }) =
+            if let (Expression::Literal(v), Expression::ColumnRef { schema: None, table: Some(t), column: c, .. }) =
                 (left.as_ref(), right.as_ref())
             {
                 if table_set.contains(&t.to_lowercase()) {
@@ -134,6 +134,7 @@ pub(super) fn extract_in_predicates_from_or(
             if col_count.get(&(t.clone(), c.clone())) == Some(&branches.len()) && vals.len() >= 2 {
                 let in_pred = Expression::InList {
                     expr: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: Some(t.clone()),
                         column: c.clone(),
                     }),
@@ -431,15 +432,15 @@ pub(super) fn extract_where_equijoins_with_schema(
                 // Use schema-based lookup
 
                 let left_table = match left.as_ref() {
-                    Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => {
+                    Expression::ColumnRef { schema: None, table: Some(t), .. } => Some(t.to_lowercase()),
+                    Expression::ColumnRef { schema: None, table: None, column, .. } => {
                         resolve_column_with_fallback(column, column_to_table)
                     }
                     _ => None,
                 };
                 let right_table = match right.as_ref() {
-                    Expression::ColumnRef { table: Some(t), .. } => Some(t.to_lowercase()),
-                    Expression::ColumnRef { table: None, column } => {
+                    Expression::ColumnRef { schema: None, table: Some(t), .. } => Some(t.to_lowercase()),
+                    Expression::ColumnRef { schema: None, table: None, column, .. } => {
                         resolve_column_with_fallback(column, column_to_table)
                     }
                     _ => None,

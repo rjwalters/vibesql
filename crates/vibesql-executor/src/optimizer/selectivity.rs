@@ -353,7 +353,7 @@ mod tests {
         // status = 'active' should be 3/4 = 75% (of non-null values)
         let pred = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "status".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))),
         };
 
@@ -370,14 +370,14 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "status".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "active",
                 )))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
         };
@@ -403,14 +403,14 @@ mod tests {
             op: BinaryOperator::Or,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "status".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "active",
                 )))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(10))),
             }),
         };
@@ -430,7 +430,7 @@ mod tests {
         // Should match all non-null rows: 4/5 = 80%
         // NDV for status is 2 (active, inactive), so selectivity = 2/2 = 1.0
         let pred = Expression::InList {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "status".to_string() }),
             values: vec![
                 Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active"))),
                 Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("inactive"))),
@@ -450,7 +450,7 @@ mod tests {
         // Should match 3/5 = 60% of rows (3 out of 4 non-null have 'active')
         // NDV for status is 2, so selectivity = 1/2 = 0.5
         let pred_single = Expression::InList {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "status".to_string() }),
             values: vec![Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("active")))],
             negated: false,
         };
@@ -476,6 +476,7 @@ mod tests {
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "status".to_string(),
                     }),
@@ -486,6 +487,7 @@ mod tests {
                 right: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "status".to_string(),
                     }),
@@ -496,7 +498,7 @@ mod tests {
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::LessThan,
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(3))),
             }),
         };

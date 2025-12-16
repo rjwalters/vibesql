@@ -96,6 +96,7 @@ fn test_or_filter_extraction() {
     let n1_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(Expression::ColumnRef {
+            schema: None,
             table: Some("n1".to_string()),
             column: "n_name".to_string(),
         }),
@@ -104,6 +105,7 @@ fn test_or_filter_extraction() {
     let n2_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(Expression::ColumnRef {
+            schema: None,
             table: Some("n2".to_string()),
             column: "n_name".to_string(),
         }),
@@ -112,6 +114,7 @@ fn test_or_filter_extraction() {
     let n1_germany = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(Expression::ColumnRef {
+            schema: None,
             table: Some("n1".to_string()),
             column: "n_name".to_string(),
         }),
@@ -120,6 +123,7 @@ fn test_or_filter_extraction() {
     let n2_france = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(Expression::ColumnRef {
+            schema: None,
             table: Some("n2".to_string()),
             column: "n_name".to_string(),
         }),
@@ -200,6 +204,7 @@ fn test_or_filter_extraction_multi_branch() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -208,6 +213,7 @@ fn test_or_filter_extraction_multi_branch() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "b".to_string(),
             }),
@@ -220,6 +226,7 @@ fn test_or_filter_extraction_multi_branch() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -228,6 +235,7 @@ fn test_or_filter_extraction_multi_branch() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "b".to_string(),
             }),
@@ -240,6 +248,7 @@ fn test_or_filter_extraction_multi_branch() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -248,6 +257,7 @@ fn test_or_filter_extraction_multi_branch() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "b".to_string(),
             }),
@@ -312,6 +322,7 @@ fn test_or_filter_extraction_nested_or() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -320,6 +331,7 @@ fn test_or_filter_extraction_nested_or() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -333,6 +345,7 @@ fn test_or_filter_extraction_nested_or() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "b".to_string(),
             }),
@@ -345,6 +358,7 @@ fn test_or_filter_extraction_nested_or() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -353,6 +367,7 @@ fn test_or_filter_extraction_nested_or() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -366,6 +381,7 @@ fn test_or_filter_extraction_nested_or() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "b".to_string(),
             }),
@@ -421,6 +437,7 @@ fn test_or_filter_extraction_asymmetric() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -429,6 +446,7 @@ fn test_or_filter_extraction_asymmetric() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "b".to_string(),
             }),
@@ -440,6 +458,7 @@ fn test_or_filter_extraction_asymmetric() {
     let right_branch = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(Expression::ColumnRef {
+            schema: None,
             table: Some("t1".to_string()),
             column: "a".to_string(),
         }),
@@ -486,6 +505,7 @@ fn test_or_filter_extraction_single_table() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -494,6 +514,7 @@ fn test_or_filter_extraction_single_table() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -557,6 +578,7 @@ fn test_or_filter_extraction_no_common_tables() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
@@ -565,6 +587,7 @@ fn test_or_filter_extraction_no_common_tables() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "b".to_string(),
             }),
@@ -578,6 +601,7 @@ fn test_or_filter_extraction_no_common_tables() {
         left: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t3".to_string()),
                 column: "c".to_string(),
             }),
@@ -586,6 +610,7 @@ fn test_or_filter_extraction_no_common_tables() {
         right: Box::new(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t4".to_string()),
                 column: "d".to_string(),
             }),

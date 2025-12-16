@@ -234,11 +234,13 @@ fn test_limit_with_inner_join() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),
@@ -347,11 +349,13 @@ fn test_offset_with_inner_join() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),
@@ -460,11 +464,13 @@ fn test_limit_offset_with_inner_join() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),

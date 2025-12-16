@@ -103,11 +103,13 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "id".to_string(),
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "id".to_string(),
             }),
@@ -230,11 +232,13 @@ fn test_hash_join_multiple_equijoins_in_where() {
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t2".to_string()),
                     column: "id".to_string(),
                 }),
@@ -242,11 +246,13 @@ fn test_hash_join_multiple_equijoins_in_where() {
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "value".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t2".to_string()),
                     column: "value".to_string(),
                 }),
@@ -372,11 +378,13 @@ fn test_cascading_joins_with_where_equijoins() {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("t1".to_string()),
                         column: "id".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::Equal,
                     right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("t2".to_string()),
                         column: "id".to_string(),
                     }),
@@ -384,11 +392,13 @@ fn test_cascading_joins_with_where_equijoins() {
                 op: vibesql_ast::BinaryOperator::And,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("t2".to_string()),
                         column: "id".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::Equal,
                     right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("t3".to_string()),
                         column: "id".to_string(),
                     }),
@@ -397,11 +407,13 @@ fn test_cascading_joins_with_where_equijoins() {
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t3".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t4".to_string()),
                     column: "id".to_string(),
                 }),
@@ -510,11 +522,13 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t2".to_string()),
                     column: "id".to_string(),
                 }),
@@ -524,11 +538,13 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "key".to_string(),
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "key".to_string(),
             }),
@@ -657,11 +673,13 @@ fn test_multi_column_hash_join_composite_keys() {
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("sales".to_string()),
                         column: "region_id".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::Equal,
                     right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("inventory".to_string()),
                         column: "region_id".to_string(),
                     }),
@@ -669,11 +687,13 @@ fn test_multi_column_hash_join_composite_keys() {
                 op: vibesql_ast::BinaryOperator::And,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("sales".to_string()),
                         column: "product_id".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::Equal,
                     right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("inventory".to_string()),
                         column: "product_id".to_string(),
                     }),
@@ -857,11 +877,13 @@ fn test_star_join_select5_pattern() {
                     left: Box::new(vibesql_ast::Expression::BinaryOp {
                         left: Box::new(vibesql_ast::Expression::BinaryOp {
                             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: Some("t1".to_string()),
                                 column: "id".to_string(),
                             }),
                             op: vibesql_ast::BinaryOperator::Equal,
                             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: Some("t2".to_string()),
                                 column: "id".to_string(),
                             }),
@@ -869,11 +891,13 @@ fn test_star_join_select5_pattern() {
                         op: vibesql_ast::BinaryOperator::And,
                         right: Box::new(vibesql_ast::Expression::BinaryOp {
                             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: Some("t1".to_string()),
                                 column: "id".to_string(),
                             }),
                             op: vibesql_ast::BinaryOperator::Equal,
                             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                                schema: None,
                                 table: Some("t3".to_string()),
                                 column: "id".to_string(),
                             }),
@@ -882,11 +906,13 @@ fn test_star_join_select5_pattern() {
                     op: vibesql_ast::BinaryOperator::And,
                     right: Box::new(vibesql_ast::Expression::BinaryOp {
                         left: Box::new(vibesql_ast::Expression::ColumnRef {
+                            schema: None,
                             table: Some("t1".to_string()),
                             column: "id".to_string(),
                         }),
                         op: vibesql_ast::BinaryOperator::Equal,
                         right: Box::new(vibesql_ast::Expression::ColumnRef {
+                            schema: None,
                             table: Some("t4".to_string()),
                             column: "id".to_string(),
                         }),
@@ -895,11 +921,13 @@ fn test_star_join_select5_pattern() {
                 op: vibesql_ast::BinaryOperator::And,
                 right: Box::new(vibesql_ast::Expression::BinaryOp {
                     left: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("t1".to_string()),
                         column: "id".to_string(),
                     }),
                     op: vibesql_ast::BinaryOperator::Equal,
                     right: Box::new(vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("t5".to_string()),
                         column: "id".to_string(),
                     }),
@@ -908,11 +936,13 @@ fn test_star_join_select5_pattern() {
             op: vibesql_ast::BinaryOperator::And,
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t1".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("t6".to_string()),
                     column: "id".to_string(),
                 }),

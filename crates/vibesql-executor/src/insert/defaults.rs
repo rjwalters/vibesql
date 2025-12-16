@@ -32,7 +32,7 @@ pub fn evaluate_insert_expression_with_trigger_context(
                 Ok(vibesql_types::SqlValue::Null)
             }
         }
-        vibesql_ast::Expression::ColumnRef { table: None, column: col_name } => {
+        vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: col_name } => {
             // Check if this is a procedural variable reference
             if let Some(ctx) = procedural_context {
                 // Try to resolve as procedural variable

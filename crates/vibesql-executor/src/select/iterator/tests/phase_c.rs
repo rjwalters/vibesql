@@ -72,6 +72,7 @@ fn test_phase_c_proof_of_concept_full_pipeline() {
     // Stage 2: WHERE age > 18
     let where_expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: Some("users".to_string()),
             column: "age".to_string(),
         }),
@@ -178,11 +179,13 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
     // Stage 2: JOIN customers ON orders.customer_id = customers.id
     let join_condition = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: Some("orders".to_string()),
             column: "customer_id".to_string(),
         }),
         op: vibesql_ast::BinaryOperator::Equal,
         right: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: Some("customers".to_string()),
             column: "id".to_string(),
         }),
@@ -215,6 +218,7 @@ fn test_phase_c_proof_of_concept_join_pipeline() {
 
     let where_expr = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: Some("orders".to_string()),
             column: "amount".to_string(),
         }),

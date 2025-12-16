@@ -64,8 +64,8 @@ impl ExpressionEvaluator<'_> {
             )),
 
             // Column reference - look up column index and get value from row
-            vibesql_ast::Expression::ColumnRef { table, column } => {
-                self.eval_column_ref(table.as_deref(), column, row)
+            vibesql_ast::Expression::ColumnRef { schema, table, column } => {
+                self.eval_column_ref(schema.as_deref(), table.as_deref(), column, row)
             }
 
             // Binary operations
@@ -440,7 +440,7 @@ impl ExpressionEvaluator<'_> {
         // Collect text values from the specified columns
         let mut text_values: Vec<arcstr::ArcStr> = Vec::new();
         for column_name in columns {
-            match self.eval_column_ref(None, column_name, row) {
+            match self.eval_column_ref(None, None, column_name, row) {
                 Ok(SqlValue::Varchar(s)) | Ok(SqlValue::Character(s)) => text_values.push(s),
                 Ok(SqlValue::Null) => {
                     // NULL values are treated as empty strings in MATCH
@@ -463,10 +463,30 @@ impl ExpressionEvaluator<'_> {
     #[inline]
     fn eval_column_ref(
         &self,
+        schema_qualifier: Option<&str>,
         table_qualifier: Option<&str>,
         column: &str,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        // Handle schema qualifier (three-part names like schema.table.column)
+        // SQLite schemas: "main" (default), "temp" (temporary tables), or attached database names
+        // For our single-database implementation:
+        // - "main" is silently accepted (treated as default)
+        // - Other schemas return "no such column" error to match SQLite behavior
+        if let Some(schema) = schema_qualifier {
+            let schema_lower = schema.to_lowercase();
+            if schema_lower != "main" {
+                // SQLite returns "no such column: schema.table.column" for unknown schemas
+                return Err(ExecutorError::ColumnNotFound {
+                    column_name: format!("{}.{}.{}", schema, table_qualifier.unwrap_or(""), column),
+                    table_name: self.schema.name.clone(),
+                    searched_tables: vec![self.schema.name.clone()],
+                    available_columns: self.schema.columns.iter().map(|c| c.name.clone()).collect(),
+                });
+            }
+            // "main" schema - continue with normal resolution
+        }
+
         // Special case: "*" is a wildcard used in COUNT(*) and is not a real column
         // Return NULL here - the actual COUNT(*) logic handles this specially
         if column == "*" {

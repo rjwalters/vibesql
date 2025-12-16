@@ -272,7 +272,7 @@ mod tests {
     use super::*;
 
     fn col(name: &str) -> Expression {
-        Expression::ColumnRef { table: None, column: name.to_string() }
+        Expression::ColumnRef { schema: None, table: None, column: name.to_string() }
     }
 
     #[test]

@@ -196,7 +196,7 @@ fn test_parse_extract_with_qualified_column() {
                 vibesql_ast::Expression::Extract { field, expr } => {
                     assert_eq!(*field, vibesql_ast::IntervalUnit::Month);
                     match &**expr {
-                        vibesql_ast::Expression::ColumnRef { table, column } => {
+                        vibesql_ast::Expression::ColumnRef { table, column, .. } => {
                             assert_eq!(table.as_deref(), Some("orders"));
                             assert_eq!(column, "order_date");
                         }

@@ -267,7 +267,7 @@ impl<'arena> ArenaParser<'arena> {
         // with "*" becomes Expression::Wildcard So this check shouldn't match anymore since
         // Expression::ColumnRef won't have "*" as column. The wildcard case is handled in
         // expression parsing.
-        if let Expression::ColumnRef { table: Some(t), column: _ } = &expr {
+        if let Expression::ColumnRef { schema: _, table: Some(t), column: _ } = &expr {
             // Check if it's a qualified wildcard - but this won't happen since
             // we parse table.* as Wildcard expression, not as ColumnRef with "*" column
             // Keep this code path but it likely won't be hit

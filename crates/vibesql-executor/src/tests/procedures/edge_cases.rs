@@ -45,7 +45,7 @@ fn test_null_parameter_in_procedure() {
             },
             ProceduralStatement::Set {
                 name: "result".to_string(),
-                value: Box::new(Expression::ColumnRef { table: None, column: "x".to_string() }),
+                value: Box::new(Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }),
             },
         ],
     );
@@ -271,6 +271,7 @@ fn test_large_number_arithmetic() {
                 name: "result".to_string(),
                 value: Box::new(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "large".to_string(),
                     }),
@@ -317,9 +318,9 @@ fn test_multiple_variable_operations() {
             ProceduralStatement::Set {
                 name: "a".to_string(),
                 value: Box::new(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { table: None, column: "b".to_string() }),
+                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "b".to_string() }),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expression::ColumnRef { table: None, column: "c".to_string() }),
+                    right: Box::new(Expression::ColumnRef { schema: None, table: None, column: "c".to_string() }),
                 }),
             },
         ],
@@ -368,7 +369,7 @@ fn test_procedural_select_into_single_column() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
+                    expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
                     alias: None, source_text: None }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
@@ -379,9 +380,10 @@ fn test_procedural_select_into_single_column() {
                 quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "user_id".to_string(),
                     }),
@@ -446,10 +448,10 @@ fn test_procedural_select_into_multiple_columns() {
                 distinct: false,
                 select_list: vec![
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef { table: None, column: "id".to_string() },
+                        expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
                         alias: None, source_text: None },
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef { table: None, column: "name".to_string() },
+                        expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
                         alias: None, source_text: None },
                 ],
                 into_table: None,
@@ -461,9 +463,10 @@ fn test_procedural_select_into_multiple_columns() {
                 quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "user_id".to_string(),
                     }),
@@ -519,7 +522,7 @@ fn test_procedural_select_into_error_no_rows() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
+                    expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
                     alias: None, source_text: None }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
@@ -530,9 +533,10 @@ fn test_procedural_select_into_error_no_rows() {
                 quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "user_id".to_string(),
                     }),
@@ -601,7 +605,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
-                    expr: Expression::ColumnRef { table: None, column: "name".to_string() },
+                    expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
                     alias: None, source_text: None }],
                 into_table: None,
                 into_variables: Some(vec!["user_name".to_string()]),
@@ -666,10 +670,10 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 distinct: false,
                 select_list: vec![
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef { table: None, column: "id".to_string() },
+                        expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
                         alias: None, source_text: None },
                     SelectItem::Expression {
-                        expr: Expression::ColumnRef { table: None, column: "name".to_string() },
+                        expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
                         alias: None, source_text: None },
                 ],
                 into_table: None,
@@ -681,7 +685,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 quoted: false,
                 }),
                 where_clause: Some(Expression::BinaryOp {
-                    left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                    left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                     op: BinaryOperator::Equal,
                     right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                 }),

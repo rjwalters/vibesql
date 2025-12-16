@@ -43,6 +43,7 @@ fn test_in_list_basic() {
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -101,6 +102,7 @@ fn test_not_in_list() {
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -157,6 +159,7 @@ fn test_in_list_with_null_value() {
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -213,6 +216,7 @@ fn test_in_list_with_null_in_list() {
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -270,6 +274,7 @@ fn test_empty_in_list() {
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -323,6 +328,7 @@ fn test_empty_not_in_list() {
         }),
         where_clause: Some(vibesql_ast::Expression::InList {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),

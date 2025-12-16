@@ -224,6 +224,7 @@ fn test_column_reference_without_from_fails() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "some_column".to_string(),
             },
@@ -262,6 +263,7 @@ fn test_is_null_with_column_reference_fails() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::IsNull {
                 expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "id".to_string(),
                 }),
@@ -302,6 +304,7 @@ fn test_between_with_column_reference_fails() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Between {
                 expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "price".to_string(),
                 }),
@@ -349,6 +352,7 @@ fn test_cast_with_column_reference_fails() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Cast {
                 expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "id".to_string(),
                 }),
@@ -389,6 +393,7 @@ fn test_like_with_column_reference_fails() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Like {
                 expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "name".to_string(),
                 }),
@@ -432,6 +437,7 @@ fn test_in_list_with_column_reference_fails() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::InList {
                 expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "id".to_string(),
                 }),

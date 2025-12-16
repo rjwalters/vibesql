@@ -338,7 +338,7 @@ impl CompiledWhereClause {
     ) -> bool {
         // Extract column reference
         let column_idx = match col_expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 schema.get_column_index(table.as_deref(), column)
             }
             _ => return false,
@@ -385,7 +385,7 @@ impl CompiledWhereClause {
     ) -> bool {
         // Extract column reference
         let column_idx = match col_expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 schema.get_column_index(table.as_deref(), column)
             }
             _ => None,
@@ -485,7 +485,7 @@ impl CompiledWhereClause {
     /// Try to extract a column index from an expression
     fn try_extract_column(expr: &Expression, schema: &CombinedSchema) -> Option<usize> {
         match expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 schema.get_column_index(table.as_deref(), column)
             }
             _ => None,
@@ -734,7 +734,7 @@ mod tests {
 
         // l_quantity < 24
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "l_quantity".to_string() }),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(24))),
         };
@@ -754,6 +754,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "l_quantity".to_string(),
                 }),
@@ -763,6 +764,7 @@ mod tests {
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "l_discount".to_string(),
                 }),
@@ -784,7 +786,7 @@ mod tests {
 
         // l_quantity < 24
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "l_quantity".to_string() }),
             op: BinaryOperator::LessThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(24))),
         };
@@ -817,6 +819,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "l_quantity".to_string(),
                 }),
@@ -826,6 +829,7 @@ mod tests {
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "l_discount".to_string(),
                 }),
@@ -886,6 +890,7 @@ mod tests {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "l_discount".to_string(),
                 }),
@@ -895,6 +900,7 @@ mod tests {
             op: BinaryOperator::And,
             right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "l_quantity".to_string(),
                 }),
@@ -922,7 +928,7 @@ mod tests {
 
         // l_quantity > 10
         let expr = Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "l_quantity".to_string() }),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::Literal(SqlValue::Integer(10))),
         };
@@ -949,7 +955,7 @@ mod tests {
         // l_quantity NOT BETWEEN 31 AND NULL
         // This should fall back to regular evaluator for proper NULL semantics
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "l_quantity".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Integer(31))),
             high: Box::new(Expression::Literal(SqlValue::Null)),
             negated: true,
@@ -962,7 +968,7 @@ mod tests {
 
         // Also test with NULL low bound
         let expr_null_low = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "l_quantity".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Null)),
             high: Box::new(Expression::Literal(SqlValue::Integer(100))),
             negated: false,
@@ -980,7 +986,7 @@ mod tests {
 
         // l_quantity BETWEEN 10 AND 100
         let expr = Expression::Between {
-            expr: Box::new(Expression::ColumnRef { table: None, column: "l_quantity".to_string() }),
+            expr: Box::new(Expression::ColumnRef { schema: None, table: None, column: "l_quantity".to_string() }),
             low: Box::new(Expression::Literal(SqlValue::Integer(10))),
             high: Box::new(Expression::Literal(SqlValue::Integer(100))),
             negated: false,
@@ -1071,11 +1077,13 @@ mod tests {
             left: Box::new(Expression::BinaryOp {
                 // p_partkey = l_partkey (column-to-column, should be skipped)
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("part".to_string()),
                     column: "p_partkey".to_string(),
                 }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("lineitem".to_string()),
                     column: "l_partkey".to_string(),
                 }),
@@ -1084,6 +1092,7 @@ mod tests {
             right: Box::new(Expression::BinaryOp {
                 // p_brand = 'Brand#12'
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("part".to_string()),
                     column: "p_brand".to_string(),
                 }),
@@ -1098,11 +1107,13 @@ mod tests {
             left: Box::new(Expression::BinaryOp {
                 // p_partkey = l_partkey (column-to-column, should be skipped)
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("part".to_string()),
                     column: "p_partkey".to_string(),
                 }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("lineitem".to_string()),
                     column: "l_partkey".to_string(),
                 }),
@@ -1111,6 +1122,7 @@ mod tests {
             right: Box::new(Expression::BinaryOp {
                 // p_brand = 'Brand#23'
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: Some("part".to_string()),
                     column: "p_brand".to_string(),
                 }),
@@ -1155,11 +1167,13 @@ mod tests {
         // l_partkey > p_partkey (inequality - should NOT be skipped, should fail compilation)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("lineitem".to_string()),
                 column: "l_partkey".to_string(),
             }),
             op: BinaryOperator::GreaterThan,
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("part".to_string()),
                 column: "p_partkey".to_string(),
             }),
