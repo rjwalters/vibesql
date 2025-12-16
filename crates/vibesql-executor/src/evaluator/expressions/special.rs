@@ -146,6 +146,33 @@ impl ExpressionEvaluator<'_> {
                     return Ok(vibesql_types::SqlValue::Integer(0));
                 }
             }
+            // Handle sqlite_search_count() - TCL test compatibility diagnostic
+            // Returns the number of rows examined during query execution
+            "SQLITE_SEARCH_COUNT" => {
+                if !args.is_empty() {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "sqlite_search_count() takes no arguments".to_string(),
+                    ));
+                }
+                if let Some(db) = self.database {
+                    return Ok(vibesql_types::SqlValue::Bigint(db.search_count() as i64));
+                } else {
+                    return Ok(vibesql_types::SqlValue::Bigint(0));
+                }
+            }
+            // Handle sqlite_search_count_reset() - Reset search count to 0
+            // Returns 0 and resets the counter
+            "SQLITE_SEARCH_COUNT_RESET" => {
+                if !args.is_empty() {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "sqlite_search_count_reset() takes no arguments".to_string(),
+                    ));
+                }
+                if let Some(db) = self.database {
+                    db.reset_search_count();
+                }
+                return Ok(vibesql_types::SqlValue::Bigint(0));
+            }
             _ => {}
         }
 
