@@ -328,7 +328,7 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
     for (order_item, index_col) in order_items.iter().zip(remaining_index_columns.iter()) {
         // ORDER BY expression must be a simple column reference
         let order_col_name = match &order_item.expr {
-            Expression::ColumnRef { table: None, column } => column,
+            Expression::ColumnRef { schema: None, table: None, column, .. } => column,
             _ => return false, // Complex expressions not supported
         };
 
@@ -843,7 +843,7 @@ mod tests {
     fn test_expression_filters_column_simple() {
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(25))),
         };
 
@@ -857,12 +857,12 @@ mod tests {
             op: BinaryOperator::And,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::GreaterThan,
-                left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Integer(18))),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { table: None, column: "city".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "city".to_string() }),
                 right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(
                     "Boston",
                 )))),
@@ -876,7 +876,7 @@ mod tests {
 
     #[test]
     fn test_is_column_reference() {
-        let expr = Expression::ColumnRef { table: None, column: "age".to_string() };
+        let expr = Expression::ColumnRef { schema: None, table: None, column: "age".to_string() };
 
         assert!(is_column_reference(&expr, "age"));
         assert!(!is_column_reference(&expr, "name"));
@@ -887,6 +887,7 @@ mod tests {
         // SQL parser normalizes unquoted identifiers to uppercase
         // but index columns might be lowercase
         let expr = Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "I_ID".to_string(), // Uppercase from parser
         };
@@ -903,7 +904,7 @@ mod tests {
         // WHERE I_ID = 42 (uppercase from parser)
         let expr = Expression::BinaryOp {
             op: BinaryOperator::Equal,
-            left: Box::new(Expression::ColumnRef { table: None, column: "I_ID".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "I_ID".to_string() }),
             right: Box::new(Expression::Literal(SqlValue::Integer(42))),
         };
 

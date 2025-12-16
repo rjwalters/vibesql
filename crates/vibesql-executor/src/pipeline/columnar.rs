@@ -554,7 +554,7 @@ mod tests {
 
         let sum_expr = Expression::AggregateFunction {
             name: "SUM".to_string(),
-            args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }],
             distinct: false, order_by: None,
         };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&sum_expr, &evaluator).unwrap();
@@ -570,7 +570,7 @@ mod tests {
         for agg_name in &["AVG", "MIN", "MAX"] {
             let expr = Expression::AggregateFunction {
                 name: agg_name.to_string(),
-                args: vec![Expression::ColumnRef { table: None, column: "x".to_string() }],
+                args: vec![Expression::ColumnRef { schema: None, table: None, column: "x".to_string() }],
                 distinct: false, order_by: None,
             };
             let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
@@ -670,7 +670,7 @@ mod tests {
         let evaluator = ctx.create_evaluator();
 
         // Column reference without aggregate should return NULL
-        let expr = Expression::ColumnRef { table: None, column: "x".to_string() };
+        let expr = Expression::ColumnRef { schema: None, table: None, column: "x".to_string() };
         let result = ColumnarPipeline::evaluate_empty_aggregate(&expr, &evaluator).unwrap();
         assert_eq!(result, SqlValue::Null);
     }

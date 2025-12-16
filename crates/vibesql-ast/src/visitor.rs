@@ -32,7 +32,7 @@
 //! }
 //!
 //! impl ExpressionVisitor for ColumnCollector {
-//!     fn visit_column_ref(&mut self, table: Option<&str>, column: &str) -> VisitResult {
+//!     fn visit_column_ref(&mut self, _schema: Option<&str>, table: Option<&str>, column: &str) -> VisitResult {
 //!         self.columns.push((table.map(String::from), column.to_string()));
 //!         VisitResult::Continue
 //!     }
@@ -144,7 +144,12 @@ pub trait ExpressionVisitor {
     }
 
     /// Visit a column reference
-    fn visit_column_ref(&mut self, _table: Option<&str>, _column: &str) -> VisitResult {
+    fn visit_column_ref(
+        &mut self,
+        _schema: Option<&str>,
+        _table: Option<&str>,
+        _column: &str,
+    ) -> VisitResult {
         VisitResult::Continue
     }
 
@@ -219,8 +224,8 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::NamedPlaceholder(name) => visitor.visit_named_placeholder(name),
 
-        Expression::ColumnRef { table, column } => {
-            visitor.visit_column_ref(table.as_deref(), column)
+        Expression::ColumnRef { schema, table, column } => {
+            visitor.visit_column_ref(schema.as_deref(), table.as_deref(), column)
         }
 
         Expression::BinaryOp { left, right, .. } => {
@@ -1424,7 +1429,12 @@ mod tests {
             columns: Vec<(Option<String>, String)>,
         }
         impl ExpressionVisitor for ColumnCollector {
-            fn visit_column_ref(&mut self, table: Option<&str>, column: &str) -> VisitResult {
+            fn visit_column_ref(
+                &mut self,
+                _schema: Option<&str>,
+                table: Option<&str>,
+                column: &str,
+            ) -> VisitResult {
                 self.columns.push((table.map(String::from), column.to_string()));
                 VisitResult::Continue
             }
@@ -1433,10 +1443,15 @@ mod tests {
         let expr = Expression::BinaryOp {
             op: crate::BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("users".to_string()),
                 column: "id".to_string(),
             }),
-            right: Box::new(Expression::ColumnRef { table: None, column: "value".to_string() }),
+            right: Box::new(Expression::ColumnRef {
+                schema: None,
+                table: None,
+                column: "value".to_string(),
+            }),
         };
 
         let mut visitor = ColumnCollector { columns: vec![] };
@@ -1573,7 +1588,7 @@ mod tests {
             from: None,
             where_clause: Some(Expression::BinaryOp {
                 op: crate::BinaryOperator::Equal,
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 right: Box::new(Expression::Placeholder(0)),
             }),
             group_by: None,

@@ -22,7 +22,7 @@ use crate::{
 /// ```text
 /// let scan = TableScanIterator::new(schema.clone(), rows);
 /// let predicate = Expression::Binary {
-///     left: Box::new(Expression::ColumnRef { column: "age".to_string() }),
+///     left: Box::new(Expression::ColumnRef { schema: None, column: "age".to_string() }),
 ///     op: BinaryOp::GreaterThan,
 ///     right: Box::new(Expression::Literal(SqlValue::Integer(18))),
 /// };

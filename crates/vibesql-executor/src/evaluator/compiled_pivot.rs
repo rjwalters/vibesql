@@ -194,7 +194,7 @@ impl PivotAggregateGroup {
 
         // Result must be a column reference (value column)
         let value_col_idx = match result {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 schema.get_column_index(table.as_deref(), column)?
             }
             _ => return None,
@@ -220,7 +220,7 @@ impl PivotAggregateGroup {
         schema: &CombinedSchema,
     ) -> Option<(usize, SqlValue)> {
         let col_idx = match col_expr {
-            Expression::ColumnRef { table, column } => {
+            Expression::ColumnRef { table, column, .. } => {
                 schema.get_column_index(table.as_deref(), column)?
             }
             _ => return None,
@@ -324,6 +324,7 @@ mod tests {
                 when_clauses: vec![CaseWhen {
                     conditions: vec![Expression::BinaryOp {
                         left: Box::new(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "d_day_name".to_string(),
                         }),
@@ -333,6 +334,7 @@ mod tests {
                         ))),
                     }],
                     result: Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "sales_price".to_string(),
                     },
@@ -414,6 +416,7 @@ mod tests {
                 when_clauses: vec![CaseWhen {
                     conditions: vec![Expression::BinaryOp {
                         left: Box::new(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: "d_week_seq".to_string(),
                         }),
@@ -421,6 +424,7 @@ mod tests {
                         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
                     }],
                     result: Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "sales_price".to_string(),
                     },

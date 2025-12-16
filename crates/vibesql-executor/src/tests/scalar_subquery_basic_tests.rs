@@ -76,6 +76,7 @@ fn test_scalar_subquery_in_where_clause() {
             expr: vibesql_ast::Expression::Function {
                 name: "AVG".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 }],
@@ -113,6 +114,7 @@ fn test_scalar_subquery_in_where_clause() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "salary".to_string(),
             }),
@@ -199,6 +201,7 @@ fn test_scalar_subquery_in_select_list() {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 }],
@@ -231,12 +234,14 @@ fn test_scalar_subquery_in_select_list() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "name".to_string(),
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 },
@@ -306,7 +311,7 @@ fn test_scalar_subquery_returns_null_when_empty() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "id".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -317,6 +322,7 @@ fn test_scalar_subquery_returns_null_when_empty() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "id".to_string(),
             }),

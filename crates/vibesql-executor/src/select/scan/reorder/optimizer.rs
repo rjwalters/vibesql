@@ -905,7 +905,7 @@ fn find_inner_table_in_condition(expr: &Expression, inner_tables: &[String]) -> 
             }
             find_inner_table_in_condition(right, inner_tables)
         }
-        Expression::ColumnRef { table: Some(t), column, .. } => {
+        Expression::ColumnRef { schema: None, table: Some(t), column, .. } => {
             let t_lower = t.to_lowercase();
             if inner_tables.contains(&t_lower) {
                 return Some(t_lower);
@@ -913,7 +913,7 @@ fn find_inner_table_in_condition(expr: &Expression, inner_tables: &[String]) -> 
             // Also try to infer from column naming convention (o_ → orders)
             infer_table_from_column(column, inner_tables)
         }
-        Expression::ColumnRef { table: None, column, .. } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Try to infer from column naming convention
             infer_table_from_column(column, inner_tables)
         }

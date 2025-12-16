@@ -407,8 +407,8 @@ fn analyze_select_list(select_list: &[SelectItem]) -> Option<ProjectionPlan> {
             }
             SelectItem::Expression { expr, alias, .. } => {
                 let column_name = match expr {
-                    Expression::ColumnRef { column, table: None } => column.clone(),
-                    Expression::ColumnRef { column, table: Some(_) } => {
+                    Expression::ColumnRef { column, table: None, .. } => column.clone(),
+                    Expression::ColumnRef { column, table: Some(_), .. } => {
                         // Qualified column ref - support it
                         column.clone()
                     }

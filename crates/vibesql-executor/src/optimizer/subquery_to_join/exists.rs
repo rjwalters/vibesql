@@ -232,6 +232,7 @@ fn try_convert_complex_exists_to_join(
             .iter()
             .map(|col| SelectItem::Expression {
                 expr: Expression::ColumnRef {
+                    schema: None,
                     table: col.table.clone(),
                     column: col.column.clone(),
                 },
@@ -413,7 +414,7 @@ fn extract_subquery_column_from_correlation(
 /// Extract column reference from an expression
 fn extract_column_ref(expr: &Expression) -> Option<ColumnRef> {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             Some(ColumnRef { table: table.clone(), column: column.clone() })
         }
         _ => None,
@@ -429,12 +430,16 @@ fn rewrite_join_condition_for_derived_table(
     alias: &str,
 ) -> Expression {
     match condition {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Check if this column is one of the subquery columns
             if subquery_columns.iter().any(|c| {
                 c.column == *column && (c.table.is_none() || c.table.as_ref() == table.as_ref())
             }) {
-                Expression::ColumnRef { table: Some(alias.to_string()), column: column.clone() }
+                Expression::ColumnRef {
+                    schema: None,
+                    table: Some(alias.to_string()),
+                    column: column.clone(),
+                }
             } else {
                 condition.clone()
             }

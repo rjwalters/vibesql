@@ -40,6 +40,7 @@ fn test_between_with_null_expr() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -97,6 +98,7 @@ fn test_not_between() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -153,6 +155,7 @@ fn test_between_boundary_values() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -212,6 +215,7 @@ fn test_not_between_with_null_bound() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -270,6 +274,7 @@ fn test_between_with_null_bound() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),
@@ -331,6 +336,7 @@ fn test_not_between_with_null_lower_bound() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "val".to_string(),
             }),

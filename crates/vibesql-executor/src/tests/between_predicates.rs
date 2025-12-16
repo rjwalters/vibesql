@@ -79,12 +79,13 @@ fn test_between_integer() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "name".to_string(),
                 },
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
-                expr: vibesql_ast::Expression::ColumnRef { table: None, column: "age".to_string() },
+                expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "age".to_string() },
                 alias: None, source_text: None },
         ],
         from: Some(vibesql_ast::FromClause::Table { quoted: false,
@@ -94,6 +95,7 @@ fn test_between_integer() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "age".to_string(),
             }),
@@ -188,7 +190,7 @@ fn test_not_between() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "name".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -199,6 +201,7 @@ fn test_not_between() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "price".to_string(),
             }),
@@ -272,6 +275,7 @@ fn test_between_boundary_inclusive() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "VALUE".to_string(),
             }),
@@ -362,7 +366,7 @@ fn test_between_with_column_references() {
             values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
-            expr: vibesql_ast::Expression::ColumnRef { table: None, column: "VALUE".to_string() },
+            expr: vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "VALUE".to_string() },
             alias: None,
             source_text: None,
         }],
@@ -373,14 +377,17 @@ fn test_between_with_column_references() {
         }),
         where_clause: Some(vibesql_ast::Expression::Between {
             expr: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "VALUE".to_string(),
             }),
             low: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "min_val".to_string(),
             }),
             high: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "max_val".to_string(),
             }),

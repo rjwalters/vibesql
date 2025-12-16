@@ -254,7 +254,7 @@ fn flatten_and_conditions<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression
 /// Extract column index from an expression if it's a simple column reference
 fn extract_column_index(expr: &Expression, schema: &CombinedSchema) -> Option<usize> {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Resolve column to index in combined schema
             schema.get_column_index(table.as_deref(), column)
         }

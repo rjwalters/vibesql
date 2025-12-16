@@ -338,6 +338,7 @@ fn replace_aggregates_with_columns(
             if format!("{:?}", expr) == format!("{:?}", agg) {
                 // Replace with column reference to the hidden column
                 return Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: format!("__order_by_agg_{}", i),
                 };

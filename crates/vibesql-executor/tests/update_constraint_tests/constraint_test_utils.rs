@@ -70,7 +70,7 @@ pub fn create_products_table_with_check_price(db: &mut Database) {
         vec![(
             "price_positive".to_string(),
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
                 op: BinaryOperator::GreaterThanOrEqual,
                 right: Box::new(Expression::Literal(SqlValue::Integer(0))),
             },
@@ -93,7 +93,7 @@ pub fn create_products_table_with_nullable_price(db: &mut Database) {
         vec![(
             "price_positive".to_string(),
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
                 op: BinaryOperator::GreaterThanOrEqual,
                 right: Box::new(Expression::Literal(SqlValue::Integer(0))),
             },
@@ -117,9 +117,10 @@ pub fn create_employees_table_with_check_bonus(db: &mut Database) {
         vec![(
             "bonus_less_than_salary".to_string(),
             Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "bonus".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "bonus".to_string() }),
                 op: BinaryOperator::LessThan,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "salary".to_string(),
                 }),
@@ -177,7 +178,7 @@ pub fn create_update_with_id_clause(
             value: Expression::Literal(value),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(id))),
         })),

@@ -375,13 +375,17 @@ fn qualify_columns(expr: &vibesql_ast::Expression, table_name: &str) -> vibesql_
     let table_name_lower = table_name.to_lowercase();
 
     match expr {
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Add table qualifier to unqualified column
-            Expression::ColumnRef { table: Some(table_name_lower.clone()), column: column.clone() }
+            Expression::ColumnRef {
+                schema: None,
+                table: Some(table_name_lower.clone()),
+                column: column.clone(),
+            }
         }
-        Expression::ColumnRef { table: Some(t), column } => {
+        Expression::ColumnRef { schema: None, table: Some(t), column, .. } => {
             // Already qualified, keep as is
-            Expression::ColumnRef { table: Some(t.clone()), column: column.clone() }
+            Expression::ColumnRef { schema: None, table: Some(t.clone()), column: column.clone() }
         }
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
             op: *op,

@@ -1200,11 +1200,13 @@ mod tests {
         // Condition: users.id = orders.user_id (column 0 = column 2 in combined row)
         let condition = vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("users".to_string()),
                 column: "id".to_string(),
             }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("orders".to_string()),
                 column: "user_id".to_string(),
             }),
@@ -1348,11 +1350,13 @@ mod tests {
             // Condition: users.id = orders.user_id
             let condition = vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("orders".to_string()),
                     column: "user_id".to_string(),
                 }),
@@ -1459,11 +1463,13 @@ mod tests {
             // Condition: left.a = right.b (no matches since ranges don't overlap)
             let condition = vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("left".to_string()),
                     column: "a".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("right".to_string()),
                     column: "b".to_string(),
                 }),
@@ -1516,11 +1522,13 @@ mod tests {
             // Condition: left.id = right.id
             let condition = vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("left".to_string()),
                     column: "id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("right".to_string()),
                     column: "id".to_string(),
                 }),
@@ -1588,11 +1596,13 @@ mod tests {
             // Condition: left.key = right.key
             let condition = vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("left".to_string()),
                     column: "key".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("right".to_string()),
                     column: "key".to_string(),
                 }),

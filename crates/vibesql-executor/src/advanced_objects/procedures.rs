@@ -136,7 +136,7 @@ pub fn execute_drop_procedure(
 /// reference.
 fn extract_variable_name(expr: &Expression) -> Result<String, ExecutorError> {
     match expr {
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Column reference without table - treat as session variable
             // If it starts with @, strip it; otherwise use as-is
             let var_name = if let Some(stripped) = column.strip_prefix('@') {
@@ -146,7 +146,7 @@ fn extract_variable_name(expr: &Expression) -> Result<String, ExecutorError> {
             };
             Ok(var_name)
         }
-        Expression::ColumnRef { table: Some(_), column: _ } => {
+        Expression::ColumnRef { schema: None, table: Some(_), column: _, .. } => {
             Err(ExecutorError::Other(
                 "OUT/INOUT parameter target must be a session variable (e.g., @var_name), not a table.column reference".to_string()
             ))

@@ -63,8 +63,8 @@ fn try_vectorized_binary_aggregate(
         // Both operands must be simple column references
         let (left_col, right_col) = match (left.as_ref(), right.as_ref()) {
             (
-                Expression::ColumnRef { table: t1, column: c1 },
-                Expression::ColumnRef { table: t2, column: c2 },
+                Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
+                Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
             ) => {
                 let idx1 = schema.get_column_index(t1.as_deref(), c1).ok_or_else(|| {
                     ExecutorError::UnsupportedExpression(format!("Column not found: {}", c1))

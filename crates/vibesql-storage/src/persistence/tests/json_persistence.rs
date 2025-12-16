@@ -926,12 +926,12 @@ fn test_json_view_preservation() {
         distinct: false,
         select_list: vec![
             SelectItem::Expression {
-                expr: Expression::ColumnRef { table: None, column: "id".to_string() },
+                expr: Expression::ColumnRef { schema: None, table: None, column: "id".to_string() },
                 alias: None,
                 source_text: None,
             },
             SelectItem::Expression {
-                expr: Expression::ColumnRef { table: None, column: "name".to_string() },
+                expr: Expression::ColumnRef { schema: None, table: None, column: "name".to_string() },
                 alias: None,
                 source_text: None,
             },
@@ -945,7 +945,7 @@ fn test_json_view_preservation() {
         quoted: false,
         }),
         where_clause: Some(Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef { table: None, column: "active".to_string() }),
+            left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "active".to_string() }),
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Boolean(true))),
         }),

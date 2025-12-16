@@ -182,6 +182,7 @@ fn test_count_star_with_where_no_fast_path() {
         }),
         where_clause: Some(vibesql_ast::Expression::BinaryOp {
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "value".to_string(),
             }),
@@ -275,6 +276,7 @@ fn test_count_star_with_group_by_no_fast_path() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "category".to_string(),
                 },
@@ -295,7 +297,7 @@ fn test_count_star_with_group_by_no_fast_path() {
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { table: None, column: "category".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "category".to_string() },
         ])),
         having: None,
         order_by: None,
@@ -401,6 +403,7 @@ fn test_count_column_no_fast_path() {
                 name: "COUNT".to_string(),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "id".to_string(),
                 }],
@@ -539,6 +542,7 @@ fn test_count_star_multiple_select_items_no_fast_path() {
                     name: "SUM".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "value".to_string(),
                     }],

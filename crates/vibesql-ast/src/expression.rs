@@ -26,8 +26,9 @@ pub enum Expression {
     /// Example: WHERE id = :user_id AND name = :name
     NamedPlaceholder(String),
 
-    /// Column reference (id, users.id)
+    /// Column reference (id, users.id, schema.table.column)
     ColumnRef {
+        schema: Option<String>,
         table: Option<String>,
         column: String,
     },

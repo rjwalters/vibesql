@@ -227,7 +227,7 @@ impl AggregateAnalysis {
     /// Extract table references from an expression
     fn extract_table_refs(expr: &Expression, tables: &mut HashSet<String>) {
         match expr {
-            Expression::ColumnRef { table: Some(table), .. } => {
+            Expression::ColumnRef { schema: None, table: Some(table), .. } => {
                 tables.insert(table.clone());
             }
             Expression::BinaryOp { left, right, .. } => {
@@ -491,7 +491,7 @@ mod tests {
     use super::*;
 
     fn make_column_ref(table: &str, column: &str) -> Expression {
-        Expression::ColumnRef { table: Some(table.to_string()), column: column.to_string() }
+        Expression::ColumnRef { schema: None, table: Some(table.to_string()), column: column.to_string() }
     }
 
     fn make_aggregate(name: &str, arg: Expression) -> Expression {

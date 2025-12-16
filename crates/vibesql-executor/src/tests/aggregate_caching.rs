@@ -139,6 +139,7 @@ fn test_repeated_sum_cached() {
         name: "SUM".to_string(),
         distinct: false,
         args: vec![vibesql_ast::Expression::ColumnRef {
+            schema: None,
             table: None,
             column: "amount".to_string(),
         }],
@@ -280,6 +281,7 @@ fn test_cache_cleared_between_groups() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "category".to_string(),
                 },
@@ -293,11 +295,12 @@ fn test_cache_cleared_between_groups() {
         }),
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
-            vibesql_ast::Expression::ColumnRef { table: None, column: "category".to_string() },
+            vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "category".to_string() },
         ])),
         having: None,
         order_by: Some(vec![vibesql_ast::OrderByItem {
             expr: vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: None,
                 column: "category".to_string(),
             },
@@ -352,14 +355,14 @@ fn test_distinct_aggregates_not_confused() {
     let count_val = vibesql_ast::Expression::AggregateFunction {
         name: "COUNT".to_string(),
         distinct: false,
-        args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }],
+        args: vec![vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "val".to_string() }],
         order_by: None,
     };
 
     let count_distinct_val = vibesql_ast::Expression::AggregateFunction {
         name: "COUNT".to_string(),
         distinct: true,
-        args: vec![vibesql_ast::Expression::ColumnRef { table: None, column: "val".to_string() }],
+        args: vec![vibesql_ast::Expression::ColumnRef { schema: None, table: None, column: "val".to_string() }],
         order_by: None,
     };
 

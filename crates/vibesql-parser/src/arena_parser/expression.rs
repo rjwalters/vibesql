@@ -474,20 +474,44 @@ impl<'arena> ArenaParser<'arena> {
             self.advance();
             let name_sym = self.intern(&name);
 
-            // Check for qualified name (table.column)
+            // Check for qualified name (table.column or schema.table.column)
             if self.try_consume(&Token::Symbol('.')) {
-                if let Token::Identifier(col) = self.peek() {
-                    let col = col.clone();
+                if let Token::Identifier(second) = self.peek() {
+                    let second = second.clone();
                     self.advance();
-                    let col_sym = self.intern(&col);
-                    return Ok(Expression::ColumnRef { table: Some(name_sym), column: col_sym });
+                    let second_sym = self.intern(&second);
+
+                    // Check for three-part name (schema.table.column)
+                    if self.try_consume(&Token::Symbol('.')) {
+                        if let Token::Identifier(third) = self.peek() {
+                            let third = third.clone();
+                            self.advance();
+                            let third_sym = self.intern(&third);
+                            return Ok(Expression::ColumnRef {
+                                schema: Some(name_sym),
+                                table: Some(second_sym),
+                                column: third_sym,
+                            });
+                        } else if matches!(self.peek(), Token::Symbol('*')) {
+                            // schema.table.* - not supported, treat as error
+                            self.advance();
+                            return Ok(Expression::Wildcard);
+                        }
+                    }
+
+                    // Two-part name (table.column)
+                    return Ok(Expression::ColumnRef {
+                        schema: None,
+                        table: Some(name_sym),
+                        column: second_sym,
+                    });
                 } else if matches!(self.peek(), Token::Symbol('*')) {
                     self.advance();
                     return Ok(Expression::Wildcard);
                 }
             }
 
-            return Ok(Expression::ColumnRef { table: None, column: name_sym });
+            return Ok(Expression::ColumnRef { schema: None, table: None, column: name_sym });
         }
 
         // Wildcard (*)
@@ -590,6 +614,7 @@ impl<'arena> ArenaParser<'arena> {
                     _ => {
                         // Treat DATE as column name when not followed by string literal
                         Some(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: self.interner.intern("DATE"),
                         })
@@ -614,6 +639,7 @@ impl<'arena> ArenaParser<'arena> {
                     _ => {
                         // Treat TIME as column name when not followed by string literal
                         Some(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: self.interner.intern("TIME"),
                         })
@@ -640,6 +666,7 @@ impl<'arena> ArenaParser<'arena> {
                     _ => {
                         // Treat TIMESTAMP as column name when not followed by string literal
                         Some(Expression::ColumnRef {
+                            schema: None,
                             table: None,
                             column: self.interner.intern("TIMESTAMP"),
                         })

@@ -107,7 +107,7 @@ pub(super) fn try_convert_in_to_join(
     //   SELECT o_orderkey FROM orders WHERE o_orderkey IN (SELECT l_orderkey FROM lineitem)
     //   Different tables, no ambiguity - l_orderkey can only be from lineitem.
     if needs_alias {
-        if let Expression::ColumnRef { table: None, .. } = &subquery_column {
+        if let Expression::ColumnRef { schema: None, table: None, .. } = &subquery_column {
             // Check if outer query has exactly one table and it matches the subquery's table
             let is_simple_self_join = is_simple_single_table_self_join(from, &table_name, &table_alias);
 
@@ -313,7 +313,11 @@ fn try_convert_aggregate_in_to_join(
     let join_condition = Expression::BinaryOp {
         op: BinaryOperator::Equal,
         left: Box::new(outer_expr.clone()),
-        right: Box::new(Expression::ColumnRef { table: Some(alias.clone()), column: column_name }),
+        right: Box::new(Expression::ColumnRef {
+            schema: None,
+            table: Some(alias.clone()),
+            column: column_name,
+        }),
     };
 
     // Create SEMI or ANTI join based on negation

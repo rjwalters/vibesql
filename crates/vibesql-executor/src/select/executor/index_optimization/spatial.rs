@@ -130,8 +130,8 @@ fn try_detect_spatial_predicate(
 ) -> Result<Option<SpatialIndexUsage>, ExecutorError> {
     // First argument should be a column reference
     let column_name = match column_expr {
-        Expression::ColumnRef { table: None, column } => column.clone(),
-        Expression::ColumnRef { table: Some(_table), column } => column.clone(),
+        Expression::ColumnRef { schema: None, table: None, column, .. } => column.clone(),
+        Expression::ColumnRef { schema: None, table: Some(_table), column, .. } => column.clone(),
         _ => return Ok(None), // Not a column reference
     };
 

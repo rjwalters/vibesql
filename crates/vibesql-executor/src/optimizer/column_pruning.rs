@@ -159,7 +159,7 @@ fn collect_columns_from_grouping_elements(
 /// Recursively collect column references from an expression
 pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<ColumnRef>) {
     match expr {
-        Expression::ColumnRef { table, column } => {
+        Expression::ColumnRef { table, column, .. } => {
             // Skip the special "*" wildcard (used in COUNT(*))
             if column != "*" {
                 columns.insert(ColumnRef::new(table.clone(), column.clone()));
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_collect_simple_column_ref() {
-        let expr = Expression::ColumnRef { table: Some("t".to_string()), column: "c".to_string() };
+        let expr = Expression::ColumnRef { schema: None, table: Some("t".to_string()), column: "c".to_string() };
 
         let mut columns = HashSet::new();
         collect_columns_from_expr(&expr, &mut columns);
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_collect_unqualified_column_ref() {
-        let expr = Expression::ColumnRef { table: None, column: "col".to_string() };
+        let expr = Expression::ColumnRef { schema: None, table: None, column: "col".to_string() };
 
         let mut columns = HashSet::new();
         collect_columns_from_expr(&expr, &mut columns);
@@ -540,11 +540,13 @@ mod tests {
     fn test_collect_from_binary_op() {
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t1".to_string()),
                 column: "a".to_string(),
             }),
             op: BinaryOperator::Multiply,
             right: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("t2".to_string()),
                 column: "b".to_string(),
             }),
@@ -564,11 +566,13 @@ mod tests {
             name: "SUM".to_string(),
             args: vec![Expression::BinaryOp {
                 left: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "price".to_string(),
                 }),
                 op: BinaryOperator::Multiply,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "qty".to_string(),
                 }),
@@ -590,6 +594,7 @@ mod tests {
         let expr = Expression::Extract {
             field: vibesql_ast::IntervalUnit::Year,
             expr: Box::new(Expression::ColumnRef {
+                schema: None,
                 table: Some("lineitem".to_string()),
                 column: "l_shipdate".to_string(),
             }),

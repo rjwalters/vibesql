@@ -62,7 +62,7 @@ fn test_concat_operator() {
 fn test_not_equal_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::NotEqual,
-        left: Box::new(Expression::ColumnRef { table: None, column: "status".to_string() }),
+        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "status".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Varchar(StringValue::from("active")))),
     };
     match expr {
@@ -75,7 +75,7 @@ fn test_not_equal_operator() {
 fn test_less_than_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::LessThan,
-        left: Box::new(Expression::ColumnRef { table: None, column: "age".to_string() }),
+        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "age".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(18))),
     };
     match expr {
@@ -88,7 +88,7 @@ fn test_less_than_operator() {
 fn test_greater_than_operator() {
     let expr = Expression::BinaryOp {
         op: BinaryOperator::GreaterThan,
-        left: Box::new(Expression::ColumnRef { table: None, column: "salary".to_string() }),
+        left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "salary".to_string() }),
         right: Box::new(Expression::Literal(SqlValue::Integer(50000))),
     };
     match expr {

@@ -301,7 +301,7 @@ mod tests {
         let exprs = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: false,
-            args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }],
             order_by: None,
         }];
 
@@ -332,13 +332,13 @@ mod tests {
             Expression::AggregateFunction {
                 name: "SUM".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
+                args: vec![Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }],
                 order_by: None,
             },
             Expression::AggregateFunction {
                 name: "AVG".to_string(),
                 distinct: false,
-                args: vec![Expression::ColumnRef { table: None, column: "col2".to_string() }],
+                args: vec![Expression::ColumnRef { schema: None, table: None, column: "col2".to_string() }],
                 order_by: None,
             },
         ];
@@ -371,7 +371,7 @@ mod tests {
         let exprs = vec![Expression::AggregateFunction {
             name: "SUM".to_string(),
             distinct: true,
-            args: vec![Expression::ColumnRef { table: None, column: "col1".to_string() }],
+            args: vec![Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }],
             order_by: None,
         }];
 
@@ -379,7 +379,7 @@ mod tests {
         assert!(result.is_none());
 
         // Test non-aggregate expression (should return None)
-        let exprs = vec![Expression::ColumnRef { table: None, column: "col1".to_string() }];
+        let exprs = vec![Expression::ColumnRef { schema: None, table: None, column: "col1".to_string() }];
 
         let result = extract_aggregates(&exprs, &combined_schema);
         assert!(result.is_none());
@@ -434,9 +434,10 @@ mod tests {
             name: "SUM".to_string(),
             distinct: false,
             args: vec![Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "price".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "price".to_string() }),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "discount".to_string(),
                 }),

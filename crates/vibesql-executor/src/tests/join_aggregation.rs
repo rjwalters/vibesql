@@ -145,6 +145,7 @@ fn test_inner_join_with_group_by_count() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
@@ -153,6 +154,7 @@ fn test_inner_join_with_group_by_count() {
                 expr: vibesql_ast::Expression::Function {
                     name: "COUNT".to_string(),
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("e".to_string()),
                         column: "emp_id".to_string(),
                     }],
@@ -174,11 +176,13 @@ fn test_inner_join_with_group_by_count() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("e".to_string()),
                     column: "dept_id".to_string(),
                 }),
@@ -189,6 +193,7 @@ fn test_inner_join_with_group_by_count() {
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
             vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("d".to_string()),
                 column: "dept_name".to_string(),
             },
@@ -255,6 +260,7 @@ fn test_left_join_with_group_by_avg_salary() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
@@ -263,6 +269,7 @@ fn test_left_join_with_group_by_avg_salary() {
                 expr: vibesql_ast::Expression::Function {
                     name: "AVG".to_string(),
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("e".to_string()),
                         column: "salary".to_string(),
                     }],
@@ -284,11 +291,13 @@ fn test_left_join_with_group_by_avg_salary() {
             join_type: vibesql_ast::JoinType::LeftOuter,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("e".to_string()),
                     column: "dept_id".to_string(),
                 }),
@@ -299,6 +308,7 @@ fn test_left_join_with_group_by_avg_salary() {
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
             vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("d".to_string()),
                 column: "dept_name".to_string(),
             },
@@ -363,6 +373,7 @@ fn test_join_group_by_with_having() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
@@ -371,6 +382,7 @@ fn test_join_group_by_with_having() {
                 expr: vibesql_ast::Expression::Function {
                     name: "COUNT".to_string(),
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("e".to_string()),
                         column: "emp_id".to_string(),
                     }],
@@ -392,11 +404,13 @@ fn test_join_group_by_with_having() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("e".to_string()),
                     column: "dept_id".to_string(),
                 }),
@@ -407,6 +421,7 @@ fn test_join_group_by_with_having() {
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
             vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("d".to_string()),
                 column: "dept_name".to_string(),
             },
@@ -415,6 +430,7 @@ fn test_join_group_by_with_having() {
             left: Box::new(vibesql_ast::Expression::Function {
                 name: "COUNT".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("e".to_string()),
                     column: "emp_id".to_string(),
                 }],
@@ -464,6 +480,7 @@ fn test_join_group_by_multiple_aggregates() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_name".to_string(),
                 },
@@ -479,6 +496,7 @@ fn test_join_group_by_multiple_aggregates() {
                 expr: vibesql_ast::Expression::Function {
                     name: "MIN".to_string(),
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("e".to_string()),
                         column: "salary".to_string(),
                     }],
@@ -489,6 +507,7 @@ fn test_join_group_by_multiple_aggregates() {
                 expr: vibesql_ast::Expression::Function {
                     name: "MAX".to_string(),
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: Some("e".to_string()),
                         column: "salary".to_string(),
                     }],
@@ -510,11 +529,13 @@ fn test_join_group_by_multiple_aggregates() {
             join_type: vibesql_ast::JoinType::Inner,
             condition: Some(vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("d".to_string()),
                     column: "dept_id".to_string(),
                 }),
                 op: vibesql_ast::BinaryOperator::Equal,
                 right: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("e".to_string()),
                     column: "dept_id".to_string(),
                 }),
@@ -525,6 +546,7 @@ fn test_join_group_by_multiple_aggregates() {
         where_clause: None,
         group_by: Some(vibesql_ast::GroupByClause::Simple(vec![
             vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("d".to_string()),
                 column: "dept_name".to_string(),
             },

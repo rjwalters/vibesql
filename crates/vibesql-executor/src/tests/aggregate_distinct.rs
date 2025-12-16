@@ -97,6 +97,7 @@ fn test_count_distinct_basic() {
                 name: "COUNT".to_string(),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -143,6 +144,7 @@ fn test_count_distinct_vs_count_all() {
                     name: "COUNT".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "amount".to_string(),
                     }],
@@ -154,6 +156,7 @@ fn test_count_distinct_vs_count_all() {
                     name: "COUNT".to_string(),
                     distinct: true,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "amount".to_string(),
                     }],
@@ -200,6 +203,7 @@ fn test_sum_distinct() {
                 name: "SUM".to_string(),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -247,6 +251,7 @@ fn test_sum_distinct_vs_sum_all() {
                     name: "SUM".to_string(),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "amount".to_string(),
                     }],
@@ -258,6 +263,7 @@ fn test_sum_distinct_vs_sum_all() {
                     name: "SUM".to_string(),
                     distinct: true,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "amount".to_string(),
                     }],
@@ -306,6 +312,7 @@ fn test_avg_distinct() {
                 name: "AVG".to_string(),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -351,6 +358,7 @@ fn test_min_distinct() {
                 name: "MIN".to_string(),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -396,6 +404,7 @@ fn test_max_distinct() {
                 name: "MAX".to_string(),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "amount".to_string(),
                 }],
@@ -461,6 +470,7 @@ fn test_count_distinct_with_nulls() {
                 name: "COUNT".to_string(),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "val".to_string(),
                 }],
@@ -525,6 +535,7 @@ fn test_distinct_all_same_value() {
                     name: "COUNT".to_string(),
                     distinct: true,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "val".to_string(),
                     }],
@@ -536,6 +547,7 @@ fn test_distinct_all_same_value() {
                     name: "SUM".to_string(),
                     distinct: true,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "val".to_string(),
                     }],
@@ -594,6 +606,7 @@ fn test_distinct_empty_table() {
                     name: "COUNT".to_string(),
                     distinct: true,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "val".to_string(),
                     }],
@@ -605,6 +618,7 @@ fn test_distinct_empty_table() {
                     name: "SUM".to_string(),
                     distinct: true,
                     args: vec![vibesql_ast::Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "val".to_string(),
                     }],

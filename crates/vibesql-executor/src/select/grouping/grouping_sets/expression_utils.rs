@@ -11,8 +11,8 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
     match (a, b) {
         // ColumnRef: case-insensitive comparison for identifiers
         (
-            Expression::ColumnRef { table: t1, column: c1 },
-            Expression::ColumnRef { table: t2, column: c2 },
+            Expression::ColumnRef { schema: None, table: t1, column: c1, .. },
+            Expression::ColumnRef { schema: None, table: t2, column: c2, .. },
         ) => {
             let columns_equal = c1.eq_ignore_ascii_case(c2);
             let tables_equal = match (t1, t2) {
@@ -287,11 +287,11 @@ mod tests {
     use super::*;
 
     fn col(name: &str) -> Expression {
-        Expression::ColumnRef { table: None, column: name.to_string() }
+        Expression::ColumnRef { schema: None, table: None, column: name.to_string() }
     }
 
     fn qualified_col(table: &str, column: &str) -> Expression {
-        Expression::ColumnRef { table: Some(table.to_string()), column: column.to_string() }
+        Expression::ColumnRef { schema: None, table: Some(table.to_string()), column: column.to_string() }
     }
 
     fn lit_int(n: i64) -> Expression {

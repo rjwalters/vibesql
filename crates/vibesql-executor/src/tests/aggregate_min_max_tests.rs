@@ -60,6 +60,7 @@ fn test_min_function() {
             expr: vibesql_ast::Expression::Function {
                 name: "MIN".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "temp".to_string(),
                 }],
@@ -142,6 +143,7 @@ fn test_max_function() {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "temp".to_string(),
                 }],
@@ -227,6 +229,7 @@ fn test_min_max_on_strings() {
             expr: vibesql_ast::Expression::Function {
                 name: "MIN".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "name".to_string(),
                 }],
@@ -267,6 +270,7 @@ fn test_min_max_on_strings() {
             expr: vibesql_ast::Expression::Function {
                 name: "MAX".to_string(),
                 args: vec![vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: None,
                     column: "name".to_string(),
                 }],

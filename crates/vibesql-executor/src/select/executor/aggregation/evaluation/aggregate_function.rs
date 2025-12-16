@@ -18,7 +18,7 @@ fn validate_aggregate_args(name: &str, args: &[vibesql_ast::Expression]) -> Resu
         matches!(arg, vibesql_ast::Expression::Wildcard)
             || matches!(
                 arg,
-                vibesql_ast::Expression::ColumnRef { table: None, column } if column == "*"
+                vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } if column == "*"
             )
     });
 
@@ -108,7 +108,7 @@ pub(super) fn evaluate(
         let is_count_star = matches!(args[0], vibesql_ast::Expression::Wildcard)
             || matches!(
                 &args[0],
-                vibesql_ast::Expression::ColumnRef { table: None, column } if column == "*"
+                vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } if column == "*"
             );
 
         if is_count_star {
@@ -262,7 +262,7 @@ pub(super) fn evaluate(
         let is_count_star_fallback = matches!(&args[0], vibesql_ast::Expression::Wildcard)
             || matches!(
                 &args[0],
-                vibesql_ast::Expression::ColumnRef { table: None, column } if column == "*"
+                vibesql_ast::Expression::ColumnRef { schema: None, table: None, column, .. } if column == "*"
             );
 
         if is_count_star_fallback {

@@ -198,8 +198,8 @@ fn try_extract_correlation(
 /// Check if an expression references a specific table
 fn is_from_table(expr: &Expression, table: &str) -> bool {
     match expr {
-        Expression::ColumnRef { table: Some(t), .. } => t.eq_ignore_ascii_case(table),
-        Expression::ColumnRef { table: None, .. } => true, // Unqualified could be from inner
+        Expression::ColumnRef { schema: None, table: Some(t), .. } => t.eq_ignore_ascii_case(table),
+        Expression::ColumnRef { schema: None, table: None, .. } => true, // Unqualified could be from inner
         _ => false,
     }
 }
@@ -209,11 +209,11 @@ fn is_from_table(expr: &Expression, table: &str) -> bool {
 /// orders table)
 fn is_from_outer_tables(expr: &Expression, outer_tables: &[String], inner_table: &str) -> bool {
     match expr {
-        Expression::ColumnRef { table: Some(t), .. } => {
+        Expression::ColumnRef { schema: None, table: Some(t), .. } => {
             outer_tables.iter().any(|ot| ot.eq_ignore_ascii_case(t))
         }
         // Handle unqualified columns that use table prefix convention (e.g., o_orderkey for orders)
-        Expression::ColumnRef { table: None, column } => {
+        Expression::ColumnRef { schema: None, table: None, column, .. } => {
             // Don't match if column starts with inner table's prefix
             let inner_prefix = inner_table.chars().next().unwrap_or('_').to_ascii_lowercase();
             let col_prefix = column.chars().next().unwrap_or('_').to_ascii_lowercase();
