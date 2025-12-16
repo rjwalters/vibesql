@@ -350,8 +350,13 @@ impl SelectExecutor<'_> {
     }
 
     /// Extract SqlValue from a literal expression
+    ///
+    /// Returns None for NULL literals because `col = NULL` can never match any row
+    /// in SQL semantics (use `IS NULL` instead). NULL = NULL is NULL, not TRUE.
     pub(crate) fn literal_to_value(&self, expr: &Expression) -> Option<SqlValue> {
         match expr {
+            // Exclude NULL - col = NULL can never match any row
+            Expression::Literal(SqlValue::Null) => None,
             Expression::Literal(val) => Some(val.clone()),
             _ => None,
         }
@@ -534,5 +539,57 @@ impl SelectExecutor<'_> {
                 .or_else(|| self.extract_between_bounds(right, target_column)),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vibesql_ast::Expression;
+    use vibesql_storage::Database;
+    use vibesql_types::SqlValue;
+
+    use crate::select::executor::builder::SelectExecutor;
+
+    /// Regression test for issue where `col = NULL` incorrectly matched rows
+    /// with NULL values when a secondary index existed on the column.
+    ///
+    /// In SQL, `col = NULL` should NEVER match any row (use `IS NULL` instead),
+    /// because NULL = NULL evaluates to NULL (unknown), not TRUE.
+    ///
+    /// The bug was that `literal_to_value` extracted NULL as a valid value,
+    /// causing the secondary index lookup to find rows with NULL values.
+    #[test]
+    fn test_literal_to_value_excludes_null() {
+        let db = Database::new();
+        let executor = SelectExecutor::new(&db);
+
+        // NULL literal should return None (cannot be used for index lookup)
+        let null_literal = Expression::Literal(SqlValue::Null);
+        assert!(
+            executor.literal_to_value(&null_literal).is_none(),
+            "literal_to_value should return None for NULL literals"
+        );
+
+        // Integer literal should return Some
+        let int_literal = Expression::Literal(SqlValue::Integer(42));
+        assert_eq!(
+            executor.literal_to_value(&int_literal),
+            Some(SqlValue::Integer(42))
+        );
+
+        // String literal should return Some
+        let str_literal = Expression::Literal(SqlValue::Varchar("test".into()));
+        assert_eq!(
+            executor.literal_to_value(&str_literal),
+            Some(SqlValue::Varchar("test".into()))
+        );
+
+        // Non-literal expression should return None
+        let column_ref = Expression::ColumnRef {
+            table: None,
+            column: "col".to_string(),
+            schema: None,
+        };
+        assert!(executor.literal_to_value(&column_ref).is_none());
     }
 }
