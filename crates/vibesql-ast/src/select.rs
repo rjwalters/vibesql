@@ -315,6 +315,9 @@ pub enum JoinType {
 pub struct OrderByItem {
     pub expr: Expression,
     pub direction: OrderDirection,
+    /// NULL ordering for ORDER BY (SQL:2003 extension)
+    /// When None, uses default: NULLS LAST for ASC, NULLS FIRST for DESC
+    pub nulls_order: Option<NullsOrder>,
 }
 
 /// Sort direction
@@ -322,6 +325,16 @@ pub struct OrderByItem {
 pub enum OrderDirection {
     Asc,
     Desc,
+}
+
+/// NULL ordering in ORDER BY clause (SQL:2003 extension)
+/// Specifies whether NULL values sort before or after non-NULL values
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NullsOrder {
+    /// NULL values sort before all non-NULL values
+    First,
+    /// NULL values sort after all non-NULL values
+    Last,
 }
 
 /// Set operators for combining SELECT statements

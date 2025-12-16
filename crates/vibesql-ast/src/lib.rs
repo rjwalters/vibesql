@@ -199,7 +199,7 @@ pub use operators::{BinaryOperator, UnaryOperator};
 pub use revoke::{CascadeOption, RevokeStmt};
 pub use select::{
     CommonTableExpr, FromClause, GroupByClause, GroupingElement, GroupingSet, JoinType,
-    MixedGroupingItem, OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation,
-    SetOperator,
+    MixedGroupingItem, NullsOrder, OrderByItem, OrderDirection, SelectItem, SelectStmt,
+    SetOperation, SetOperator,
 };
 pub use statement::Statement;

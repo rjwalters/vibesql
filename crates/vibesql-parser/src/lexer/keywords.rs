@@ -51,6 +51,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "ORDER" => Keyword::Order,
     "ASC" => Keyword::Asc,
     "DESC" => Keyword::Desc,
+    "NULLS" => Keyword::Nulls,
     "LIMIT" => Keyword::Limit,
     "OFFSET" => Keyword::Offset,
     "SET" => Keyword::Set,

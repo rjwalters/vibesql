@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bumpalo::collections::Vec as BumpVec;
 use vibesql_ast::arena::{
     CommonTableExpr, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet, JoinType,
-    OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation, SetOperator, Symbol,
+    NullsOrder, OrderByItem, OrderDirection, SelectItem, SelectStmt, SetOperation, SetOperator,
+    Symbol,
 };
 
 use super::ArenaParser;
@@ -626,7 +627,22 @@ impl<'arena> ArenaParser<'arena> {
                 OrderDirection::Asc
             };
 
-            items.push(OrderByItem { expr, direction });
+            // Parse optional NULLS FIRST/LAST (SQL:2003 extension)
+            let nulls_order = if self.try_consume_keyword(Keyword::Nulls) {
+                if self.try_consume_keyword(Keyword::First) {
+                    Some(NullsOrder::First)
+                } else if self.try_consume_keyword(Keyword::Last) {
+                    Some(NullsOrder::Last)
+                } else {
+                    return Err(crate::ParseError {
+                        message: format!("Expected FIRST or LAST after NULLS, found {:?}", self.peek()),
+                    });
+                }
+            } else {
+                None
+            };
+
+            items.push(OrderByItem { expr, direction, nulls_order });
 
             if !self.try_consume(&Token::Comma) {
                 break;

@@ -125,6 +125,7 @@ pub(super) fn apply_window_functions_to_aggregates(
                     .map(|item| vibesql_ast::OrderByItem {
                         expr: map_expr_to_result_column(&item.expr, select_list),
                         direction: item.direction.clone(),
+                        nulls_order: item.nulls_order.clone(),
                     })
                     .collect::<Vec<_>>()
             });

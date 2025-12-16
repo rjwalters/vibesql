@@ -598,6 +598,7 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
                         .map(|item| crate::OrderByItem {
                             expr: transform_expression(visitor, item.expr),
                             direction: item.direction,
+                            nulls_order: item.nulls_order,
                         })
                         .collect()
                 }),
@@ -768,6 +769,7 @@ fn transform_window_spec<V: ExpressionMutVisitor>(visitor: &mut V, spec: WindowS
                 .map(|item| crate::OrderByItem {
                     expr: transform_expression(visitor, item.expr),
                     direction: item.direction,
+                    nulls_order: item.nulls_order,
                 })
                 .collect()
         }),
@@ -1088,6 +1090,7 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
                 .map(|item| crate::OrderByItem {
                     expr: transform_expression(visitor, item.expr),
                     direction: item.direction,
+                    nulls_order: item.nulls_order,
                 })
                 .collect()
         }),

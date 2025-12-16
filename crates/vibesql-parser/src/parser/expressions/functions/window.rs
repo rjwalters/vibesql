@@ -86,7 +86,7 @@ impl Parser {
                     vibesql_ast::OrderDirection::Asc // Default
                 };
 
-                order_items.push(vibesql_ast::OrderByItem { expr, direction });
+                order_items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order: None });
 
                 if matches!(self.peek(), Token::Comma) {
                     self.advance();

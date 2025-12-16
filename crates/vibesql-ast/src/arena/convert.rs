@@ -27,9 +27,9 @@ use crate::{
     Assignment, BinaryOperator, CaseWhen, CharacterUnit, CommonTableExpr, ConflictClause,
     DeleteStmt, Expression, FrameBound, FrameUnit, FromClause, FulltextMode, GroupByClause,
     GroupingElement, GroupingSet, InsertSource, InsertStmt, IntervalUnit, JoinType,
-    MixedGroupingItem, OrderByItem, OrderDirection, PseudoTable, Quantifier, SelectItem,
-    SelectStmt, SetOperation, SetOperator, TrimPosition, TruthValue, UpdateStmt, WhereClause,
-    WindowFrame, WindowFunctionSpec, WindowSpec,
+    MixedGroupingItem, NullsOrder, OrderByItem, OrderDirection, PseudoTable, Quantifier,
+    SelectItem, SelectStmt, SetOperation, SetOperator, TrimPosition, TruthValue, UpdateStmt,
+    WhereClause, WindowFrame, WindowFunctionSpec, WindowSpec,
 };
 
 /// Converter for arena-allocated AST to owned AST.
@@ -366,7 +366,14 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     }
 
     fn convert_order_by_item(&self, item: &arena_expr::OrderByItem<'arena>) -> OrderByItem {
-        OrderByItem { expr: self.convert_expression(&item.expr), direction: item.direction.into() }
+        OrderByItem {
+            expr: self.convert_expression(&item.expr),
+            direction: item.direction.into(),
+            nulls_order: item.nulls_order.map(|no| match no {
+                arena_expr::NullsOrder::First => NullsOrder::First,
+                arena_expr::NullsOrder::Last => NullsOrder::Last,
+            }),
+        }
     }
 
     // ========================================================================

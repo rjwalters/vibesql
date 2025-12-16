@@ -209,7 +209,7 @@ impl Parser {
                     vibesql_ast::OrderDirection::Asc // Default
                 };
 
-                Ok(vibesql_ast::OrderByItem { expr, direction })
+                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order: None })
             })?;
 
             Some(order_items)
@@ -476,7 +476,7 @@ impl Parser {
                     vibesql_ast::OrderDirection::Asc
                 };
 
-                Ok(vibesql_ast::OrderByItem { expr, direction })
+                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order: None })
             })?;
 
             Some(order_items)

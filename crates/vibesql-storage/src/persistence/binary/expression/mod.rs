@@ -477,7 +477,7 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
                         1 => vibesql_ast::OrderDirection::Desc,
                         _ => vibesql_ast::OrderDirection::Asc, // Default to Asc for unknown
                     };
-                    items.push(vibesql_ast::OrderByItem { expr, direction });
+                    items.push(vibesql_ast::OrderByItem { expr, direction, nulls_order: None });
                 }
                 Some(items)
             } else {

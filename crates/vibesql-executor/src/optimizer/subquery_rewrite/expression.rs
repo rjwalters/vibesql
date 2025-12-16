@@ -267,6 +267,7 @@ pub(super) fn rewrite_expression_with_context(
                 items.iter().map(|item| vibesql_ast::OrderByItem {
                     expr: rewrite_expression_with_context(&item.expr, rewrite_subquery_fn, outer_tables),
                     direction: item.direction.clone(),
+                    nulls_order: item.nulls_order.clone(),
                 }).collect()
             }),
         },

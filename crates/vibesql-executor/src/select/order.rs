@@ -181,9 +181,11 @@ fn resolve_position_with_wildcards<'a>(
     ResolvedPosition::NotFound
 }
 
+/// Sort key for ORDER BY: (value, direction, nulls_order)
+type SortKey = (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>);
+
 /// Row with optional sort keys for ORDER BY
-pub(super) type RowWithSortKeys =
-    (vibesql_storage::Row, Option<Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection)>>);
+pub(super) type RowWithSortKeys = (vibesql_storage::Row, Option<Vec<SortKey>>);
 
 /// Count the number of columns in a SELECT list after wildcard expansion
 ///
@@ -269,7 +271,7 @@ pub(super) fn apply_order_by(
             let expr_to_eval =
                 resolve_order_by_alias(&order_item.expr, select_list, term_index, Some(schema))?;
             let key_value = evaluator.eval(expr_to_eval.as_ref(), row)?;
-            keys.push((key_value, order_item.direction.clone()));
+            keys.push((key_value, order_item.direction.clone(), order_item.nulls_order));
         }
         *sort_keys = Some(keys);
     }
@@ -280,12 +282,33 @@ pub(super) fn apply_order_by(
         let keys_a = keys_a.as_ref().unwrap();
         let keys_b = keys_b.as_ref().unwrap();
 
-        for ((val_a, dir), (val_b, _)) in keys_a.iter().zip(keys_b.iter()) {
-            // Handle NULLs: always sort last regardless of ASC/DESC
+        for ((val_a, dir, nulls_order), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
+            // Determine NULL ordering:
+            // - If explicitly specified via NULLS FIRST/LAST, use that
+            // - Default: SQLite uses NULLS LAST for all directions
+            let nulls_first = match nulls_order {
+                Some(vibesql_ast::NullsOrder::First) => true,
+                Some(vibesql_ast::NullsOrder::Last) => false,
+                None => false, // SQLite default: NULLS LAST
+            };
+
+            // Handle NULLs according to nulls_first setting
             let cmp = match (val_a.is_null(), val_b.is_null()) {
                 (true, true) => Ordering::Equal,
-                (true, false) => return Ordering::Greater, // NULL always sorts last
-                (false, true) => return Ordering::Less,    // non-NULL always sorts first
+                (true, false) => {
+                    if nulls_first {
+                        return Ordering::Less; // NULL sorts before non-NULL
+                    } else {
+                        return Ordering::Greater; // NULL sorts after non-NULL
+                    }
+                }
+                (false, true) => {
+                    if nulls_first {
+                        return Ordering::Greater; // non-NULL sorts after NULL
+                    } else {
+                        return Ordering::Less; // non-NULL sorts before NULL
+                    }
+                }
                 (false, false) => {
                     // Compare non-NULL values, respecting direction
                     match dir {
@@ -1081,6 +1104,7 @@ fn resolve_where_expression_with_schema(
                 items.iter().map(|item| vibesql_ast::OrderByItem {
                     expr: resolve_where_expression_with_schema(&item.expr, select_list, table_columns),
                     direction: item.direction.clone(),
+                    nulls_order: item.nulls_order.clone(),
                 }).collect()
             }),
         },
