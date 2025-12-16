@@ -164,7 +164,7 @@ fn execute_insert_internal(
     }
 
     // For multi-row INSERT, validate all rows first, then insert all
-    // This ensures atomicity: all rows succeed or all fail
+    // This ensures atomicity: all rows succeed or all fail (unless IGNORE is used)
     let mut validated_rows: Vec<(Vec<vibesql_types::SqlValue>, Option<u64>)> = Vec::new();
     let mut primary_key_values: Vec<Vec<vibesql_types::SqlValue>> = Vec::new(); // Track PK values for duplicate checking within batch
     let mut unique_constraint_values = if schema.get_unique_constraint_indices().is_empty() {
@@ -172,6 +172,9 @@ fn execute_insert_internal(
     } else {
         vec![Vec::new(); schema.get_unique_constraint_indices().len()]
     }; // Track UNIQUE values for each constraint
+
+    // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
+    let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
 
     // Track the first auto-generated ID for LAST_INSERT_ROWID() support
     // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
@@ -257,9 +260,10 @@ fn execute_insert_internal(
 
         // Validate all constraints in a single pass and extract index keys
         // Skip PK/UNIQUE duplicate checks if using REPLACE conflict clause or ON DUPLICATE KEY
-        // UPDATE
+        // UPDATE. Also skip for IGNORE since we'll handle violations by skipping the row.
         let skip_duplicate_checks =
             matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
+                || matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore))
                 || stmt.on_duplicate_key_update.is_some();
         let validator = super::row_validator::RowValidator::new(
             db,
@@ -269,6 +273,25 @@ fn execute_insert_internal(
             &unique_constraint_values,
             skip_duplicate_checks,
         );
+
+        // For IGNORE, we need to check for constraint violations before adding to validated_rows
+        // If there's a violation, skip this row instead of returning an error
+        if use_ignore {
+            // Check if this row would violate any constraints
+            let would_violate = check_would_violate_constraints(
+                db,
+                &schema,
+                &storage_table_name,
+                &full_row_values,
+                &primary_key_values,
+                &unique_constraint_values,
+            );
+            if would_violate {
+                // Skip this row - don't add to validated_rows
+                continue;
+            }
+        }
+
         let validation_result = validator.validate(&full_row_values)?;
 
         // Track PK values for batch duplicate checking (using pre-extracted keys)
@@ -511,4 +534,149 @@ fn execute_insert_internal(
     }
 
     Ok(rows_inserted)
+}
+
+/// Check if inserting a row would violate any constraints (for IGNORE conflict resolution)
+/// Returns true if any constraint would be violated
+fn check_would_violate_constraints(
+    db: &vibesql_storage::Database,
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+    row_values: &[vibesql_types::SqlValue],
+    batch_pk_values: &[Vec<vibesql_types::SqlValue>],
+    batch_unique_values: &[Vec<Vec<vibesql_types::SqlValue>>],
+) -> bool {
+    // Check NOT NULL constraints
+    for (col_idx, col) in schema.columns.iter().enumerate() {
+        if !col.nullable && row_values[col_idx] == vibesql_types::SqlValue::Null {
+            return true;
+        }
+    }
+
+    // Check PRIMARY KEY uniqueness
+    if let Some(pk_indices) = schema.get_primary_key_indices() {
+        let new_pk_values: Vec<vibesql_types::SqlValue> =
+            pk_indices.iter().map(|&idx| row_values[idx].clone()).collect();
+
+        // Skip if any PK value is NULL (multiple NULLs are allowed for non-INTEGER PRIMARY KEY)
+        if !new_pk_values.contains(&vibesql_types::SqlValue::Null) {
+            // Check against batch
+            if batch_pk_values.contains(&new_pk_values) {
+                return true;
+            }
+
+            // Check against existing table data
+            if let Some(table) = db.get_table(table_name) {
+                if let Some(pk_index) = table.primary_key_index() {
+                    if pk_index.contains_key(&new_pk_values) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Check UNIQUE constraints
+    let unique_constraint_indices = schema.get_unique_constraint_indices();
+    for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
+        let new_unique_values: Vec<vibesql_types::SqlValue> =
+            unique_indices.iter().map(|&idx| row_values[idx].clone()).collect();
+
+        // Skip if any value is NULL
+        if new_unique_values.contains(&vibesql_types::SqlValue::Null) {
+            continue;
+        }
+
+        // Check against batch
+        if constraint_idx < batch_unique_values.len()
+            && batch_unique_values[constraint_idx].contains(&new_unique_values)
+        {
+            return true;
+        }
+
+        // Check against existing table data
+        if let Some(table) = db.get_table(table_name) {
+            let unique_indexes = table.unique_indexes();
+            if constraint_idx < unique_indexes.len()
+                && unique_indexes[constraint_idx].contains_key(&new_unique_values)
+            {
+                return true;
+            }
+        }
+    }
+
+    // Check user-defined UNIQUE indexes
+    if let Some(table) = db.get_table(table_name) {
+        for index_name in db.list_indexes_for_table(table_name) {
+            if let Some(index_metadata) = db.get_index(&index_name) {
+                if !index_metadata.unique {
+                    continue;
+                }
+
+                // Build key values for this index
+                let mut key_values = Vec::new();
+                for index_col in &index_metadata.columns {
+                    if let Some(col_idx) = schema.get_column_index(&index_col.column_name) {
+                        key_values.push(row_values[col_idx].clone());
+                    }
+                }
+
+                // Skip if any value is NULL
+                if key_values.contains(&vibesql_types::SqlValue::Null) {
+                    continue;
+                }
+
+                // Check if key exists in index
+                if let Some(index_data) = db.get_index_data(&index_name) {
+                    if index_data.contains_key(&key_values) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Use `table` to suppress the unused variable warning in the `let Some(table)` pattern.
+        // This is a read-only check, so we just need to ensure the table exists.
+        let _ = table.row_count();
+    }
+
+    // Check CHECK constraints
+    if !schema.check_constraints.is_empty() {
+        let row = vibesql_storage::Row::new(row_values.to_vec());
+        let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+
+        for (_constraint_name, check_expr) in &schema.check_constraints {
+            if let Ok(result) = evaluator.eval(check_expr, &row) {
+                if result == vibesql_types::SqlValue::Boolean(false) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Check FOREIGN KEY constraints
+    for fk in &schema.foreign_keys {
+        let fk_values: Vec<vibesql_types::SqlValue> =
+            fk.column_indices.iter().map(|&idx| row_values[idx].clone()).collect();
+
+        // Skip if any FK value is NULL
+        if fk_values.iter().any(|v| v.is_null()) {
+            continue;
+        }
+
+        // Check if referenced key exists in parent table
+        if let Some(parent_table) = db.get_table(&fk.parent_table) {
+            let key_exists = parent_table.scan().iter().any(|parent_row| {
+                fk.parent_column_indices
+                    .iter()
+                    .zip(&fk_values)
+                    .all(|(&parent_idx, fk_val)| parent_row.get(parent_idx) == Some(fk_val))
+            });
+
+            if !key_exists {
+                return true;
+            }
+        }
+    }
+
+    false
 }
