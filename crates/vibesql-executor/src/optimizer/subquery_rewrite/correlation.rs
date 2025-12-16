@@ -113,6 +113,9 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
             //
             // Conservative behavior: Returns false (not external) when uncertain,
             // which may miss some optimizations but maintains correctness.
+            //
+            // EXCEPTION: If the subquery has no FROM clause, any column reference
+            // MUST be external since there's no internal schema to reference.
             if let Some(from) = &subquery.from {
                 let col_prefix = column.chars().next().unwrap_or('_').to_ascii_lowercase();
 
@@ -126,7 +129,9 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
                     false
                 }
             } else {
-                false
+                // No FROM clause means any column reference must be external
+                // (there's no internal schema to reference columns from)
+                true
             }
         }
 
