@@ -1182,7 +1182,13 @@ pub(super) fn nested_loop_join(
             nested_loop_full_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
         vibesql_ast::JoinType::Cross => {
-            nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx)
+            // NATURAL CROSS JOIN should apply the natural join condition
+            // (semantically equivalent to NATURAL INNER JOIN)
+            if natural && combined_condition.is_some() {
+                nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx)
+            } else {
+                nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx)
+            }
         }
         vibesql_ast::JoinType::Semi => {
             nested_loop_semi_join(left, right, &combined_condition, database, timeout_ctx)

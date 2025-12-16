@@ -167,8 +167,8 @@ fn test_natural_join_single_common_column() {
 
 #[test]
 fn test_natural_cross_join_accepted() {
-    // SQLite allows NATURAL CROSS JOIN, treating it as a regular CROSS JOIN
-    // (the NATURAL modifier is effectively ignored for CROSS JOINs)
+    // NATURAL CROSS JOIN is valid SQL - SQLite applies the natural join condition
+    // (matching on common column names), not a cartesian product
     let result = vibesql_parser::Parser::parse_sql("SELECT * FROM t1 NATURAL CROSS JOIN t2");
 
     assert!(result.is_ok(), "NATURAL CROSS JOIN should parse successfully");
@@ -177,8 +177,8 @@ fn test_natural_cross_join_accepted() {
         vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
             vibesql_ast::FromClause::Join { join_type, natural, .. } => {
                 assert_eq!(*join_type, vibesql_ast::JoinType::Cross);
-                // NATURAL is effectively ignored for CROSS JOIN
-                assert!(!*natural);
+                // NATURAL flag should be preserved
+                assert!(*natural);
             }
             _ => panic!("Expected JOIN"),
         },
