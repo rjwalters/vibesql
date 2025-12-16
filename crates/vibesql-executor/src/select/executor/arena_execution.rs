@@ -294,15 +294,45 @@ impl SelectExecutor<'_> {
             })
             .collect::<Result<_, _>>()?;
 
-        // Sort by keys
+        // Sort by keys with proper NULL handling
         keyed_rows.sort_by(|(keys_a, _), (keys_b, _)| {
             for (i, (key_a, key_b)) in keys_a.iter().zip(keys_b.iter()).enumerate() {
-                let cmp = compare_values(key_a, key_b);
+                let order_item = order_by.get(i);
+                let asc = order_item.is_some_and(|o| matches!(o.direction, OrderDirection::Asc));
+
+                // Determine NULL ordering:
+                // - If explicitly specified via NULLS FIRST/LAST, use that
+                // - Default: SQLite uses NULLS LAST for all directions
+                let nulls_first = order_item.and_then(|o| o.nulls_order).is_some_and(
+                    |no| matches!(no, vibesql_ast::arena::NullsOrder::First),
+                );
+
+                // Handle NULLs according to nulls_first setting
+                let cmp = match (key_a.is_null(), key_b.is_null()) {
+                    (true, true) => Ordering::Equal,
+                    (true, false) => {
+                        if nulls_first {
+                            return Ordering::Less; // NULL sorts before non-NULL
+                        } else {
+                            return Ordering::Greater; // NULL sorts after non-NULL
+                        }
+                    }
+                    (false, true) => {
+                        if nulls_first {
+                            return Ordering::Greater; // non-NULL sorts after NULL
+                        } else {
+                            return Ordering::Less; // non-NULL sorts before NULL
+                        }
+                    }
+                    (false, false) => {
+                        // Compare non-NULL values, respecting direction
+                        let cmp = compare_values(key_a, key_b);
+                        if asc { cmp } else { cmp.reverse() }
+                    }
+                };
+
                 if cmp != Ordering::Equal {
-                    // Apply ASC/DESC
-                    let asc =
-                        order_by.get(i).is_some_and(|o| matches!(o.direction, OrderDirection::Asc));
-                    return if asc { cmp } else { cmp.reverse() };
+                    return cmp;
                 }
             }
             Ordering::Equal

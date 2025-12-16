@@ -952,4 +952,37 @@ mod tests {
         let result = ArenaParser::parse_sql(sql, &arena);
         assert!(result.is_ok(), "TPC-H Q1 should parse successfully: {:?}", result.err());
     }
+
+    #[test]
+    fn test_order_by_nulls_first_last() {
+        use vibesql_ast::NullsOrder;
+
+        // Test NULLS FIRST
+        let stmt = parse_select_to_owned("SELECT x FROM t ORDER BY x ASC NULLS FIRST").unwrap();
+        let order_by = stmt.order_by.unwrap();
+        assert_eq!(order_by.len(), 1);
+        assert_eq!(order_by[0].nulls_order, Some(NullsOrder::First));
+
+        // Test NULLS LAST
+        let stmt = parse_select_to_owned("SELECT x FROM t ORDER BY x DESC NULLS LAST").unwrap();
+        let order_by = stmt.order_by.unwrap();
+        assert_eq!(order_by.len(), 1);
+        assert_eq!(order_by[0].nulls_order, Some(NullsOrder::Last));
+
+        // Test default (None)
+        let stmt = parse_select_to_owned("SELECT x FROM t ORDER BY x").unwrap();
+        let order_by = stmt.order_by.unwrap();
+        assert_eq!(order_by.len(), 1);
+        assert_eq!(order_by[0].nulls_order, None);
+
+        // Test multiple columns
+        let stmt = parse_select_to_owned(
+            "SELECT x, y FROM t ORDER BY x NULLS FIRST, y DESC NULLS LAST",
+        )
+        .unwrap();
+        let order_by = stmt.order_by.unwrap();
+        assert_eq!(order_by.len(), 2);
+        assert_eq!(order_by[0].nulls_order, Some(NullsOrder::First));
+        assert_eq!(order_by[1].nulls_order, Some(NullsOrder::Last));
+    }
 }

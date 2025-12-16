@@ -1239,7 +1239,8 @@ impl SelectExecutor<'_> {
         };
 
         // Parse order_by items and resolve to column indices
-        let mut sort_columns: Vec<(usize, bool)> = Vec::new(); // (column_index, is_desc)
+        // (column_index, is_desc, nulls_first)
+        let mut sort_columns: Vec<(usize, bool, bool)> = Vec::new();
         for (term_index, item) in order_by.iter().enumerate() {
             let col_idx_opt = match &item.expr {
                 // Numeric literal: ORDER BY 1
@@ -1290,7 +1291,13 @@ impl SelectExecutor<'_> {
                     });
                 }
                 let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
-                sort_columns.push((col_idx, is_desc));
+                // Determine NULL ordering:
+                // - If explicitly specified via NULLS FIRST/LAST, use that
+                // - Default: SQLite uses NULLS LAST for all directions
+                let nulls_first = item
+                    .nulls_order
+                    .is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
+                sort_columns.push((col_idx, is_desc, nulls_first));
             } else {
                 // ORDER BY term doesn't match any column in the result set
                 return Err(ExecutorError::OrderByTermNotInResultSet {
@@ -1304,19 +1311,41 @@ impl SelectExecutor<'_> {
         }
 
         rows.sort_by(|a, b| {
-            for (col_idx, is_desc) in &sort_columns {
+            for (col_idx, is_desc, nulls_first) in &sort_columns {
                 let val_a = a.values.get(*col_idx);
                 let val_b = b.values.get(*col_idx);
 
-                let cmp = match (val_a, val_b) {
-                    (Some(a), Some(b)) => compare_sql_values(a, b),
-                    (Some(_), None) => Ordering::Less,
-                    (None, Some(_)) => Ordering::Greater,
-                    (None, None) => Ordering::Equal,
+                // Handle NULLs according to nulls_first setting
+                let cmp = match (val_a.map(|v| v.is_null()).unwrap_or(true), val_b.map(|v| v.is_null()).unwrap_or(true)) {
+                    (true, true) => Ordering::Equal,
+                    (true, false) => {
+                        if *nulls_first {
+                            return Ordering::Less; // NULL sorts before non-NULL
+                        } else {
+                            return Ordering::Greater; // NULL sorts after non-NULL
+                        }
+                    }
+                    (false, true) => {
+                        if *nulls_first {
+                            return Ordering::Greater; // non-NULL sorts after NULL
+                        } else {
+                            return Ordering::Less; // non-NULL sorts before NULL
+                        }
+                    }
+                    (false, false) => {
+                        // Compare non-NULL values
+                        match (val_a, val_b) {
+                            (Some(a_val), Some(b_val)) => {
+                                let cmp = compare_sql_values(a_val, b_val);
+                                if *is_desc { cmp.reverse() } else { cmp }
+                            }
+                            _ => Ordering::Equal, // Shouldn't happen since we checked is_null above
+                        }
+                    }
                 };
 
                 if cmp != Ordering::Equal {
-                    return if *is_desc { cmp.reverse() } else { cmp };
+                    return cmp;
                 }
             }
             Ordering::Equal

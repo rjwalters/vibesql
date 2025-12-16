@@ -186,7 +186,8 @@ impl SelectExecutor<'_> {
         use crate::select::grouping::compare_sql_values;
 
         // Pre-compute column indices for ORDER BY columns
-        let mut sort_indices: Vec<(usize, OrderDirection)> = Vec::with_capacity(order_by.len());
+        // (col_idx, direction, nulls_first)
+        let mut sort_indices: Vec<(usize, OrderDirection, bool)> = Vec::with_capacity(order_by.len());
 
         for item in order_by {
             let col_idx = match &item.expr {
@@ -204,20 +205,38 @@ impl SelectExecutor<'_> {
                     ));
                 }
             };
-            sort_indices.push((col_idx, item.direction.clone()));
+            // Determine NULL ordering:
+            // - If explicitly specified via NULLS FIRST/LAST, use that
+            // - Default: SQLite uses NULLS LAST for all directions
+            let nulls_first = item
+                .nulls_order
+                .is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
+            sort_indices.push((col_idx, item.direction.clone(), nulls_first));
         }
 
         // Sort rows by the specified columns
         rows.sort_by(|a, b| {
-            for (col_idx, dir) in &sort_indices {
+            for (col_idx, dir, nulls_first) in &sort_indices {
                 let val_a = &a.values[*col_idx];
                 let val_b = &b.values[*col_idx];
 
-                // Handle NULLs: always sort last regardless of ASC/DESC
+                // Handle NULLs according to nulls_first setting
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
-                    (true, false) => return Ordering::Greater, // NULL always sorts last
-                    (false, true) => return Ordering::Less,    // non-NULL always sorts first
+                    (true, false) => {
+                        if *nulls_first {
+                            return Ordering::Less; // NULL sorts before non-NULL
+                        } else {
+                            return Ordering::Greater; // NULL sorts after non-NULL
+                        }
+                    }
+                    (false, true) => {
+                        if *nulls_first {
+                            return Ordering::Greater; // non-NULL sorts after NULL
+                        } else {
+                            return Ordering::Less; // non-NULL sorts before NULL
+                        }
+                    }
                     (false, false) => {
                         // Compare non-NULL values, respecting direction
                         match dir {

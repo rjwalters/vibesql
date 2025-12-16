@@ -1233,6 +1233,7 @@ mod tests {
             order_by: Some(vec![OrderByItem {
                 expr: Expression::ColumnRef { table: None, column: "name".to_string() },
                 direction: OrderDirection::Asc,
+                nulls_order: None,
             }]),
             limit: Some(Expression::Literal(SqlValue::Integer(10))),
             offset: None,
@@ -1359,6 +1360,7 @@ mod tests {
                 order_by: Some(vec![OrderByItem {
                     expr: Expression::ColumnRef { table: None, column: "salary".to_string() },
                     direction: OrderDirection::Desc,
+                    nulls_order: None,
                 }]),
                 frame: None,
             },
