@@ -1183,6 +1183,154 @@ fn resolve_where_expression_with_schema(
     }
 }
 
+/// Extract aggregate expressions from ORDER BY items for pre-computation during GROUP BY.
+///
+/// When ORDER BY contains aggregate functions (e.g., `ORDER BY max(n)+0`), these aggregates
+/// must be computed during the GROUP BY phase, not during ORDER BY evaluation.
+/// This function collects all aggregate expressions from ORDER BY so they can be pre-computed.
+///
+/// Returns a vector of unique aggregate expressions found in ORDER BY.
+pub(crate) fn extract_order_by_aggregates(
+    order_by: &[vibesql_ast::OrderByItem],
+) -> Vec<vibesql_ast::Expression> {
+    let mut aggregates = Vec::new();
+    for item in order_by {
+        collect_aggregates_from_expr(&item.expr, &mut aggregates);
+    }
+    aggregates
+}
+
+/// Recursively collect aggregate function expressions from an expression tree.
+fn collect_aggregates_from_expr(
+    expr: &vibesql_ast::Expression,
+    aggregates: &mut Vec<vibesql_ast::Expression>,
+) {
+    use vibesql_ast::Expression;
+
+    match expr {
+        Expression::AggregateFunction { .. } => {
+            // Check if this aggregate is already collected (avoid duplicates)
+            let already_exists = aggregates.iter().any(|existing| {
+                format!("{:?}", existing) == format!("{:?}", expr)
+            });
+            if !already_exists {
+                aggregates.push(expr.clone());
+            }
+        }
+
+        // Recursively search in compound expressions
+        Expression::BinaryOp { left, right, .. } => {
+            collect_aggregates_from_expr(left, aggregates);
+            collect_aggregates_from_expr(right, aggregates);
+        }
+        Expression::UnaryOp { expr: inner, .. } => {
+            collect_aggregates_from_expr(inner, aggregates);
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                collect_aggregates_from_expr(arg, aggregates);
+            }
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            if let Some(op) = operand {
+                collect_aggregates_from_expr(op, aggregates);
+            }
+            for when_clause in when_clauses {
+                for cond in &when_clause.conditions {
+                    collect_aggregates_from_expr(cond, aggregates);
+                }
+                collect_aggregates_from_expr(&when_clause.result, aggregates);
+            }
+            if let Some(else_expr) = else_result {
+                collect_aggregates_from_expr(else_expr, aggregates);
+            }
+        }
+        Expression::Cast { expr: inner, .. } => {
+            collect_aggregates_from_expr(inner, aggregates);
+        }
+        Expression::Between { expr, low, high, .. } => {
+            collect_aggregates_from_expr(expr, aggregates);
+            collect_aggregates_from_expr(low, aggregates);
+            collect_aggregates_from_expr(high, aggregates);
+        }
+        Expression::InList { expr, values, .. } => {
+            collect_aggregates_from_expr(expr, aggregates);
+            for item in values {
+                collect_aggregates_from_expr(item, aggregates);
+            }
+        }
+
+        // Leaf expressions - nothing to extract
+        Expression::Literal(_)
+        | Expression::ColumnRef { .. }
+        | Expression::Wildcard
+        | Expression::CurrentDate
+        | Expression::CurrentTime { .. }
+        | Expression::CurrentTimestamp { .. }
+        | Expression::Default
+        | Expression::NextValue { .. }
+        | Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_)
+        | Expression::PseudoVariable { .. }
+        | Expression::DuplicateKeyValue { .. }
+        | Expression::SessionVariable { .. } => {}
+
+        // Skip subqueries and window functions
+        Expression::ScalarSubquery(_)
+        | Expression::Exists { .. }
+        | Expression::In { .. }
+        | Expression::QuantifiedComparison { .. }
+        | Expression::WindowFunction { .. } => {}
+
+        // Other expressions we might need to handle
+        Expression::Like { expr, pattern, .. } => {
+            collect_aggregates_from_expr(expr, aggregates);
+            collect_aggregates_from_expr(pattern, aggregates);
+        }
+        Expression::IsNull { expr, .. } => {
+            collect_aggregates_from_expr(expr, aggregates);
+        }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            collect_aggregates_from_expr(left, aggregates);
+            collect_aggregates_from_expr(right, aggregates);
+        }
+        Expression::IsTruthValue { expr, .. } => {
+            collect_aggregates_from_expr(expr, aggregates);
+        }
+        Expression::Conjunction(terms) | Expression::Disjunction(terms) => {
+            for term in terms {
+                collect_aggregates_from_expr(term, aggregates);
+            }
+        }
+        Expression::RowValueConstructor(items) => {
+            for item in items {
+                collect_aggregates_from_expr(item, aggregates);
+            }
+        }
+        Expression::Position { substring, string, .. } => {
+            collect_aggregates_from_expr(substring, aggregates);
+            collect_aggregates_from_expr(string, aggregates);
+        }
+        Expression::Trim { string, removal_char, .. } => {
+            collect_aggregates_from_expr(string, aggregates);
+            if let Some(c) = removal_char {
+                collect_aggregates_from_expr(c, aggregates);
+            }
+        }
+        Expression::Extract { expr, .. } => {
+            collect_aggregates_from_expr(expr, aggregates);
+        }
+        Expression::Interval { value, .. } => {
+            collect_aggregates_from_expr(value, aggregates);
+        }
+        Expression::Collate { expr: inner, .. } => {
+            collect_aggregates_from_expr(inner, aggregates);
+        }
+        Expression::MatchAgainst { .. } => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
@@ -1200,15 +1348,15 @@ mod tests {
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(3)]),
-                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Asc, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(1)]),
-                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
-                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc, None)]),
             ),
         ];
 
@@ -1217,7 +1365,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir), (val_b, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
                     (true, false) => return Ordering::Greater,
@@ -1265,7 +1413,7 @@ mod tests {
         for i in (0..15000).rev() {
             rows.push((
                 Row::from_vec(vec![SqlValue::Integer(i)]),
-                Some(vec![(SqlValue::Integer(i), vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Integer(i), vibesql_ast::OrderDirection::Asc, None)]),
             ));
         }
 
@@ -1273,7 +1421,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir), (val_b, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
                     (true, false) => return Ordering::Greater,

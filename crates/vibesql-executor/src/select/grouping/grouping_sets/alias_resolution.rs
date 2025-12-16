@@ -276,7 +276,7 @@ mod tests {
             vec![select_item(col("a_col"), Some("a")), select_item(col("b_col"), Some("b"))];
 
         let base_exprs = vec![col("a"), col("b")];
-        let resolved = resolve_base_expressions_aliases(&base_exprs, &select_list);
+        let resolved = resolve_base_expressions_aliases(&base_exprs, &select_list).unwrap();
 
         assert_eq!(resolved.len(), 2);
         assert!(

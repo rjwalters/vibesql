@@ -13,8 +13,8 @@ use crate::{
     errors::ExecutorError,
     evaluator::compiled_pivot::PivotAggregateGroup,
     optimizer::{
-        collect_required_columns, compute_projection_indices, optimize_where_clause, project_rows,
-        remap_schema,
+        collect_columns_from_expr, collect_required_columns, compute_projection_indices,
+        optimize_where_clause, project_rows, remap_schema,
     },
     pipeline::ExecutionContext,
     select::{
@@ -188,17 +188,32 @@ impl SelectExecutor<'_> {
             }
         };
 
+        // Extract aggregates from ORDER BY for pre-computation during GROUP BY
+        // This allows ORDER BY expressions like "ORDER BY max(n)+0" to work
+        // Note: This must be done before column pruning so we can include the columns
+        // referenced by ORDER BY aggregates in the required columns.
+        let order_by_aggregates = if let Some(order_by) = &stmt.order_by {
+            crate::select::order::extract_order_by_aggregates(order_by)
+        } else {
+            Vec::new()
+        };
+
         // Column pruning optimization (#4355, #4377)
         // After JOIN completes, project only the columns needed for aggregation.
         // This reduces memory and CPU overhead significantly for multi-way JOINs.
         // For example, Q7's 6-way JOIN produces 54 columns but only 14 are needed.
         let (filtered_rows, schema) = {
-            // Collect required columns from SELECT, GROUP BY, and HAVING
-            let required_columns = collect_required_columns(
+            // Collect required columns from SELECT, GROUP BY, HAVING, and ORDER BY aggregates
+            let mut required_columns = collect_required_columns(
                 &stmt.select_list,
                 stmt.group_by.as_ref(),
                 stmt.having.as_ref(),
             );
+
+            // Also collect columns from ORDER BY aggregates
+            for agg_expr in &order_by_aggregates {
+                collect_columns_from_expr(agg_expr, &mut required_columns);
+            }
 
             // Check if pruning would help (have required columns and would reduce width)
             if !required_columns.is_empty() {
@@ -337,7 +352,25 @@ impl SelectExecutor<'_> {
                     };
 
                     if include_group {
-                        let row = vibesql_storage::Row::new(aggregate_results);
+                        // Include GROUP BY values after SELECT values for ORDER BY resolution
+                        // ORDER BY can reference GROUP BY columns not in SELECT list
+                        let mut row_values = aggregate_results;
+                        row_values.extend(group_key.iter().cloned());
+
+                        // Compute ORDER BY aggregates and append them to row values
+                        // This allows ORDER BY expressions like "ORDER BY max(n)+0"
+                        for order_agg_expr in &order_by_aggregates {
+                            let agg_value = self.evaluate_with_aggregates_and_grouping(
+                                order_agg_expr,
+                                &group_rows,
+                                &group_key,
+                                &evaluator,
+                                &grouping_context,
+                            )?;
+                            row_values.push(agg_value);
+                        }
+
+                        let row = vibesql_storage::Row::new(row_values);
 
                         // Track memory for aggregation result row
                         let row_memory = std::mem::size_of::<vibesql_storage::Row>()
@@ -432,9 +465,41 @@ impl SelectExecutor<'_> {
             result_rows
         };
 
+        // Get GROUP BY expressions for ORDER BY resolution
+        let group_by_exprs: Vec<vibesql_ast::Expression> = if let Some(group_by) = &stmt.group_by {
+            get_base_expressions(group_by)
+        } else {
+            Vec::new()
+        };
+
+        // Calculate count of hidden columns (GROUP BY + ORDER BY aggregates)
+        let hidden_col_count = group_by_exprs.len() + order_by_aggregates.len();
+
         // Apply ORDER BY if present
         let result_rows = if let Some(order_by) = &stmt.order_by {
-            self.apply_order_by_to_aggregates(result_rows, stmt, order_by, &expanded_select_list)?
+            self.apply_order_by_to_aggregates(
+                result_rows,
+                stmt,
+                order_by,
+                &expanded_select_list,
+                &group_by_exprs,
+                &order_by_aggregates,
+            )?
+        } else {
+            result_rows
+        };
+
+        // Strip GROUP BY and ORDER BY aggregate values from result rows
+        // (they were only needed for ORDER BY resolution)
+        let result_rows: Vec<vibesql_storage::Row> = if hidden_col_count > 0 {
+            let select_col_count = expanded_select_list.len();
+            result_rows
+                .into_iter()
+                .map(|row| {
+                    let values: Vec<_> = row.values.into_iter().take(select_col_count).collect();
+                    vibesql_storage::Row::new(values)
+                })
+                .collect()
         } else {
             result_rows
         };
