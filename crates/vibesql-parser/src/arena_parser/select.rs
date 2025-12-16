@@ -161,12 +161,19 @@ impl<'arena> ArenaParser<'arena> {
     /// in the WITH clause, even if they don't actually recurse.
     fn parse_cte(&mut self, recursive: bool) -> Result<CommonTableExpr<'arena>, ParseError> {
         // Parse CTE name
-        let name = if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            self.advance();
-            self.intern(&name)
-        } else {
-            return Err(ParseError { message: "Expected CTE name".to_string() });
+        let name = match self.peek() {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                self.intern(&name)
+            }
+            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as CTE names
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                let name = format!("{}", kw).to_lowercase();
+                self.advance();
+                self.intern(&name)
+            }
+            _ => return Err(ParseError { message: "Expected CTE name".to_string() }),
         };
 
         // Parse optional column list

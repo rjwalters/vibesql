@@ -320,6 +320,12 @@ impl Parser {
                 self.advance();
                 name
             }
+            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as CTE names
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                let name = format!("{}", kw).to_lowercase();
+                self.advance();
+                name
+            }
             _ => return Err(ParseError { message: "Expected CTE name (identifier)".to_string() }),
         };
 

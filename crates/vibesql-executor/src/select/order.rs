@@ -425,6 +425,10 @@ fn resolve_order_by_for_aggregates_inner(
                     alias_name.clone()
                 } else if let vibesql_ast::Expression::ColumnRef { column, .. } = expr {
                     column.clone()
+                } else if let vibesql_ast::Expression::AggregateFunction { name, .. } = expr {
+                    // For aggregate functions, use the function name (lowercase)
+                    // This matches the schema column name generated in apply_order_by_to_aggregates
+                    name.to_lowercase()
                 } else {
                     format!("col{}", idx + 1)
                 };
@@ -556,13 +560,19 @@ fn find_matching_select_expression(
     select_list: &[vibesql_ast::SelectItem],
 ) -> Option<String> {
     for (idx, item) in select_list.iter().enumerate() {
-        if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias , .. } = item {
+        if let vibesql_ast::SelectItem::Expression { expr: select_expr, alias, .. } = item {
             if expressions_equal(expr, select_expr) {
                 // Found matching expression
+                // Return alias if present, otherwise derive column name from expression
                 return Some(if let Some(alias_name) = alias {
                     alias_name.clone()
                 } else if let vibesql_ast::Expression::ColumnRef { column, .. } = select_expr {
                     column.clone()
+                } else if let vibesql_ast::Expression::AggregateFunction { name, .. } = select_expr
+                {
+                    // For aggregate functions, use the function name (lowercase)
+                    // This matches the schema column name generated in apply_order_by_to_aggregates
+                    name.to_lowercase()
                 } else {
                     format!("col{}", idx + 1)
                 });
@@ -1470,15 +1480,15 @@ mod tests {
         let mut rows: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(1)]),
-                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Desc)]),
+                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Desc, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(3)]),
-                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Desc)]),
+                Some(vec![(SqlValue::Integer(3), vibesql_ast::OrderDirection::Desc, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
-                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Desc)]),
+                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Desc, None)]),
             ),
         ];
 
@@ -1486,7 +1496,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir), (val_b, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
                     (true, false) => return Ordering::Greater,
@@ -1532,15 +1542,15 @@ mod tests {
         let mut rows_asc: Vec<RowWithSortKeys> = vec![
             (
                 Row::from_vec(vec![SqlValue::Integer(2)]),
-                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Integer(2), vibesql_ast::OrderDirection::Asc, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Null]),
-                Some(vec![(SqlValue::Null, vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Null, vibesql_ast::OrderDirection::Asc, None)]),
             ),
             (
                 Row::from_vec(vec![SqlValue::Integer(1)]),
-                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc)]),
+                Some(vec![(SqlValue::Integer(1), vibesql_ast::OrderDirection::Asc, None)]),
             ),
         ];
 
@@ -1548,7 +1558,7 @@ mod tests {
             let keys_a = keys_a.as_ref().unwrap();
             let keys_b = keys_b.as_ref().unwrap();
 
-            for ((val_a, dir), (val_b, _)) in keys_a.iter().zip(keys_b.iter()) {
+            for ((val_a, dir, _nulls), (val_b, _, _)) in keys_a.iter().zip(keys_b.iter()) {
                 let cmp = match (val_a.is_null(), val_b.is_null()) {
                     (true, true) => Ordering::Equal,
                     (true, false) => return Ordering::Greater,
