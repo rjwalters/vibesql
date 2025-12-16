@@ -170,14 +170,18 @@ impl SelectExecutor<'_> {
         let value = evaluator.eval(expr, &empty_row)?;
 
         // Convert to integer
+        // SQLite compatibility: LIMIT -1 means unlimited
         match value {
             vibesql_types::SqlValue::Integer(n) => {
-                if n < 0 {
+                if n < -1 {
                     Err(crate::errors::ExecutorError::InvalidLimitOffset {
                         clause: clause_name.to_string(),
                         value: n.to_string(),
-                        reason: "must be non-negative".to_string(),
+                        reason: "must be non-negative or -1".to_string(),
                     })
+                } else if n == -1 {
+                    // -1 means unlimited - return MAX which caller interprets as no limit
+                    Ok(usize::MAX)
                 } else {
                     Ok(n as usize)
                 }

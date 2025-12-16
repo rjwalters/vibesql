@@ -180,13 +180,22 @@ impl<'a> Lexer<'a> {
                 Ok(Token::Placeholder)
             }
             '$' => {
-                // Check if followed by digits for numbered placeholder ($1, $2, etc.)
-                if self.peek_byte(1).map(|b| b.is_ascii_digit()).unwrap_or(false) {
+                // Check what follows the $
+                let next = self.peek_byte(1);
+                if next.map(|b| b.is_ascii_digit()).unwrap_or(false) {
+                    // PostgreSQL-style numbered placeholder ($1, $2, etc.)
                     self.tokenize_numbered_placeholder()
+                } else if next.map(|b| b.is_ascii_alphabetic() || b == b'_').unwrap_or(false) {
+                    // SQLite/TCL-style named placeholder ($name, $x1, etc.)
+                    self.tokenize_dollar_named_placeholder()
+                } else if next == Some(b':') {
+                    // TCL global variable syntax ($::name) - treat as named placeholder
+                    self.tokenize_tcl_global_placeholder()
                 } else {
                     let token = self.extract_error_token();
                     Err(LexerError {
-                        message: "Expected digit after '$' for numbered placeholder".to_string(),
+                        message: "Expected digit or identifier after '$' for placeholder"
+                            .to_string(),
                         position: self.position(),
                         near_token: Some(token),
                     })
@@ -471,6 +480,66 @@ impl<'a> Lexer<'a> {
             });
         }
 
+        Ok(Token::NamedPlaceholder(name))
+    }
+
+    /// Tokenize a dollar-prefixed named placeholder ($name, $x1, $user_id, etc.).
+    /// SQLite/TCL style - same as :name but with $ prefix.
+    fn tokenize_dollar_named_placeholder(&mut self) -> Result<Token, LexerError> {
+        self.advance(); // consume '$'
+
+        let mut name = String::new();
+
+        // Read the identifier (alphanumeric or underscore)
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                name.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if name.is_empty() {
+            return Err(LexerError {
+                message: "Expected identifier after '$' for named placeholder".to_string(),
+                position: self.position(),
+                near_token: Some("$".to_string()),
+            });
+        }
+
+        // Use NamedPlaceholder since it's functionally equivalent to :name
+        Ok(Token::NamedPlaceholder(name))
+    }
+
+    /// Tokenize a TCL global variable placeholder ($::name, $::namespace::var, etc.).
+    /// TCL uses $::name for global namespace variables. We treat these as named placeholders.
+    fn tokenize_tcl_global_placeholder(&mut self) -> Result<Token, LexerError> {
+        self.advance(); // consume '$'
+
+        let mut name = String::new();
+
+        // Consume the :: prefix and any subsequent ::namespace:: parts
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch == ':' || ch.is_ascii_alphanumeric() || ch == '_' {
+                name.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if name.is_empty() || name == ":" || name == "::" {
+            return Err(LexerError {
+                message: "Expected identifier after '$::' for TCL global placeholder".to_string(),
+                position: self.position(),
+                near_token: Some(format!("${}", name)),
+            });
+        }
+
+        // Use NamedPlaceholder - the name includes :: prefix for uniqueness
         Ok(Token::NamedPlaceholder(name))
     }
 }

@@ -315,20 +315,25 @@ impl SelectExecutor<'_> {
     }
 
     /// Evaluate an arena LIMIT or OFFSET expression to a usize value
+    /// SQLite compatibility: -1 means unlimited (returns usize::MAX)
     fn evaluate_arena_limit_offset_expr(
         &self,
         expr: &vibesql_ast::arena::Expression,
     ) -> Result<usize, ExecutorError> {
         match expr {
             vibesql_ast::arena::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
-                if *n < 0 {
+                if *n < -1 {
                     return Err(ExecutorError::InvalidLimitOffset {
                         clause: "LIMIT/OFFSET".to_string(),
                         value: n.to_string(),
-                        reason: "must be non-negative".to_string(),
+                        reason: "must be non-negative or -1".to_string(),
                     });
                 }
-                Ok(*n as usize)
+                if *n == -1 {
+                    Ok(usize::MAX) // -1 means unlimited
+                } else {
+                    Ok(*n as usize)
+                }
             }
             _ => Err(ExecutorError::InvalidLimitOffset {
                 clause: "LIMIT/OFFSET".to_string(),
@@ -339,11 +344,15 @@ impl SelectExecutor<'_> {
     }
 
     /// Evaluate optional arena LIMIT expression to Option<usize>
+    /// SQLite compatibility: LIMIT -1 means unlimited (returns None)
     fn evaluate_arena_limit(
         &self,
         limit: &Option<vibesql_ast::arena::Expression>,
     ) -> Result<Option<usize>, ExecutorError> {
-        limit.as_ref().map(|e| self.evaluate_arena_limit_offset_expr(e)).transpose()
+        match limit.as_ref().map(|e| self.evaluate_arena_limit_offset_expr(e)).transpose()? {
+            Some(n) if n == usize::MAX => Ok(None), // -1 means unlimited
+            other => Ok(other),
+        }
     }
 
     /// Evaluate optional arena OFFSET expression to Option<usize>

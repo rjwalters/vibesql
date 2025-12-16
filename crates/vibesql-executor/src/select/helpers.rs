@@ -87,12 +87,17 @@ pub(super) fn evaluate_limit_offset_expr(
     // Convert to integer
     match value {
         vibesql_types::SqlValue::Integer(n) => {
-            if n < 0 {
+            if n < -1 {
+                // Only truly negative values (< -1) are errors
+                // -1 is handled specially by evaluate_limit() to mean unlimited
                 Err(crate::ExecutorError::InvalidLimitOffset {
                     clause: clause_name.to_string(),
                     value: n.to_string(),
-                    reason: "must be non-negative".to_string(),
+                    reason: "must be non-negative or -1".to_string(),
                 })
+            } else if n < 0 {
+                // n == -1: return as-is, caller will interpret as unlimited
+                Ok(n as usize) // Will wrap to usize::MAX, handled by caller
             } else {
                 Ok(n as usize)
             }
@@ -111,11 +116,15 @@ pub(super) fn evaluate_limit_offset_expr(
 }
 
 /// Evaluate optional LIMIT expression to Option<usize>
+/// SQLite compatibility: LIMIT -1 means unlimited (returns None)
 pub(super) fn evaluate_limit(
     limit: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
 ) -> Result<Option<usize>, crate::ExecutorError> {
-    limit.as_ref().map(|e| evaluate_limit_offset_expr(e, database, "LIMIT")).transpose()
+    match limit.as_ref().map(|e| evaluate_limit_offset_expr(e, database, "LIMIT")).transpose()? {
+        Some(n) if n == usize::MAX => Ok(None), // -1 wrapped to MAX means unlimited
+        other => Ok(other),
+    }
 }
 
 /// Evaluate optional OFFSET expression to Option<usize>

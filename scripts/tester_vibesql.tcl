@@ -383,6 +383,12 @@ proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
 
+    # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
+    # SQLite's TCL interface binds $variable to TCL variables of the same name.
+    # We emulate this by substituting variables from the caller's scope.
+    # Use -nocommands to avoid evaluating [commands] and -nobackslashes for literal \
+    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -650,6 +656,9 @@ proc parse_csv_result {output} {
 proc execsql_with_headers {sql {db ""}} {
     # Execute SQL and return {headers rows} for iteration
 
+    # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
+    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -680,6 +689,9 @@ proc execsql2 {sql {db ""}} {
     #   Columns: a, b, a, b with values: 1, 2, 3, 4
     #   Array becomes: data(a)=3, data(b)=4 (last values)
     #   Output: a 3 b 4 a 3 b 4 (using last value for each column name occurrence)
+
+    # Substitute TCL variables in the SQL string (emulate SQLite's parameter binding)
+    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -1026,6 +1038,8 @@ proc db {cmd args} {
     switch $cmd {
         eval {
             set sql [lindex $args 0]
+            # Substitute TCL variables from caller's scope (emulate SQLite's parameter binding)
+            catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
             if {[llength $args] == 1} {
                 # Simple case: just return the results
                 return [execsql $sql]
@@ -1062,6 +1076,8 @@ proc db {cmd args} {
         one {
             # Return single value (first column of first row)
             set sql [lindex $args 0]
+            # Substitute TCL variables from caller's scope
+            catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
             set result [execsql $sql]
             if {[llength $result] > 0} {
                 return [lindex $result 0]
