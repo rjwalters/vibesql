@@ -159,8 +159,8 @@ fn bind_select(stmt: &SelectStmt, params: &[SqlValue]) -> SelectStmt {
         group_by: stmt.group_by.clone(),
         having: stmt.having.clone(),
         order_by: stmt.order_by.clone(),
-        limit: stmt.limit,
-        offset: stmt.offset,
+        limit: stmt.limit.clone(),
+        offset: stmt.offset.clone(),
         set_operation: stmt.set_operation.clone(),
         values: stmt.values.clone(),
     }
