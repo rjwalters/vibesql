@@ -468,11 +468,9 @@ impl Parser {
             _ => return Err(ParseError { message: "Expected JOIN keyword".to_string() }),
         };
 
-        // SQLite allows NATURAL CROSS JOIN, treating it as a regular CROSS JOIN
-        // (the NATURAL modifier is effectively ignored for CROSS JOINs).
-        // We parse it successfully but set is_natural to false for CROSS JOINs.
-        let is_natural = if join_type == vibesql_ast::JoinType::Cross { false } else { is_natural };
-
+        // NATURAL CROSS JOIN is valid SQL and should apply the natural join condition
+        // (matching on common column names). The executor handles this by treating
+        // NATURAL CROSS JOIN as an inner join with the natural join condition.
         Ok((join_type, is_natural))
     }
 }
