@@ -664,6 +664,35 @@ impl SelectExecutor<'_> {
                     return Ok(None);
                 }
             }
+
+            // Issue #4510: columnar_group_by_batch returns [group_keys..., aggregates...] format.
+            // If the SELECT list has aggregates before GROUP BY columns (e.g., SELECT count(*), col
+            // FROM t GROUP BY col), the result order won't match. Fall back to row-oriented.
+            // The SELECT list must have all non-aggregates first, then all aggregates.
+            let mut first_agg_pos = None;
+            let mut last_non_agg_pos = None;
+            for (i, item) in stmt.select_list.iter().enumerate() {
+                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                    if matches!(expr, Expression::AggregateFunction { .. }) {
+                        if first_agg_pos.is_none() {
+                            first_agg_pos = Some(i);
+                        }
+                    } else {
+                        last_non_agg_pos = Some(i);
+                    }
+                }
+            }
+            // If first aggregate comes before last non-aggregate, order doesn't match columnar
+            if let (Some(first_agg), Some(last_non_agg)) = (first_agg_pos, last_non_agg_pos) {
+                if first_agg < last_non_agg {
+                    log::debug!(
+                        "Native columnar: skipping GROUP BY - aggregate at position {} before non-aggregate at {}",
+                        first_agg,
+                        last_non_agg
+                    );
+                    return Ok(None);
+                }
+            }
         }
 
         // Execute using native columnar pipeline

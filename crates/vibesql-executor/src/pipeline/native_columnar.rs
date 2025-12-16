@@ -302,6 +302,35 @@ impl ExecutionPipeline for NativeColumnarPipeline {
             )));
         }
 
+        // Issue #4510: columnar_group_by_batch returns [group_keys..., aggregates...] format.
+        // If the SELECT list has aggregates before GROUP BY columns (e.g., SELECT count(*), col
+        // FROM t GROUP BY col), the result order won't match. Fall back to row-oriented.
+        // The SELECT list must have all non-aggregates first, then all aggregates.
+        if has_group_by {
+            let mut first_agg_pos = None;
+            let mut last_non_agg_pos = None;
+            for (i, item) in select_items.iter().enumerate() {
+                if let SelectItem::Expression { expr, .. } = item {
+                    if matches!(expr, Expression::AggregateFunction { .. }) {
+                        if first_agg_pos.is_none() {
+                            first_agg_pos = Some(i);
+                        }
+                    } else {
+                        last_non_agg_pos = Some(i);
+                    }
+                }
+            }
+            // If first aggregate comes before last non-aggregate, order doesn't match columnar
+            if let (Some(first_agg), Some(last_non_agg)) = (first_agg_pos, last_non_agg_pos) {
+                if first_agg < last_non_agg {
+                    log::debug!("Native columnar fallback: aggregate at {} before non-aggregate at {}", first_agg, last_non_agg);
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "SELECT list with aggregates before GROUP BY columns not supported in native columnar".to_string(),
+                    ));
+                }
+            }
+        }
+
         // Helper to return empty result for GROUP BY with empty input
         // SQL semantics: GROUP BY on empty input returns 0 rows (no groups)
         // Without GROUP BY: aggregates on empty input return 1 row (COUNT=0, others=NULL)
