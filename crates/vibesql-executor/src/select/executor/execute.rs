@@ -1352,10 +1352,14 @@ impl SelectExecutor<'_> {
                 let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
                 // Determine NULL ordering:
                 // - If explicitly specified via NULLS FIRST/LAST, use that
-                // - Default: SQLite uses NULLS LAST for all directions
-                let nulls_first = item
-                    .nulls_order
-                    .is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
+                // - Default: SQLite treats NULL as the smallest value:
+                //   - ASC order: NULL comes first (before all other values)
+                //   - DESC order: NULL comes last (after all other values)
+                let nulls_first = match item.nulls_order {
+                    Some(vibesql_ast::NullsOrder::First) => true,
+                    Some(vibesql_ast::NullsOrder::Last) => false,
+                    None => !is_desc, // SQLite default: NULL is smallest
+                };
                 sort_columns.push((col_idx, is_desc, nulls_first, collation));
             } else {
                 // ORDER BY term doesn't match any column in the result set
