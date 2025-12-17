@@ -1439,6 +1439,21 @@ proc faultsim_save_and_close {} {
     return
 }
 
+proc sqlite3_rekey {args} {
+    # SQLite encryption extension - not supported
+    return
+}
+
+proc sqlite3_key {args} {
+    # SQLite encryption extension - not supported
+    return
+}
+
+proc sqlite3_memdebug_fail {args} {
+    # SQLite memory debugging - not supported
+    return -1
+}
+
 proc breakpoint {} {
     # Debug breakpoint - ignore
     return
