@@ -752,6 +752,61 @@ fn divide_sql_value(value: &vibesql_types::SqlValue, count: i64) -> vibesql_type
     }
 }
 
+/// Compare two SqlValues for ordering purposes with optional collation
+///
+/// Supports SQLite collations:
+/// - BINARY (default): byte-by-byte comparison
+/// - NOCASE: case-insensitive comparison for text
+/// - RTRIM: trims trailing whitespace before comparison
+///
+/// For non-text values or when collation is None, falls back to compare_sql_values
+pub fn compare_sql_values_with_collation(
+    a: &vibesql_types::SqlValue,
+    b: &vibesql_types::SqlValue,
+    collation: Option<&str>,
+) -> Ordering {
+    use vibesql_types::SqlValue;
+
+    // Handle NULL values first
+    match (a.is_null(), b.is_null()) {
+        (true, true) => return Ordering::Equal,
+        (true, false) => return Ordering::Greater,
+        (false, true) => return Ordering::Less,
+        (false, false) => {}
+    }
+
+    // Check if we need to apply collation (only for text values)
+    let collation_upper = collation.map(|c| c.to_uppercase());
+    match collation_upper.as_deref() {
+        Some("NOCASE") => {
+            // Case-insensitive comparison for text values
+            match (a, b) {
+                (SqlValue::Character(s1), SqlValue::Character(s2))
+                | (SqlValue::Varchar(s1), SqlValue::Varchar(s2))
+                | (SqlValue::Character(s1), SqlValue::Varchar(s2))
+                | (SqlValue::Varchar(s1), SqlValue::Character(s2)) => {
+                    s1.to_lowercase().cmp(&s2.to_lowercase())
+                }
+                _ => compare_sql_values(a, b),
+            }
+        }
+        Some("RTRIM") => {
+            // Trim trailing whitespace before comparison
+            match (a, b) {
+                (SqlValue::Character(s1), SqlValue::Character(s2))
+                | (SqlValue::Varchar(s1), SqlValue::Varchar(s2))
+                | (SqlValue::Character(s1), SqlValue::Varchar(s2))
+                | (SqlValue::Varchar(s1), SqlValue::Character(s2)) => {
+                    s1.trim_end().cmp(s2.trim_end())
+                }
+                _ => compare_sql_values(a, b),
+            }
+        }
+        // BINARY or default: use standard comparison
+        _ => compare_sql_values(a, b),
+    }
+}
+
 /// Compare two SqlValues for ordering purposes (SQL ORDER BY semantics)
 ///
 /// Implements SQLite type affinity ordering for MIN/MAX aggregates:
