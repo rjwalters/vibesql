@@ -520,8 +520,8 @@ fn main() {
                                 vibesql::ast::SelectItem::Expression { alias: None, expr, .. } => {
                                     // Try to extract column name from expression
                                     match expr {
-                                        vibesql::ast::Expression::ColumnRef { column, .. } => {
-                                            column.clone()
+                                        vibesql::ast::Expression::ColumnRef(id) => {
+                                            id.column_canonical().to_string()
                                         }
                                         _ => format!("col{}", i + 1),
                                     }

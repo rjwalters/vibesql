@@ -207,12 +207,25 @@ pub fn optimize_expression(
         }
 
         // IS TRUE/IS FALSE/IS UNKNOWN - try to fold if operand is a literal
+        // SQLite compatibility: integers are treated as booleans (0=FALSE, non-zero=TRUE)
         Expression::IsTruthValue { expr, truth_value, negated } => {
             let inner_opt = optimize_expression(expr, evaluator)?;
             if let Expression::Literal(val) = &inner_opt {
                 let result = match truth_value {
-                    vibesql_ast::TruthValue::True => matches!(val, SqlValue::Boolean(true)),
-                    vibesql_ast::TruthValue::False => matches!(val, SqlValue::Boolean(false)),
+                    vibesql_ast::TruthValue::True => match val {
+                        SqlValue::Boolean(true) => true,
+                        SqlValue::Integer(n) => *n != 0,
+                        SqlValue::Bigint(n) => *n != 0,
+                        SqlValue::Smallint(n) => *n != 0,
+                        _ => false,
+                    },
+                    vibesql_ast::TruthValue::False => match val {
+                        SqlValue::Boolean(false) => true,
+                        SqlValue::Integer(0) => true,
+                        SqlValue::Bigint(0) => true,
+                        SqlValue::Smallint(0) => true,
+                        _ => false,
+                    },
                     vibesql_ast::TruthValue::Unknown => matches!(val, SqlValue::Null),
                 };
                 let final_result = if *negated { !result } else { result };

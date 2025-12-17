@@ -391,23 +391,9 @@ impl CombinedExpressionEvaluator<'_> {
         let left_val = self.eval(left, row)?;
         let right_val = self.eval(right, row)?;
 
-        let left_null = matches!(left_val, vibesql_types::SqlValue::Null);
-        let right_null = matches!(right_val, vibesql_types::SqlValue::Null);
-
-        // IS DISTINCT FROM semantics:
-        // - Both NULL: NOT distinct (they are considered equal)
-        // - One NULL, one not: distinct
-        // - Both non-NULL: use normal equality comparison
-        let is_distinct = if left_null && right_null {
-            // Both NULL - not distinct
-            false
-        } else if left_null || right_null {
-            // One NULL, one not - distinct
-            true
-        } else {
-            // Both non-NULL - compare values
-            left_val != right_val
-        };
+        // Use values_are_distinct for SQLite-compatible comparison
+        // This handles Boolean/Integer comparison (SQLite treats 0 as FALSE, non-zero as TRUE)
+        let is_distinct = super::super::core::values_are_distinct(&left_val, &right_val);
 
         // IS NOT DISTINCT FROM inverts the result
         let result = if negated { !is_distinct } else { is_distinct };

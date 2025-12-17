@@ -415,10 +415,21 @@ impl Parser {
                     truth_value: vibesql_ast::TruthValue::Unknown,
                     negated,
                 };
-            } else {
-                // Expect NULL
-                self.expect_keyword(Keyword::Null)?;
+            } else if self.peek_keyword(Keyword::Null) {
+                // IS NULL / IS NOT NULL
+                self.consume_keyword(Keyword::Null)?;
                 left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated };
+            } else {
+                // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
+                // This handles cases like `expr IS 0` or `expr IS 1`
+                let right = self.parse_additive_expression()?;
+                left = vibesql_ast::Expression::IsDistinctFrom {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
+                    // IS NOT is equivalent to IS DISTINCT FROM (NULL-safe not equals)
+                    negated: !negated,
+                };
             }
         }
 

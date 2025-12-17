@@ -561,7 +561,7 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
         | Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)
-        | Expression::ColumnRef { .. }
+        | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

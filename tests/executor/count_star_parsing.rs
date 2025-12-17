@@ -22,7 +22,7 @@ fn test_parse_count_star_simple() {
                         // Should be either Wildcard or ColumnRef with "*"
                         assert!(
                             matches!(args[0], vibesql_ast::Expression::Wildcard)
-                                || matches!(&args[0], vibesql_ast::Expression::ColumnRef { column, .. } if column == "*")
+                                || matches!(&args[0], vibesql_ast::Expression::ColumnRef(ref id) if id.column_canonical() == "*")
                         );
                     }
                     _ => panic!("Expected AggregateFunction, got: {:?}", expr),
@@ -52,7 +52,7 @@ fn test_parse_count_star_in_arithmetic() {
                             matches!(e, vibesql_ast::Expression::AggregateFunction { name, args, .. }
                                 if name == "count" &&
                                    (matches!(args.first(), Some(vibesql_ast::Expression::Wildcard)) ||
-                                    matches!(args.first(), Some(vibesql_ast::Expression::ColumnRef { column, .. }) if column == "*")))
+                                    matches!(args.first(), Some(vibesql_ast::Expression::ColumnRef(ref id)) if id.column_canonical() == "*")))
                         };
 
                         assert!(

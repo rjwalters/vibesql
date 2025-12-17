@@ -362,13 +362,26 @@ impl CombinedExpressionEvaluator<'_> {
                 // - IS FALSE: TRUE if expr is FALSE, FALSE if expr is TRUE or UNKNOWN
                 // - IS UNKNOWN: TRUE if expr is UNKNOWN (NULL), FALSE if expr is TRUE or FALSE
                 // - IS NOT X: negates the result
+                //
+                // SQLite compatibility: integers are treated as booleans
+                // - 0 is FALSE
+                // - Non-zero integers are TRUE
+                // - NULL is UNKNOWN
                 let result = match truth_value {
-                    vibesql_ast::TruthValue::True => {
-                        matches!(val, vibesql_types::SqlValue::Boolean(true))
-                    }
-                    vibesql_ast::TruthValue::False => {
-                        matches!(val, vibesql_types::SqlValue::Boolean(false))
-                    }
+                    vibesql_ast::TruthValue::True => match &val {
+                        vibesql_types::SqlValue::Boolean(true) => true,
+                        vibesql_types::SqlValue::Integer(n) => *n != 0,
+                        vibesql_types::SqlValue::Bigint(n) => *n != 0,
+                        vibesql_types::SqlValue::Smallint(n) => *n != 0,
+                        _ => false,
+                    },
+                    vibesql_ast::TruthValue::False => match &val {
+                        vibesql_types::SqlValue::Boolean(false) => true,
+                        vibesql_types::SqlValue::Integer(0) => true,
+                        vibesql_types::SqlValue::Bigint(0) => true,
+                        vibesql_types::SqlValue::Smallint(0) => true,
+                        _ => false,
+                    },
                     vibesql_ast::TruthValue::Unknown => matches!(val, vibesql_types::SqlValue::Null),
                 };
                 let final_result = if *negated { !result } else { result };

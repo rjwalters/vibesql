@@ -117,6 +117,18 @@ pub(crate) fn values_are_equal(
         (Character(a), Varchar(b)) | (Varchar(a), Character(b)) => a == b,
         (Boolean(a), Boolean(b)) => a == b,
 
+        // SQLite compatibility: Boolean/Integer comparisons
+        // In SQLite, FALSE == 0 and TRUE == non-zero
+        (Boolean(b), Integer(i)) | (Integer(i), Boolean(b)) => {
+            if *b { *i != 0 } else { *i == 0 }
+        }
+        (Boolean(b), Bigint(i)) | (Bigint(i), Boolean(b)) => {
+            if *b { *i != 0 } else { *i == 0 }
+        }
+        (Boolean(b), Smallint(i)) | (Smallint(i), Boolean(b)) => {
+            if *b { *i != 0 } else { *i == 0 }
+        }
+
         // Numeric type comparisons - convert to f64 for comparison
         // This handles: Numeric, Integer, Smallint, Bigint, Unsigned, Float, Real, Double
         (

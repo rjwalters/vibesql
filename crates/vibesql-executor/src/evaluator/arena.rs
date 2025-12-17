@@ -252,11 +252,24 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
 
             // IS TRUE / IS FALSE / IS UNKNOWN
+            // SQLite compatibility: integers are treated as booleans (0=FALSE, non-zero=TRUE)
             ArenaExpression::IsTruthValue { expr, truth_value, negated } => {
                 let val = self.eval_with_depth(expr, row)?;
                 let result = match truth_value {
-                    vibesql_ast::arena::TruthValue::True => matches!(val, SqlValue::Boolean(true)),
-                    vibesql_ast::arena::TruthValue::False => matches!(val, SqlValue::Boolean(false)),
+                    vibesql_ast::arena::TruthValue::True => match &val {
+                        SqlValue::Boolean(true) => true,
+                        SqlValue::Integer(n) => *n != 0,
+                        SqlValue::Bigint(n) => *n != 0,
+                        SqlValue::Smallint(n) => *n != 0,
+                        _ => false,
+                    },
+                    vibesql_ast::arena::TruthValue::False => match &val {
+                        SqlValue::Boolean(false) => true,
+                        SqlValue::Integer(0) => true,
+                        SqlValue::Bigint(0) => true,
+                        SqlValue::Smallint(0) => true,
+                        _ => false,
+                    },
                     vibesql_ast::arena::TruthValue::Unknown => matches!(val, SqlValue::Null),
                 };
                 Ok(SqlValue::Boolean(if *negated { !result } else { result }))

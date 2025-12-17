@@ -1,5 +1,6 @@
 //! Tests for CREATE/DROP ASSERTION (SQL:1999 Feature F671/F672)
 
+use vibesql_ast::ColumnIdentifier;
 use vibesql_executor::advanced_objects;
 use vibesql_storage::Database;
 
@@ -10,11 +11,9 @@ fn test_create_assertion_success() {
         assertion_name: "valid_balance".to_string(),
         check_condition: Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("accounts".to_string()),
-                column: "balance".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                ColumnIdentifier::qualified("accounts", false, "balance", false),
+            )),
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         }),
     };
@@ -109,11 +108,9 @@ fn test_create_drop_round_trip() {
         assertion_name: "positive_values".to_string(),
         check_condition: Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
-            left: Box::new(vibesql_ast::Expression::ColumnRef {
-                schema: None,
-                table: Some("data".to_string()),
-                column: "value".to_string(),
-            }),
+            left: Box::new(vibesql_ast::Expression::ColumnRef(
+                ColumnIdentifier::qualified("data", false, "value", false),
+            )),
             right: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(0))),
         }),
     };
@@ -180,22 +177,18 @@ fn test_assertion_with_complex_condition() {
             op: vibesql_ast::BinaryOperator::And,
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::GreaterThan,
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("users".to_string()),
-                    column: "age".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    ColumnIdentifier::qualified("users", false, "age", false),
+                )),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(18),
                 )),
             }),
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::LessThan,
-                left: Box::new(vibesql_ast::Expression::ColumnRef {
-                    schema: None,
-                    table: Some("users".to_string()),
-                    column: "age".to_string(),
-                }),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    ColumnIdentifier::qualified("users", false, "age", false),
+                )),
                 right: Box::new(vibesql_ast::Expression::Literal(
                     vibesql_types::SqlValue::Integer(100),
                 )),
