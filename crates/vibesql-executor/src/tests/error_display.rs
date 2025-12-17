@@ -96,7 +96,7 @@ fn test_subquery_returned_multiple_rows_display() {
 #[test]
 fn test_subquery_column_count_mismatch_display() {
     let error = ExecutorError::SubqueryColumnCountMismatch { expected: 1, actual: 3 };
-    assert_eq!(error.to_string(), "Subquery returned 3 columns, expected 1");
+    assert_eq!(error.to_string(), "sub-select returns 3 columns - expected 1");
 }
 
 #[test]

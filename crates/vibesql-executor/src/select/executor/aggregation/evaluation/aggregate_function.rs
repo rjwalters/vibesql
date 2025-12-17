@@ -159,11 +159,13 @@ pub(super) fn evaluate(
     // GROUP_CONCAT(expr ORDER BY ...) - sorted concatenation
     if name.to_uppercase() == "GROUP_CONCAT" {
         let separator = if args.len() == 2 {
-            // Evaluate separator (second argument) - it should be a constant string
-            // Use the first row to evaluate (separator should be the same for all rows)
-            if let Some(first_row) = group_rows.first() {
+            // Evaluate separator (second argument)
+            // SQLite uses the LAST row's value when separator is an expression
+            // (e.g., when separator is a column reference like b1 in group_concat(a1, b1))
+            // Fix for aggnested-1.4 test
+            if let Some(last_row) = group_rows.last() {
                 evaluator.clear_cse_cache();
-                let sep_value = evaluator.eval(&args[1], first_row)?;
+                let sep_value = evaluator.eval(&args[1], last_row)?;
                 match sep_value {
                     vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                         s.to_string()

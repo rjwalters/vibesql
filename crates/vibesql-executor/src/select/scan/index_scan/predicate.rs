@@ -26,6 +26,10 @@ pub(crate) struct RangePredicate {
     pub end: Option<SqlValue>,
     pub inclusive_start: bool,
     pub inclusive_end: bool,
+    /// Whether NULL values should be excluded from the range scan
+    /// This is true for all SQL inequality comparisons (<, <=, >, >=, BETWEEN)
+    /// since NULL comparisons in SQL return NULL (not true)
+    pub exclude_nulls: bool,
 }
 
 /// Index predicate types that can be pushed down to storage layer
@@ -57,11 +61,13 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                                 return None;
                             }
                             // Equal is a range with same start and end, both inclusive
+                            // For equality, exclude_nulls is false since we're matching a specific value
                             return Some(RangePredicate {
                                 start: Some(value.clone()),
                                 end: Some(value.clone()),
                                 inclusive_start: true,
                                 inclusive_end: true,
+                                exclude_nulls: false,
                             });
                         }
                     }
@@ -77,6 +83,7 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                                 end: Some(value.clone()),
                                 inclusive_start: true,
                                 inclusive_end: true,
+                                exclude_nulls: false,
                             });
                         }
                     }
@@ -93,30 +100,35 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                             if matches!(value, SqlValue::Null) {
                                 return None;
                             }
+                            // All inequality comparisons exclude NULLs (SQL semantics)
                             return Some(match op {
                                 BinaryOperator::GreaterThan => RangePredicate {
                                     start: Some(value.clone()),
                                     end: None,
                                     inclusive_start: false,
                                     inclusive_end: false,
+                                    exclude_nulls: true,
                                 },
                                 BinaryOperator::GreaterThanOrEqual => RangePredicate {
                                     start: Some(value.clone()),
                                     end: None,
                                     inclusive_start: true,
                                     inclusive_end: false,
+                                    exclude_nulls: true,
                                 },
                                 BinaryOperator::LessThan => RangePredicate {
                                     start: None,
                                     end: Some(value.clone()),
                                     inclusive_start: false,
                                     inclusive_end: false,
+                                    exclude_nulls: true,
                                 },
                                 BinaryOperator::LessThanOrEqual => RangePredicate {
                                     start: None,
                                     end: Some(value.clone()),
                                     inclusive_start: false,
                                     inclusive_end: true,
+                                    exclude_nulls: true,
                                 },
                                 _ => unreachable!(),
                             });
@@ -130,6 +142,7 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                             if matches!(value, SqlValue::Null) {
                                 return None;
                             }
+                            // All inequality comparisons exclude NULLs (SQL semantics)
                             return Some(match op {
                                 // Flip the comparison: value > col means col < value
                                 BinaryOperator::GreaterThan => RangePredicate {
@@ -137,24 +150,28 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                                     end: Some(value.clone()),
                                     inclusive_start: false,
                                     inclusive_end: false,
+                                    exclude_nulls: true,
                                 },
                                 BinaryOperator::GreaterThanOrEqual => RangePredicate {
                                     start: None,
                                     end: Some(value.clone()),
                                     inclusive_start: false,
                                     inclusive_end: true,
+                                    exclude_nulls: true,
                                 },
                                 BinaryOperator::LessThan => RangePredicate {
                                     start: Some(value.clone()),
                                     end: None,
                                     inclusive_start: false,
                                     inclusive_end: false,
+                                    exclude_nulls: true,
                                 },
                                 BinaryOperator::LessThanOrEqual => RangePredicate {
                                     start: Some(value.clone()),
                                     end: None,
                                     inclusive_start: true,
                                     inclusive_end: false,
+                                    exclude_nulls: true,
                                 },
                                 _ => unreachable!(),
                             });
@@ -178,6 +195,8 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                                 l.end = r.end;
                                 l.inclusive_end = r.inclusive_end;
                             }
+                            // If either side excludes NULLs, the merged range should too
+                            l.exclude_nulls = l.exclude_nulls || r.exclude_nulls;
                             return Some(l);
                         }
                         (Some(l), None) => return Some(l),
@@ -207,11 +226,13 @@ fn extract_range_predicate(expr: &Expression, column_name: &str) -> Option<Range
                         (low_val.clone(), high_val.clone())
                     };
 
+                    // BETWEEN excludes NULLs in SQL semantics
                     return Some(RangePredicate {
                         start: Some(effective_low),
                         end: Some(effective_high),
                         inclusive_start: true,
                         inclusive_end: true,
+                        exclude_nulls: true,
                     });
                 }
             }
@@ -929,6 +950,7 @@ fn collect_column_predicates(
                                 end: Some(value.clone()),
                                 inclusive_start: true,
                                 inclusive_end: true,
+                                exclude_nulls: false,
                             });
                         }
                     }
@@ -943,6 +965,7 @@ fn collect_column_predicates(
                                 end: Some(value.clone()),
                                 inclusive_start: true,
                                 inclusive_end: true,
+                                exclude_nulls: false,
                             });
                         }
                     }

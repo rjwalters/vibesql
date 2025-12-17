@@ -235,6 +235,18 @@ pub(crate) fn execute_index_scan(
                 // - Allocating Vec<usize> for all matching indices
                 // - Sorting the indices (not needed without ORDER BY)
 
+                // Get column index for NULL filtering if needed
+                // SQL semantics: NULL < X returns NULL (not true), so NULLs shouldn't match
+                let null_filter_col_idx = if range.exclude_nulls {
+                    table
+                        .schema
+                        .columns
+                        .iter()
+                        .position(|c| c.name.eq_ignore_ascii_case(first_indexed_column))
+                } else {
+                    None
+                };
+
                 // Profiling: Measure time spent in each phase when RANGE_SCAN_PROFILE=1
                 let profile = std::env::var("RANGE_SCAN_PROFILE").is_ok();
 
@@ -257,6 +269,16 @@ pub(crate) fn execute_index_scan(
                         let t1 = Instant::now();
                         if let Some(row_ref) = table.get_row(idx) {
                             lookup_time += t1.elapsed();
+
+                            // Skip rows with NULL in indexed column (SQL semantics)
+                            if let Some(col_idx) = null_filter_col_idx {
+                                if matches!(
+                                    row_ref.values.get(col_idx),
+                                    Some(vibesql_types::SqlValue::Null)
+                                ) {
+                                    continue;
+                                }
+                            }
 
                             let t2 = Instant::now();
                             rows.push(row_ref.clone());
@@ -281,7 +303,21 @@ pub(crate) fn execute_index_scan(
 
                     rows
                 } else {
-                    streaming_iter.filter_map(|idx| table.get_row(idx)).cloned().collect()
+                    streaming_iter
+                        .filter_map(|idx| table.get_row(idx))
+                        .filter(|row| {
+                            // Skip rows with NULL in indexed column (SQL semantics)
+                            if let Some(col_idx) = null_filter_col_idx {
+                                !matches!(
+                                    row.values.get(col_idx),
+                                    Some(vibesql_types::SqlValue::Null)
+                                )
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect()
                 };
                 // sqlite_search_count: Track rows examined during streaming index scan
                 database.increment_search_count(rows.len() as u64);
@@ -365,7 +401,7 @@ pub(crate) fn execute_index_scan(
         }
     } else {
         match index_predicate {
-            Some(IndexPredicate::Range(range)) => {
+            Some(IndexPredicate::Range(ref range)) => {
                 // Use storage layer's optimized range_scan for >, <, >=, <=, BETWEEN
                 // The storage layer handles empty/inverted range validation efficiently
                 //
@@ -395,16 +431,16 @@ pub(crate) fn execute_index_scan(
                     )
                 }
             }
-            Some(IndexPredicate::In(values)) => {
+            Some(IndexPredicate::In(ref values)) => {
                 // For multi-column indexes, use prefix matching to find all rows
                 // where the first column matches any of the IN values
                 if is_multi_column_index {
                     // Use prefix_multi_lookup which performs range scans to match
                     // partial keys (e.g., [10] matches [10, 20], [10, 30], etc.)
-                    index_data.prefix_multi_lookup(&values)
+                    index_data.prefix_multi_lookup(values)
                 } else {
                     // For single-column indexes, use regular exact match lookup
-                    index_data.multi_lookup(&values)
+                    index_data.multi_lookup(values)
                 }
             }
             None => {
@@ -468,11 +504,37 @@ pub(crate) fn execute_index_scan(
     let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
     let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
 
+    // Get column index for NULL filtering if we have a range predicate with exclude_nulls
+    // SQL semantics: NULL < X returns NULL (not true), so NULLs shouldn't match range predicates
+    let null_filter_col_idx = if let Some(IndexPredicate::Range(ref range)) = index_predicate {
+        if range.exclude_nulls {
+            table
+                .schema
+                .columns
+                .iter()
+                .position(|c| c.name.eq_ignore_ascii_case(first_indexed_column))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Zero-copy optimization: Work with row references until the final step
     // This avoids cloning rows that will be filtered out by the WHERE clause
     // Issue #3790: Use get_row() which returns None for deleted rows
-    let row_refs: Vec<&Row> =
-        matching_row_indices.iter().filter_map(|idx| table.get_row(*idx)).collect();
+    let row_refs: Vec<&Row> = matching_row_indices
+        .iter()
+        .filter_map(|idx| table.get_row(*idx))
+        .filter(|row| {
+            // Skip rows with NULL in indexed column (SQL semantics for range predicates)
+            if let Some(col_idx) = null_filter_col_idx {
+                !matches!(row.values.get(col_idx), Some(vibesql_types::SqlValue::Null))
+            } else {
+                true
+            }
+        })
+        .collect();
     // sqlite_search_count: Track rows examined during index scan
     database.increment_search_count(row_refs.len() as u64);
 

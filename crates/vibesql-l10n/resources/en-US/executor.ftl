@@ -77,7 +77,7 @@ executor-parse-error = Parse error: { $message }
 # =============================================================================
 
 executor-subquery-returned-multiple-rows = Scalar subquery returned { $actual } rows, expected { $expected }
-executor-subquery-column-count-mismatch = Subquery returned { $actual } columns, expected { $expected }
+executor-subquery-column-count-mismatch = sub-select returns { $actual } columns - expected { $expected }
 executor-column-count-mismatch = Derived column list has { $provided } columns but query produces { $expected } columns
 
 # =============================================================================
@@ -178,6 +178,12 @@ executor-cursor-not-found = Cursor '{ $name }' not found
 executor-cursor-already-open = Cursor '{ $name }' is already open
 executor-cursor-not-open = Cursor '{ $name }' is not open
 executor-cursor-not-scrollable = Cursor '{ $name }' is not scrollable (SCROLL not specified)
+
+# =============================================================================
+# JOIN Errors
+# =============================================================================
+
+executor-join-using-column-not-present = cannot join using column { $column_name } - column not present in both tables
 
 # =============================================================================
 # Storage and General Errors

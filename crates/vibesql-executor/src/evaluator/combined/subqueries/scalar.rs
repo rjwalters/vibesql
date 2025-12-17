@@ -74,14 +74,21 @@ impl CombinedExpressionEvaluator<'_> {
         // Determine if subquery is correlated (cached by AST pointer - issue #4142)
         let is_uncorrelated = !self.is_correlated_cached(subquery);
 
+        // Check if we have outer context that could affect subquery execution
+        let has_outer_context =
+            !self.schema.table_schemas.is_empty() || self.outer_schema.is_some();
+
         // Compute cache key (different strategies for correlated vs uncorrelated)
-        let cache_key = if is_uncorrelated {
-            // Uncorrelated: cache key is just the subquery hash (cached by AST pointer - issue
-            // #4142)
+        // FIX for aggnested-1.4: When we have outer context, ALWAYS include outer row values
+        // in the cache key, even if is_uncorrelated() returns true. The correlation detection
+        // heuristic can miss correlations with unqualified column names (e.g., 'a1' from outer
+        // table t1 when the subquery's table t2 doesn't have a column named 'a1').
+        // This ensures correctness at the cost of slightly less efficient caching.
+        let cache_key = if is_uncorrelated && !has_outer_context {
+            // Truly uncorrelated (no outer context at all): cache by subquery hash only
             self.compute_subquery_hash_cached(subquery)
         } else if !self.schema.table_schemas.is_empty() {
-            // Correlated: cache key includes correlation column values
-            // Only attempt if we have an outer schema to reference
+            // Has outer context: include correlation values in cache key for safety
             if let Some(correlation_values) = extract_correlation_values(subquery, row, self.schema)
             {
                 // Hash is cached by AST pointer (issue #4142)
@@ -113,7 +120,7 @@ impl CombinedExpressionEvaluator<'_> {
                 return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
             }
         } else {
-            // Correlated but no outer schema - skip caching
+            // Has outer_schema but not in schema.table_schemas - skip caching
             // Still pass CTE context if available (fix for TPC-H Q15)
             let select_executor = if let Some(cte_ctx) = self.cte_context {
                 crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
