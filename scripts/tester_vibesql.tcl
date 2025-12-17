@@ -1427,7 +1427,27 @@ proc run_test_file {filename} {
     # set testdir [file dirname $argv0]
     # source $testdir/tester.tcl
     regsub {set testdir \[file dirname \$argv0\]} $content "set testdir \"$testdir\"" content
-    regsub {source \$testdir/tester\.tcl} $content "# tester.tcl replaced by vibesql shim" content
+    # When we replace "source tester.tcl", we need to ensure the variables
+    # that tester.tcl would have set are available in the eval scope.
+    # Simply commenting it out doesn't work because variables defined with ::
+    # might not be visible without the :: prefix in the eval'd code.
+    set tester_vars {
+        set SQLITE_MAX_LENGTH $::SQLITE_MAX_LENGTH
+        set SQLITE_MAX_COLUMN $::SQLITE_MAX_COLUMN
+        set SQLITE_MAX_SQL_LENGTH $::SQLITE_MAX_SQL_LENGTH
+        set SQLITE_MAX_EXPR_DEPTH $::SQLITE_MAX_EXPR_DEPTH
+        set SQLITE_MAX_COMPOUND_SELECT $::SQLITE_MAX_COMPOUND_SELECT
+        set SQLITE_MAX_VDBE_OP $::SQLITE_MAX_VDBE_OP
+        set SQLITE_MAX_FUNCTION_ARG $::SQLITE_MAX_FUNCTION_ARG
+        set SQLITE_MAX_ATTACHED $::SQLITE_MAX_ATTACHED
+        set SQLITE_MAX_LIKE_PATTERN_LENGTH $::SQLITE_MAX_LIKE_PATTERN_LENGTH
+        set SQLITE_MAX_VARIABLE_NUMBER $::SQLITE_MAX_VARIABLE_NUMBER
+        set SQLITE_MAX_TRIGGER_DEPTH $::SQLITE_MAX_TRIGGER_DEPTH
+        set AUTOVACUUM $::AUTOVACUUM
+        set TEMP_STORE $::TEMP_STORE
+        set SQLITE_DEFAULT_AUTOVACUUM $::SQLITE_DEFAULT_AUTOVACUUM
+    }
+    regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 
     # Execute the modified content
     if {[catch {eval $content} err]} {
