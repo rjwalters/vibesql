@@ -20,7 +20,7 @@ fn test_count_star_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
                 order_by: None,
@@ -73,7 +73,7 @@ fn test_count_star_in_expression_without_from() {
                 ))),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
@@ -114,7 +114,7 @@ fn test_complex_expression_without_from() {
     // Build the complex expression step by step
     // COUNT(*)
     let count_star = vibesql_ast::Expression::AggregateFunction {
-        name: "COUNT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
         order_by: None,

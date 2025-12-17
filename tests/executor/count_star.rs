@@ -40,7 +40,7 @@ fn test_count_star_in_multiplication() {
                 ))),
                 op: vibesql_ast::BinaryOperator::Multiply,
                 right: Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
@@ -99,14 +99,14 @@ fn test_count_star_in_addition() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
                 }),
                 op: vibesql_ast::BinaryOperator::Plus,
                 right: Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
@@ -159,7 +159,7 @@ fn test_count_star_complex_expression() {
     // Build: COUNT(*) * 2
     let count_times_two = vibesql_ast::Expression::BinaryOp {
         left: Box::new(vibesql_ast::Expression::AggregateFunction {
-            name: "COUNT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("COUNT"),
             distinct: false,
             args: vec![vibesql_ast::Expression::Wildcard],
             order_by: None,
@@ -237,7 +237,7 @@ fn test_count_star_with_unary_operators() {
     let unary_count = vibesql_ast::Expression::UnaryOp {
         op: vibesql_ast::UnaryOperator::Plus,
         expr: Box::new(vibesql_ast::Expression::AggregateFunction {
-            name: "COUNT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("COUNT"),
             distinct: false,
             args: vec![vibesql_ast::Expression::Wildcard],
             order_by: None,
@@ -319,7 +319,7 @@ fn test_count_star_with_negative_unary() {
     let negative_count = vibesql_ast::Expression::UnaryOp {
         op: vibesql_ast::UnaryOperator::Minus,
         expr: Box::new(vibesql_ast::Expression::AggregateFunction {
-            name: "COUNT".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("COUNT"),
             distinct: false,
             args: vec![vibesql_ast::Expression::Wildcard],
             order_by: None,
