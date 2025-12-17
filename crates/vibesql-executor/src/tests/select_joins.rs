@@ -502,8 +502,12 @@ fn test_cross_join() {
     assert_eq!(result[0].values.len(), 4); // users (2 cols) + products (2 cols)
 }
 
+/// Test that CROSS JOIN with ON condition works like INNER JOIN (SQLite compatibility)
+///
+/// SQLite accepts CROSS JOIN with ON clause and treats it semantically as an INNER JOIN.
+/// The ON condition filters the Cartesian product, producing the same results as INNER JOIN.
 #[test]
-fn test_cross_join_with_condition_fails() {
+fn test_cross_join_with_condition_works_like_inner_join() {
     let mut db = vibesql_storage::Database::new();
 
     let users_schema = vibesql_catalog::TableSchema::new(
@@ -515,6 +519,16 @@ fn test_cross_join_with_condition_fails() {
         )],
     );
     db.create_table(users_schema).unwrap();
+    db.insert_row(
+        "users",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "users",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(2)]),
+    )
+    .unwrap();
 
     let products_schema = vibesql_catalog::TableSchema::new(
         "products".to_string(),
@@ -525,33 +539,49 @@ fn test_cross_join_with_condition_fails() {
         )],
     );
     db.create_table(products_schema).unwrap();
+    db.insert_row(
+        "products",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(1)]),
+    )
+    .unwrap();
+    db.insert_row(
+        "products",
+        vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(3)]),
+    )
+    .unwrap();
 
-    // CROSS JOIN with condition should return an error
+    // CROSS JOIN with ON condition should work like INNER JOIN (SQLite compatibility)
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
         into_table: None,
         into_variables: None,
         with_clause: None,
         set_operation: None,
-            values: None,
+        values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
         from: Some(vibesql_ast::FromClause::Join {
-            left: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            left: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "users".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
-            right: Box::new(vibesql_ast::FromClause::Table { quoted: false,
+            right: Box::new(vibesql_ast::FromClause::Table {
+                quoted: false,
                 name: "products".to_string(),
                 alias: None,
                 column_aliases: None,
             }),
             join_type: vibesql_ast::JoinType::Cross,
             condition: Some(vibesql_ast::Expression::BinaryOp {
-                left: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false))),
+                left: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("users", false, "id", false),
+                )),
                 op: vibesql_ast::BinaryOperator::Equal,
-                right: Box::new(vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified("products", false, "id", false))),
+                right: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::qualified("products", false, "id", false),
+                )),
             }),
             using_columns: None,
             natural: false,
@@ -564,14 +594,13 @@ fn test_cross_join_with_condition_fails() {
         offset: None,
     };
 
-    let result = executor.execute(&stmt);
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.to_string().contains("CROSS JOIN does not support ON clause"),
-        "Expected error about CROSS JOIN ON clause, got: {}",
-        err
-    );
+    let result = executor.execute(&stmt).unwrap();
+    // Only 1 matching row (users.id=1 matches products.id=1)
+    assert_eq!(result.len(), 1);
+    // Result has 2 columns (users.id, products.id)
+    assert_eq!(result[0].values.len(), 2);
+    assert_eq!(result[0].values[0], vibesql_types::SqlValue::Integer(1));
+    assert_eq!(result[0].values[1], vibesql_types::SqlValue::Integer(1));
 }
 
 /// Test that NULL values in join columns do NOT match each other (issue #1877)

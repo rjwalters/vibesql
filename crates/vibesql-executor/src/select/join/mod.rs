@@ -1182,9 +1182,12 @@ pub(super) fn nested_loop_join(
             nested_loop_full_outer_join(left, right, &combined_condition, database, timeout_ctx)
         }
         vibesql_ast::JoinType::Cross => {
-            // NATURAL CROSS JOIN should apply the natural join condition
-            // (semantically equivalent to NATURAL INNER JOIN)
-            if natural && combined_condition.is_some() {
+            // CROSS JOIN with any condition (from USING clause, NATURAL, or explicit ON)
+            // should be executed as INNER JOIN - the condition filters the Cartesian product.
+            // Note: `using_columns` may be None here if USING deduplication is handled
+            // post-process by the caller (join_scan.rs), but `combined_condition` will
+            // contain the generated USING equality conditions.
+            if combined_condition.is_some() {
                 nested_loop_inner_join(left, right, &combined_condition, database, timeout_ctx)
             } else {
                 nested_loop_cross_join(left, right, &combined_condition, database, timeout_ctx)

@@ -107,13 +107,15 @@ pub(crate) fn count_tables_in_from(from: &FromClause) -> usize {
 pub(crate) fn all_joins_are_cross(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => true,
-        FromClause::Join { left, right, join_type, condition, natural, .. } => {
-            // Must be CROSS join type AND have no ON condition AND not NATURAL
+        FromClause::Join { left, right, join_type, condition, natural, using_columns } => {
+            // Must be CROSS join type AND have no ON condition AND not NATURAL AND no USING
             // CROSS JOIN with ON clause is invalid and should not be reordered
             // NATURAL CROSS JOIN has implicit condition and should not be reordered
+            // CROSS JOIN USING has explicit join columns and should not be reordered
             matches!(join_type, vibesql_ast::JoinType::Cross)
                 && condition.is_none()
                 && !*natural
+                && using_columns.is_none()
                 && all_joins_are_cross(left)
                 && all_joins_are_cross(right)
         }

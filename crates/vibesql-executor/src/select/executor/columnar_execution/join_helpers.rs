@@ -26,16 +26,22 @@ pub(super) fn is_inner_or_cross_join_only(from: &FromClause) -> bool {
     }
 }
 
-/// Check if a FROM clause contains a CROSS JOIN with an ON condition
+/// Check if a FROM clause contains a CROSS JOIN with a join condition
 ///
-/// This is semantically invalid SQL (CROSS JOIN should not have ON clause).
-/// We detect this case to fall back to regular execution which produces a proper error.
+/// CROSS JOIN with ON condition is semantically invalid SQL.
+/// CROSS JOIN with USING clause or NATURAL CROSS JOIN should be treated as INNER JOIN
+/// and require special handling that the columnar path doesn't support.
+///
+/// We detect these cases to fall back to regular execution which handles them correctly.
 pub(super) fn has_cross_join_with_on_condition(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
-        FromClause::Join { left, right, join_type, condition, .. } => {
-            // CROSS JOIN with ON condition is invalid
-            if matches!(join_type, JoinType::Cross) && condition.is_some() {
+        FromClause::Join { left, right, join_type, condition, using_columns, natural } => {
+            // CROSS JOIN with any join condition (ON, USING, or NATURAL) should fall back
+            // to regular execution path which handles filtering and column deduplication
+            if matches!(join_type, JoinType::Cross)
+                && (condition.is_some() || using_columns.is_some() || *natural)
+            {
                 return true;
             }
             // Recursively check children

@@ -585,11 +585,7 @@ mod tests {
         );
 
         // Non-literal expression should return None
-        let column_ref = Expression::ColumnRef {
-            table: None,
-            column: "col".to_string(),
-            schema: None,
-        };
+        let column_ref = Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col", false));
         assert!(executor.literal_to_value(&column_ref).is_none());
     }
 }
