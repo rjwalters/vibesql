@@ -40,24 +40,24 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
             op1 == op2 && expressions_equal(e1, e2)
         }
 
-        // Function: case-insensitive name, recurse into args
+        // Function: case-insensitive name (via FunctionIdentifier), recurse into args
         (
             Expression::Function { name: n1, args: a1, character_unit: cu1 },
             Expression::Function { name: n2, args: a2, character_unit: cu2 },
         ) => {
-            n1.eq_ignore_ascii_case(n2)
+            n1 == n2 // FunctionIdentifier comparison is case-insensitive via canonical
                 && cu1 == cu2
                 && a1.len() == a2.len()
                 && a1.iter().zip(a2).all(|(x, y)| expressions_equal(x, y))
         }
 
-        // AggregateFunction: case-insensitive name, check distinct, recurse into args
+        // AggregateFunction: case-insensitive name (via FunctionIdentifier), check distinct, recurse into args
         // Note: order_by is ignored in equality check for grouping purposes
         (
             Expression::AggregateFunction { name: n1, distinct: d1, args: a1, .. },
             Expression::AggregateFunction { name: n2, distinct: d2, args: a2, .. },
         ) => {
-            n1.eq_ignore_ascii_case(n2)
+            n1 == n2 // FunctionIdentifier comparison is case-insensitive via canonical
                 && d1 == d2
                 && a1.len() == a2.len()
                 && a1.iter().zip(a2).all(|(x, y)| expressions_equal(x, y))
@@ -255,7 +255,7 @@ fn window_function_equal(a: &WindowFunctionSpec, b: &WindowFunctionSpec) -> bool
             WindowFunctionSpec::Value { name: n1, args: a1 },
             WindowFunctionSpec::Value { name: n2, args: a2 },
         ) => {
-            n1.eq_ignore_ascii_case(n2)
+            n1 == n2 // FunctionIdentifier comparison is case-insensitive via canonical
                 && a1.len() == a2.len()
                 && a1.iter().zip(a2).all(|(x, y)| expressions_equal(x, y))
         }
@@ -313,11 +313,11 @@ mod tests {
     }
 
     fn func(name: &str, args: Vec<Expression>) -> Expression {
-        Expression::Function { name: name.to_string(), args, character_unit: None }
+        Expression::Function { name: vibesql_ast::FunctionIdentifier::new(name), args, character_unit: None }
     }
 
     fn agg(name: &str, args: Vec<Expression>, distinct: bool) -> Expression {
-        Expression::AggregateFunction { name: name.to_string(), distinct, args, order_by: None }
+        Expression::AggregateFunction { name: vibesql_ast::FunctionIdentifier::new(name), distinct, args, order_by: None }
     }
 
     // --- ColumnRef tests ---

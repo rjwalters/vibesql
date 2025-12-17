@@ -7,7 +7,7 @@ use super::common::create_test_evaluator;
 // Helper functions for this module
 pub fn create_function_expr(name: &str, args: Vec<SqlValue>) -> vibesql_ast::Expression {
     vibesql_ast::Expression::Function {
-        name: name.to_string(),
+        name: vibesql_ast::FunctionIdentifier::new(name),
         args: args.into_iter().map(vibesql_ast::Expression::Literal).collect(),
         character_unit: None,
     }

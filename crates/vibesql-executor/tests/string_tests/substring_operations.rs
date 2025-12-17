@@ -18,7 +18,7 @@ use crate::common::create_test_evaluator;
 fn test_substring_null_string() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -33,7 +33,7 @@ fn test_substring_null_string() {
 fn test_substring_null_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -50,7 +50,7 @@ fn test_substring_null_start() {
 fn test_substring_null_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -68,7 +68,7 @@ fn test_substring_null_length() {
 fn test_substring_negative_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -86,7 +86,7 @@ fn test_substring_negative_start() {
 fn test_substring_zero_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -103,7 +103,7 @@ fn test_substring_zero_start() {
 fn test_substring_start_beyond_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -120,7 +120,7 @@ fn test_substring_start_beyond_length() {
 fn test_substring_zero_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -142,7 +142,7 @@ fn test_substring_negative_length() {
     // Position 2 is 'e', extracting leftward gets chars before it: "h"
     // (only 1 char available since we can't go before position 1)
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -162,7 +162,7 @@ fn test_substring_multibyte_characters() {
     let (evaluator, row) = create_test_evaluator();
     // "café" is 4 characters but 5 bytes in UTF-8
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("café"),
@@ -180,7 +180,7 @@ fn test_substring_multibyte_characters() {
 fn test_substring_empty_string() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from(""),
@@ -197,7 +197,7 @@ fn test_substring_empty_string() {
 fn test_substring_wrong_arg_count_too_few() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -211,7 +211,7 @@ fn test_substring_wrong_arg_count_too_few() {
 fn test_substring_wrong_arg_count_too_many() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -230,7 +230,7 @@ fn test_substring_wrong_arg_count_too_many() {
 fn test_substring_wrong_type_string() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
@@ -245,7 +245,7 @@ fn test_substring_wrong_type_string() {
 fn test_substring_wrong_type_start() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -264,7 +264,7 @@ fn test_substring_wrong_type_start() {
 fn test_substring_wrong_type_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -288,7 +288,7 @@ fn test_substring_wrong_type_length() {
 fn test_left_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -303,7 +303,7 @@ fn test_left_null() {
 fn test_left_negative_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -320,7 +320,7 @@ fn test_left_negative_length() {
 fn test_left_zero_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -337,7 +337,7 @@ fn test_left_zero_length() {
 fn test_left_length_exceeds_string() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -354,7 +354,7 @@ fn test_left_length_exceeds_string() {
 fn test_left_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("café"),
@@ -371,7 +371,7 @@ fn test_left_multibyte() {
 fn test_left_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -385,7 +385,7 @@ fn test_left_wrong_arg_count() {
 fn test_left_wrong_type_string() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -400,7 +400,7 @@ fn test_left_wrong_type_string() {
 fn test_left_wrong_type_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -419,7 +419,7 @@ fn test_left_wrong_type_length() {
 fn test_left_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "LEFT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEFT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("hello"),
@@ -440,7 +440,7 @@ fn test_left_character_type() {
 fn test_right_null() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -455,7 +455,7 @@ fn test_right_null() {
 fn test_right_negative_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -472,7 +472,7 @@ fn test_right_negative_length() {
 fn test_right_zero_length() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -489,7 +489,7 @@ fn test_right_zero_length() {
 fn test_right_length_exceeds_string() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("hello"),
@@ -506,7 +506,7 @@ fn test_right_length_exceeds_string() {
 fn test_right_multibyte() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("café"),
@@ -523,7 +523,7 @@ fn test_right_multibyte() {
 fn test_right_wrong_arg_count() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
             arcstr::ArcStr::from("hello"),
         ))],
@@ -537,7 +537,7 @@ fn test_right_wrong_arg_count() {
 fn test_right_wrong_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(123)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(3)),
@@ -552,7 +552,7 @@ fn test_right_wrong_type() {
 fn test_right_character_type() {
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "RIGHT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("RIGHT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Character(
                 arcstr::ArcStr::from("hello"),
@@ -574,7 +574,7 @@ fn test_substring_date_extract_year() {
     // TPC-H Q7/Q9 pattern: SUBSTR(l_shipdate, 1, 4) to extract year from date
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "1995-06-15".parse().unwrap(),
@@ -593,7 +593,7 @@ fn test_substring_date_extract_month() {
     // Extract month from date using SUBSTRING
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "1995-06-15".parse().unwrap(),
@@ -612,7 +612,7 @@ fn test_substring_date_extract_day() {
     // Extract day from date using SUBSTRING
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "1995-06-15".parse().unwrap(),
@@ -631,7 +631,7 @@ fn test_substring_timestamp_extract_year() {
     // Extract year from timestamp using SUBSTRING
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "1996-12-25 14:30:45".parse().unwrap(),
@@ -650,7 +650,7 @@ fn test_substring_timestamp_extract_time() {
     // Extract time portion from timestamp using SUBSTRING
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Timestamp(
                 "1996-12-25 14:30:45".parse().unwrap(),
@@ -669,7 +669,7 @@ fn test_substr_alias_with_date() {
     // Test SUBSTR alias (commonly used in TPC-H queries)
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTR".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTR"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "1995-01-01".parse().unwrap(),
@@ -688,7 +688,7 @@ fn test_substring_date_without_length() {
     // SUBSTRING on date without explicit length - returns rest of string
     let (evaluator, row) = create_test_evaluator();
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBSTRING".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBSTRING"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "1995-06-15".parse().unwrap(),

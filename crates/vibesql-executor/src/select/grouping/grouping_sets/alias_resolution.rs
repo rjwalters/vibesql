@@ -290,7 +290,7 @@ mod tests {
             select_item(col("n_name"), Some("nation")),
             select_item(
                 Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![Expression::Wildcard],
                     order_by: None,
@@ -394,7 +394,7 @@ mod tests {
     fn test_resolve_group_by_alias_expression_alias() {
         // SELECT SUBSTR(o_orderdate, 1, 4) AS o_year ... GROUP BY o_year
         let substr_expr = Expression::Function {
-            name: "SUBSTR".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("SUBSTR"),
             args: vec![
                 col("o_orderdate"),
                 Expression::Literal(vibesql_types::SqlValue::Integer(1)),

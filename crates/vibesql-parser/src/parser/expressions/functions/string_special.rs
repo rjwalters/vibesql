@@ -192,7 +192,11 @@ impl Parser {
             args.push(length);
         }
 
-        Ok(vibesql_ast::Expression::Function { name: function_name, args, character_unit })
+        Ok(vibesql_ast::Expression::Function {
+            name: vibesql_ast::FunctionIdentifier::new(&function_name),
+            args,
+            character_unit,
+        })
     }
 
     /// Parse CHARACTERS or OCTETS keyword for USING clause

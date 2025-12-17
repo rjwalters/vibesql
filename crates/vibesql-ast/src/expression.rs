@@ -2,7 +2,7 @@
 
 use vibesql_types::SqlValue;
 
-use crate::identifier::ColumnIdentifier;
+use crate::identifier::{ColumnIdentifier, FunctionIdentifier};
 use crate::{BinaryOperator, OrderByItem, SelectStmt, UnaryOperator};
 
 /// SQL Expression (can appear in SELECT, WHERE, etc.)
@@ -59,8 +59,12 @@ pub enum Expression {
     },
 
     /// Function call (UPPER(x), SUBSTRING(x, 1, 3))
+    ///
+    /// Uses `FunctionIdentifier` for proper case handling:
+    /// - Canonical (lowercase) for case-insensitive comparison
+    /// - Display (original case) for error messages
     Function {
-        name: String,
+        name: FunctionIdentifier,
         args: Vec<Expression>,
         character_unit: Option<CharacterUnit>,
     },
@@ -70,8 +74,12 @@ pub enum Expression {
     /// SQL:2003 ordered set functions with ORDER BY clause
     /// Example: COUNT(DISTINCT customer_id), SUM(ALL amount)
     /// Example: GROUP_CONCAT(name ORDER BY name ASC)
+    ///
+    /// Uses `FunctionIdentifier` for proper case handling:
+    /// - Canonical (lowercase) for case-insensitive comparison
+    /// - Display (original case) for error messages
     AggregateFunction {
-        name: String,
+        name: FunctionIdentifier,
         distinct: bool, // true = DISTINCT, false = ALL (implicit)
         args: Vec<Expression>,
         /// Optional ORDER BY clause within the aggregate function
@@ -398,19 +406,21 @@ pub enum TruthValue {
 }
 
 /// Window function specification
+///
+/// Uses `FunctionIdentifier` for proper case handling in all variants.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowFunctionSpec {
     /// Aggregate function used as window function
     /// Example: SUM(salary), AVG(price), COUNT(*)
-    Aggregate { name: String, args: Vec<Expression> },
+    Aggregate { name: FunctionIdentifier, args: Vec<Expression> },
 
     /// Ranking function
     /// Example: ROW_NUMBER(), RANK(), DENSE_RANK(), NTILE(4)
-    Ranking { name: String, args: Vec<Expression> },
+    Ranking { name: FunctionIdentifier, args: Vec<Expression> },
 
     /// Value function
     /// Example: LAG(salary, 1), LEAD(price, 2), FIRST_VALUE(name), LAST_VALUE(amount)
-    Value { name: String, args: Vec<Expression> },
+    Value { name: FunctionIdentifier, args: Vec<Expression> },
 }
 
 /// Window specification (OVER clause)

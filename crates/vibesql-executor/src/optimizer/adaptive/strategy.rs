@@ -361,7 +361,7 @@ mod tests {
             distinct: false,
             select_list: vec![SelectItem::Expression {
                 expr: Expression::AggregateFunction {
-                    name: "SUM".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     distinct: false,
                     args: vec![Expression::BinaryOp {
                         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))),

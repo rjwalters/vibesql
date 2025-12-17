@@ -9,7 +9,7 @@ fn test_datediff_basic() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-10".parse().unwrap(),
@@ -29,7 +29,7 @@ fn test_datediff_negative() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-05".parse().unwrap(),
@@ -49,7 +49,7 @@ fn test_datediff_same_date() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATEDIFF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATEDIFF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -71,7 +71,7 @@ fn test_date_add_days() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -92,7 +92,7 @@ fn test_date_add_months() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -113,7 +113,7 @@ fn test_date_add_years() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -134,7 +134,7 @@ fn test_date_add_negative() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_ADD".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_ADD"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -155,7 +155,7 @@ fn test_adddate_alias() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "ADDDATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("ADDDATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -178,7 +178,7 @@ fn test_date_sub_days() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_SUB".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_SUB"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -199,7 +199,7 @@ fn test_date_sub_months() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "DATE_SUB".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("DATE_SUB"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-04-15".parse().unwrap(),
@@ -220,7 +220,7 @@ fn test_subdate_alias() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "SUBDATE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUBDATE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),

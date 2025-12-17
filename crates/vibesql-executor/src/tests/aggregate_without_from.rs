@@ -20,7 +20,7 @@ fn test_max_constant_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(100))],
                 order_by: None,
@@ -55,7 +55,7 @@ fn test_count_star_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::Wildcard],
                 order_by: None,
@@ -91,7 +91,7 @@ fn test_aggregate_in_expression_without_from() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "MAX".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("MAX"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                         5,
@@ -133,7 +133,7 @@ fn test_count_distinct_without_from() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: true,
                 args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(65))],
                 order_by: None,
@@ -169,7 +169,7 @@ fn test_multiple_aggregates_without_from() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
-                    name: "MAX".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("MAX"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                         5,
@@ -179,7 +179,7 @@ fn test_multiple_aggregates_without_from() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
-                    name: "MIN".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("MIN"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                         10,
@@ -189,7 +189,7 @@ fn test_multiple_aggregates_without_from() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
@@ -228,7 +228,7 @@ fn test_sum_avg_without_from() {
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
-                    name: "SUM".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("SUM"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                         100,
@@ -238,7 +238,7 @@ fn test_sum_avg_without_from() {
                 alias: None, source_text: None },
             vibesql_ast::SelectItem::Expression {
                 expr: vibesql_ast::Expression::AggregateFunction {
-                    name: "AVG".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("AVG"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(
                         50,

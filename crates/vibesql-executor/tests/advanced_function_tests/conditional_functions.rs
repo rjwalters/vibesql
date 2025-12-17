@@ -7,7 +7,7 @@ fn test_greatest_integers() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "GREATEST".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("GREATEST"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
@@ -25,7 +25,7 @@ fn test_greatest_with_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "GREATEST".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("GREATEST"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
@@ -42,7 +42,7 @@ fn test_least_integers() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LEAST".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEAST"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(10)),
@@ -60,7 +60,7 @@ fn test_least_with_null() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "LEAST".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("LEAST"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(5)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
@@ -77,7 +77,7 @@ fn test_if_true_condition() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "IF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("IF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -98,7 +98,7 @@ fn test_if_false_condition() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "IF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("IF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false)),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
@@ -119,7 +119,7 @@ fn test_if_null_condition() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "IF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("IF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(

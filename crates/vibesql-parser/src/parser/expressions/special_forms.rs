@@ -8,25 +8,28 @@ impl Parser {
         match self.peek() {
             // CURRENT_DATE, CURRENT_TIME, CURRENT_TIMESTAMP (as identifiers)
             Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_DATE" => {
+                let orig_name = id.clone();
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Function {
-                    name: "CURRENT_DATE".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new(&orig_name),
                     args: vec![],
                     character_unit: None,
                 }))
             }
             Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_TIME" => {
+                let orig_name = id.clone();
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Function {
-                    name: "CURRENT_TIME".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new(&orig_name),
                     args: vec![],
                     character_unit: None,
                 }))
             }
             Token::Identifier(ref id) if id.to_uppercase() == "CURRENT_TIMESTAMP" => {
+                let orig_name = id.clone();
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Function {
-                    name: "CURRENT_TIMESTAMP".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new(&orig_name),
                     args: vec![],
                     character_unit: None,
                 }))
@@ -40,18 +43,20 @@ impl Parser {
 
                 // Check for underscore followed by DATE/TIME/TIMESTAMP
                 if let Token::Identifier(ref id) = self.peek() {
+                    // Build the original name by combining CURRENT with the suffix
+                    let suffix = id.clone();
                     let function_name = match id.to_uppercase().as_str() {
                         "_DATE" => {
                             self.advance(); // consume _DATE
-                            "CURRENT_DATE"
+                            format!("CURRENT{}", suffix)
                         }
                         "_TIME" => {
                             self.advance(); // consume _TIME
-                            "CURRENT_TIME"
+                            format!("CURRENT{}", suffix)
                         }
                         "_TIMESTAMP" => {
                             self.advance(); // consume _TIMESTAMP
-                            "CURRENT_TIMESTAMP"
+                            format!("CURRENT{}", suffix)
                         }
                         _ => {
                             return Err(ParseError {
@@ -64,7 +69,7 @@ impl Parser {
                     };
 
                     Ok(Some(vibesql_ast::Expression::Function {
-                        name: function_name.to_string(),
+                        name: vibesql_ast::FunctionIdentifier::new(&function_name),
                         args: vec![],
                         character_unit: None,
                     }))

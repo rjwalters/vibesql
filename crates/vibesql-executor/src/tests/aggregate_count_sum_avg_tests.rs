@@ -58,7 +58,7 @@ fn test_count_star_no_group_by() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![vibesql_ast::Expression::Wildcard],
                 character_unit: None,
             },
@@ -137,7 +137,7 @@ fn test_sum_no_group_by() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "SUM".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                 character_unit: None,
             },
@@ -218,7 +218,7 @@ fn test_count_with_nulls() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![vibesql_ast::Expression::Wildcard],
                 character_unit: None,
             },
@@ -297,7 +297,7 @@ fn test_sum_with_nulls() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "SUM".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))],
                 character_unit: None,
             },
@@ -378,7 +378,7 @@ fn test_avg_function() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("score", false))],
                 character_unit: None,
             },
@@ -458,7 +458,7 @@ fn test_avg_with_nulls() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("rating", false))],
                 character_unit: None,
             },
@@ -541,7 +541,7 @@ fn test_count_column_all_nulls() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("value", false))],
                 character_unit: None,
             },
@@ -575,7 +575,7 @@ fn test_count_column_all_nulls() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![vibesql_ast::Expression::Wildcard],
                 character_unit: None,
             },
@@ -635,7 +635,7 @@ fn test_count_star_in_simple_case_expression() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
                 operand: Some(Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
@@ -710,7 +710,7 @@ fn test_count_star_in_searched_case_expression() {
                 when_clauses: vec![vibesql_ast::CaseWhen {
                     conditions: vec![vibesql_ast::Expression::BinaryOp {
                         left: Box::new(vibesql_ast::Expression::AggregateFunction {
-                            name: "COUNT".to_string(),
+                            name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                             distinct: false,
                             args: vec![vibesql_ast::Expression::Wildcard],
                             order_by: None,
@@ -784,7 +784,7 @@ fn test_count_star_in_arithmetic_expression() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::BinaryOp {
                 left: Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,
@@ -855,7 +855,7 @@ fn test_count_star_in_case_then_clause() {
                         )),
                     }],
                     result: vibesql_ast::Expression::AggregateFunction {
-                        name: "COUNT".to_string(),
+                        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                         distinct: false,
                         args: vec![vibesql_ast::Expression::Wildcard],
                         order_by: None,
@@ -915,7 +915,7 @@ fn test_count_star_in_nested_case_expression() {
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Case {
                 operand: Some(Box::new(vibesql_ast::Expression::AggregateFunction {
-                    name: "COUNT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                     distinct: false,
                     args: vec![vibesql_ast::Expression::Wildcard],
                     order_by: None,

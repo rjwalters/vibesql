@@ -20,7 +20,7 @@ fn test_coalesce_lazy_evaluation_short_circuits() {
 
     // Create expression: COALESCE(10, NULL/0) - should return 10 and not evaluate division
     let expr = vibesql_ast::Expression::Function {
-        name: "COALESCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COALESCE"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(10)),
             // This expression would cause a division by zero if evaluated
@@ -48,7 +48,7 @@ fn test_coalesce_evaluates_all_when_all_null() {
     let row = Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::Function {
-        name: "COALESCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COALESCE"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Null),
             vibesql_ast::Expression::Literal(SqlValue::Null),
@@ -73,7 +73,7 @@ fn test_nullif_lazy_evaluation_short_circuits() {
     // Create expression: NULLIF(NULL, expensive_expr) - should return NULL without evaluating
     // division
     let expr = vibesql_ast::Expression::Function {
-        name: "NULLIF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("NULLIF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Null),
             // This expression would cause a division by zero if evaluated
@@ -101,7 +101,7 @@ fn test_nullif_evaluates_second_when_first_not_null() {
     let row = Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::Function {
-        name: "NULLIF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("NULLIF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(42)),
             vibesql_ast::Expression::Literal(SqlValue::Integer(42)),
@@ -123,7 +123,7 @@ fn test_nullif_returns_first_when_not_equal() {
     let row = Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::Function {
-        name: "NULLIF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("NULLIF"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Integer(42)),
             vibesql_ast::Expression::Literal(SqlValue::Integer(43)),
@@ -145,7 +145,7 @@ fn test_coalesce_with_strings() {
     let row = Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::Function {
-        name: "COALESCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COALESCE"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Null),
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("hello"))),
@@ -168,11 +168,11 @@ fn test_nested_coalesce() {
     let row = Row::new(vec![]);
 
     let expr = vibesql_ast::Expression::Function {
-        name: "COALESCE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COALESCE"),
         args: vec![
             vibesql_ast::Expression::Literal(SqlValue::Null),
             vibesql_ast::Expression::Function {
-                name: "COALESCE".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COALESCE"),
                 args: vec![
                     vibesql_ast::Expression::Literal(SqlValue::Null),
                     vibesql_ast::Expression::Literal(SqlValue::Integer(42)),

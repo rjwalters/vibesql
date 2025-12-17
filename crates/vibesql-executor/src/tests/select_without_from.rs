@@ -154,7 +154,7 @@ fn test_select_function_call() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "UPPER".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("UPPER"),
                 args: vec![vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                     arcstr::ArcStr::from("hello"),
                 ))],

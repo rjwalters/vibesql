@@ -59,7 +59,7 @@ fn test_avg_precision_decimal() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
                 character_unit: None,
             },
@@ -146,7 +146,7 @@ fn test_sum_mixed_numeric_types() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "SUM".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                 character_unit: None,
             },
@@ -237,7 +237,7 @@ fn test_aggregate_with_case_expression() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "SUM".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 args: vec![vibesql_ast::Expression::Case {
                     operand: None,
                     when_clauses: vec![vibesql_ast::CaseWhen {
@@ -309,7 +309,7 @@ fn test_max_with_unary_plus() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Plus,
@@ -368,7 +368,7 @@ fn test_max_with_unary_minus() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
@@ -428,7 +428,7 @@ fn test_count_with_not() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::AggregateFunction {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 distinct: false,
                 args: vec![vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Not,

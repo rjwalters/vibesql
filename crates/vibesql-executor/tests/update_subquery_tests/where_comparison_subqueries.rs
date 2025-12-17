@@ -113,7 +113,7 @@ fn test_update_where_scalar_subquery_less_than() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("salary", false))],
                 character_unit: None,
             },
@@ -271,7 +271,7 @@ fn test_update_where_subquery_with_aggregate() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: Expression::Function {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("price", false))],
                 character_unit: None,
             },

@@ -9,7 +9,7 @@ fn test_extract_year() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "EXTRACT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("EXTRACT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("YEAR"),
@@ -29,7 +29,7 @@ fn test_extract_month() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "EXTRACT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("EXTRACT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("MONTH"),
@@ -49,7 +49,7 @@ fn test_extract_day() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "EXTRACT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("EXTRACT"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("DAY"),
@@ -71,7 +71,7 @@ fn test_age_two_dates_years_only() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "AGE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("AGE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),
@@ -95,7 +95,7 @@ fn test_age_two_dates_complex() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "AGE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("AGE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-05-20".parse().unwrap(),
@@ -121,7 +121,7 @@ fn test_age_negative() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "AGE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("AGE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2020-01-15".parse().unwrap(),
@@ -146,7 +146,7 @@ fn test_age_same_date() {
     let (evaluator, row) = create_test_evaluator();
 
     let expr = vibesql_ast::Expression::Function {
-        name: "AGE".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("AGE"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Date(
                 "2024-01-15".parse().unwrap(),

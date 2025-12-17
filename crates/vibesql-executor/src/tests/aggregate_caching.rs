@@ -33,7 +33,7 @@ fn test_repeated_count_star_cached() {
     // Build: COUNT(*) * 37 + NULLIF(45, COUNT(*) * 13) + COUNT(*) + 22
     // Expected: 5 * 37 + NULLIF(45, 5 * 13) + 5 + 22 = 185 + 45 + 5 + 22 = 257
     let count_star = vibesql_ast::Expression::AggregateFunction {
-        name: "COUNT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
         order_by: None,
@@ -55,7 +55,7 @@ fn test_repeated_count_star_cached() {
 
     // NULLIF(45, COUNT(*) * 13)
     let nullif_expr = vibesql_ast::Expression::Function {
-        name: "NULLIF".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("NULLIF"),
         args: vec![
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(45)),
             count_times_13,
@@ -136,7 +136,7 @@ fn test_repeated_sum_cached() {
     let executor = SelectExecutor::new(&db);
 
     let sum_amount = vibesql_ast::Expression::AggregateFunction {
-        name: "SUM".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("SUM"),
         distinct: false,
         args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
         order_by: None,
@@ -254,7 +254,7 @@ fn test_cache_cleared_between_groups() {
     let executor = SelectExecutor::new(&db);
 
     let count_star = vibesql_ast::Expression::AggregateFunction {
-        name: "COUNT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
         distinct: false,
         args: vec![vibesql_ast::Expression::Wildcard],
         order_by: None,
@@ -341,14 +341,14 @@ fn test_distinct_aggregates_not_confused() {
     let executor = SelectExecutor::new(&db);
 
     let count_val = vibesql_ast::Expression::AggregateFunction {
-        name: "COUNT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
         distinct: false,
         args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
         order_by: None,
     };
 
     let count_distinct_val = vibesql_ast::Expression::AggregateFunction {
-        name: "COUNT".to_string(),
+        name: vibesql_ast::FunctionIdentifier::new("COUNT"),
         distinct: true,
         args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("val", false))],
         order_by: None,

@@ -616,7 +616,7 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
             vibesql_ast::Expression::Function { name: n1, args: a1, .. },
             vibesql_ast::Expression::Function { name: n2, args: a2, .. },
         ) => {
-            n1.eq_ignore_ascii_case(n2)
+            n1 == n2 // FunctionIdentifier comparison is case-insensitive via canonical
                 && a1.len() == a2.len()
                 && a1.iter().zip(a2.iter()).all(|(x, y)| expressions_equal(x, y))
         }

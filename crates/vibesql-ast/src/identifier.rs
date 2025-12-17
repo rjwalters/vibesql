@@ -941,11 +941,46 @@ impl FunctionIdentifier {
     pub fn matches(&self, name: &str) -> bool {
         self.canonical == name.to_lowercase()
     }
+
+    /// Get the canonical form as str (alias for canonical()).
+    pub fn as_str(&self) -> &str {
+        &self.canonical
+    }
+
+    /// Return the canonical (lowercase) form as a new String.
+    /// Provides compatibility with code expecting String methods.
+    pub fn to_lowercase(&self) -> String {
+        self.canonical.clone()
+    }
+
+    /// Return the canonical form uppercased.
+    /// Provides compatibility with code expecting String methods.
+    pub fn to_uppercase(&self) -> String {
+        self.canonical.to_uppercase()
+    }
+
+    /// Case-insensitive comparison with a string slice.
+    /// Provides compatibility with code expecting String methods.
+    pub fn eq_ignore_ascii_case(&self, other: &str) -> bool {
+        self.canonical == other.to_ascii_lowercase()
+    }
 }
 
 impl PartialEq for FunctionIdentifier {
     fn eq(&self, other: &Self) -> bool {
         self.canonical == other.canonical
+    }
+}
+
+impl PartialEq<str> for FunctionIdentifier {
+    fn eq(&self, other: &str) -> bool {
+        self.canonical == other.to_lowercase()
+    }
+}
+
+impl PartialEq<&str> for FunctionIdentifier {
+    fn eq(&self, other: &&str) -> bool {
+        self.canonical == other.to_lowercase()
     }
 }
 

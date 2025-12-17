@@ -225,7 +225,7 @@ fn test_select_with_group_by() {
         distinct: false,
         select_list: vec![SelectItem::Expression {
             expr: Expression::Function {
-                name: "COUNT".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("COUNT"),
                 args: vec![Expression::Wildcard],
                 character_unit: None,
             },
@@ -269,7 +269,7 @@ fn test_select_with_having() {
         having: Some(Expression::BinaryOp {
             op: BinaryOperator::GreaterThan,
             left: Box::new(Expression::Function {
-                name: "SUM".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("amount", false))],
                 character_unit: None,
             }),

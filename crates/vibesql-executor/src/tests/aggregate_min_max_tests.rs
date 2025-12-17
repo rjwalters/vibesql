@@ -58,7 +58,7 @@ fn test_min_function() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "MIN".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MIN"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("temp", false))],
                 character_unit: None,
             },
@@ -137,7 +137,7 @@ fn test_max_function() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("temp", false))],
                 character_unit: None,
             },
@@ -219,7 +219,7 @@ fn test_min_max_on_strings() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "MIN".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MIN"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))],
                 character_unit: None,
             },
@@ -256,7 +256,7 @@ fn test_min_max_on_strings() {
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::Function {
-                name: "MAX".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MAX"),
                 args: vec![vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("name", false))],
                 character_unit: None,
             },

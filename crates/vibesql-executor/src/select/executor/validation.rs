@@ -216,28 +216,28 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                     // Multi-arg COUNT without DISTINCT is an error
                     // SQLite: "wrong number of arguments to function count()"
                     if arg_count > 1 && !*distinct {
-                        Some(name.clone())
+                        Some(name.to_string())
                     } else {
                         None
                     }
                 }
                 "MIN" | "MAX" => {
                     if has_wildcard || arg_count == 0 {
-                        Some(name.clone()) // Preserve original case for SQLite-compatible error
+                        Some(name.to_string()) // Preserve original case for SQLite-compatible error
                     } else {
                         None
                     }
                 }
                 "SUM" | "AVG" | "TOTAL" => {
                     if has_wildcard || arg_count == 0 || arg_count > 1 {
-                        Some(name.clone()) // Preserve original case for SQLite-compatible error
+                        Some(name.to_string()) // Preserve original case for SQLite-compatible error
                     } else {
                         None
                     }
                 }
                 "GROUP_CONCAT" => {
                     if arg_count == 0 || arg_count > 2 {
-                        Some(name.clone()) // Preserve original case for SQLite-compatible error
+                        Some(name.to_string()) // Preserve original case for SQLite-compatible error
                     } else {
                         None
                     }
@@ -247,7 +247,7 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
         }
         Expression::Function { name, args, .. } => {
             // Check if this is an aggregate function with wrong args
-            if is_aggregate_function(name) {
+            if is_aggregate_function(name.as_str()) {
                 let upper = name.to_uppercase();
                 let arg_count = args.len();
 
@@ -265,7 +265,7 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                         // count(a, b) without DISTINCT is wrong
                         // Regular count without DISTINCT can only have 0-1 args
                         if arg_count > 1 {
-                            Some(name.clone()) // Preserve original case
+                            Some(name.to_string()) // Preserve original case
                         } else {
                             None
                         }
@@ -273,21 +273,21 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                     "MIN" | "MAX" => {
                         // Multi-arg min/max are scalar, so only check single arg case
                         if arg_count <= 1 && (has_wildcard || arg_count == 0) {
-                            Some(name.clone()) // Preserve original case
+                            Some(name.to_string()) // Preserve original case
                         } else {
                             None
                         }
                     }
                     "SUM" | "AVG" | "TOTAL" => {
                         if has_wildcard || arg_count == 0 || arg_count > 1 {
-                            Some(name.clone()) // Preserve original case
+                            Some(name.to_string()) // Preserve original case
                         } else {
                             None
                         }
                     }
                     "GROUP_CONCAT" => {
                         if arg_count == 0 || arg_count > 2 {
-                            Some(name.clone()) // Preserve original case
+                            Some(name.to_string()) // Preserve original case
                         } else {
                             None
                         }
@@ -347,17 +347,17 @@ fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
 /// Returns the function name (original case preserved) if found, None otherwise
 fn find_aggregate_in_expression(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::AggregateFunction { name, .. } => Some(name.clone()), // Preserve original case
+        Expression::AggregateFunction { name, .. } => Some(name.to_string()), // Preserve original case
         Expression::Function { name, args, .. } => {
             // Check if this function is a built-in aggregate
             // Note: MIN/MAX with multiple args are scalar functions in SQLite
-            if is_aggregate_function(name) {
+            if is_aggregate_function(name.as_str()) {
                 let upper = name.to_uppercase();
                 if matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1 {
                     // Multi-arg min/max are scalar, not aggregate
                     None
                 } else {
-                    Some(name.clone()) // Preserve original case
+                    Some(name.to_string()) // Preserve original case
                 }
             } else {
                 // Check function arguments recursively
@@ -466,7 +466,7 @@ fn find_nested_aggregate(expr: &Expression) -> Option<String> {
         }
         Expression::Function { name, args, .. } => {
             // Check if this function is a built-in aggregate with nested aggregate args
-            if is_aggregate_function(name) {
+            if is_aggregate_function(name.as_str()) {
                 let upper = name.to_uppercase();
                 // Multi-arg MIN/MAX are scalar functions, not aggregates
                 let is_scalar_minmax = matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1;
@@ -834,7 +834,7 @@ fn expression_contains_aggregate(expr: &Expression) -> bool {
         Expression::AggregateFunction { .. } => true,
         Expression::Function { name, args, .. } => {
             // Check if this function is a built-in aggregate
-            if is_aggregate_function(name) {
+            if is_aggregate_function(name.as_str()) {
                 let upper = name.to_uppercase();
                 // Multi-arg MIN/MAX are scalar functions
                 if matches!(upper.as_str(), "MIN" | "MAX") && args.len() > 1 {
@@ -930,7 +930,7 @@ fn find_aliased_aggregate_misuse_in_expression(
         }
         Expression::Function { name, args, .. } => {
             // Check if this function is a built-in aggregate
-            let is_agg = is_aggregate_function(name);
+            let is_agg = is_aggregate_function(name.as_str());
             let upper = name.to_uppercase();
             // Multi-arg MIN/MAX are scalar functions
             let effectively_aggregate =
@@ -1366,7 +1366,7 @@ mod tests {
     fn test_min_star_invalid() {
         // MIN(*) should be invalid - returns error with function name (preserving original case)
         let expr = Expression::AggregateFunction {
-            name: "MIN".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("MIN"),
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("*", false))],
             order_by: None,
@@ -1380,7 +1380,7 @@ mod tests {
     fn test_max_star_invalid() {
         // MAX(*) should be invalid
         let expr = Expression::AggregateFunction {
-            name: "MAX".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("MAX"),
             distinct: false,
             args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("*", false))],
             order_by: None,
@@ -1394,7 +1394,7 @@ mod tests {
     fn test_min_no_args_invalid() {
         // MIN() with no arguments should be invalid
         let expr = Expression::AggregateFunction {
-            name: "MIN".to_string(),
+            name: vibesql_ast::FunctionIdentifier::new("MIN"),
             distinct: false,
             args: vec![],
             order_by: None,
@@ -1409,7 +1409,7 @@ mod tests {
         // Test the public function
         let select_list = vec![SelectItem::Expression {
             expr: Expression::AggregateFunction {
-                name: "MIN".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("MIN"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("*", false))],
                 order_by: None,
@@ -1452,7 +1452,7 @@ mod tests {
         // Note: 'm' is NOT a column in the table, so it's treated as an alias reference
         let select_list = vec![SelectItem::Expression {
             expr: Expression::AggregateFunction {
-                name: "min".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("min"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
                 order_by: None,
@@ -1465,7 +1465,7 @@ mod tests {
         let having_expr = Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::LessThan,
             left: Box::new(Expression::AggregateFunction {
-                name: "max".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("max"),
                 distinct: false,
                 args: vec![Expression::BinaryOp {
                     op: vibesql_ast::BinaryOperator::Plus,
@@ -1498,7 +1498,7 @@ mod tests {
         // For now, we only detect the case where it's inside an aggregate.
         let select_list = vec![SelectItem::Expression {
             expr: Expression::AggregateFunction {
-                name: "min".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("min"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
                 order_by: None,
@@ -1527,7 +1527,7 @@ mod tests {
         // No aliased aggregate, should pass
         let select_list = vec![SelectItem::Expression {
             expr: Expression::AggregateFunction {
-                name: "count".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("count"),
                 distinct: false,
                 args: vec![Expression::Wildcard],
                 order_by: None,
@@ -1559,7 +1559,7 @@ mod tests {
             },
             SelectItem::Expression {
                 expr: Expression::AggregateFunction {
-                    name: "count".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("count"),
                     distinct: false,
                     args: vec![Expression::Wildcard],
                     order_by: None,
@@ -1573,7 +1573,7 @@ mod tests {
         let having_expr = Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::LessThan,
             left: Box::new(Expression::AggregateFunction {
-                name: "max".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("max"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false))],
                 order_by: None,
@@ -1602,7 +1602,7 @@ mod tests {
                 right: Box::new(Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
                     expr: Box::new(Expression::AggregateFunction {
-                        name: "AVG".to_string(),
+                        name: vibesql_ast::FunctionIdentifier::new("AVG"),
                         distinct: false,
                         args: vec![Expression::UnaryOp {
                             op: vibesql_ast::UnaryOperator::Minus,
@@ -1619,7 +1619,7 @@ mod tests {
         // HAVING AVG(col0) IS NULL - col0 is a real column, not the alias
         let having_expr = Expression::IsNull {
             expr: Box::new(Expression::AggregateFunction {
-                name: "AVG".to_string(),
+                name: vibesql_ast::FunctionIdentifier::new("AVG"),
                 distinct: false,
                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("col0", false))],
                 order_by: None,
@@ -1665,7 +1665,7 @@ mod tests {
         let select_list = vec![
             SelectItem::Expression {
                 expr: Expression::AggregateFunction {
-                    name: "min".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("min"),
                     distinct: false,
                     args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
                     order_by: None,
@@ -1681,12 +1681,12 @@ mod tests {
             SelectItem::Expression {
                 // coalesce(min(f1)+5, 11) AS m2
                 expr: Expression::Function {
-                    name: "coalesce".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("coalesce"),
                     args: vec![
                         Expression::BinaryOp {
                             op: vibesql_ast::BinaryOperator::Plus,
                             left: Box::new(Expression::AggregateFunction {
-                                name: "min".to_string(),
+                                name: vibesql_ast::FunctionIdentifier::new("min"),
                                 distinct: false,
                                 args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("f1", false))],
                                 order_by: None,

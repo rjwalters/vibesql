@@ -495,7 +495,7 @@ mod tests {
     }
 
     fn make_aggregate(name: &str, arg: Expression) -> Expression {
-        Expression::AggregateFunction { name: name.to_string(), distinct: false, args: vec![arg], order_by: None }
+        Expression::AggregateFunction { name: vibesql_ast::FunctionIdentifier::new(name), distinct: false, args: vec![arg], order_by: None }
     }
 
     #[test]

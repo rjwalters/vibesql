@@ -221,7 +221,7 @@ fn test_concat_function_in_procedure() {
             ProceduralStatement::Set {
                 name: "full_name".to_string(),
                 value: Box::new(Expression::Function {
-                    name: "CONCAT".to_string(),
+                    name: vibesql_ast::FunctionIdentifier::new("CONCAT"),
                     args: vec![
                         Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("first", false)),
                         Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(" "))),

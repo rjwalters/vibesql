@@ -330,7 +330,8 @@ impl ToSql for Expression {
 
             Expression::Function { name, args, character_unit } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
-                let mut result = format!("{}({})", name.to_uppercase(), args_sql.join(", "));
+                let mut result =
+                    format!("{}({})", name.canonical().to_uppercase(), args_sql.join(", "));
                 if let Some(unit) = character_unit {
                     result.push_str(&format!(" USING {}", unit.to_sql()));
                 }
@@ -355,14 +356,14 @@ impl ToSql for Expression {
                 if *distinct {
                     format!(
                         "{}(DISTINCT {}{})",
-                        name.to_uppercase(),
+                        name.canonical().to_uppercase(),
                         args_sql.join(", "),
                         order_by_sql.unwrap_or_default()
                     )
                 } else {
                     format!(
                         "{}({}{})",
-                        name.to_uppercase(),
+                        name.canonical().to_uppercase(),
                         args_sql.join(", "),
                         order_by_sql.unwrap_or_default()
                     )
@@ -694,19 +695,19 @@ impl ToSql for WindowFunctionSpec {
         match self {
             WindowFunctionSpec::Aggregate { name, args } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
-                format!("{}({})", name.to_uppercase(), args_sql.join(", "))
+                format!("{}({})", name.canonical().to_uppercase(), args_sql.join(", "))
             }
             WindowFunctionSpec::Ranking { name, args } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
                 if args_sql.is_empty() {
-                    format!("{}()", name.to_uppercase())
+                    format!("{}()", name.canonical().to_uppercase())
                 } else {
-                    format!("{}({})", name.to_uppercase(), args_sql.join(", "))
+                    format!("{}({})", name.canonical().to_uppercase(), args_sql.join(", "))
                 }
             }
             WindowFunctionSpec::Value { name, args } => {
                 let args_sql: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
-                format!("{}({})", name.to_uppercase(), args_sql.join(", "))
+                format!("{}({})", name.canonical().to_uppercase(), args_sql.join(", "))
             }
         }
     }
@@ -1084,7 +1085,7 @@ impl ToSql for MixedGroupingItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ColumnIdentifier;
+    use crate::{ColumnIdentifier, FunctionIdentifier};
 
     #[test]
     fn test_binary_operators() {
@@ -1275,7 +1276,7 @@ mod tests {
     #[test]
     fn test_aggregate_function() {
         let expr = Expression::AggregateFunction {
-            name: "count".to_string(),
+            name: FunctionIdentifier::new("count"),
             distinct: true,
             args: vec![Expression::ColumnRef(ColumnIdentifier::simple("id", false))],
             order_by: None,
@@ -1340,9 +1341,14 @@ mod tests {
     #[test]
     fn test_window_function() {
         let expr = Expression::WindowFunction {
-            function: WindowFunctionSpec::Ranking { name: "row_number".to_string(), args: vec![] },
+            function: WindowFunctionSpec::Ranking {
+                name: FunctionIdentifier::new("row_number"),
+                args: vec![],
+            },
             over: WindowSpec {
-                partition_by: Some(vec![Expression::ColumnRef(ColumnIdentifier::simple("dept", false))]),
+                partition_by: Some(vec![Expression::ColumnRef(ColumnIdentifier::simple(
+                    "dept", false,
+                ))]),
                 order_by: Some(vec![OrderByItem {
                     expr: Expression::ColumnRef(ColumnIdentifier::simple("salary", false)),
                     direction: OrderDirection::Desc,

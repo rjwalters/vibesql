@@ -100,10 +100,23 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "no such table: [string tolower $table_name]"
     }
 
+    # Column not found in INSERT: "Column 'X' not found (searched tables: T)" -> "table t has no column named x"
+    # This format is used by SQLite for INSERT INTO table(columns) when a column doesn't exist
+    if {[regexp -nocase {^Column '([^']+)' not found \(searched tables: ([^)]+)\)} $error_msg -> col_name table_name]} {
+        # If it's a single table (no commas), use the INSERT-specific format
+        if {![string match "*,*" $table_name]} {
+            return "table [string tolower $table_name] has no column named [string tolower $col_name]"
+        }
+        # Otherwise, fall through to the generic "no such column" format
+    }
+
     # Column not found: "Column 'X' not found..." -> "no such column: x"
     if {[regexp -nocase {^Column '([^']+)' not found} $error_msg -> col_name]} {
         return "no such column: [string tolower $col_name]"
     }
+
+    # Note: Column/value count mismatch errors like "table X has N columns but M values were supplied"
+    # are already in SQLite format from VibeSQL - no translation needed.
 
     # Index not found: "Index 'X' not found" -> "no such index: x"
     if {[regexp -nocase {^Index '([^']+)' not found} $error_msg -> idx_name]} {
