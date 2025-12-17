@@ -206,4 +206,4 @@ pub use select::{
 pub use statement::Statement;
 
 // SQL Identifiers with SQL:1999 case sensitivity handling
-pub use identifier::{ColumnIdentifier, Identifier, TableIdentifier};
+pub use identifier::{ColumnIdentifier, FunctionIdentifier, Identifier, TableIdentifier};

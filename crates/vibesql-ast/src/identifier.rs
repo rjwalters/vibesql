@@ -891,6 +891,90 @@ impl From<String> for ColumnIdentifier {
 /// This is a type alias for now, but can be specialized later if needed.
 pub type Identifier = TableIdentifier;
 
+/// A SQL function identifier with proper case handling.
+///
+/// Similar to TableIdentifier and ColumnIdentifier, this type separates:
+/// - **Canonical form**: Lowercase for comparison and lookup
+/// - **Display form**: Preserves user's original case for error messages
+///
+/// ## Example
+///
+/// ```
+/// use vibesql_ast::FunctionIdentifier;
+///
+/// // User wrote SUBSTR in their query
+/// let func = FunctionIdentifier::new("SUBSTR");
+/// assert_eq!(func.canonical(), "substr");  // Lowercase for comparison
+/// assert_eq!(func.display(), "SUBSTR");    // Original case for errors
+/// ```
+#[derive(Debug, Clone)]
+pub struct FunctionIdentifier {
+    /// Canonical form (lowercase) for comparison and lookup
+    canonical: String,
+    /// Display form preserving user's original input
+    display: String,
+}
+
+impl FunctionIdentifier {
+    /// Create a new function identifier preserving original case.
+    ///
+    /// The canonical form is lowercased for case-insensitive comparison,
+    /// while the display form preserves the original case for error messages.
+    pub fn new(name: &str) -> Self {
+        Self {
+            canonical: name.to_lowercase(),
+            display: name.to_string(),
+        }
+    }
+
+    /// Get the canonical (lowercase) form for comparison.
+    pub fn canonical(&self) -> &str {
+        &self.canonical
+    }
+
+    /// Get the display form (original case) for error messages.
+    pub fn display(&self) -> &str {
+        &self.display
+    }
+
+    /// Check if this function matches the given name (case-insensitive).
+    pub fn matches(&self, name: &str) -> bool {
+        self.canonical == name.to_lowercase()
+    }
+}
+
+impl PartialEq for FunctionIdentifier {
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical == other.canonical
+    }
+}
+
+impl Eq for FunctionIdentifier {}
+
+impl Hash for FunctionIdentifier {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.canonical.hash(state);
+    }
+}
+
+impl fmt::Display for FunctionIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display)
+    }
+}
+
+impl From<&str> for FunctionIdentifier {
+    fn from(s: &str) -> Self {
+        Self::new(s)
+    }
+}
+
+impl From<String> for FunctionIdentifier {
+    fn from(s: String) -> Self {
+        Self::new(&s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
