@@ -222,6 +222,11 @@ impl DeleteExecutor {
             .next()
             .is_some();
 
+        // Validate WHERE clause columns upfront (catches errors even on empty tables)
+        if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
+            Self::validate_where_columns(where_expr, &schema, table_name)?;
+        }
+
         // Find rows to delete and their indices
         // Try to use primary key index for fast lookup
         let mut rows_and_indices_to_delete: Vec<(usize, vibesql_storage::Row)> = Vec::new();
@@ -435,6 +440,94 @@ impl DeleteExecutor {
         None
     }
 
+    /// Validate that all column references in the WHERE clause exist in the schema
+    /// This catches errors like "DELETE FROM t WHERE nonexistent_col = 5" even on empty tables
+    fn validate_where_columns(
+        expr: &vibesql_ast::Expression,
+        schema: &vibesql_catalog::TableSchema,
+        table_name: &str,
+    ) -> Result<(), ExecutorError> {
+        use vibesql_ast::Expression;
+
+        match expr {
+            Expression::ColumnRef(col_id) => {
+                let col_name = col_id.column_canonical();
+                // Check if column exists in schema (case-insensitive)
+                // Also allow ROWID pseudo-column aliases
+                let is_rowid = col_name.eq_ignore_ascii_case("rowid")
+                    || col_name.eq_ignore_ascii_case("_rowid_")
+                    || col_name.eq_ignore_ascii_case("oid");
+                if !is_rowid && !schema.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name)) {
+                    return Err(ExecutorError::NoSuchColumn {
+                        column_ref: col_name.to_string(),
+                    });
+                }
+                Ok(())
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                Self::validate_where_columns(left, schema, table_name)?;
+                Self::validate_where_columns(right, schema, table_name)
+            }
+            Expression::UnaryOp { expr, .. } => Self::validate_where_columns(expr, schema, table_name),
+            Expression::IsNull { expr, .. } => Self::validate_where_columns(expr, schema, table_name),
+            Expression::Between { expr, low, high, .. } => {
+                Self::validate_where_columns(expr, schema, table_name)?;
+                Self::validate_where_columns(low, schema, table_name)?;
+                Self::validate_where_columns(high, schema, table_name)
+            }
+            Expression::InList { expr, values, .. } => {
+                Self::validate_where_columns(expr, schema, table_name)?;
+                for item in values {
+                    Self::validate_where_columns(item, schema, table_name)?;
+                }
+                Ok(())
+            }
+            Expression::Function { args, .. } => {
+                for arg in args {
+                    Self::validate_where_columns(arg, schema, table_name)?;
+                }
+                Ok(())
+            }
+            Expression::AggregateFunction { args, .. } => {
+                for arg in args {
+                    Self::validate_where_columns(arg, schema, table_name)?;
+                }
+                Ok(())
+            }
+            Expression::Case { operand, when_clauses, else_result } => {
+                if let Some(op) = operand {
+                    Self::validate_where_columns(op, schema, table_name)?;
+                }
+                for case_when in when_clauses {
+                    for cond in &case_when.conditions {
+                        Self::validate_where_columns(cond, schema, table_name)?;
+                    }
+                    Self::validate_where_columns(&case_when.result, schema, table_name)?;
+                }
+                if let Some(else_expr) = else_result {
+                    Self::validate_where_columns(else_expr, schema, table_name)?;
+                }
+                Ok(())
+            }
+            // Literals and other expressions that don't reference columns
+            Expression::Literal(_)
+            | Expression::Wildcard
+            | Expression::Placeholder(_)
+            | Expression::NumberedPlaceholder(_)
+            | Expression::NamedPlaceholder(_)
+            | Expression::CurrentDate
+            | Expression::CurrentTime { .. }
+            | Expression::CurrentTimestamp { .. } => Ok(()),
+            // Subqueries have their own scope - don't validate against parent table
+            Expression::ScalarSubquery(_)
+            | Expression::In { .. }
+            | Expression::Exists { .. }
+            | Expression::QuantifiedComparison { .. } => Ok(()),
+            // Other expressions - recurse into children if any
+            _ => Ok(()),
+        }
+    }
+
     /// Collect rows using table scan (fallback when PK optimization can't be used)
     fn collect_rows_with_scan(
         table: &vibesql_storage::Table,
@@ -451,10 +544,9 @@ impl DeleteExecutor {
             let should_delete = if let Some(ref where_clause) = where_clause {
                 match where_clause {
                     vibesql_ast::WhereClause::Condition(where_expr) => {
-                        matches!(
-                            evaluator.eval(where_expr, row),
-                            Ok(vibesql_types::SqlValue::Boolean(true))
-                        )
+                        // Propagate errors from eval() - don't silently swallow them
+                        let result = evaluator.eval(where_expr, row)?;
+                        matches!(result, vibesql_types::SqlValue::Boolean(true))
                     }
                     vibesql_ast::WhereClause::CurrentOf(_cursor_name) => {
                         return Err(ExecutorError::UnsupportedFeature(
