@@ -209,7 +209,28 @@ impl Parser {
                     vibesql_ast::OrderDirection::Asc // Default
                 };
 
-                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order: None })
+                // Parse optional NULLS FIRST/LAST (SQL:2003 extension)
+                let nulls_order = if p.peek_keyword(Keyword::Nulls) {
+                    p.consume_keyword(Keyword::Nulls)?;
+                    if p.peek_keyword(Keyword::First) {
+                        p.consume_keyword(Keyword::First)?;
+                        Some(vibesql_ast::NullsOrder::First)
+                    } else if p.peek_keyword(Keyword::Last) {
+                        p.consume_keyword(Keyword::Last)?;
+                        Some(vibesql_ast::NullsOrder::Last)
+                    } else {
+                        return Err(ParseError {
+                            message: format!(
+                                "Expected FIRST or LAST after NULLS, found {}",
+                                p.peek().syntax_error()
+                            ),
+                        });
+                    }
+                } else {
+                    None
+                };
+
+                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
             })?;
 
             Some(order_items)

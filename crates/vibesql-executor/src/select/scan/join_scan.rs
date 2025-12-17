@@ -332,6 +332,10 @@ fn remove_duplicate_columns_for_using_join(
                 // Position in result = left_col_count + position_in_right_schema
                 let hidden_idx = left_col_count + table_start_idx + col_idx;
                 result.schema.hide_column(hidden_idx);
+
+                // Mark as "joined column" so it won't be considered ambiguous
+                // when referenced without table qualification (issue #4517)
+                result.schema.add_joined_column(&col.name);
             }
         }
     }

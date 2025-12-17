@@ -1,13 +1,12 @@
+use tempfile::tempdir;
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::{parse_sql_statements, read_sql_dump, Database};
 use vibesql_types::DataType;
 
 #[test]
 fn test_database_save_and_load_roundtrip() {
-    let temp_file = "/tmp/test_db_roundtrip.sql";
-
-    // Clean up any existing test file
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_roundtrip.sql");
 
     // Step 1: Create database with some tables and data
     let mut db = Database::new();
@@ -47,18 +46,18 @@ fn test_database_save_and_load_roundtrip() {
         .unwrap();
 
     // Step 2: Save database to SQL dump
-    db.save_sql_dump(temp_file).unwrap();
+    db.save_sql_dump(&temp_file).unwrap();
 
     // Step 3: Verify file was created and has content
-    assert!(std::path::Path::new(temp_file).exists(), "SQL dump file should exist");
+    assert!(temp_file.exists(), "SQL dump file should exist");
 
-    let content = std::fs::read_to_string(temp_file).unwrap();
+    let content = std::fs::read_to_string(&temp_file).unwrap();
     assert!(content.contains("CREATE TABLE test_users"), "SQL dump should contain CREATE TABLE");
     assert!(content.contains("Alice"), "SQL dump should contain inserted data");
     assert!(content.contains("Bob"), "SQL dump should contain inserted data");
 
     // Step 4: Load database from SQL dump using the load utilities
-    let sql_content = read_sql_dump(temp_file).unwrap();
+    let sql_content = read_sql_dump(&temp_file).unwrap();
     let statements = parse_sql_statements(&sql_content).unwrap();
 
     // Verify we got the expected statements
@@ -81,17 +80,13 @@ fn test_database_save_and_load_roundtrip() {
             result.err()
         );
     }
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
+    // temp dir is automatically cleaned up on drop
 }
 
 #[test]
 fn test_binary_format_roundtrip() {
-    let temp_file = "/tmp/test_db_binary_roundtrip.vbsql";
-
-    // Clean up any existing test file
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_binary_roundtrip.vbsql");
 
     // Step 1: Create database with schemas, tables, indexes, and data
     let mut db = Database::new();
@@ -175,16 +170,16 @@ fn test_binary_format_roundtrip() {
         .unwrap();
 
     // Step 2: Save database to binary format
-    db.save_binary(temp_file).unwrap();
+    db.save_binary(&temp_file).unwrap();
 
     // Step 3: Verify file was created and has content
-    assert!(std::path::Path::new(temp_file).exists(), "Binary file should exist");
+    assert!(temp_file.exists(), "Binary file should exist");
 
-    let metadata = std::fs::metadata(temp_file).unwrap();
+    let metadata = std::fs::metadata(&temp_file).unwrap();
     assert!(metadata.len() > 100, "Binary file should have substantial content");
 
     // Step 4: Load database from binary format
-    let db2 = Database::load_binary(temp_file).unwrap();
+    let db2 = Database::load_binary(&temp_file).unwrap();
 
     // Step 5: Verify all data was preserved
 
@@ -231,12 +226,9 @@ fn test_binary_format_roundtrip() {
     assert_eq!(products_rows[0].values[2], vibesql_types::SqlValue::Double(19.99));
 
     // Step 6: Test auto-detection via Database::load()
-    let db3 = Database::load(temp_file).unwrap();
+    let db3 = Database::load(&temp_file).unwrap();
     let users_table3 = db3.get_table("users").unwrap();
     assert_eq!(users_table3.row_count(), 3);
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
 
 #[test]
@@ -292,10 +284,8 @@ CREATE TABLE users (
 
 #[test]
 fn test_compressed_binary_format_roundtrip() {
-    let temp_file = "/tmp/test_db_compressed_roundtrip.vbsqlz";
-
-    // Clean up any existing test file
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_compressed_roundtrip.vbsqlz");
 
     // Create database with test data
     let mut db = Database::new();
@@ -332,13 +322,13 @@ fn test_compressed_binary_format_roundtrip() {
         .unwrap();
 
     // Save in compressed format
-    db.save_compressed(temp_file).unwrap();
+    db.save_compressed(&temp_file).unwrap();
 
     // Verify file was created
-    assert!(std::path::Path::new(temp_file).exists(), "Compressed file should exist");
+    assert!(temp_file.exists(), "Compressed file should exist");
 
     // Load from compressed format
-    let loaded_db = Database::load_compressed(temp_file).unwrap();
+    let loaded_db = Database::load_compressed(&temp_file).unwrap();
 
     // Verify table exists
     assert!(loaded_db.get_table("users").is_some(), "Users table should exist");
@@ -352,17 +342,12 @@ fn test_compressed_binary_format_roundtrip() {
     assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
     assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
     assert_eq!(rows[0].values[2], vibesql_types::SqlValue::Integer(30));
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
 
 #[test]
 fn test_default_save_method_creates_compressed() {
-    let temp_file = "/tmp/test_db_default_save.vbsqlz";
-
-    // Clean up
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_default_save.vbsqlz");
 
     // Create simple database
     let mut db = Database::new();
@@ -373,27 +358,21 @@ fn test_default_save_method_creates_compressed() {
     db.create_table(schema).unwrap();
 
     // Save using default method (should create compressed)
-    db.save(temp_file).unwrap();
+    db.save(&temp_file).unwrap();
 
     // Verify file exists
-    assert!(std::path::Path::new(temp_file).exists());
+    assert!(temp_file.exists());
 
     // Load it back using auto-detection
-    let loaded_db = Database::load(temp_file).unwrap();
+    let loaded_db = Database::load(&temp_file).unwrap();
     assert!(loaded_db.get_table("test").is_some());
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
 
 #[test]
 fn test_compression_reduces_file_size() {
-    let compressed_file = "/tmp/test_db_compressed.vbsqlz";
-    let uncompressed_file = "/tmp/test_db_uncompressed.vbsql";
-
-    // Clean up
-    let _ = std::fs::remove_file(compressed_file);
-    let _ = std::fs::remove_file(uncompressed_file);
+    let dir = tempdir().unwrap();
+    let compressed_file = dir.path().join("test_db_compressed.vbsqlz");
+    let uncompressed_file = dir.path().join("test_db_uncompressed.vbsql");
 
     // Create database with some data
     let mut db = Database::new();
@@ -422,12 +401,12 @@ fn test_compression_reduces_file_size() {
     }
 
     // Save both formats
-    db.save_compressed(compressed_file).unwrap();
-    db.save_uncompressed(uncompressed_file).unwrap();
+    db.save_compressed(&compressed_file).unwrap();
+    db.save_uncompressed(&uncompressed_file).unwrap();
 
     // Get file sizes
-    let compressed_size = std::fs::metadata(compressed_file).unwrap().len();
-    let uncompressed_size = std::fs::metadata(uncompressed_file).unwrap().len();
+    let compressed_size = std::fs::metadata(&compressed_file).unwrap().len();
+    let uncompressed_size = std::fs::metadata(&uncompressed_file).unwrap().len();
 
     // Verify compression reduces size
     println!("Uncompressed: {} bytes, Compressed: {} bytes", uncompressed_size, compressed_size);
@@ -436,20 +415,13 @@ fn test_compression_reduces_file_size() {
         compressed_size < uncompressed_size / 2,
         "Should compress by at least 50% with repetitive data"
     );
-
-    // Clean up
-    std::fs::remove_file(compressed_file).unwrap();
-    std::fs::remove_file(uncompressed_file).unwrap();
 }
 
 #[test]
 fn test_load_auto_detects_compressed_format() {
-    let compressed_file = "/tmp/test_db_auto_detect.vbsqlz";
-    let uncompressed_file = "/tmp/test_db_auto_detect.vbsql";
-
-    // Clean up
-    let _ = std::fs::remove_file(compressed_file);
-    let _ = std::fs::remove_file(uncompressed_file);
+    let dir = tempdir().unwrap();
+    let compressed_file = dir.path().join("test_db_auto_detect.vbsqlz");
+    let uncompressed_file = dir.path().join("test_db_auto_detect.vbsql");
 
     // Create database
     let mut db = Database::new();
@@ -460,28 +432,22 @@ fn test_load_auto_detects_compressed_format() {
     db.create_table(schema).unwrap();
 
     // Save in both formats
-    db.save_compressed(compressed_file).unwrap();
-    db.save_uncompressed(uncompressed_file).unwrap();
+    db.save_compressed(&compressed_file).unwrap();
+    db.save_uncompressed(&uncompressed_file).unwrap();
 
     // Load both using generic load() method (should auto-detect)
-    let loaded_compressed = Database::load(compressed_file).unwrap();
-    let loaded_uncompressed = Database::load(uncompressed_file).unwrap();
+    let loaded_compressed = Database::load(&compressed_file).unwrap();
+    let loaded_uncompressed = Database::load(&uncompressed_file).unwrap();
 
     // Verify both loaded correctly
     assert!(loaded_compressed.get_table("test").is_some());
     assert!(loaded_uncompressed.get_table("test").is_some());
-
-    // Clean up
-    std::fs::remove_file(compressed_file).unwrap();
-    std::fs::remove_file(uncompressed_file).unwrap();
 }
 
 #[test]
 fn test_primary_key_persistence() {
-    let temp_file = "/tmp/test_db_primary_key.vbsql";
-
-    // Clean up any existing test file
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_primary_key.vbsql");
 
     // Create database with a primary key
     let mut db = Database::new();
@@ -528,10 +494,10 @@ fn test_primary_key_persistence() {
         .unwrap();
 
     // Save to binary format
-    db.save_binary(temp_file).unwrap();
+    db.save_binary(&temp_file).unwrap();
 
     // Load from binary format
-    let db2 = Database::load_binary(temp_file).unwrap();
+    let db2 = Database::load_binary(&temp_file).unwrap();
 
     // Verify primary key was preserved
     let table_after = db2.get_table("orders").unwrap();
@@ -546,17 +512,12 @@ fn test_primary_key_persistence() {
     let rows = table_after.scan();
     assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
     assert_eq!(rows[1].values[0], vibesql_types::SqlValue::Integer(2));
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
 
 #[test]
 fn test_composite_primary_key_persistence() {
-    let temp_file = "/tmp/test_db_composite_pk.vbsql";
-
-    // Clean up
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_composite_pk.vbsql");
 
     // Create database with composite primary key
     let mut db = Database::new();
@@ -587,8 +548,8 @@ fn test_composite_primary_key_persistence() {
     );
 
     // Save and reload
-    db.save_binary(temp_file).unwrap();
-    let db2 = Database::load_binary(temp_file).unwrap();
+    db.save_binary(&temp_file).unwrap();
+    let db2 = Database::load_binary(&temp_file).unwrap();
 
     // Verify composite PK was preserved
     let table_after = db2.get_table("order_items").unwrap();
@@ -597,17 +558,12 @@ fn test_composite_primary_key_persistence() {
         Some(vec!["order_id".to_string(), "line_number".to_string()]),
         "Composite primary key should be preserved after load"
     );
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
 
 #[test]
 fn test_no_primary_key_persistence() {
-    let temp_file = "/tmp/test_db_no_pk.vbsql";
-
-    // Clean up
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_no_pk.vbsql");
 
     // Create database without primary key
     let mut db = Database::new();
@@ -627,15 +583,12 @@ fn test_no_primary_key_persistence() {
     assert_eq!(table_before.schema.primary_key, None, "No primary key should be set");
 
     // Save and reload
-    db.save_binary(temp_file).unwrap();
-    let db2 = Database::load_binary(temp_file).unwrap();
+    db.save_binary(&temp_file).unwrap();
+    let db2 = Database::load_binary(&temp_file).unwrap();
 
     // Verify no primary key after load
     let table_after = db2.get_table("logs").unwrap();
     assert_eq!(table_after.schema.primary_key, None, "No primary key should be preserved as None");
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
 
 /// Test that indexes are populated correctly after database save/load.
@@ -643,10 +596,8 @@ fn test_no_primary_key_persistence() {
 /// columns returned empty results after loading a database from disk.
 #[test]
 fn test_index_data_populated_after_load() {
-    let temp_file = "/tmp/test_db_index_after_load.vbsql";
-
-    // Clean up any existing test file
-    let _ = std::fs::remove_file(temp_file);
+    let dir = tempdir().unwrap();
+    let temp_file = dir.path().join("test_db_index_after_load.vbsql");
 
     // Step 1: Create database with index
     let mut db = Database::new();
@@ -717,10 +668,10 @@ fn test_index_data_populated_after_load() {
     );
 
     // Step 2: Save to binary format
-    db.save_binary(temp_file).unwrap();
+    db.save_binary(&temp_file).unwrap();
 
     // Step 3: Load from binary format
-    let db2 = Database::load_binary(temp_file).unwrap();
+    let db2 = Database::load_binary(&temp_file).unwrap();
 
     // Step 4: Verify index exists after load
     assert!(db2.index_exists("idx_customer"), "Index should exist after load");
@@ -756,7 +707,4 @@ fn test_index_data_populated_after_load() {
     let rows = rows.unwrap();
     assert_eq!(rows.len(), 1, "Should find exactly one row for Alice");
     assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice")));
-
-    // Clean up
-    std::fs::remove_file(temp_file).unwrap();
 }
