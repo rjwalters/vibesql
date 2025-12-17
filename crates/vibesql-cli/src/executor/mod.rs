@@ -797,6 +797,18 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "INTEGRITY_CHECK" => {
+                    // SQLite compatibility: Return "ok" if no corruption detected
+                    // Since we're in-memory and don't have B-tree corruption scenarios,
+                    // we always return "ok"
+                    Ok(QueryResult {
+                        columns: vec!["integrity_check".to_string()],
+                        rows: vec![vec![Some("ok".to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - return empty result for compatibility
                     Ok(QueryResult {

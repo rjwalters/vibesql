@@ -977,6 +977,12 @@ proc do_test {name script expected} {
 proc do_execsql_test {name sql {expected {}}} {
     # Convenience wrapper for SQL execution tests
     # Expected is optional - if not provided, just execute the SQL
+
+    # Pre-substitute TCL variables at this level (where they're in scope from foreach loops)
+    # This handles cases like: foreach {id x} {...} { do_execsql_test test.$id {INSERT ... $x} }
+    # where $x needs to be substituted before the SQL is passed down
+    catch {set sql [uplevel 1 [list subst -nocommands -nobackslashes $sql]]}
+
     do_test $name [list execsql $sql] $expected
 }
 
