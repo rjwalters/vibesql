@@ -165,7 +165,7 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Symbol('.'))
                 }
             }
-            '+' | '-' | '*' | '/' => {
+            '+' | '-' | '*' | '/' | '%' => {
                 let symbol = ch;
                 self.advance();
                 Ok(Token::Symbol(symbol))
