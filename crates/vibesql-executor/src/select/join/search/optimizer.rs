@@ -113,9 +113,12 @@ impl JoinOrderSearch {
     ///
     /// Returns list of table names in the order they should be joined.
     ///
-    /// When time-bounded search is enabled (default), uses parallel BFS for all
-    /// multi-table queries with a configurable time budget. This allows optimization
-    /// of large queries (9+ tables) while preventing excessive search time.
+    /// For small queries (≤3 tables), uses sequential DFS since the search space
+    /// is trivial (at most 6 orderings) and parallel overhead isn't worth it.
+    ///
+    /// When time-bounded search is enabled (default), uses parallel BFS for
+    /// multi-table queries (4+) with a configurable time budget. This allows
+    /// optimization of large queries (9+ tables) while preventing excessive search time.
     ///
     /// When time-bounded search is disabled, uses legacy behavior: parallel BFS for
     /// 3-6 table queries with highly connected join graphs, DFS for others.
@@ -124,7 +127,14 @@ impl JoinOrderSearch {
             return Vec::new();
         }
 
-        // Use time-bounded BFS for all multi-table queries when enabled
+        // For small queries (≤3 tables), use sequential DFS
+        // The search space is trivial (at most 3! = 6 orderings) and
+        // rayon thread pool overhead can cause delays under contention
+        if self.context.all_tables.len() <= 3 {
+            return self.context.find_optimal_order_dfs();
+        }
+
+        // Use time-bounded BFS for larger multi-table queries when enabled
         if self.context.config.use_time_budget {
             // Time-bounded BFS handles all query sizes with time budget protection
             self.context.find_optimal_order_parallel()

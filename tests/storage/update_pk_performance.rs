@@ -53,6 +53,7 @@ fn test_update_with_pk_index_performance() {
                 column: "value".to_string(),
                 value: Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef {
+                        schema: None,
                         table: None,
                         column: "value".to_string(),
                     }),
@@ -61,7 +62,7 @@ fn test_update_with_pk_index_performance() {
                 },
             }],
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-                left: Box::new(Expression::ColumnRef { table: None, column: "id".to_string() }),
+                left: Box::new(Expression::ColumnRef { schema: None, table: None, column: "id".to_string() }),
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(SqlValue::Integer(i))),
             })),

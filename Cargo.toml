@@ -427,6 +427,14 @@ path = "tests/regression/issue_4418.rs"
 name = "issue_4501_scalar_subquery_join"
 path = "tests/regression/issue_4501_scalar_subquery_join.rs"
 
+[[test]]
+name = "issue_4527_order_by_aggregate_position"
+path = "tests/regression/issue_4527_order_by_aggregate_position.rs"
+
+[[test]]
+name = "issue_4530_correlated_subquery_no_from"
+path = "tests/regression/issue_4530_correlated_subquery_no_from.rs"
+
 # Parser tests - SQL parsing and syntax
 [[test]]
 name = "coverage_improvements"

@@ -45,7 +45,7 @@ fn execute_dml(db: &mut Database, sql: &str) {
 
 #[test]
 fn test_search_count_basic() {
-    let mut db = Database::new();
+    let db = Database::new();
 
     // Initial search count should be 0
     assert_eq!(db.search_count(), 0);
@@ -79,7 +79,7 @@ fn test_search_count_function() {
 
 #[test]
 fn test_search_count_reset_function() {
-    let mut db = Database::new();
+    let db = Database::new();
 
     // Set some initial count
     db.increment_search_count(42);

@@ -147,9 +147,10 @@ fn collect_correlation_refs_from_expr(
                         refs.insert((Some(table_name.to_string()), column.to_string()));
                     }
                 }
-            } else if !subquery_tables.is_empty() {
-                // Unqualified reference - check if it's in outer schema but not in subquery tables
-                // This is conservative: we only add it if we're sure it's external
+            } else {
+                // Unqualified reference - check if it's in outer schema
+                // If subquery_tables is empty (no FROM clause), any column ref
+                // MUST be from the outer schema since there's no internal schema
                 if outer_schema.get_column_index(None, column).is_some() {
                     refs.insert((None, column.to_string()));
                 }

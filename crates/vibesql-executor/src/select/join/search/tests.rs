@@ -599,11 +599,9 @@ fn test_time_bounded_search_completes_fast_for_small_queries() {
     let order = search.find_optimal_order();
     let elapsed = start.elapsed();
 
-    // Should complete quickly for 3 tables (generous threshold for parallel test suite)
-    // The actual operation typically completes in <50ms, but system load during
-    // parallel test execution can cause significant delays. Using 10s threshold
-    // to catch infinite loops while being resilient to system load.
-    assert!(elapsed.as_secs() < 10, "Small query took too long: {:?}", elapsed);
+    // Should complete quickly for 3 tables - now uses sequential DFS which avoids
+    // rayon thread pool contention. 500ms is generous for what should be <10ms.
+    assert!(elapsed.as_millis() < 500, "Small query took too long: {:?}", elapsed);
     assert_eq!(order.len(), 3);
 }
 

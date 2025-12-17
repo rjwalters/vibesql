@@ -11,6 +11,7 @@ fn test_create_assertion_success() {
         check_condition: Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThanOrEqual,
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("accounts".to_string()),
                 column: "balance".to_string(),
             }),
@@ -109,6 +110,7 @@ fn test_create_drop_round_trip() {
         check_condition: Box::new(vibesql_ast::Expression::BinaryOp {
             op: vibesql_ast::BinaryOperator::GreaterThan,
             left: Box::new(vibesql_ast::Expression::ColumnRef {
+                schema: None,
                 table: Some("data".to_string()),
                 column: "value".to_string(),
             }),
@@ -179,6 +181,7 @@ fn test_assertion_with_complex_condition() {
             left: Box::new(vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::GreaterThan,
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "age".to_string(),
                 }),
@@ -189,6 +192,7 @@ fn test_assertion_with_complex_condition() {
             right: Box::new(vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::LessThan,
                 left: Box::new(vibesql_ast::Expression::ColumnRef {
+                    schema: None,
                     table: Some("users".to_string()),
                     column: "age".to_string(),
                 }),
