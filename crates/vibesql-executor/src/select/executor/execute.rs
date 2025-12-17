@@ -1208,6 +1208,46 @@ fn collect_union_aliases(
 }
 
 impl SelectExecutor<'_> {
+    /// Resolve a column name to an index in set operation ORDER BY
+    ///
+    /// Tries to match by:
+    /// 1. Numeric column reference (e.g., "1" -> column 0)
+    /// 2. Alias name from first branch's column info
+    /// 3. Alias name from any UNION branch (SQLite compatibility)
+    fn resolve_order_by_column(
+        column: &str,
+        column_info: &[(String, Option<String>)],
+        all_union_aliases: &[Vec<Option<String>>],
+    ) -> Option<usize> {
+        // Try to parse as numeric column reference first
+        if let Ok(n) = column.parse::<usize>() {
+            return Some(n.saturating_sub(1));
+        }
+
+        // Try to match by alias name first, then by original expression name
+        // Use case-insensitive matching for SQLite compatibility
+        let col_idx = column_info.iter().position(|(alias, orig)| {
+            alias.eq_ignore_ascii_case(column)
+                || orig.as_ref().map_or(false, |o| o.eq_ignore_ascii_case(column))
+        });
+
+        // If not found, check if any branch has this alias (SQLite compatibility)
+        // SQLite allows ORDER BY to reference aliases from any UNION branch
+        col_idx.or_else(|| {
+            // Check all positions in all branches
+            for branch_aliases in all_union_aliases {
+                for (idx, alias_opt) in branch_aliases.iter().enumerate() {
+                    if let Some(alias) = alias_opt {
+                        if alias.eq_ignore_ascii_case(column) {
+                            return Some(idx);
+                        }
+                    }
+                }
+            }
+            None
+        })
+    }
+
     /// Sort set operation results by ORDER BY clause
     ///
     /// ORDER BY on a UNION/INTERSECT/EXCEPT can use:
@@ -1224,7 +1264,7 @@ impl SelectExecutor<'_> {
         _select_list: &[vibesql_ast::SelectItem],
         all_union_aliases: &[Vec<Option<String>>], // Aliases from all UNION branches (wildcards expanded)
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
-        use crate::select::grouping::compare_sql_values;
+        use crate::select::grouping::compare_sql_values_with_collation;
         use std::cmp::Ordering;
 
         // Build column name map from the first branch's aliases (with wildcards already expanded)
@@ -1239,47 +1279,37 @@ impl SelectExecutor<'_> {
         };
 
         // Parse order_by items and resolve to column indices
-        // (column_index, is_desc, nulls_first)
-        let mut sort_columns: Vec<(usize, bool, bool)> = Vec::new();
+        // (column_index, is_desc, nulls_first, collation)
+        let mut sort_columns: Vec<(usize, bool, bool, Option<String>)> = Vec::new();
         for (term_index, item) in order_by.iter().enumerate() {
-            let col_idx_opt = match &item.expr {
+            // Extract column index and optional collation
+            let (col_idx_opt, collation) = match &item.expr {
                 // Numeric literal: ORDER BY 1
                 vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
-                    Some((*n as usize).saturating_sub(1)) // 1-based to 0-based
+                    (Some((*n as usize).saturating_sub(1)), None) // 1-based to 0-based
                 }
                 // Column reference: ORDER BY x or ORDER BY a
                 vibesql_ast::Expression::ColumnRef(col_id) => {
                     let column = col_id.column_canonical();
-                    // Try to parse as numeric column reference first
-                    if let Ok(n) = column.parse::<usize>() {
-                        Some(n.saturating_sub(1))
-                    } else {
-                        // Try to match by alias name first, then by original expression name
-                        // Use case-insensitive matching for SQLite compatibility
-                        let col_idx = column_info.iter().position(|(alias, orig)| {
-                            alias.eq_ignore_ascii_case(column)
-                                || orig.as_ref().is_some_and(|o| o.eq_ignore_ascii_case(column))
-                        });
-
-                        // If not found, check if any branch has this alias (SQLite compatibility)
-                        // SQLite allows ORDER BY to reference aliases from any UNION branch
-                        col_idx.or_else(|| {
-                            // Check all positions in all branches
-                            for branch_aliases in all_union_aliases {
-                                for (idx, alias_opt) in branch_aliases.iter().enumerate() {
-                                    if let Some(alias) = alias_opt {
-                                        if alias.eq_ignore_ascii_case(column) {
-                                            return Some(idx);
-                                        }
-                                    }
-                                }
-                            }
-                            None
-                        })
-                    }
+                    (Self::resolve_order_by_column(column, &column_info, all_union_aliases), None)
+                }
+                // COLLATE expression: ORDER BY x COLLATE nocase
+                // Extract the column reference and resolve it
+                vibesql_ast::Expression::Collate { expr, collation } => {
+                    let col_idx = match expr.as_ref() {
+                        vibesql_ast::Expression::ColumnRef(col_id) => {
+                            let column = col_id.column_canonical();
+                            Self::resolve_order_by_column(column, &column_info, all_union_aliases)
+                        }
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => {
+                            Some((*n as usize).saturating_sub(1))
+                        }
+                        _ => None,
+                    };
+                    (col_idx, Some(collation.clone()))
                 }
                 // Complex expressions not supported in compound query ORDER BY
-                _ => None,
+                _ => (None, None),
             };
 
             if let Some(col_idx) = col_idx_opt {
@@ -1298,7 +1328,7 @@ impl SelectExecutor<'_> {
                 let nulls_first = item
                     .nulls_order
                     .is_some_and(|no| matches!(no, vibesql_ast::NullsOrder::First));
-                sort_columns.push((col_idx, is_desc, nulls_first));
+                sort_columns.push((col_idx, is_desc, nulls_first, collation));
             } else {
                 // ORDER BY term doesn't match any column in the result set
                 return Err(ExecutorError::OrderByTermNotInResultSet {
@@ -1312,7 +1342,7 @@ impl SelectExecutor<'_> {
         }
 
         rows.sort_by(|a, b| {
-            for (col_idx, is_desc, nulls_first) in &sort_columns {
+            for (col_idx, is_desc, nulls_first, collation) in &sort_columns {
                 let val_a = a.values.get(*col_idx);
                 let val_b = b.values.get(*col_idx);
 
@@ -1337,7 +1367,8 @@ impl SelectExecutor<'_> {
                         // Compare non-NULL values
                         match (val_a, val_b) {
                             (Some(a_val), Some(b_val)) => {
-                                let cmp = compare_sql_values(a_val, b_val);
+                                // Apply collation if specified
+                                let cmp = compare_sql_values_with_collation(a_val, b_val, collation.as_deref());
                                 if *is_desc { cmp.reverse() } else { cmp }
                             }
                             _ => Ordering::Equal, // Shouldn't happen since we checked is_null above
