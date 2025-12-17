@@ -1272,6 +1272,12 @@ proc db {cmd args} {
             # This is a stub to allow tests that check status to pass
             return 0
         }
+        cache {
+            # SQLite's db cache command manages statement caching
+            # Subcommands: flush, size, etc.
+            # We ignore this as we don't implement statement caching
+            return
+        }
         default {
             error "Unknown db command: $cmd"
         }
@@ -1341,8 +1347,37 @@ proc sqlite3_memdebug_pending {args} {
     return -1
 }
 
+proc optimization_control {db flag value} {
+    # SQLite query optimizer control - ignore
+    # This is used to enable/disable specific optimizer features
+    # We don't support this level of optimizer control
+    return
+}
+
 proc breakpoint {} {
     # Debug breakpoint - ignore
+    return
+}
+
+proc drop_all_tables {} {
+    # Drop all tables in the database
+    # Used by some tests to reset state
+    if {$::db_file eq ""} {
+        return
+    }
+    # Get list of tables
+    set tables [execsql {SELECT name FROM sqlite_master WHERE type='table'}]
+    # In case sqlite_master doesn't work, try an alternative approach
+    if {$tables eq ""} {
+        # Just delete and recreate the database file
+        if {[file exists $::db_file]} {
+            file delete -force $::db_file
+        }
+    } else {
+        foreach table $tables {
+            catch {execsql "DROP TABLE IF EXISTS $table"}
+        }
+    }
     return
 }
 
