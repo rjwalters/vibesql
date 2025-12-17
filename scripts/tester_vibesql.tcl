@@ -227,6 +227,10 @@ proc translate_error_to_sqlite {vibesql_error} {
     }
 
     # Table already exists: "Table 'X' already exists" -> "table X already exists"
+    # Note: SQLite uses different formats for CREATE TABLE vs ALTER TABLE RENAME:
+    # - CREATE TABLE: {table "X" already exists}
+    # - ALTER TABLE RENAME: {there is already another table or index with this name: x}
+    # We can't distinguish these without SQL context, so we use the simpler format.
     if {[regexp -nocase {^Table '([^']+)' already exists} $error_msg -> table_name]} {
         return "table [string tolower $table_name] already exists"
     }
