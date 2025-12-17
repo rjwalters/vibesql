@@ -387,6 +387,52 @@ proc flush_batch {} {
     return $result
 }
 
+proc exec_preserve_newlines {sql db_file} {
+    # Execute vibesql command and preserve trailing newlines in output.
+    # TCL's exec strips exactly one trailing newline, which makes it impossible
+    # to distinguish between:
+    # - Zero rows (empty output)
+    # - One NULL row (single \n output, stripped to empty by exec)
+    #
+    # We use open/read/close instead of exec to preserve all newlines.
+    # This correctly handles NULL aggregate results like:
+    #   SELECT avg(x) FROM t1 WHERE x>100  →  outputs "\n" for NULL
+    #
+    # The trailing newline is then handled by parse_raw_result which treats
+    # empty lines as NULL values.
+
+    # Write SQL to a temp file to avoid shell quoting issues
+    set tmpfile "/tmp/vibesql_exec_[pid]_[clock microseconds].sql"
+    set fd [open $tmpfile w]
+    puts -nonewline $fd $sql
+    close $fd
+
+    # Build the command pipeline
+    if {$db_file eq ""} {
+        set cmd "$::vibesql_path < $tmpfile 2>&1"
+    } else {
+        set cmd "$::vibesql_path $db_file < $tmpfile 2>&1"
+    }
+
+    # Execute using open/read/close to preserve newlines
+    # Note: When child process exits with error, close throws.
+    # We read all output first, then handle close error separately.
+    set pipe [open "|/bin/sh -c [list $cmd]" r]
+    set result [read $pipe]
+    set close_error [catch {close $pipe}]
+
+    # Clean up temp file
+    catch {file delete $tmpfile}
+
+    # Check for errors in output (regardless of exit code)
+    # vibesql outputs errors starting with "Error"
+    if {[regexp {^Error} $result]} {
+        error [translate_error_to_sqlite $result]
+    }
+
+    return $result
+}
+
 proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
@@ -505,16 +551,15 @@ proc execsql {sql {db ""}} {
     # This matches SQLite TCL interface behavior
     set raw_sql ".mode raw\n${pragma_prefix}$sql"
 
-    # Use catch to handle process errors and translate them to SQLite format
+    # Use exec_preserve_newlines to avoid TCL's exec stripping trailing newlines.
+    # This is critical for distinguishing between:
+    # - Zero rows returned (empty output) → should return {}
+    # - One NULL row returned (single \n output) → should return {""}
+    # TCL's exec strips one trailing newline, making these indistinguishable.
     if {$::db_file eq ""} {
-        set exec_code [catch {exec echo $raw_sql | $::vibesql_path 2>@1} result]
+        set result [exec_preserve_newlines $raw_sql ""]
     } else {
-        set exec_code [catch {exec echo $raw_sql | $::vibesql_path $::db_file 2>@1} result]
-    }
-
-    if {$exec_code != 0} {
-        # Process exited with error - translate and re-raise
-        error [translate_error_to_sqlite $result]
+        set result [exec_preserve_newlines $raw_sql $::db_file]
     }
 
     return [parse_raw_result $result]
@@ -527,11 +572,27 @@ proc parse_raw_result {output} {
     # This matches SQLite TCL interface behavior for NULL representation
     set data {}
 
-    # Note: TCL's exec command already strips exactly one trailing newline from
-    # command output. VibeSQL's raw mode outputs each row followed by a newline,
-    # including rows with NULL values (which appear as empty lines).
-    # We must NOT strip any additional newlines, otherwise trailing NULL rows
-    # would be lost. Just split directly on newlines.
+    # Special case: completely empty output means zero rows
+    # This must be checked BEFORE stripping the trailing newline
+    if {$output eq ""} {
+        return {}
+    }
+
+    # Special case: single newline means one row with NULL value
+    # This is how VibeSQL outputs a single-column NULL result
+    # Check this BEFORE stripping the trailing newline
+    if {$output eq "\n"} {
+        return [list ""]
+    }
+
+    # Strip exactly one trailing newline if present.
+    # VibeSQL outputs each row followed by a newline, including the last row.
+    # Without this, split would create an extra empty element at the end.
+    # Example: "abc\n" (one row) → split gives {"abc" ""} but we want {"abc"}
+    if {[string index $output end] eq "\n"} {
+        set output [string range $output 0 end-1]
+    }
+
     set lines [split $output "\n"]
 
     foreach line $lines {
