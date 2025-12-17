@@ -258,6 +258,14 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: incomplete input$} $error_msg]} {
         return "incomplete input"
     }
+    # Semantic parse errors that SQLite returns as-is (not wrapped in "near ...": syntax error)
+    # These are specific error messages that have semantic meaning, not just syntax errors
+    if {[regexp -nocase {^Parse error: (a NATURAL join may not have an ON or USING clause)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    if {[regexp -nocase {^Parse error: (unknown join type: .+)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"
@@ -393,23 +401,64 @@ proc execsql {sql {db ""}} {
     track_pragma_setting $sql
 
     # Handle SQLite-specific statements
-    set sql_upper [string toupper [string trim $sql]]
+    # Strip unsupported PRAGMA/ANALYZE/REINDEX statements from the beginning
+    # of multi-statement SQL blocks (e.g., "PRAGMA vdbe_listing=on; SELECT ...")
+    while {1} {
+        set sql_upper [string toupper [string trim $sql]]
 
-    # Skip unsupported PRAGMAs but allow column_names through
-    if {[string match "PRAGMA*" $sql_upper]} {
-        # Parse PRAGMA name from the statement
-        # Patterns: PRAGMA name, PRAGMA name=value, PRAGMA name(value)
-        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names)} $sql]} {
-            # Pass through to VibeSQL - these are supported
-        } else {
-            return {}  ;# Skip unsupported PRAGMA statements
+        # Check for unsupported PRAGMAs (allow full_column_names and short_column_names through)
+        if {[string match "PRAGMA*" $sql_upper]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names)} $sql]} {
+                # This PRAGMA is supported - stop stripping
+                break
+            } else {
+                # Strip this unsupported PRAGMA statement from the SQL
+                # Pattern matches: PRAGMA name; or PRAGMA name=value; or PRAGMA name(value);
+                # Note: Use string range instead of regex capture for multiline SQL
+                if {[regexp -nocase {^PRAGMA\s+[^;]+;} [string trim $sql] match]} {
+                    set rest [string range [string trim $sql] [string length $match] end]
+                    set sql [string trim $rest]
+                    if {$sql eq ""} {
+                        return {}  ;# Nothing left after stripping PRAGMA
+                    }
+                    continue  ;# Check if there are more pragmas to strip
+                } else {
+                    # Single PRAGMA statement without semicolon
+                    return {}
+                }
+            }
         }
-    }
-    if {[string match "ANALYZE*" $sql_upper]} {
-        return {}  ;# Skip ANALYZE statements
-    }
-    if {[string match "REINDEX*" $sql_upper]} {
-        return {}  ;# Skip REINDEX statements
+
+        # Skip ANALYZE statements
+        if {[string match "ANALYZE*" $sql_upper]} {
+            if {[regexp -nocase {^ANALYZE[^;]*;} [string trim $sql] match]} {
+                set rest [string range [string trim $sql] [string length $match] end]
+                set sql [string trim $rest]
+                if {$sql eq ""} {
+                    return {}
+                }
+                continue
+            } else {
+                return {}
+            }
+        }
+
+        # Skip REINDEX statements
+        if {[string match "REINDEX*" $sql_upper]} {
+            if {[regexp -nocase {^REINDEX[^;]*;} [string trim $sql] match]} {
+                set rest [string range [string trim $sql] [string length $match] end]
+                set sql [string trim $rest]
+                if {$sql eq ""} {
+                    return {}
+                }
+                continue
+            } else {
+                return {}
+            }
+        }
+
+        # No more statements to strip
+        break
     }
 
     # Handle transaction batching
@@ -478,13 +527,11 @@ proc parse_raw_result {output} {
     # This matches SQLite TCL interface behavior for NULL representation
     set data {}
 
-    # Important: Don't use "string trimright $output \n" because that removes
-    # ALL trailing newlines, including those that represent NULL values in
-    # single-column queries. Instead, trim only one trailing newline if present
-    # (the final line terminator) but preserve empty lines before it.
-    if {[string index $output end] eq "\n"} {
-        set output [string range $output 0 end-1]
-    }
+    # Note: TCL's exec command already strips exactly one trailing newline from
+    # command output. VibeSQL's raw mode outputs each row followed by a newline,
+    # including rows with NULL values (which appear as empty lines).
+    # We must NOT strip any additional newlines, otherwise trailing NULL rows
+    # would be lost. Just split directly on newlines.
     set lines [split $output "\n"]
 
     foreach line $lines {
