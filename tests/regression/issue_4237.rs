@@ -15,6 +15,7 @@
 //! 2. Skip auto-generated PK indexes (PK_*) to avoid duplicate index creation
 
 use std::fs;
+use tempfile::NamedTempFile;
 
 use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
@@ -70,7 +71,8 @@ fn test_insert_or_replace_persists_across_sql_dump() {
     assert_eq!(rows[0][1], SqlValue::Varchar(StringValue::from("PASS")));
 
     // Save database as SQL dump
-    let path = "/tmp/test_issue_4237.sql";
+    let temp_file = NamedTempFile::new().unwrap();
+    let path = temp_file.path().to_str().unwrap();
     db.save_sql_dump(path).unwrap();
 
     // Verify the SQL dump contains PRIMARY KEY
@@ -124,9 +126,7 @@ fn test_insert_or_replace_persists_across_sql_dump() {
         SqlValue::Varchar(StringValue::from("FAIL")),
         "Status should be updated to FAIL"
     );
-
-    // Cleanup
-    let _ = fs::remove_file(path);
+    // temp_file is automatically cleaned up on drop
 }
 
 /// Test that SQL dump correctly includes composite PRIMARY KEY
@@ -141,7 +141,8 @@ fn test_composite_primary_key_in_sql_dump() {
     .unwrap();
 
     // Save and check the dump
-    let path = "/tmp/test_issue_4237_composite.sql";
+    let temp_file = NamedTempFile::new().unwrap();
+    let path = temp_file.path().to_str().unwrap();
     db.save_sql_dump(path).unwrap();
 
     let dump_content = fs::read_to_string(path).unwrap();
@@ -150,9 +151,7 @@ fn test_composite_primary_key_in_sql_dump() {
         "SQL dump should contain composite PRIMARY KEY: {}",
         dump_content
     );
-
-    // Cleanup
-    let _ = fs::remove_file(path);
+    // temp_file is automatically cleaned up on drop
 }
 
 /// Test that PK_ indexes are not duplicated in SQL dump
@@ -163,7 +162,8 @@ fn test_pk_indexes_not_duplicated_in_dump() {
     execute(&mut db, "CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)").unwrap();
 
     // Save and check the dump
-    let path = "/tmp/test_issue_4237_pk_dup.sql";
+    let temp_file = NamedTempFile::new().unwrap();
+    let path = temp_file.path().to_str().unwrap();
     db.save_sql_dump(path).unwrap();
 
     let dump_content = fs::read_to_string(path).unwrap();
@@ -177,7 +177,5 @@ fn test_pk_indexes_not_duplicated_in_dump() {
         "Should not have separate PK_ index: {}",
         dump_content
     );
-
-    // Cleanup
-    let _ = fs::remove_file(path);
+    // temp_file is automatically cleaned up on drop
 }

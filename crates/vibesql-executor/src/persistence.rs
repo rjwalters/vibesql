@@ -138,13 +138,14 @@ fn truncate_for_error(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use std::{fs, io::Write};
+    use tempfile::NamedTempFile;
 
     use super::*;
 
     #[test]
     fn test_load_simple_database() {
         // Create a temporary SQL dump file
-        let temp_file = "/tmp/test_load_simple.sql";
+        let temp_file = NamedTempFile::new().unwrap();
         let sql_dump = r#"
 -- Test database
 CREATE TABLE users (id INTEGER, name VARCHAR(50));
@@ -152,10 +153,10 @@ INSERT INTO users VALUES (1, 'Alice');
 INSERT INTO users VALUES (2, 'Bob');
 "#;
 
-        fs::write(temp_file, sql_dump).unwrap();
+        fs::write(temp_file.path(), sql_dump).unwrap();
 
         // Load the database
-        let db = load_sql_dump(temp_file).unwrap();
+        let db = load_sql_dump(temp_file.path().to_str().unwrap()).unwrap();
 
         // Verify the table exists (note: identifiers are uppercased)
         assert!(db.get_table("USERS").is_some());
@@ -163,14 +164,12 @@ INSERT INTO users VALUES (2, 'Bob');
         // Verify data was loaded
         let table = db.get_table("USERS").unwrap();
         assert_eq!(table.row_count(), 2);
-
-        // Clean up
-        fs::remove_file(temp_file).unwrap();
+        // temp_file is automatically cleaned up on drop
     }
 
     #[test]
     fn test_load_with_schema() {
-        let temp_file = "/tmp/test_load_schema.sql";
+        let temp_file = NamedTempFile::new().unwrap();
         // Note: Schema-qualified INSERT statements not yet supported by parser
         // So we create the table in a schema but insert without schema qualification
         let sql_dump = r#"
@@ -178,14 +177,12 @@ CREATE SCHEMA test_schema;
 CREATE TABLE test_schema.products (id INTEGER, price REAL);
 "#;
 
-        fs::write(temp_file, sql_dump).unwrap();
+        fs::write(temp_file.path(), sql_dump).unwrap();
 
-        let db = load_sql_dump(temp_file).unwrap();
+        let db = load_sql_dump(temp_file.path().to_str().unwrap()).unwrap();
 
         // Verify table exists in schema (case-insensitive lookup)
         assert!(db.get_table("test_schema.products").is_some());
-
-        fs::remove_file(temp_file).unwrap();
     }
 
     #[test]
@@ -197,33 +194,29 @@ CREATE TABLE test_schema.products (id INTEGER, price REAL);
 
     #[test]
     fn test_load_invalid_sql() {
-        let temp_file = "/tmp/test_load_invalid.sql";
-        fs::write(temp_file, "THIS IS NOT VALID SQL;").unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        fs::write(temp_file.path(), "THIS IS NOT VALID SQL;").unwrap();
 
-        let result = load_sql_dump(temp_file);
+        let result = load_sql_dump(temp_file.path().to_str().unwrap());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to parse"));
-
-        fs::remove_file(temp_file).unwrap();
     }
 
     #[test]
     fn test_load_binary_file_error() {
-        let temp_file = "/tmp/test_load_binary.db";
-        let mut file = fs::File::create(temp_file).unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut file = fs::File::create(temp_file.path()).unwrap();
         file.write_all(b"SQLite format 3\0").unwrap();
         file.write_all(&[0xFF, 0xFE, 0xFD]).unwrap();
 
-        let result = load_sql_dump(temp_file);
+        let result = load_sql_dump(temp_file.path().to_str().unwrap());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("binary SQLite database"));
-
-        fs::remove_file(temp_file).unwrap();
     }
 
     #[test]
     fn test_load_with_indexes() {
-        let temp_file = "/tmp/test_load_indexes.sql";
+        let temp_file = NamedTempFile::new().unwrap();
         let sql_dump = r#"
 CREATE TABLE employees (id INTEGER, name VARCHAR(100), dept VARCHAR(50));
 INSERT INTO employees VALUES (1, 'Alice', 'Engineering');
@@ -231,9 +224,9 @@ INSERT INTO employees VALUES (2, 'Bob', 'Sales');
 CREATE INDEX idx_dept ON employees (dept Asc);
 "#;
 
-        fs::write(temp_file, sql_dump).unwrap();
+        fs::write(temp_file.path(), sql_dump).unwrap();
 
-        let db = load_sql_dump(temp_file).unwrap();
+        let db = load_sql_dump(temp_file.path().to_str().unwrap()).unwrap();
 
         // Verify table and data (note: identifiers are uppercased)
         assert!(db.get_table("EMPLOYEES").is_some());
@@ -242,26 +235,22 @@ CREATE INDEX idx_dept ON employees (dept Asc);
 
         // Verify index exists (note: identifiers are uppercased)
         assert!(db.get_index("IDX_DEPT").is_some());
-
-        fs::remove_file(temp_file).unwrap();
     }
 
     #[test]
     fn test_load_with_roles() {
-        let temp_file = "/tmp/test_load_roles.sql";
+        let temp_file = NamedTempFile::new().unwrap();
         let sql_dump = r#"
 CREATE ROLE admin;
 CREATE ROLE user;
 CREATE TABLE data (id INTEGER);
 "#;
 
-        fs::write(temp_file, sql_dump).unwrap();
+        fs::write(temp_file.path(), sql_dump).unwrap();
 
-        let db = load_sql_dump(temp_file).unwrap();
+        let db = load_sql_dump(temp_file.path().to_str().unwrap()).unwrap();
 
         // Verify table exists (note: identifiers are uppercased)
         assert!(db.get_table("DATA").is_some());
-
-        fs::remove_file(temp_file).unwrap();
     }
 }
