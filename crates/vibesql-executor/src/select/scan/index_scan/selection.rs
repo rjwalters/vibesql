@@ -243,20 +243,25 @@ pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool 
     }
 }
 
-/// Check if an expression is a literal value or parameter placeholder
+/// Check if an expression is a non-NULL literal value or parameter placeholder
 ///
 /// Index scans can filter on columns compared to literal values or bound parameters,
 /// not columns compared to other columns (which are equijoin conditions).
 /// Parameter placeholders (?, $1, :name, etc.) are treated as literals for index selection
 /// because they are resolved to concrete values at execution time.
+///
+/// **Important**: NULL literals are excluded because `col = NULL` can never return true
+/// (per SQL three-valued logic), so using an index for this predicate is incorrect.
 fn is_literal(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::Literal(_)
-            | Expression::Placeholder(_)
-            | Expression::NumberedPlaceholder(_)
-            | Expression::NamedPlaceholder(_)
-    )
+    match expr {
+        // Exclude NULL literals - col = NULL can never match rows
+        Expression::Literal(vibesql_types::SqlValue::Null) => false,
+        Expression::Literal(_) => true,
+        Expression::Placeholder(_)
+        | Expression::NumberedPlaceholder(_)
+        | Expression::NamedPlaceholder(_) => true,
+        _ => false,
+    }
 }
 
 /// Case-insensitive lookup of column statistics
