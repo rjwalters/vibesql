@@ -228,12 +228,13 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
     }
 }
 
-/// Check if an expression is a reference to a specific column
+/// Check if an expression is a reference to a specific column.
 ///
 /// Uses case-insensitive comparison because:
 /// - ColumnIdentifier.column_canonical() returns lowercase for unquoted identifiers
 /// - Schema metadata (column_name) may not be consistently lowercased
 /// - For SQL:1999 compliance with quoted identifiers, both sides should use canonical forms
+///
 /// TODO: Once schema metadata consistently uses canonical forms, change to direct equality
 pub(super) fn is_column_reference(expr: &Expression, column_name: &str) -> bool {
     match expr {

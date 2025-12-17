@@ -1258,7 +1258,7 @@ impl SelectExecutor<'_> {
                         // Use case-insensitive matching for SQLite compatibility
                         let col_idx = column_info.iter().position(|(alias, orig)| {
                             alias.eq_ignore_ascii_case(column)
-                                || orig.as_ref().map_or(false, |o| o.eq_ignore_ascii_case(column))
+                                || orig.as_ref().is_some_and(|o| o.eq_ignore_ascii_case(column))
                         });
 
                         // If not found, check if any branch has this alias (SQLite compatibility)

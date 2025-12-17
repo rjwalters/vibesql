@@ -142,15 +142,12 @@ impl SelectExecutor<'_> {
         stmt: &SelectStmt,
     ) -> Result<Option<Vec<Row>>, ExecutorError> {
         // Only applies when LIMIT 1 is specified (most common case for this pattern)
-        let is_limit_1 = match &stmt.limit {
-            Some(expr) => {
-                match crate::select::helpers::evaluate_limit_offset_expr(expr, self.database, "LIMIT") {
-                    Ok(1) => true,
-                    _ => false,
-                }
-            }
-            None => false,
-        };
+        let is_limit_1 = stmt.limit.as_ref().is_some_and(|expr| {
+            matches!(
+                crate::select::helpers::evaluate_limit_offset_expr(expr, self.database, "LIMIT"),
+                Ok(1)
+            )
+        });
         if !is_limit_1 {
             return Ok(None);
         }

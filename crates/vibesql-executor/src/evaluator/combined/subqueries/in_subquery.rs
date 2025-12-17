@@ -426,7 +426,7 @@ fn can_use_index_for_in_subquery(
         if let Some(index_metadata) = database.get_index(index_name) {
             // Check if first indexed column matches our projected column
             if let Some(first_col) = index_metadata.columns.first() {
-                if &first_col.column_name == column_name {
+                if first_col.column_name == column_name {
                     return true;
                 }
             }
@@ -468,7 +468,7 @@ fn try_index_optimized_in_subquery(
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
             if let Some(first_col) = index_metadata.columns.first() {
-                if &first_col.column_name == column_name {
+                if first_col.column_name == column_name {
                     selected_index = Some(index_name.clone());
                     break;
                 }

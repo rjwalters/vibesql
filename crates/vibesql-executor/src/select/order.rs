@@ -1132,7 +1132,7 @@ fn resolve_where_expression_with_schema(
                 items.iter().map(|item| vibesql_ast::OrderByItem {
                     expr: resolve_where_expression_with_schema(&item.expr, select_list, table_columns),
                     direction: item.direction.clone(),
-                    nulls_order: item.nulls_order.clone(),
+                    nulls_order: item.nulls_order,
                 }).collect()
             }),
         },

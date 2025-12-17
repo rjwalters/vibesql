@@ -47,7 +47,7 @@ enum EquijoinEvalStrategy {
     Simple {
         left_col_idx: usize,
         right_col_idx: usize,
-        remaining_condition: Option<vibesql_ast::Expression>,
+        remaining_condition: Option<Box<vibesql_ast::Expression>>,
     },
     /// Complex condition - need full evaluation with combined_row
     Complex,
@@ -80,7 +80,7 @@ fn analyze_join_condition(
             return EquijoinEvalStrategy::Simple {
                 left_col_idx: equi_info.left_col_idx,
                 right_col_idx: equi_info.right_col_idx,
-                remaining_condition: Some(right.as_ref().clone()),
+                remaining_condition: Some(Box::new(right.as_ref().clone())),
             };
         }
         // Try right side
@@ -88,7 +88,7 @@ fn analyze_join_condition(
             return EquijoinEvalStrategy::Simple {
                 left_col_idx: equi_info.left_col_idx,
                 right_col_idx: equi_info.right_col_idx,
-                remaining_condition: Some(left.as_ref().clone()),
+                remaining_condition: Some(Box::new(left.as_ref().clone())),
             };
         }
     }
@@ -609,7 +609,7 @@ pub(super) fn nested_loop_inner_join(
                 right_slice,
                 left_col_idx,
                 right_col_idx,
-                remaining_condition.as_ref(),
+                remaining_condition.as_deref(),
                 &combined_schema,
                 database,
                 timeout_ctx,

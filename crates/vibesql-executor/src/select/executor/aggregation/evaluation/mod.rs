@@ -240,10 +240,8 @@ impl SelectExecutor<'_> {
             CombinedExpressionEvaluator::with_database(&result_schema, self.database);
 
         // Evaluate ORDER BY expressions and attach sort keys to rows
-        let mut rows_with_keys: Vec<(
-            vibesql_storage::Row,
-            Vec<(vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>)>,
-        )> = Vec::new();
+        type SortKey = (vibesql_types::SqlValue, vibesql_ast::OrderDirection, Option<vibesql_ast::NullsOrder>);
+        let mut rows_with_keys: Vec<(vibesql_storage::Row, Vec<SortKey>)> = Vec::new();
         for row in rows {
             // Clear CSE cache before evaluating each row to prevent column values
             // from being incorrectly cached across different rows
@@ -270,7 +268,7 @@ impl SelectExecutor<'_> {
                 );
 
                 let key_value = result_evaluator.eval(&resolved_expr, &row)?;
-                sort_keys.push((key_value, order_item.direction.clone(), order_item.nulls_order.clone()));
+                sort_keys.push((key_value, order_item.direction.clone(), order_item.nulls_order));
             }
             rows_with_keys.push((row, sort_keys));
         }
@@ -298,8 +296,10 @@ impl SelectExecutor<'_> {
                     };
                     return if a_is_null {
                         if nulls_first { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater }
+                    } else if nulls_first {
+                        std::cmp::Ordering::Greater
                     } else {
-                        if nulls_first { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less }
+                        std::cmp::Ordering::Less
                     };
                 }
 
@@ -325,6 +325,7 @@ impl SelectExecutor<'_> {
 /// When ORDER BY contains aggregates like `max(n)+0`, we pre-compute the aggregate values
 /// and store them in hidden columns. This function replaces the aggregate expressions
 /// with ColumnRef expressions pointing to those hidden columns.
+#[allow(clippy::only_used_in_recursion)] // start_idx is pre-existing unused parameter
 fn replace_aggregates_with_columns(
     expr: &vibesql_ast::Expression,
     order_by_aggregates: &[vibesql_ast::Expression],
