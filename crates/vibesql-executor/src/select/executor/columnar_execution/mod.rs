@@ -835,6 +835,11 @@ impl SelectExecutor<'_> {
             stmt.having.is_some()
         );
 
-        Ok(Some(result))
+        // Apply LIMIT/OFFSET to the result
+        let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+        let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+        let final_result = crate::select::helpers::apply_limit_offset(result, limit, offset);
+
+        Ok(Some(final_result))
     }
 }

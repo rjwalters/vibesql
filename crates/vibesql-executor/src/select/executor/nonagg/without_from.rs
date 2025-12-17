@@ -7,6 +7,7 @@ use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
+    select::helpers::{apply_limit_offset, evaluate_limit, evaluate_offset},
 };
 
 impl SelectExecutor<'_> {
@@ -110,7 +111,12 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // Return a single row with the evaluated values
-        Ok(vec![vibesql_storage::Row::new(values)])
+        // Build result row
+        let result = vec![vibesql_storage::Row::new(values)];
+
+        // Apply LIMIT and OFFSET (important for queries like SELECT 1 LIMIT 0)
+        let limit = evaluate_limit(&stmt.limit, self.database)?;
+        let offset = evaluate_offset(&stmt.offset, self.database)?;
+        Ok(apply_limit_offset(result, limit, offset))
     }
 }

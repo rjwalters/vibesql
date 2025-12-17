@@ -45,9 +45,11 @@ impl SelectExecutor<'_> {
             // If table doesn't exist, fall through to normal path which will produce proper error
             if let Some(table) = self.database.get_table(&table_name) {
                 let count = table.row_count();
-                return Ok(vec![vibesql_storage::Row::new(vec![
-                    vibesql_types::SqlValue::Integer(count as i64),
-                ])]);
+                let result = vec![vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(count as i64)])];
+                // Apply LIMIT/OFFSET even in fast path
+                let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+                let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+                return Ok(apply_limit_offset(result, limit, offset));
             }
         }
 

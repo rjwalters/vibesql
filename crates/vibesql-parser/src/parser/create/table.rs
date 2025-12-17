@@ -6,10 +6,18 @@ use super::super::*;
 
 impl Parser {
     /// Parse CREATE TABLE statement
+    /// Supports CREATE [TEMP|TEMPORARY] TABLE syntax (SQLite compatibility)
     pub(in crate::parser) fn parse_create_table_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateTableStmt, ParseError> {
         self.expect_keyword(Keyword::Create)?;
+
+        // Skip TEMP or TEMPORARY if present (SQLite compatibility)
+        // We parse the syntax but treat temp tables as regular tables
+        if self.peek_keyword(Keyword::Temp) || self.peek_keyword(Keyword::Temporary) {
+            self.advance();
+        }
+
         self.expect_keyword(Keyword::Table)?;
 
         // Check for optional IF NOT EXISTS clause
