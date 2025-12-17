@@ -136,6 +136,13 @@ proc translate_error_to_sqlite {vibesql_error} {
         return {near "*": syntax error}
     }
 
+    # Note: "near EXCEPT/UNION/INTERSECT: syntax error" can come from either:
+    # - ORDER BY before compound operator (e.g., SELECT 1 ORDER BY 1 EXCEPT SELECT 2)
+    # - LIMIT before compound operator (e.g., SELECT 1 LIMIT 5 UNION SELECT 2)
+    # SQLite gives different messages for each case, but we can't distinguish them
+    # without SQL context. We don't translate these to avoid incorrect translations.
+    # selectE-3.1 and limit-7.1.x tests will both fail with generic "near X: syntax error".
+
     # Note: "wrong number of arguments to function count()" can come from:
     # 1. count(DISTINCT) - no args after DISTINCT (should be "DISTINCT aggregates must have exactly one argument")
     # 2. count(a, b) - too many args (should be "wrong number of arguments to function count()")
